@@ -2651,6 +2651,32 @@ type InteractiveCommitResult struct {
 	Profile model.ProjectProfile `json:"profile"`
 }
 
+func preserveOmittedProfileDimensions(current, staged model.ProjectProfileDimensions) model.ProjectProfileDimensions {
+	if profileDimensionOmitted(staged.Identity) {
+		staged.Identity = current.Identity
+	}
+	if profileDimensionOmitted(staged.Style) {
+		staged.Style = current.Style
+	}
+	if profileDimensionOmitted(staged.Audience) {
+		staged.Audience = current.Audience
+	}
+	if profileDimensionOmitted(staged.Platforms) {
+		staged.Platforms = current.Platforms
+	}
+	if profileDimensionOmitted(staged.Preferences) {
+		staged.Preferences = current.Preferences
+	}
+	if profileDimensionOmitted(staged.Memory) {
+		staged.Memory = current.Memory
+	}
+	return staged
+}
+
+func profileDimensionOmitted(dimension model.ProfileDimension) bool {
+	return len(dimension.Content) == 0 && len(dimension.Sources) == 0 && len(dimension.Evidence) == 0 && len(dimension.MissingFields) == 0
+}
+
 func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req InteractiveCommitRequest) (InteractiveCommitResult, error) {
 	if strings.TrimSpace(req.IdempotencyKey) == "" || strings.TrimSpace(req.ConfirmationToken) == "" {
 		return InteractiveCommitResult{}, ErrInteractiveDraftInvalid
@@ -2751,7 +2777,7 @@ func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req 
 				return ErrProjectProfileVersionConflict
 			}
 			profile = current
-			profile.Dimensions = draft.Profile.Dimensions
+			profile.Dimensions = preserveOmittedProfileDimensions(current.Dimensions, draft.Profile.Dimensions)
 			profile.AnalysisLimits = draft.Profile.AnalysisLimits
 			profile.FollowUpQuestions = draft.Profile.FollowUpQuestions
 			if assistantProfileCommit {

@@ -35,6 +35,7 @@ var (
 	ErrAssistantWorkspaceBusy            = errors.New("assistant_workspace_busy")
 	ErrAssistantWorkspaceModeMismatch    = errors.New("assistant workspace mode does not match request")
 	ErrAssistantWorkspaceNotFound        = errors.New("assistant workspace not found")
+	ErrAssistantWorkspaceExpired         = errors.New("assistant workspace expired")
 )
 
 type AssistantWorkspaceInput struct {
@@ -160,7 +161,10 @@ func (s *InteractiveService) findAssistantWorkspace(ctx context.Context, userID,
 	if err != nil {
 		return nil, errors.Join(ErrInteractivePersistence, err)
 	}
-	if workspace.ClosedAt != nil || !workspace.ExpiresAt.After(time.Now().UTC()) {
+	if !workspace.ExpiresAt.After(time.Now().UTC()) {
+		return nil, ErrAssistantWorkspaceExpired
+	}
+	if workspace.ClosedAt != nil {
 		return nil, ErrAssistantWorkspaceNotFound
 	}
 	return workspace, nil

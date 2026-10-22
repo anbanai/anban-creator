@@ -130,7 +130,7 @@ describe('ProjectsPage', () => {
     expect(await screen.findByRole('dialog', { name: '新建人设' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     fireEvent.click(aiAction)
-    await waitFor(() => expect(window.location.pathname).toBe('/'))
+    await waitFor(() => expect(window.location.pathname).toBe('/portraits/new'))
     expect(window.location.search).toBe('')
   })
   it('opens profile mode with the current project when updating its profile by conversation', async () => {

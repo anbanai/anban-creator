@@ -256,11 +256,13 @@ func interactiveError(c fiber.Ctx, err error) error {
 	case errors.Is(err, service.ErrAssistantCheckpointConflict):
 		return ErrorWithCode(c, 409, "assistant_checkpoint_conflict", err.Error())
 	case errors.Is(err, service.ErrAssistantWorkspaceBusy):
-		return Error(c, 409, err.Error())
+		return ErrorWithCode(c, 409, "assistant_workspace_busy", err.Error())
 	case errors.Is(err, service.ErrAssistantWorkspaceModeMismatch):
-		return Error(c, 409, err.Error())
+		return ErrorWithCode(c, 409, "assistant_workspace_mode_mismatch", err.Error())
+	case errors.Is(err, service.ErrAssistantWorkspaceExpired):
+		return ErrorWithCode(c, 410, "assistant_workspace_expired", err.Error())
 	case errors.Is(err, service.ErrAssistantWorkspaceNotFound):
-		return Error(c, 404, err.Error())
+		return ErrorWithCode(c, 404, "assistant_workspace_not_found", err.Error())
 	case errors.Is(err, service.ErrAssistantRuntimeContextTooLarge):
 		return Error(c, 413, err.Error())
 	case errors.Is(err, service.ErrInteractiveSessionNotFound):

@@ -69,6 +69,14 @@ function projectName(project?: AssistantProject) {
   return project?.name ? `${project.name}人设` : '新人设'
 }
 
+function assistantWorkspaceErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object' || !('response' in error)) return undefined
+  const data = (error as { response?: { data?: unknown } }).response?.data
+  if (!data || typeof data !== 'object' || !('error_code' in data)) return undefined
+  const code = (data as { error_code?: unknown }).error_code
+  return typeof code === 'string' ? code : undefined
+}
+
 function readPersistedWorkspace(): PersistedWorkspace | null {
   try {
     const raw = sessionStorage.getItem(WORKSPACE_STORAGE_KEY)
@@ -215,7 +223,16 @@ export default function AssistantWorkspace() {
       await api.assistant.workspaceMessage(currentWorkspace.id, mode, text)
     } catch (sendError) {
       setComposer(text)
-      setError(sendError instanceof Error ? sendError.message : '消息发送失败')
+      const errorCode = assistantWorkspaceErrorCode(sendError)
+      if (errorCode === 'assistant_workspace_expired') {
+        setWorkspace(null)
+        setLastEventIds({})
+        setError('对话已过期。消息仍保留在输入框中，重新发送后会建立新会话。')
+      } else if (errorCode === 'assistant_workspace_busy') {
+        setError('助手仍在处理上一条消息，请稍后重试。')
+      } else {
+        setError(sendError instanceof Error ? sendError.message : '消息发送失败')
+      }
     } finally {
       setSending(false)
     }
@@ -255,7 +272,16 @@ export default function AssistantWorkspace() {
       setContentId(nextWorkspace.content_id ?? contentId)
       setWorkspace(nextWorkspace)
     } catch (switchError) {
-      setError(switchError instanceof Error ? switchError.message : '当前模式正在处理，请稍后切换')
+      const errorCode = assistantWorkspaceErrorCode(switchError)
+      if (errorCode === 'assistant_workspace_expired') {
+        setWorkspace(null)
+        setLastEventIds({})
+        setError('对话已过期，请重新发送消息以建立新会话。')
+      } else if (errorCode === 'assistant_workspace_busy') {
+        setError('助手仍在处理上一条消息，请稍后切换。')
+      } else {
+        setError(switchError instanceof Error ? switchError.message : '当前模式正在处理，请稍后切换')
+      }
     } finally {
       setSwitching(false)
     }
@@ -267,7 +293,16 @@ export default function AssistantWorkspace() {
       await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers)
       setQuestionsByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).map((item) => item.callId === batch.callId ? { ...item, answers: answer.answers } : item) }))
     } catch (answerError) {
-      setError(answerError instanceof Error ? answerError.message : '提交回答失败')
+      const errorCode = assistantWorkspaceErrorCode(answerError)
+      if (errorCode === 'assistant_workspace_expired') {
+        setWorkspace(null)
+        setLastEventIds({})
+        setError('对话已过期，请重新发送消息以建立新会话。')
+      } else if (errorCode === 'assistant_workspace_busy') {
+        setError('助手仍在处理上一条消息，请稍后提交回答。')
+      } else {
+        setError(answerError instanceof Error ? answerError.message : '提交回答失败')
+      }
     }
   }
 
@@ -321,6 +356,7 @@ export default function AssistantWorkspace() {
 
       {!workspace ? <section className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-5 py-12 text-center"><p className="text-sm font-medium text-primary">Anban AI</p><h1 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{heading}</h1><p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-muted-foreground">选择模式，告诉我你接下来想完成什么。</p><nav className="mx-auto mt-10 flex flex-wrap justify-center gap-1" aria-label="助手模式">{MODES.map((candidate) => { const item = bootstrap?.modes.find((entry) => entry.id === candidate); return <button key={candidate} type="button" aria-pressed={mode === candidate} aria-disabled={!item?.available} onClick={() => void chooseMode(candidate)} className={`rounded-full px-4 py-2 text-sm ${mode === candidate ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'} ${!item?.available ? 'opacity-50' : ''}`}>{modeLabel(candidate)}</button> })}</nav>
         <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} onProject={(value) => { setProjectId(value); setContentId('') }} onContent={setContentId} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />
+        {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
         <Composer value={composer} placeholder={modePlaceholder(mode)} disabled={!canSend} onChange={setComposer} onSend={() => void sendMessage()} />
       </section> : <section className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col px-4 pb-4 md:px-8"><div className="flex shrink-0 flex-wrap items-center justify-center gap-1 py-4">{MODES.map((candidate) => { const item = bootstrap?.modes.find((entry) => entry.id === candidate); return <button key={candidate} type="button" aria-pressed={mode === candidate} disabled={!item?.available || switching} onClick={() => void chooseMode(candidate)} className={`rounded-full px-4 py-2 text-sm ${mode === candidate ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'} ${!item?.available ? 'opacity-50' : ''}`}>{modeLabel(candidate)}</button> })}</div><WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} disabled={Boolean(workspace && !pendingMode)} onProject={(value) => { setProjectId(value); setContentId('') }} onContent={(value) => { setContentId(value); if (pendingMode && selectedProject) void chooseMode(pendingMode, { projectId: selectedProject.id, contentId: value }) }} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} /><div className="min-h-0 flex-1 overflow-y-auto py-4" aria-live="polite"><Conversation messages={activeMessages} questions={activeQuestions} onAnswer={submitAnswers} />{activeDraft && <div className="mt-6 rounded-xl border border-primary/30 bg-primary/[0.04] p-4"><div className="flex items-center gap-2 text-sm font-medium"><Check className="size-4 text-emerald-600" />{modeLabel(mode)}已整理完成</div><p className="mt-2 text-xs text-muted-foreground">确认后保存当前结构化结果。</p><Button className="mt-4" size="sm" disabled={committing} onClick={() => void commitDraft()}>{committing ? <Loader2 className="size-4 animate-spin" /> : '确认并保存'}</Button></div>}{error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}</div><Composer value={composer} placeholder={activeQuestions.length ? '请先完成上面的回答' : modePlaceholder(mode)} disabled={!canSend || activeQuestions.length > 0} onChange={setComposer} onSend={() => void sendMessage()} /></section>}
     </main>

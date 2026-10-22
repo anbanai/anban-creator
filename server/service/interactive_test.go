@@ -568,6 +568,24 @@ func TestValidateStageRetainsAllProfileDimensionReasons(t *testing.T) {
 	}
 }
 
+func TestPreserveOmittedProfileDimensionsDuringTargetedRefresh(t *testing.T) {
+	current := model.NewProjectProfile().Dimensions
+	current.Identity.Content = map[string]any{"business": "茶礼盒"}
+	current.Identity.Sources = []string{"[用户确认]"}
+	current.Audience.Content = map[string]any{"buyer": "送礼人群"}
+	current.Preferences.Content = map[string]any{"direction": "节日礼赠"}
+
+	staged := model.NewProjectProfile().Dimensions
+	staged.Style.Content = map[string]any{"tone": "简洁"}
+	merged := preserveOmittedProfileDimensions(current, staged)
+	if !reflect.DeepEqual(merged.Identity, current.Identity) || !reflect.DeepEqual(merged.Audience, current.Audience) || !reflect.DeepEqual(merged.Preferences, current.Preferences) {
+		t.Fatalf("omitted confirmed dimensions were not preserved: %#v", merged)
+	}
+	if !reflect.DeepEqual(merged.Style, staged.Style) {
+		t.Fatalf("targeted dimension changed: got %#v, want %#v", merged.Style, staged.Style)
+	}
+}
+
 func TestInteractiveProgressRejectsFieldsInStableOrder(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		var progress InteractiveProgress

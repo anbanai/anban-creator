@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-const pinnedHumanizerRevision = "9862685f575c65a8247f90369951df1b3416e3d6"
+const pinnedHumanizerRevision = "8c307f367c91bd974002f10f2be2965d642c13df"
 
 func TestHumanizerSkillUsesOfficialNestedSubmodule(t *testing.T) {
 	root := repoRoot(t)
@@ -33,13 +33,13 @@ func TestHumanizerSkillUsesOfficialNestedSubmodule(t *testing.T) {
 	if !ok {
 		t.Fatalf("upstream Humanizer metadata = %#v, want a mapping", frontmatter["metadata"])
 	}
-	if got := frontmatterStringValue(metadata["version"]); got != "3.0.0" {
-		t.Fatalf("upstream Humanizer version = %q, want pinned 3.0.0", got)
+	if got := frontmatterStringValue(metadata["version"]); got != "3.1.0" {
+		t.Fatalf("upstream Humanizer version = %q, want pinned 3.1.0", got)
 	}
 	for _, want := range []string{
 		"name: humanizer",
 		"metadata:",
-		`version: "3.0.0"`,
+		`version: "3.1.0"`,
 		"license: MIT",
 	} {
 		if !strings.Contains(upstream, want) {

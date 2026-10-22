@@ -120,6 +120,21 @@ describe('AssistantWorkspace', () => {
     expect(secondKey).toBe(firstKey)
   })
 
+  it('keeps the unsent message and offers a fresh session after workspace expiry', async () => {
+    const expired = Object.assign(new Error('expired'), { response: { data: { error_code: 'assistant_workspace_expired' } } })
+    mocks.workspaceMessage.mockRejectedValueOnce(expired).mockResolvedValueOnce(undefined)
+    renderPage()
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '继续完善画像' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(composer).toHaveValue('继续完善画像'))
+    expect(await screen.findByText(/对话已过期/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledTimes(2))
+    expect(mocks.workspaceMessage).toHaveBeenLastCalledWith('workspace-1', 'profile', '继续完善画像')
+  })
+
   it('collects review context in the same workspace before switching modes', async () => {
     mocks.bootstrap.mockResolvedValue({
       defaultModeId: 'profile',

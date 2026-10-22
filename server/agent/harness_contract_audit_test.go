@@ -90,6 +90,20 @@ func TestProjectCreatorProfileRefreshPreservesScopeAndDirectionSemantics(t *test
 			t.Fatalf("project profile direction contract missing %q", term)
 		}
 	}
+	for _, contract := range []struct {
+		path  string
+		terms []string
+	}{
+		{path: "harness/skills/article-research/SKILL.md", terms: []string{"ranking", "first-batch", "scope"}},
+		{path: "harness/skills/seednote-research/SKILL.md", terms: []string{"候选排序", "首批", "范围"}},
+	} {
+		body := strings.ToLower(readArticleContractFile(t, filepath.Join(root, contract.path)))
+		for _, term := range contract.terms {
+			if !strings.Contains(body, term) {
+				t.Fatalf("%s direction contract missing %q", contract.path, term)
+			}
+		}
+	}
 }
 
 func TestVisualProductionScopesMatchGetProjectProfileSchema(t *testing.T) {

@@ -391,6 +391,22 @@ func TestAssistantWorkspaceCreationIsIdempotentAndBindsSessionToWorkspace(t *tes
 	}
 }
 
+func TestFindAssistantWorkspaceDistinguishesExpiryFromMissing(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	now := time.Now().UTC()
+	workspace := &model.AssistantWorkspace{ID: uuid.NewString(), UserID: "user-1", ModeID: AssistantModeProfile, ExpiresAt: now.Add(-time.Minute), CreatedAt: now.Add(-time.Hour), UpdatedAt: now}
+	if err := repo.AssistantWorkspaces().Create(context.Background(), workspace); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewInteractiveService(repo)
+	if _, err := svc.findAssistantWorkspace(context.Background(), "user-1", workspace.ID); !errors.Is(err, ErrAssistantWorkspaceExpired) {
+		t.Fatalf("findAssistantWorkspace() error = %v, want ErrAssistantWorkspaceExpired", err)
+	}
+	if _, err := svc.findAssistantWorkspace(context.Background(), "user-1", "missing"); !errors.Is(err, ErrAssistantWorkspaceNotFound) {
+		t.Fatalf("findAssistantWorkspace() missing error = %v, want ErrAssistantWorkspaceNotFound", err)
+	}
+}
+
 func TestAssistantWorkspaceIdempotencyRetryRecoversOrphanedWorkspace(t *testing.T) {
 	repo := newAssistantTestRepo(t)
 	svc := newAssistantWorkspaceTestService(repo)
