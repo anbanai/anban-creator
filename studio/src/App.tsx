@@ -43,7 +43,19 @@ function ChatRedirect() {
   const [params] = useSearchParams()
   const mode = params.get('mode')
   const validMode = mode === 'profile' || mode === 'creation' || mode === 'review' ? mode : undefined
-  return <Navigate to="/" replace state={{ modeId: validMode, projectId: params.get('project_id') || undefined, contentId: params.get('content_id') || undefined }} />
+  return (
+    <Navigate
+      to="/"
+      replace
+      state={{
+        modeId: validMode,
+        projectId: params.get('project_id') || undefined,
+        contentId: params.get('content_id') || undefined,
+        checkpointId: params.get('checkpoint_id') || undefined,
+        initialMessage: params.get('initial_message') || params.get('initialMessage') || undefined,
+      }}
+    />
+  )
 }
 
 function LoadingSpinner() {

@@ -2230,7 +2230,6 @@ func (s *InteractiveService) ResolveRuntimeSession(runtimeToken string) (string,
 		sessions = append(sessions, sess)
 	}
 	s.mu.RUnlock()
-	var fallback *InteractiveSession
 	for _, sess := range sessions {
 		sess.mu.Lock()
 		closed := sess.Closed
@@ -2245,16 +2244,7 @@ func (s *InteractiveService) ResolveRuntimeSession(runtimeToken string) (string,
 			if workspaceActive[sess.WorkspaceID] == id {
 				return id, userID, expiresAt, nil
 			}
-			if fallback == nil {
-				fallback = sess
-			}
 		}
-	}
-	if fallback != nil {
-		fallback.mu.Lock()
-		id, userID, expiresAt := fallback.ID, fallback.UserID, fallback.ExpiresAt
-		fallback.mu.Unlock()
-		return id, userID, expiresAt, nil
 	}
 	return "", "", time.Time{}, ErrInteractiveToken
 }

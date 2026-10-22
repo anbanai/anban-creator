@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -387,6 +388,84 @@ func TestAssistantWorkspaceCreationIsIdempotentAndBindsSessionToWorkspace(t *tes
 
 	if _, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", AssistantWorkspaceInput{ModeID: AssistantModeProfile}, "workspace-retry-key"); !errors.Is(err, ErrInteractiveIdempotency) {
 		t.Fatalf("same key with different request error = %v, want ErrInteractiveIdempotency", err)
+	}
+}
+
+func TestAssistantWorkspaceIdempotencyRetryRecoversOrphanedWorkspace(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	svc := newAssistantWorkspaceTestService(repo)
+	input := AssistantWorkspaceInput{ModeID: AssistantModeProfile}
+	key := "orphaned-workspace-key"
+	keyHash := fmt.Sprintf("%x", sha256.Sum256([]byte("user-1\x00"+key)))
+	now := time.Now().UTC()
+	orphan := &model.AssistantWorkspace{
+		ID: uuid.NewString(), UserID: "user-1", ModeID: AssistantModeProfile,
+		RuntimeID: uuid.NewString(), RuntimeStatus: "starting", ExpiresAt: now.Add(time.Hour),
+		CreatedAt: now, UpdatedAt: now, IdempotencyKeyHash: &keyHash,
+		RequestFingerprint: assistantWorkspaceRequestFingerprint(input),
+	}
+	if err := repo.AssistantWorkspaces().Create(context.Background(), orphan); err != nil {
+		t.Fatalf("create orphan workspace: %v", err)
+	}
+
+	workspace, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", input, key)
+	if err != nil {
+		t.Fatalf("CreateAssistantWorkspace() should recover orphan: %v", err)
+	}
+	if workspace.ID != orphan.ID || workspace.SessionID == "" {
+		t.Fatalf("recovered workspace = %#v; want original id with a bound session", workspace)
+	}
+	t.Cleanup(func() { _ = svc.CloseAssistantWorkspace(context.Background(), "user-1", workspace.ID) })
+}
+
+func TestRenewSessionExtendsWorkspaceExpiry(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	svc := newAssistantWorkspaceTestService(repo)
+	svc.SetSessionTTL(3 * time.Hour)
+	svc.SetSessionIdleTimeout(time.Minute)
+	workspace, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", AssistantWorkspaceInput{ModeID: AssistantModeProfile}, "workspace-expiry-key")
+	if err != nil {
+		t.Fatalf("CreateAssistantWorkspace() error = %v", err)
+	}
+	t.Cleanup(func() { _ = svc.CloseAssistantWorkspace(context.Background(), "user-1", workspace.ID) })
+	before, err := repo.AssistantWorkspaces().FindByIDForUser(context.Background(), "user-1", workspace.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetSessionIdleTimeout(2 * time.Hour)
+	svc.renewSession(workspace.SessionID)
+	after, err := repo.AssistantWorkspaces().FindByIDForUser(context.Background(), "user-1", workspace.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ExpiresAt.After(before.ExpiresAt) {
+		t.Fatalf("workspace expiry = %v, want after %v", after.ExpiresAt, before.ExpiresAt)
+	}
+}
+
+func TestResolveRuntimeSessionRejectsAmbiguousWorkspaceToken(t *testing.T) {
+	svc := NewInteractiveServiceWithRuntime(nil, interactiveTestRuntimeFactory{})
+	first := &InteractiveSession{ID: "first", UserID: "user-1", WorkspaceID: "workspace-1", ExpiresAt: time.Now().Add(time.Hour), runtimeTokenHash: confirmationHash("runtime-token")}
+	second := &InteractiveSession{ID: "second", UserID: "user-1", WorkspaceID: "workspace-1", ExpiresAt: time.Now().Add(time.Hour), runtimeTokenHash: confirmationHash("runtime-token")}
+	svc.sessions[first.ID] = first
+	svc.sessions[second.ID] = second
+	svc.workspaceRuntimes["workspace-1"] = &interactiveWorkspaceRuntime{tokenHash: confirmationHash("runtime-token")}
+	if _, _, _, err := svc.ResolveRuntimeSession("runtime-token"); !errors.Is(err, ErrInteractiveToken) {
+		t.Fatalf("ambiguous workspace token error = %v, want ErrInteractiveToken", err)
+	}
+}
+
+func TestResolveRuntimeSessionSelectsActiveWorkspaceSession(t *testing.T) {
+	svc := NewInteractiveServiceWithRuntime(nil, interactiveTestRuntimeFactory{})
+	first := &InteractiveSession{ID: "first", UserID: "user-1", WorkspaceID: "workspace-1", ExpiresAt: time.Now().Add(time.Hour), runtimeTokenHash: confirmationHash("runtime-token")}
+	active := &InteractiveSession{ID: "active", UserID: "user-1", WorkspaceID: "workspace-1", ExpiresAt: time.Now().Add(time.Hour), runtimeTokenHash: confirmationHash("runtime-token")}
+	svc.sessions[first.ID] = first
+	svc.sessions[active.ID] = active
+	svc.workspaceRuntimes["workspace-1"] = &interactiveWorkspaceRuntime{tokenHash: confirmationHash("runtime-token"), activeSessionID: active.ID}
+
+	sessionID, userID, _, err := svc.ResolveRuntimeSession("runtime-token")
+	if err != nil || sessionID != active.ID || userID != active.UserID {
+		t.Fatalf("ResolveRuntimeSession() = %q/%q, %v; want active workspace session %q/%q", sessionID, userID, err, active.ID, active.UserID)
 	}
 }
 

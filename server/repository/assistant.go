@@ -23,6 +23,7 @@ type AssistantWorkspaceRepository interface {
 	CountActive(ctx context.Context, userID string, now time.Time) (int64, error)
 	CountActiveAll(ctx context.Context, now time.Time) (int64, error)
 	Update(ctx context.Context, workspace *model.AssistantWorkspace) error
+	BindSession(ctx context.Context, userID, workspaceID, modeID, sessionID, projectID, contentID string, expiresAt, updatedAt time.Time) (bool, error)
 	SetRuntimeStatus(ctx context.Context, id, status string, updatedAt time.Time) error
 	Delete(ctx context.Context, userID, id string, at time.Time) error
 }
@@ -75,6 +76,57 @@ func (r *assistantWorkspaceRepository) Update(ctx context.Context, workspace *mo
 		return errors.New("assistant workspace identity is required")
 	}
 	return r.db.WithContext(ctx).Save(workspace).Error
+}
+
+func (r *assistantWorkspaceRepository) BindSession(ctx context.Context, userID, workspaceID, modeID, sessionID, projectID, contentID string, expiresAt, updatedAt time.Time) (bool, error) {
+	column := ""
+	switch modeID {
+	case model.AssistantModeProfile:
+		column = "profile_session_id"
+	case model.AssistantModeCreation:
+		column = "creation_session_id"
+	case model.AssistantModeReview:
+		column = "review_session_id"
+	default:
+		return false, errors.New("assistant workspace mode is invalid")
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return false, errors.New("assistant workspace session id is required")
+	}
+	result := r.db.WithContext(ctx).Model(&model.AssistantWorkspace{}).
+		Where("user_id = ? AND id = ? AND closed_at IS NULL", userID, workspaceID).
+		Where(column+" = '' OR "+column+" = ?", sessionID).
+		Updates(map[string]any{
+			column:       sessionID,
+			"project_id": projectID,
+			"content_id": contentID,
+			"expires_at": gorm.Expr("CASE WHEN expires_at < ? THEN ? ELSE expires_at END", expiresAt, expiresAt),
+			"updated_at": updatedAt,
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected > 0 {
+		return true, nil
+	}
+	var workspace model.AssistantWorkspace
+	if err := r.db.WithContext(ctx).Select(column).Where("user_id = ? AND id = ? AND closed_at IS NULL", userID, workspaceID).First(&workspace).Error; err != nil {
+		return false, err
+	}
+	return assistantWorkspaceBoundSession(workspace, modeID) == sessionID, nil
+}
+
+func assistantWorkspaceBoundSession(workspace model.AssistantWorkspace, modeID string) string {
+	switch modeID {
+	case model.AssistantModeProfile:
+		return workspace.ProfileSessionID
+	case model.AssistantModeCreation:
+		return workspace.CreationSessionID
+	case model.AssistantModeReview:
+		return workspace.ReviewSessionID
+	default:
+		return ""
+	}
 }
 
 func (r *assistantWorkspaceRepository) SetRuntimeStatus(ctx context.Context, id, status string, updatedAt time.Time) error {
@@ -190,6 +242,7 @@ func (r *assistantCheckpointRepository) DeleteExpired(ctx context.Context, now t
 type AssistantSessionRepository interface {
 	CreateWithLease(ctx context.Context, session *model.AssistantSession, lease *model.AssistantSessionLease, now time.Time) (bool, error)
 	FindByIDForUser(ctx context.Context, userID, sessionID string) (*model.AssistantSession, error)
+	FindLatestByWorkspaceMode(ctx context.Context, userID, workspaceID, modeID string) (*model.AssistantSession, error)
 	FindLeaseBySession(ctx context.Context, sessionID string) (*model.AssistantSessionLease, error)
 	CountActiveStandaloneByUser(ctx context.Context, userID string, now time.Time) (int64, error)
 	RenewLease(ctx context.Context, sessionID string, now, expiresAt time.Time) (bool, error)
@@ -242,6 +295,16 @@ func (r *assistantSessionRepository) FindByIDForUser(ctx context.Context, userID
 	return &session, nil
 }
 
+func (r *assistantSessionRepository) FindLatestByWorkspaceMode(ctx context.Context, userID, workspaceID, modeID string) (*model.AssistantSession, error) {
+	var session model.AssistantSession
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ? AND workspace_id = ? AND mode_id = ?", userID, workspaceID, modeID).
+		Order("created_at DESC").Order("id DESC").First(&session).Error; err != nil {
+		return nil, err
+	}
+	return &session, nil
+}
+
 func (r *assistantSessionRepository) FindLeaseBySession(ctx context.Context, sessionID string) (*model.AssistantSessionLease, error) {
 	var lease model.AssistantSessionLease
 	if err := r.db.WithContext(ctx).Where("session_id = ?", sessionID).First(&lease).Error; err != nil {
@@ -279,6 +342,13 @@ func (r *assistantSessionRepository) RenewLease(ctx context.Context, sessionID s
 		if err := tx.Model(&model.AssistantSession{}).Where("id = ? AND closed_at IS NULL", sessionID).
 			Updates(map[string]any{"expires_at": expiresAt, "updated_at": now}).Error; err != nil {
 			return err
+		}
+		if active.WorkspaceID != "" {
+			if err := tx.Model(&model.AssistantWorkspace{}).
+				Where("id = ? AND closed_at IS NULL AND expires_at < ?", active.WorkspaceID, expiresAt).
+				Updates(map[string]any{"expires_at": expiresAt, "updated_at": now}).Error; err != nil {
+				return err
+			}
 		}
 		renewed = true
 		return nil

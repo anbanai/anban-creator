@@ -181,42 +181,88 @@ func (s *InteractiveService) workspaceSessionBusy(sessionID string) bool {
 	return sess.busy || sess.committing || sess.pendingCall != "" || sess.activeCommand != 0 || sess.Status == "waiting_answer"
 }
 
-func (s *InteractiveService) waitForAssistantWorkspaceBinding(ctx context.Context, userID string, workspace *model.AssistantWorkspace, fingerprint string) (*model.AssistantWorkspace, error) {
-	if workspace == nil {
+func (s *InteractiveService) findLiveWorkspaceSession(workspaceID, modeID string) *InteractiveSession {
+	s.mu.RLock()
+	sessions := make([]*InteractiveSession, 0, len(s.sessions))
+	for _, sess := range s.sessions {
+		sessions = append(sessions, sess)
+	}
+	s.mu.RUnlock()
+	for _, sess := range sessions {
+		sess.mu.Lock()
+		live := !sess.Closed && sess.ExpiresAt.After(time.Now()) && sess.WorkspaceID == workspaceID && sess.ModeID == modeID
+		sess.mu.Unlock()
+		if live {
+			return sess
+		}
+	}
+	return nil
+}
+
+func (s *InteractiveService) bindAssistantWorkspaceSession(ctx context.Context, userID string, workspace *model.AssistantWorkspace, sess *InteractiveSession) (*model.AssistantWorkspace, error) {
+	if workspace == nil || sess == nil || workspace.ID != sess.WorkspaceID || workspace.ModeID != sess.ModeID {
 		return nil, ErrAssistantWorkspaceNotFound
 	}
-	if workspace.RequestFingerprint != fingerprint || workspace.ClosedAt != nil || !workspace.ExpiresAt.After(time.Now().UTC()) {
+	workspace.ProjectID = sess.ProjectID
+	workspace.ContentID = sess.ContentID
+	sess.mu.Lock()
+	expiresAt := sess.ExpiresAt.UTC()
+	sess.mu.Unlock()
+	bound, err := s.repo.AssistantWorkspaces().BindSession(ctx, userID, workspace.ID, workspace.ModeID, sess.ID, workspace.ProjectID, workspace.ContentID, expiresAt, time.Now().UTC())
+	if err != nil {
+		return nil, errors.Join(ErrInteractivePersistence, err)
+	}
+	if !bound {
+		return nil, ErrAssistantWorkspaceBusy
+	}
+	if err := setAssistantWorkspaceSessionID(workspace, workspace.ModeID, sess.ID); err != nil {
+		return nil, err
+	}
+	if expiresAt.After(workspace.ExpiresAt) {
+		workspace.ExpiresAt = expiresAt
+	}
+	workspace.UpdatedAt = time.Now().UTC()
+	s.setWorkspaceRuntimeActive(workspace.ID, sess.ID)
+	return workspace, nil
+}
+
+func (s *InteractiveService) recoverUnboundAssistantWorkspace(ctx context.Context, userID string, workspace *model.AssistantWorkspace, input AssistantWorkspaceInput) (*model.AssistantWorkspace, error) {
+	if workspace == nil || workspace.ClosedAt != nil || !workspace.ExpiresAt.After(time.Now().UTC()) {
+		return nil, ErrAssistantWorkspaceNotFound
+	}
+	if workspace.RequestFingerprint != assistantWorkspaceRequestFingerprint(input) {
 		return nil, ErrInteractiveIdempotency
 	}
 	if assistantWorkspaceSessionID(workspace, workspace.ModeID) != "" {
 		return workspace, nil
 	}
-	deadline := time.NewTimer(5 * time.Second)
-	defer deadline.Stop()
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-deadline.C:
-			return nil, ErrInteractivePersistence
-		case <-ticker.C:
-			current, err := s.repo.AssistantWorkspaces().FindByIDForUser(ctx, userID, workspace.ID)
+	sess := s.findLiveWorkspaceSession(workspace.ID, workspace.ModeID)
+	if sess == nil {
+		previous, err := s.repo.AssistantSessions().FindLatestByWorkspaceMode(ctx, userID, workspace.ID, workspace.ModeID)
+		if err == nil {
+			sessionID, recreateErr := s.recreateWorkspaceSession(ctx, userID, workspace, workspace.ModeID, workspace.ProjectID, workspace.ContentID, previous.ID)
+			if recreateErr != nil {
+				return nil, recreateErr
+			}
+			s.mu.RLock()
+			sess = s.sessions[sessionID]
+			s.mu.RUnlock()
+			if sess == nil {
+				return nil, ErrInteractivePersistence
+			}
+		} else if errors.Is(err, gorm.ErrRecordNotFound) {
+			sess, err = s.CreateAssistantSessionWithIdempotency(ctx, userID, AssistantSessionInput{
+				ModeID: workspace.ModeID, ProjectID: input.ProjectID, ContentID: input.ContentID,
+				CheckpointID: input.CheckpointID, WorkspaceID: workspace.ID, WorkspaceNew: true,
+			}, workspace.ID+":session")
 			if err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return nil, ErrAssistantWorkspaceNotFound
-				}
-				return nil, errors.Join(ErrInteractivePersistence, err)
+				return nil, err
 			}
-			if current.RequestFingerprint != fingerprint || current.ClosedAt != nil || !current.ExpiresAt.After(time.Now().UTC()) {
-				return nil, ErrInteractiveIdempotency
-			}
-			if assistantWorkspaceSessionID(current, current.ModeID) != "" {
-				return current, nil
-			}
+		} else {
+			return nil, errors.Join(ErrInteractivePersistence, err)
 		}
 	}
+	return s.bindAssistantWorkspaceSession(ctx, userID, workspace, sess)
 }
 
 func (s *InteractiveService) CreateAssistantWorkspace(ctx context.Context, userID string, input AssistantWorkspaceInput, idempotencyKey string) (*AssistantWorkspaceView, error) {
@@ -244,7 +290,7 @@ func (s *InteractiveService) CreateAssistantWorkspace(ctx context.Context, userI
 				return nil, ErrInteractiveIdempotency
 			}
 			if assistantWorkspaceSessionID(existing, existing.ModeID) == "" {
-				existing, lookupErr = s.waitForAssistantWorkspaceBinding(ctx, userID, existing, requestFingerprint)
+				existing, lookupErr = s.recoverUnboundAssistantWorkspace(ctx, userID, existing, input)
 				if lookupErr != nil {
 					return nil, lookupErr
 				}
@@ -256,9 +302,15 @@ func (s *InteractiveService) CreateAssistantWorkspace(ctx context.Context, userI
 	}
 	workspaceID := uuid.NewString()
 	now := time.Now().UTC()
+	s.mu.RLock()
+	initialTTL := s.ttl
+	if s.idleTimeout > 0 && s.idleTimeout < initialTTL {
+		initialTTL = s.idleTimeout
+	}
+	s.mu.RUnlock()
 	workspace := &model.AssistantWorkspace{
 		ID: workspaceID, UserID: userID, ProjectID: input.ProjectID, ContentID: input.ContentID,
-		ModeID: modeID, RuntimeID: workspaceID, RuntimeStatus: "starting", ExpiresAt: now.Add(s.ttl), CreatedAt: now, UpdatedAt: now,
+		ModeID: modeID, RuntimeID: workspaceID, RuntimeStatus: "starting", ExpiresAt: now.Add(initialTTL), CreatedAt: now, UpdatedAt: now,
 		IdempotencyKeyHash: keyHash, RequestFingerprint: requestFingerprint,
 	}
 	if err := s.repo.AssistantWorkspaces().Create(ctx, workspace); err != nil {
@@ -268,7 +320,7 @@ func (s *InteractiveService) CreateAssistantWorkspace(ctx context.Context, userI
 					return nil, ErrInteractiveIdempotency
 				}
 				if assistantWorkspaceSessionID(existing, existing.ModeID) == "" {
-					existing, lookupErr = s.waitForAssistantWorkspaceBinding(ctx, userID, existing, requestFingerprint)
+					existing, lookupErr = s.recoverUnboundAssistantWorkspace(ctx, userID, existing, input)
 					if lookupErr != nil {
 						return nil, lookupErr
 					}
@@ -288,18 +340,10 @@ func (s *InteractiveService) CreateAssistantWorkspace(ctx context.Context, userI
 	workspace.ProjectID = session.ProjectID
 	workspace.ContentID = session.ContentID
 	workspace.ExpiresAt = session.ExpiresAt.UTC()
-	if err := setAssistantWorkspaceSessionID(workspace, modeID, session.ID); err != nil {
-		_ = s.Close(userID, session.ID)
-		_ = s.repo.AssistantWorkspaces().Delete(ctx, userID, workspaceID, time.Now().UTC())
+	workspace, err = s.bindAssistantWorkspaceSession(ctx, userID, workspace, session)
+	if err != nil {
 		return nil, err
 	}
-	workspace.UpdatedAt = time.Now().UTC()
-	if err := s.repo.AssistantWorkspaces().Update(ctx, workspace); err != nil {
-		_ = s.Close(userID, session.ID)
-		_ = s.repo.AssistantWorkspaces().Delete(ctx, userID, workspaceID, time.Now().UTC())
-		return nil, errors.Join(ErrInteractivePersistence, err)
-	}
-	s.setWorkspaceRuntimeActive(workspace.ID, session.ID)
 	return s.assistantWorkspaceView(workspace), nil
 }
 
