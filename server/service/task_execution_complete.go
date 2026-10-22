@@ -1425,9 +1425,12 @@ func (s *TaskService) buildCloudTaskOutcome(ctx context.Context, task *model.Tas
 		outcome.Diagnostic = diagnostic
 		if result != nil && (result.ErrorCode == "provider_content_policy" || result.ErrorCode == "provider_policy_rejection") {
 			warningCode := result.ErrorCode
+			warningMessage := "供应商内容安全策略拒绝了一次请求；已按服务端文件契约判定最终交付。"
+			if result.Success && result.ProviderRecovery != nil && result.ProviderRecovery.Status == "succeeded" {
+				warningMessage = "供应商内容安全策略拒绝了一次请求；清洁恢复会话已完成，最终交付已按服务端文件契约确认。"
+			}
 			outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{
-				Code: warningCode, Stage: safePublicDiagnosticStage(result.FailureStage),
-				Message: "供应商内容安全策略拒绝了一次请求；已按服务端文件契约判定最终交付。",
+				Code: warningCode, Stage: safePublicDiagnosticStage(result.FailureStage), Message: warningMessage,
 			})
 		}
 	}
@@ -1635,8 +1638,13 @@ func publicExecutionDiagnostic(execution *model.TaskExecution, result *agent.Exe
 	switch result.ErrorCode {
 	case "provider_content_policy", "provider_policy_rejection":
 		summary = "供应商内容安全策略拒绝了请求。"
+		if result.Success && result.ProviderRecovery != nil && result.ProviderRecovery.Status == "succeeded" {
+			summary = "供应商内容安全策略曾拒绝一次请求；清洁恢复会话已完成，最终交付已按服务端文件契约确认。"
+		}
 		if direction == "unknown" {
-			summary += "供应商未披露具体片段，也未说明发生在输入还是输出。"
+			if !(result.Success && result.ProviderRecovery != nil && result.ProviderRecovery.Status == "succeeded") {
+				summary += "供应商未披露具体片段，也未说明发生在输入还是输出。"
+			}
 		}
 	case "provider_authentication":
 		summary = "供应商身份验证失败，请检查执行配置。"

@@ -1135,6 +1135,18 @@ func TestPublicExecutionDiagnosticUsesStableProviderTaxonomy(t *testing.T) {
 	}
 }
 
+func TestPublicExecutionDiagnosticExplainsSuccessfulProviderRecovery(t *testing.T) {
+	execution := &model.TaskExecution{Provider: "minimax"}
+	diagnostic := publicExecutionDiagnostic(execution, &agent.ExecutionResult{
+		Success: true, ErrorCode: "provider_policy_rejection", ProviderCode: "content_exists_risk",
+		ContentDirection: "unknown", Recoverable: true,
+		ProviderRecovery: &agent.ProviderRecovery{Status: "succeeded", InitialErrorCode: "provider_policy_rejection"},
+	})
+	if diagnostic == nil || !strings.Contains(diagnostic.Summary, "清洁恢复会话已完成") || strings.Contains(diagnostic.Summary, "未披露具体片段") {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
 func TestPublicExecutionDiagnosticRejectsUnregisteredProviderValues(t *testing.T) {
 	execution := &model.TaskExecution{Provider: "provider"}
 	result := &agent.ExecutionResult{

@@ -248,6 +248,16 @@ type ArtifactUploadFailure struct {
 	ArtifactTransferFailure
 }
 
+// ProviderRecovery records a bounded clean-session retry after a provider
+// policy rejection. It is diagnostic history, not evidence that the provider
+// accepted the original request.
+type ProviderRecovery struct {
+	Status           string `json:"status"`
+	InitialErrorCode string `json:"initial_error_code,omitempty"`
+	ProviderCode     string `json:"provider_code,omitempty"`
+	RequestID        string `json:"request_id,omitempty"`
+}
+
 // ExecutionResult captures the outcome of an agent execution.
 type ExecutionResult struct {
 	Success           bool   `json:"success"`
@@ -289,6 +299,7 @@ type ExecutionResult struct {
 	Model                       string                   `json:"model,omitempty"` // Claude Code agent model (from claude.models.default)
 	ArtifactUploadFailures      []ArtifactUploadFailure  `json:"artifact_upload_failures,omitempty"`
 	ArtifactFinalizationFailure *ArtifactTransferFailure `json:"artifact_finalization_failure,omitempty"`
+	ProviderRecovery            *ProviderRecovery         `json:"provider_recovery,omitempty"`
 }
 
 func writeMontageInputJSON(workDir string, task *model.Task) error {

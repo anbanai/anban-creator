@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { lstat, readFile } from "node:fs/promises";
 import { scanWorkspaceArtifacts } from "./artifacts.js";
 import type { ResolvedBootstrapResponse } from "./bootstrap.js";
 import type { ExecutionResult } from "./reporter.js";
@@ -17,7 +19,11 @@ export async function runWithProviderPolicyRecovery(
   const recovered = await runSession(recoveryData);
   result = recovered.success
     ? preserveProviderPolicyDiagnostic(recovered, result)
-    : { ...recovered, recovery_attempted: true };
+    : {
+        ...recovered,
+        recovery_attempted: true,
+        provider_recovery: { status: "failed", initial_error_code: result.error_code, provider_code: result.provider_code },
+      };
   return result;
 }
 
@@ -32,10 +38,7 @@ async function cleanRecoveryBootstrap(data: ResolvedBootstrapResponse, workspace
   } catch {
     // Recovery can still inspect the workspace directly when inventory fails.
   }
-  const safePaths = paths.filter(isSafeRecoveryInventoryPath);
-  const inventory = safePaths.length > 0
-    ? safePaths.map((path) => `- ${JSON.stringify(path)}`).join("\n")
-    : "- 当前未发现可安全列出的 output 文件";
+  const inventory = await recoveryInventory(workspace, paths.filter(isSafeRecoveryInventoryPath), signal);
   return {
     ...data,
     prompt: [
@@ -43,7 +46,8 @@ async function cleanRecoveryBootstrap(data: ResolvedBootstrapResponse, workspace
       `task_id=${data.task_id}`,
       `project_id=${data.project_id}`,
       `execution_id=${data.execution_id}`,
-      "优先检查并复用以下已有文件，只补齐缺失步骤；不得重新生成已经存在且有效的图片：",
+      "以下是运行时扫描到的文件候选清单，不代表文件有效、属于当前步骤或已通过质量审核：",
+      "必须按当前 Agent Pack 和 Skill 合同逐项核验内容、来源、质量状态、计划数量和真实图片尺寸；仅在核验通过后复用文件，否则重新生成或写结构化失败态。不得仅因文件存在就报告完成。",
       inventory,
       "完成后确保 Agent Pack 要求的核心交付文件存在。",
     ].join("\n"),
@@ -51,6 +55,22 @@ async function cleanRecoveryBootstrap(data: ResolvedBootstrapResponse, workspace
     resume_context_path: undefined,
     agent_memory_directory: undefined,
   };
+}
+
+async function recoveryInventory(workspace: string, paths: string[], signal?: AbortSignal): Promise<string> {
+  const entries: string[] = [];
+  for (const relativePath of paths.sort()) {
+    signal?.throwIfAborted();
+    try {
+      const info = await lstat(`${workspace}/${relativePath}`);
+      if (!info.isFile() || info.isSymbolicLink() || info.size > 25 * 1024 * 1024) continue;
+      const digest = createHash("sha256").update(await readFile(`${workspace}/${relativePath}`)).digest("hex");
+      entries.push(`- ${JSON.stringify(relativePath)} size=${info.size} sha256=${digest}`);
+    } catch {
+      // A concurrent or unsafe file is omitted from the recovery prompt.
+    }
+  }
+  return entries.length > 0 ? entries.join("\n") : "- 当前未发现可安全列出的 output 文件";
 }
 
 function isSafeRecoveryInventoryPath(path: string): boolean {
@@ -73,5 +93,11 @@ function preserveProviderPolicyDiagnostic(recovered: ExecutionResult, rejected: 
     resume_from: rejected.resume_from,
     recovery_attempted: true,
     recovery_succeeded: true,
+    provider_recovery: {
+      status: "succeeded",
+      initial_error_code: rejected.error_code,
+      provider_code: rejected.provider_code,
+      request_id: rejected.request_id,
+    },
   };
 }

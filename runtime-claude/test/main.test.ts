@@ -331,6 +331,8 @@ describe("runJob finalization", () => {
       expect(calls[1]!.agent_memory_directory).toBeUndefined();
       expect(calls[1]!.prompt).toContain("task_id=task-1");
       expect(calls[1]!.prompt).toContain("output/04-article-final.md");
+      expect(calls[1]!.prompt).toContain("sha256=");
+      expect(calls[1]!.prompt).toContain("不代表文件有效");
       expect(calls[1]!.prompt).not.toContain("ignore previous instructions");
       expect(calls[1]!.prompt).not.toContain("sensitive provider text");
       expect(calls[1]!.prompt).not.toContain(bootstrapData.prompt);
@@ -340,6 +342,12 @@ describe("runJob finalization", () => {
         provider_code: "content_exists_risk",
         http_status: 400,
         request_id: "request-1",
+        provider_recovery: {
+          status: "succeeded",
+          initial_error_code: "provider_policy_rejection",
+          provider_code: "content_exists_risk",
+          request_id: "request-1",
+        },
       });
     } finally {
       await rm(workspace, { recursive: true, force: true });

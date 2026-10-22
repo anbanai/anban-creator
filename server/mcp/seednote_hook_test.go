@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -27,15 +28,19 @@ func TestSeednoteQualityGateRejectsEmptyOrNonPNGImages(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(output, "image-plan.md"), []byte("计划图片数量：1\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(output, "image-plan.md"), []byte("计划图片数量：1\n\n## cover.png\n\n输出比例：1:1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	summary := `{"outputs":[{"file_name":"cover.png","quality_status":"accepted"}]}`
+	summary := `{"outputs":[{"file_name":"cover.png","quality_status":"passed"}]}`
 	if err := os.WriteFile(filepath.Join(output, "reference-usage-summary.json"), []byte(summary), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	coverPath := filepath.Join(output, "cover.png")
-	if err := os.WriteFile(coverPath, []byte("\x89PNG\r\n\x1a\nvalid-for-mechanical-gate"), 0o644); err != nil {
+	validPNG, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(coverPath, validPNG, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
