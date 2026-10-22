@@ -883,6 +883,13 @@ func (h *TaskHandler) GetByID(c fiber.Ctx) error {
 		currentExecution, _ = h.repo.TaskExecutions().FindCurrentByTaskID(c.Context(), task.ID)
 	}
 	if files, filesErr := h.service.GetVisibleFiles(c.Context(), task.ID); filesErr == nil {
+		if !taskUserIsAdmin(c) {
+			files, filesErr = h.service.FilterDeliverableFiles(c.Context(), task.ID, files)
+		}
+		if filesErr != nil {
+			h.logger.Error().Err(filesErr).Str("task_id", task.ID).Msg("filter runtime context files failed")
+			return Error(c, fiber.StatusInternalServerError, "failed to load task file context")
+		}
 		resp["runtime_context"] = buildRuntimeContextWithExecution(task, files, project, currentExecution)
 	} else {
 		resp["runtime_context"] = buildRuntimeContextWithExecution(task, nil, project, currentExecution)

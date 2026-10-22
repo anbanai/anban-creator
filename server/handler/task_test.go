@@ -788,6 +788,60 @@ func TestGetFilesReturnsPublishedAndCollectedFiles(t *testing.T) {
 	}
 }
 
+func TestGetByIDRuntimeContextHidesInternalFilesFromOrdinaryUsers(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID, taskID := uuid.NewString(), uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "runtimefiles"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration, ID: taskID, UserID: userID, ProjectID: uuid.NewString(), Type: model.PlatformSeednote, Status: model.TaskStatusRunning}); err != nil {
+		t.Fatal(err)
+	}
+	executionID := seedHandlerFrozenExecution(t, repo, taskID, model.PlatformSeednote, model.TaskStatusCompleted)
+	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
+		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStateDelivered, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md", MimeType: "text/markdown"},
+		{ID: uuid.NewString(), TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStateDelivered, Role: model.FileRoleOther, FilePath: "output/review.json", FileName: "review.json", MimeType: "application/json"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	h := NewTaskHandler(newHandlerTaskService(t, repo, nil, nil, &logger, "", nil, nil), &logger)
+	app := fiber.New()
+	app.Get("/tasks/:id", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.GetByID(c)
+	})
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/tasks/"+taskID, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+	var body struct {
+		Data struct {
+			RuntimeContext struct {
+				Artifacts struct {
+					Items []struct {
+						Label string `json:"label"`
+					} `json:"items"`
+				} `json:"artifacts"`
+			} `json:"runtime_context"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	items := body.Data.RuntimeContext.Artifacts.Items
+	if len(items) != 1 || items[0].Label != "文章正文" {
+		t.Fatalf("runtime artifact items = %#v, want only core delivery", items)
+	}
+}
+
 func TestProcessTaskFileCanBePreviewedButNotDownloaded(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
