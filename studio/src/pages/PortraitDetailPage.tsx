@@ -77,12 +77,12 @@ function PortraitDetail({ projectId }: { projectId: string }) {
         const edit = edits[key]
         const stale = edit && edit.version !== profile.version
         let content = profile.dimensions[key].content
-        try { if (edit) content = JSON.parse(edit.text) } catch { /* Advanced editor keeps malformed text until corrected. */ }
+        try { if (edit) content = JSON.parse(edit.text) } catch { /* Keep the last readable content visible while the draft is invalid. */ }
         return <div key={key}>{stale && <p role="alert" className="text-sm text-amber-800">{portraitLabels[key]}的服务器版本已变化。你的修改仍在，请先复制保留，再载入最新内容。</p>}{stale && <Button variant="outline" size="sm" onClick={() => { setEdits(current => { const next = { ...current }; delete next[key]; return next }); setErrors(current => ({ ...current, [key]: '' })) }}>载入最新{portraitLabels[key]}</Button>}
           <ProfileDimensionCard label={portraitLabels[key]} dimension={{ ...profile.dimensions[key], content }} text={edit?.text ?? JSON.stringify(content, null, 2)} disabled={busy || Boolean(stale)} error={errors[key]} onTextChange={text => {
             setEdits(current => ({ ...current, [key]: { text, version: current[key]?.version ?? profile.version } }))
             let error = ''
-            try { const value = JSON.parse(text); if (!value || typeof value !== 'object' || Array.isArray(value)) error = '内容须为有效对象' } catch { error = '高级编辑内容格式不正确，请检查后保存' }
+            try { const value = JSON.parse(text); if (!value || typeof value !== 'object' || Array.isArray(value)) error = '内容须为有效对象' } catch { error = '画像内容格式不正确，请检查后保存' }
             setErrors(current => ({ ...current, [key]: error }))
           }} onSave={() => void save(key)} />
         </div>
