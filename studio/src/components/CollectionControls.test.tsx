@@ -8,11 +8,11 @@ describe('collection controls', () => {
   it('clears the search without losing keyboard focus', () => {
     function Search() {
       const [value, setValue] = useState('灵感')
-      return <SearchInput value={value} onChange={setValue} placeholder="搜索创作项目" />
+      return <SearchInput value={value} onChange={setValue} placeholder="搜索人设" />
     }
     render(<Search />)
     fireEvent.click(screen.getByRole('button', { name: '清空搜索' }))
-    expect(screen.getByRole('searchbox', { name: '搜索创作项目' })).toHaveValue('')
+    expect(screen.getByRole('searchbox', { name: '搜索人设' })).toHaveValue('')
     expect(screen.getByRole('searchbox')).toHaveFocus()
   })
 

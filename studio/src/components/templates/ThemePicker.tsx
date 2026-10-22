@@ -22,7 +22,7 @@ const fallbackColors = {
 }
 
 function themeLabel(theme?: ResourceEntry | null): string {
-  if (!theme) return '不设置（用创作项目默认排版）'
+  if (!theme) return '不设置（用人设默认排版）'
   return theme.description || theme.name
 }
 
@@ -64,7 +64,7 @@ function ThemeSummary({ theme, compact = false, noneLabel }: { theme?: ResourceE
     return (
       <div className="min-w-0 flex-1 text-left">
         <p className="truncate text-sm font-medium text-muted-foreground">{noneLabel}</p>
-        {!compact && <p className="truncate text-xs text-muted-foreground">使用创作项目默认排版配置</p>}
+        {!compact && <p className="truncate text-xs text-muted-foreground">使用人设默认排版配置</p>}
       </div>
     )
   }
@@ -85,7 +85,7 @@ function ThemeSummary({ theme, compact = false, noneLabel }: { theme?: ResourceE
   )
 }
 
-// ThemePicker — 公众号「排版风格」选择器 + 实时预览，用于公众号创作项目编辑。
+// ThemePicker — 公众号「排版风格」选择器 + 实时预览，用于公众号人设编辑。
 //
 // - 选中后下拉触发器显示中文名（用 Base UI SelectValue 的 function child 渲染
 //   description||name，不依赖隐式 label 映射，避免显示英文 key）。
@@ -103,7 +103,7 @@ export function ThemePicker({
   theme,
   onTheme,
   readOnly = false,
-  noneLabel = '不设置（用创作项目默认排版）',
+  noneLabel = '不设置（用人设默认排版）',
 }: ThemePickerProps) {
   const { data: themeResources } = useQuery({
     queryKey: queryKeys.resources.themes,

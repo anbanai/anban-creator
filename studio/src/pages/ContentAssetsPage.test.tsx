@@ -33,7 +33,7 @@ describe('ContentAssetsPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '跨平台复用' }))
     await screen.findByRole('option', { name: /我的视频号/ })
-    fireEvent.change(screen.getByLabelText('目标项目'), { target: { value: 'p1' } })
+    fireEvent.change(screen.getByLabelText('目标人设'), { target: { value: 'p1' } })
     fireEvent.click(screen.getByRole('button', { name: '开始复用' }))
     await waitFor(() => expect(api.createReuseRun).toHaveBeenCalledWith('a1', expect.objectContaining({ target_project_id: 'p1', target_platform: 'hypit' })))
     expect(await screen.findByText(/等待自动生产/)).toBeInTheDocument()
@@ -52,7 +52,7 @@ describe('ContentAssetsPage', () => {
     render(<QueryClientProvider client={client}><MemoryRouter><ContentAssetsPage /></MemoryRouter></QueryClientProvider>)
 
     fireEvent.click(await screen.findByRole('button', { name: '跨平台复用' }))
-    fireEvent.change(await screen.findByLabelText('目标项目'), { target: { value: 'p1' } })
+    fireEvent.change(await screen.findByLabelText('目标人设'), { target: { value: 'p1' } })
     fireEvent.click(screen.getByRole('button', { name: '开始复用' }))
 
     expect(await screen.findByText(/生产失败 · 内容生成/)).toBeInTheDocument()

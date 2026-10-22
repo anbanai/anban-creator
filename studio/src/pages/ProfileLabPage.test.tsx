@@ -28,7 +28,7 @@ const profile: ProjectProfile = {
   schema_version: 1, status: 'confirmed', initialization_status: 'ready', version: 2,
   application_source: 'system_analysis',
   dimensions: {
-    identity: { content: { name: '云端手记', positioning: '分享真实效率实验' }, sources: ['[用户确认]'], evidence: ['用户填写了项目定位'], missing_fields: ['核心栏目'] },
+    identity: { content: { name: '云端手记', positioning: '分享真实效率实验' }, sources: ['[用户确认]'], evidence: ['用户填写了人设定位'], missing_fields: ['核心栏目'] },
     style: { content: { tone: '克制、具体' }, sources: ['[链接分析]'], evidence: ['公开主页样本'], missing_fields: [] },
     audience: { content: { primary: '职场新人' }, sources: ['[推断待确认]'], evidence: ['依据用户方向推断'], missing_fields: [] },
     platforms: { content: { primary: 'wechat' }, sources: ['[用户确认]'], evidence: [], missing_fields: [] },
@@ -90,7 +90,7 @@ function finishCreation() {
   nextStep()
   nextStep()
   nextStep()
-  fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+  fireEvent.click(screen.getByRole('button', { name: '创建人设' }))
 }
 
 function openEditSave() {
@@ -107,7 +107,7 @@ describe('ProfileLabPage', () => {
 
   it('creates one project with any selected creation objects and the grouped account setup', async () => {
     renderRoute('/projects/new')
-    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '新品牌' } })
+    fireEvent.change(screen.getByLabelText('人设名称'), { target: { value: '新品牌' } })
     for (const label of ['公众号文章', '公众号贴图', '种草笔记', '视频生成', '视频复刻', '白板视频']) {
       fireEvent.click(screen.getByRole('checkbox', { name: label }))
     }
@@ -119,7 +119,7 @@ describe('ProfileLabPage', () => {
     nextStep()
     fireEvent.change(screen.getByLabelText('内容偏好'), { target: { value: '案例和实操' } })
     fireEvent.change(screen.getByLabelText('内容红线'), { target: { value: '不做夸大承诺' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建人设' }))
 
     await waitFor(() => expect(api.projects.create).toHaveBeenCalledTimes(1))
     expect(api.projects.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -145,13 +145,13 @@ describe('ProfileLabPage', () => {
 
   it('sends analyze false when the user skips automatic profile analysis', async () => {
     renderRoute('/projects/new')
-    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '只建项目' } })
+    fireEvent.change(screen.getByLabelText('人设名称'), { target: { value: '只建人设' } })
     fireEvent.click(screen.getByRole('checkbox', { name: '公众号文章' }))
     nextStep()
     nextStep()
     nextStep()
     fireEvent.click(screen.getByRole('checkbox', { name: '跳过画像分析' }))
-    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建人设' }))
     await waitFor(() => expect(api.projects.create).toHaveBeenCalled())
     expect(api.projects.create).toHaveBeenCalledWith(expect.objectContaining({
       profile_setup: expect.objectContaining({ analyze: false }),
@@ -161,7 +161,7 @@ describe('ProfileLabPage', () => {
   it('navigates to the new project under React Strict Mode after creation succeeds', async () => {
     vi.mocked(api.projects.getAccountProfile).mockResolvedValueOnce({ ...profile, initialization_status: 'queued' })
     renderRoute('/projects/new', undefined, true)
-    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: 'Strict Mode 项目' } })
+    fireEvent.change(screen.getByLabelText('人设名称'), { target: { value: 'Strict Mode 人设' } })
     fireEvent.click(screen.getByRole('checkbox', { name: '公众号文章' }))
     finishCreation()
 
@@ -171,15 +171,15 @@ describe('ProfileLabPage', () => {
 
   it('includes visual style and an uploaded project reference in the creation request', async () => {
     renderRoute('/projects/new')
-    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '视觉项目' } })
+    fireEvent.change(screen.getByLabelText('人设名称'), { target: { value: '视觉人设' } })
     fireEvent.click(screen.getByRole('checkbox', { name: '公众号文章' }))
     nextStep()
     fireEvent.click(screen.getByText('更多资料（可选）'))
     fireEvent.change(screen.getByLabelText('视觉风格描述'), { target: { value: '自然光、低饱和' } })
-    fireEvent.click(screen.getByRole('button', { name: '项目参考图文件' }))
+    fireEvent.click(screen.getByRole('button', { name: '人设参考图文件' }))
     nextStep()
     nextStep()
-    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建人设' }))
 
     await waitFor(() => expect(api.projects.create).toHaveBeenCalledWith(expect.objectContaining({
       visual_style: '自然光、低饱和',
@@ -211,7 +211,7 @@ describe('ProfileLabPage', () => {
     const identity = screen.getByRole('region', { name: '定位 identity' })
     expect(within(identity).getByLabelText('定位')).toHaveValue('分享真实效率实验')
     expect(within(identity).getByText('[用户确认]')).toBeInTheDocument()
-    expect(within(identity).getByText('用户填写了项目定位')).toBeInTheDocument()
+    expect(within(identity).getByText('用户填写了人设定位')).toBeInTheDocument()
     expect(screen.queryByLabelText(/JSON|画像 JSON/i)).not.toBeInTheDocument()
     expect(screen.getAllByText('[推断待确认]').length).toBeGreaterThan(0)
     expect(screen.getByText(/preferences.*硬性约束/)).toBeInTheDocument()
@@ -260,7 +260,7 @@ describe('ProfileLabPage', () => {
     expect(screen.getByRole('navigation', { name: '创建进度' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '1. 基础信息' })).toHaveAttribute('aria-current', 'step')
     expect(screen.queryByLabelText('运营目标')).not.toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '简洁项目' } })
+    fireEvent.change(screen.getByLabelText('人设名称'), { target: { value: '简洁人设' } })
     fireEvent.click(screen.getByRole('checkbox', { name: '公众号文章' }))
     nextStep()
     expect(screen.queryByLabelText('运营目标')).not.toBeInTheDocument()
@@ -269,7 +269,7 @@ describe('ProfileLabPage', () => {
 
   it('keeps progress-line navigation sequential when an earlier step is invalid', async () => {
     renderRoute('/projects/new')
-    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '顺序校验项目' } })
+    fireEvent.change(screen.getByLabelText('人设名称'), { target: { value: '顺序校验人设' } })
     fireEvent.click(screen.getByRole('checkbox', { name: '公众号文章' }))
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     expect(screen.getByRole('button', { name: '2. 社媒链接' })).toHaveAttribute('aria-current', 'step')
@@ -284,8 +284,8 @@ describe('ProfileLabPage', () => {
   it('requires a name and at least one object, validates optional URLs, and retains account details without a URL', async () => {
     renderRoute('/projects/new')
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
-    expect(screen.getByRole('alert')).toHaveTextContent('请填写项目名称')
-    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '视频计划' } })
+    expect(screen.getByRole('alert')).toHaveTextContent('请填写人设名称')
+    fireEvent.change(screen.getByLabelText('人设名称'), { target: { value: '视频计划' } })
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     expect(screen.getByRole('alert')).toHaveTextContent('至少选择一种创作对象')
     fireEvent.click(screen.getByRole('checkbox', { name: '视频生成' }))
@@ -298,7 +298,7 @@ describe('ProfileLabPage', () => {
     fireEvent.change(screen.getByLabelText('公众号名称'), { target: { value: '筹备中的账号' } })
     nextStep()
     nextStep()
-    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建人设' }))
     await waitFor(() => expect(api.projects.create).toHaveBeenCalledWith(expect.objectContaining({
       agent_ids: ['montage'], platform: 'montage',
       profile_setup: expect.objectContaining({ platform_accounts: [expect.objectContaining({ account_name: '筹备中的账号', profile_url: '' })] }),
@@ -437,8 +437,8 @@ describe('ProfileLabPage', () => {
   it('keeps unsupported legacy projects in their basic settings flow', async () => {
     vi.mocked(api.projects.get).mockResolvedValueOnce({ stats, project: { ...project, platform: 'ecommerce', agent_ids: null } })
     renderRoute('/projects/project-1/profile-lab')
-    expect(await screen.findByRole('heading', { name: '该项目使用专属创作设置' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '返回项目' })).toHaveAttribute('href', '/projects')
+    expect(await screen.findByRole('heading', { name: '该人设使用专属创作设置' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '返回人设' })).toHaveAttribute('href', '/projects')
     expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument()
   })
 
@@ -455,7 +455,7 @@ describe('ProfileLabPage', () => {
 
   it('returns to the original task flow after full-page creation', async () => {
     renderRoute('/projects/new?type=wechat-picture&intent=new&return_to=/tasks')
-    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '贴图项目' } })
+    fireEvent.change(screen.getByLabelText('人设名称'), { target: { value: '贴图人设' } })
     fireEvent.click(screen.getByRole('checkbox', { name: '公众号贴图' }))
     finishCreation()
     await waitFor(() => expect(window.location.pathname).toBe('/tasks'))
@@ -467,10 +467,10 @@ describe('ProfileLabPage', () => {
     let resolveCreate!: (value: { project: Project }) => void
     vi.mocked(api.projects.create).mockReturnValueOnce(new Promise((resolve) => { resolveCreate = resolve }))
     renderRoute('/projects/new')
-    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '离开中的项目' } })
+    fireEvent.change(screen.getByLabelText('人设名称'), { target: { value: '离开中的人设' } })
     fireEvent.click(screen.getByRole('checkbox', { name: '公众号文章' }))
     finishCreation()
-    fireEvent.click(screen.getByRole('link', { name: '项目' }))
+    fireEvent.click(screen.getByRole('link', { name: '人设' }))
     expect(window.location.pathname).toBe('/projects')
     await act(async () => resolveCreate({ project: { ...project, id: 'late-created' } }))
     await waitFor(() => expect(window.location.pathname).toBe('/projects'))

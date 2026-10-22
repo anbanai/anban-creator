@@ -38,7 +38,7 @@ export function clearPortraitCreationHandoff(projectId: string): void {
 export function preparePortraitProject(candidate: PortraitCandidate, messages: PortraitChatMessage[]) {
   const checked = validatePortraitCandidate(candidate, messages)
   const project: CreateProjectRequest = {
-    name: checked.name || '我的内容项目',
+    name: checked.name || '我的内容人设',
     instructions: checked.summary || checked.facets.identity?.text || '画像信息尚待补充，请勿编造用户身份与经历。',
   }
   return { project, candidate: checked }
@@ -72,7 +72,7 @@ export function portraitCreationBrief(candidate: PortraitCandidate, idea = candi
   if (!idea?.trim()) throw new Error('请写下这次想创作什么。')
   return [
     `本次创作：${idea.trim()}`,
-    '依据已确认的项目画像创作；没有提供的案例、截图、数字和效果不得编造。',
+    '依据已确认的人设画像创作；没有提供的案例、截图、数字和效果不得编造。',
     '交付可审阅的作品，保留需要补充的素材位置；不要自行公开发布。',
   ].join('\n\n')
 }

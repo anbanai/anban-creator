@@ -204,8 +204,8 @@ export default function TasksPage() {
         return
       }
       toast.error(projectsQuery.isError
-        ? '无法加载对应的创作项目，请刷新后重试。'
-        : '所选创作项目不存在或已归档，请返回项目页重试。')
+        ? '无法加载对应的人设，请刷新后重试。'
+        : '所选人设不存在或已归档，请返回人设页重试。')
       setSearchParams({}, { replace: true })
       return
     }
@@ -219,7 +219,7 @@ export default function TasksPage() {
     if (projects.length > 0) return
 
     setModalOpen(false)
-    toast.error('请先创建一个创作项目，再开始创作。')
+    toast.error('请先创建一个人设，再开始创作。')
     navigate(projectsReturnHref({ type: createIntent.type ?? 'seednote', intent: createIntent.intent ?? 'new' }))
   }, [projects.length, projectsLoading, modalOpen, navigate, createIntent.type, createIntent.intent])
 
@@ -406,7 +406,7 @@ export default function TasksPage() {
       return
     }
     if (projects.length === 0) {
-      toast.error('请先创建一个创作项目，再开始创作。')
+      toast.error('请先创建一个人设，再开始创作。')
       navigate(projectsReturnHref({ type: createIntent.type ?? 'seednote', intent: createIntent.intent ?? 'new' }))
       return
     }
@@ -620,14 +620,14 @@ export default function TasksPage() {
               ? '试试其他关键词、清空筛选，或继续向下滚动加载作品。搜索仅匹配已加载作品。'
               : statusFilter === 'all'
               ? projects.length === 0
-                ? '先创建一个创作项目，再开始生成内容。'
+                ? '先创建一个人设，再开始生成内容。'
                 : '创建作品开始生成内容。'
               : '尝试其他筛选条件或创建新作品。'
           }
           action={
             !planFilter && !searchFilter.trim() && !projectFilter && statusFilter === 'all'
               ? projects.length === 0
-                ? { label: '去创建创作项目', onClick: () => navigate('/projects') }
+                ? { label: '去创建人设', onClick: () => navigate('/projects') }
                 : { label: '创作', onClick: openCreate }
               : undefined
           }
@@ -734,7 +734,7 @@ export default function TasksPage() {
                           <h3 className="line-clamp-2 text-sm font-medium leading-6 text-foreground sm:line-clamp-1">{task.title || task.prompt || contentTypeDisplayName(task.type)}</h3>
                         </div>
                         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                          {project ? <span className="max-w-[min(16rem,42vw)] truncate text-muted-foreground">{project.name}</span> : <span>未设置创作项目</span>}
+                          {project ? <span className="max-w-[min(16rem,42vw)] truncate text-muted-foreground">{project.name}</span> : <span>未设置人设</span>}
                           <span aria-hidden="true" className="text-border">·</span>
                           <span className={actionSignal.tone === 'risk' ? 'font-medium text-destructive' : 'font-medium text-foreground'}>{stage.title}</span>
                           {actionSignal.tone === 'risk' && <span>{actionSignal.hint}</span>}

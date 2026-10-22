@@ -183,7 +183,7 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
   const canEdit = Boolean(selected && !isManagedMemoryPath(selected.path) && !selectedProfileDimension)
   const memoryRefreshing = query.isFetching
   const profileRefreshing = profileQuery.isFetching || profileAnalysisQuery.isFetching
-  const refreshLabel = '刷新项目记忆'
+  const refreshLabel = '刷新人设记忆'
 
   const save = async () => {
     if (!selected || !canEdit) return
@@ -232,13 +232,13 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
         <DialogHeader className="shrink-0 gap-1 border-b bg-background px-5 py-4 pr-24 sm:px-6 sm:pr-24">
           <div className="flex min-w-0 items-center gap-2">
             <Brain className="size-4 shrink-0 text-primary" />
-            <DialogTitle className="truncate text-lg">项目记忆</DialogTitle>
+            <DialogTitle className="truncate text-lg">人设记忆</DialogTitle>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <DialogDescription className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
               {project ? <ProjectIdentity project={project} compact /> : <span className="break-words font-medium text-foreground/80">{projectName}</span>}
               <span aria-hidden="true">·</span>
-              <span>{query.data?.updated_at ? `最近更新 ${formatUpdatedAt(query.data.updated_at)}` : '创作过程中积累的项目上下文'}</span>
+              <span>{query.data?.updated_at ? `最近更新 ${formatUpdatedAt(query.data.updated_at)}` : '创作过程中积累的人设上下文'}</span>
             </DialogDescription>
             {profileSupported && onUpdateProfile && project?.status !== 'archived' && <Button variant="outline" size="sm" className="shrink-0" onClick={onUpdateProfile}><MessageSquareText />对话更新画像</Button>}
           </div>
@@ -253,7 +253,7 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
             <TooltipContent>{refreshLabel}</TooltipContent>
           </Tooltip>
           <Tooltip>
-            <TooltipTrigger render={<DialogClose render={<Button variant="ghost" size="icon-md" className="absolute right-2 top-2" aria-label="关闭项目记忆" />} />}>
+            <TooltipTrigger render={<DialogClose render={<Button variant="ghost" size="icon-md" className="absolute right-2 top-2" aria-label="关闭人设记忆" />} />}>
               <X className="size-4" />
             </TooltipTrigger>
             <TooltipContent>关闭</TooltipContent>
@@ -266,14 +266,14 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
               <div className="flex h-full items-center justify-center text-muted-foreground"><Loader2 className="mr-2 size-4 animate-spin" />正在读取记忆</div>
             ) : query.isError ? (
               <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-                <p className="text-sm font-medium">无法读取项目记忆</p>
+                <p className="text-sm font-medium">无法读取人设记忆</p>
                 <Button variant="outline" size="sm" onClick={() => void query.refetch()}><RefreshCw />重试</Button>
               </div>
             ) : query.data?.status === 'empty' || files.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
                 <Brain className="size-8" />
-                <p className="text-sm font-medium text-foreground">还没有项目记忆</p>
-                <p className="max-w-sm text-xs">完成一次创作后，项目会在这里积累可复用的上下文。</p>
+                <p className="text-sm font-medium text-foreground">还没有人设记忆</p>
+                <p className="max-w-sm text-xs">完成一次创作后，人设会在这里积累可复用的上下文。</p>
               </div>
             ) : (
               <div className="grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
@@ -358,7 +358,7 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
               </div>
             )}
           </section>
-          {profileSupported && <section aria-label="项目画像" className="border-t bg-muted/10 p-4 sm:p-6">
+          {profileSupported && <section aria-label="人设画像" className="border-t bg-muted/10 p-4 sm:p-6">
             <div className="mx-auto w-full max-w-3xl space-y-0">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 pb-4">
                 <div className="min-w-0">
@@ -388,7 +388,7 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
 
               {profile && selectedProfileDimension && profileErrors[selectedProfileDimension]?.includes('未保存的修改已保留') && <Button className="mt-3" variant="outline" size="sm" disabled={profileQuery.isFetching} onClick={() => loadLatestDimension(selectedProfileDimension)}>载入最新版本</Button>}
               {profile && !hasProfileFiles && <div className="mt-4 space-y-0">
-                <p className="mb-3 text-xs text-muted-foreground">画像文件尚未投影到项目记忆，先在这里补充；同步后可直接从左侧 `profile/*.md` 文件查看。</p>
+                <p className="mb-3 text-xs text-muted-foreground">画像文件尚未投影到人设记忆，先在这里补充；同步后可直接从左侧 `profile/*.md` 文件查看。</p>
                 {Object.entries(profile.dimensions).map(([name, dimension]) => (
                   <div key={name} className="min-w-0">
                     <ProfileDimensionCard

@@ -47,7 +47,7 @@ export default function ContentAssetsPage() {
   const createReuseRun = useMutation({
     mutationFn: () => {
       const project = (projects.data ?? []).find(item => item.id === targetProjectId)
-      if (!reuseAsset || !project) throw new Error('请选择目标项目')
+      if (!reuseAsset || !project) throw new Error('请选择目标人设')
       const requestId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
       return api.contentAssets.createReuseRun(reuseAsset.id, { target_project_id: project.id, target_platform: project.platform || 'unknown', ...(sourceTaskID ? { source_content_kind: 'task', source_content_id: sourceTaskID } : {}), idempotency_key: `reuse:${reuseAsset.id}:${project.id}:${requestId}` })
     },
@@ -92,7 +92,7 @@ export default function ContentAssetsPage() {
         <select aria-label="内容平台筛选" className="h-9 rounded-md border border-input bg-background px-3 text-sm" value={platformFilter} onChange={event => { setPlatformFilter(event.target.value); setPage(0) }}><option value="">全部平台</option>{['wechat', 'seednote', 'hypit', 'montage', 'whiteboard-animation'].map(value => <option key={value} value={value}>{value}</option>)}</select>
         <select aria-label="证据来源筛选" className="h-9 rounded-md border border-input bg-background px-3 text-sm" value={sourceFilter} onChange={event => { setSourceFilter(event.target.value); setPage(0) }}><option value="">全部证据来源</option><option value="external">外部研究</option><option value="internal_published">已发布内容</option><option value="imported">导入内容</option></select>
         <select aria-label="生命周期筛选" className="h-9 rounded-md border border-input bg-background px-3 text-sm" value={lifecycleFilter} onChange={event => { setLifecycleFilter(event.target.value); setPage(0) }}><option value="">全部生命周期</option>{Object.entries(lifecycleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-        <select aria-label="所属项目筛选" className="h-9 rounded-md border border-input bg-background px-3 text-sm" value={projectFilter} onChange={event => { setProjectFilter(event.target.value); setPage(0) }}><option value="">全部项目</option>{(projects.data ?? []).map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
+        <select aria-label="所属人设筛选" className="h-9 rounded-md border border-input bg-background px-3 text-sm" value={projectFilter} onChange={event => { setProjectFilter(event.target.value); setPage(0) }}><option value="">全部人设</option>{(projects.data ?? []).map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
       </div>
       {assets.isPending && <p role="status" className="py-12 text-center text-sm text-muted-foreground">正在加载选题资产…</p>}
       {assets.isError && <div role="alert" className="flex items-center justify-center gap-3 py-10 text-sm text-destructive"><span>选题资产加载失败。</span><Button variant="outline" size="sm" onClick={() => void assets.refetch()}>重试</Button></div>}
@@ -119,25 +119,25 @@ export default function ContentAssetsPage() {
     </section>}
 
     {detailAssetId && <section className="space-y-4 border-t border-border pt-5" aria-label="选题资产内容链路">
-      <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-sm font-semibold">{detail.data?.asset.title || '内容链路'}</h2><div className="flex items-center gap-2"><select aria-label="评分目标项目" className="h-9 max-w-64 rounded-md border border-input bg-background px-3 text-sm" value={scoreProjectId} onChange={event => setScoreProjectId(event.target.value)}><option value="">选择评分项目</option>{(projects.data ?? []).map(project => <option key={project.id} value={project.id}>{project.name} · {project.platform}</option>)}</select><Button size="sm" variant="outline" disabled={!scoreProjectId || scoreAsset.isPending} onClick={() => scoreAsset.mutate()}><Sparkles />更新平台评分</Button></div></div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-sm font-semibold">{detail.data?.asset.title || '内容链路'}</h2><div className="flex items-center gap-2"><select aria-label="评分目标人设" className="h-9 max-w-64 rounded-md border border-input bg-background px-3 text-sm" value={scoreProjectId} onChange={event => setScoreProjectId(event.target.value)}><option value="">选择评分人设</option>{(projects.data ?? []).map(project => <option key={project.id} value={project.id}>{project.name} · {project.platform}</option>)}</select><Button size="sm" variant="outline" disabled={!scoreProjectId || scoreAsset.isPending} onClick={() => scoreAsset.mutate()}><Sparkles />更新平台评分</Button></div></div>
       {detail.isPending && <p className="text-sm text-muted-foreground">正在加载内容链路…</p>}
       {detail.data && <>
         <div className="grid gap-3 md:grid-cols-2">
           <div className="border border-border p-3"><h3 className="text-xs font-medium text-muted-foreground">关联内容</h3>{detail.data.links.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">暂无来源或派生内容</p> : <ul className="mt-2 divide-y divide-border">{detail.data.links.map(link => <li key={link.id} className="flex flex-wrap justify-between gap-2 py-2 text-sm"><span>{link.relation === 'origin' ? '来源' : link.relation === 'derivative' ? '派生' : '参考'} · {link.content_kind}</span><span className="text-muted-foreground">{link.platform || '未标平台'}{link.angle ? ` · ${link.angle}` : ''}</span></li>)}</ul>}</div>
           <div className="border border-border p-3"><h3 className="text-xs font-medium text-muted-foreground">平台评分记录</h3>{detail.data.scores.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">尚无评分记录</p> : <ul className="mt-2 divide-y divide-border">{detail.data.scores.slice(0, 5).map(score => { const missing = Array.isArray(score.snapshot.missing) ? score.snapshot.missing.join('、') : ''; const label = score.status === 'scored' ? `${score.score.toFixed(0)} 分` : score.status === 'exploratory' ? `探索信号 ${score.score.toFixed(0)}` : '数据不足'; return <li key={score.id} className="py-2 text-sm"><div className="flex justify-between gap-2"><span>{score.platform} · {label}</span><span className="text-muted-foreground">{score.data_as_of ? `截至 ${new Date(score.data_as_of).toLocaleDateString('zh-CN')}` : '无统计日期'}</span></div><p className="mt-1 text-xs text-muted-foreground">revision {score.analytics_revision} · {score.confidence === 'high' ? '高置信度' : score.confidence === 'medium' ? '中置信度' : '低置信度'}{missing ? ` · 缺少 ${missing}` : ''}</p></li> })}</ul>}</div>
         </div>
-        {scoreAsset.isError && <p role="alert" className="text-sm text-destructive">评分失败，请检查目标项目和分析数据状态。</p>}
+        {scoreAsset.isError && <p role="alert" className="text-sm text-destructive">评分失败，请检查目标人设和分析数据状态。</p>}
       </>}
     </section>}
 
     <Dialog open={!!reuseAsset} onOpenChange={open => { if (!open) setReuseAsset(null) }}>
       <DialogContent>
-        <DialogHeader><DialogTitle>跨平台复用</DialogTitle><DialogDescription>为“{reuseAsset?.title}”创建自动生产运行。系统会按目标项目的平台生成独立内容版本。</DialogDescription></DialogHeader>
-        <label className="space-y-1.5 text-sm"><span>目标项目</span><select aria-label="目标项目" className="h-10 w-full rounded-md border border-input bg-background px-3" value={targetProjectId} onChange={event => setTargetProjectId(event.target.value)}>
-          <option value="">选择项目</option>{(projects.data ?? []).map(project => <option key={project.id} value={project.id}>{project.name} · {project.platform}</option>)}
+        <DialogHeader><DialogTitle>跨平台复用</DialogTitle><DialogDescription>为“{reuseAsset?.title}”创建自动生产运行。系统会按目标人设的平台生成独立内容版本。</DialogDescription></DialogHeader>
+        <label className="space-y-1.5 text-sm"><span>目标人设</span><select aria-label="目标人设" className="h-10 w-full rounded-md border border-input bg-background px-3" value={targetProjectId} onChange={event => setTargetProjectId(event.target.value)}>
+          <option value="">选择人设</option>{(projects.data ?? []).map(project => <option key={project.id} value={project.id}>{project.name} · {project.platform}</option>)}
         </select></label>
-        {projects.isPending && <p className="text-sm text-muted-foreground">正在加载项目…</p>}
-        {projects.data?.length === 0 && <p className="text-sm text-muted-foreground">请先创建可用于内容生产的项目。</p>}
+        {projects.isPending && <p className="text-sm text-muted-foreground">正在加载人设…</p>}
+        {projects.data?.length === 0 && <p className="text-sm text-muted-foreground">请先创建可用于内容生产的人设。</p>}
         {createReuseRun.isError && <p role="alert" className="text-sm text-destructive">创建自动生产运行失败，请稍后重试。</p>}
         <DialogFooter><Button variant="outline" onClick={() => setReuseAsset(null)}>取消</Button><Button disabled={!targetProjectId || createReuseRun.isPending || projects.isPending} onClick={() => createReuseRun.mutate()}><Sparkles />开始复用</Button></DialogFooter>
       </DialogContent>

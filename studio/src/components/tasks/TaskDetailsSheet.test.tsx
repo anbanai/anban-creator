@@ -10,14 +10,14 @@ const project: Project = {
   id: 'project-1',
   user_id: 'user-1',
   platform: 'wechat',
-  name: '当前创作项目名称',
+  name: '当前人设名称',
   avatar_url: '',
   profile_url: '',
   keywords: '',
-  visual_style: '当前创作项目视觉风格',
-  writer: '当前创作项目写作风格',
-  theme: '当前创作项目排版',
-  author: '当前创作项目作者',
+  visual_style: '当前人设视觉风格',
+  writer: '当前人设写作风格',
+  theme: '当前人设排版',
+  author: '当前人设作者',
 
   image_ratio: '16:9',
   max_concurrent_tasks: 1,
@@ -36,7 +36,7 @@ const articleTask: Task = {
   project_id: project.id,
   execution_profile: 'effective',
   project_snapshot: {
-    project_name: '创建时创作项目名称',
+    project_name: '创建时人设名称',
     platform: 'wechat',
     visual_style: '柔光生活摄影',
     image_ratio: '3:2',
@@ -119,7 +119,7 @@ describe('TaskDetailsSheet', () => {
     render(<TaskDetailsSheet {...createSheetProps({ selectedTab: 'logs' })} />)
 
     expect(screen.getByText('夏日选题')).toBeInTheDocument()
-    expect(screen.queryByText('创建时创作项目名称')).not.toBeInTheDocument()
+    expect(screen.queryByText('创建时人设名称')).not.toBeInTheDocument()
     expect(screen.getByText('已完成')).toBeInTheDocument()
   })
 
@@ -131,7 +131,7 @@ describe('TaskDetailsSheet', () => {
     expect(screen.getByRole('heading', { name: '作品详情' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('手动创建')).toBeInTheDocument()
-    expect(within(screen.getByRole('tabpanel')).queryByText('创建时创作项目名称')).not.toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).queryByText('创建时人设名称')).not.toBeInTheDocument()
     expect(within(screen.getByRole('region', { name: '积分明细' })).getAllByText('6,000 积分')).toHaveLength(2)
   })
 
@@ -139,7 +139,7 @@ describe('TaskDetailsSheet', () => {
     render(<ControlledTaskDetailsSheet {...createSheetProps()} />)
 
     expect(screen.getByRole('region', { name: '作品时间与来源' })).toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: '创作项目' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '人设' })).not.toBeInTheDocument()
     expect(screen.getByRole('region', { name: '积分明细' })).toBeInTheDocument()
   })
 
@@ -254,7 +254,7 @@ describe('TaskDetailsSheet', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: '配置' }))
 
-    expect(within(screen.getByRole('tabpanel')).getByText('创建时创作项目名称')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('创建时人设名称')).toBeInTheDocument()
     expect(screen.getByText('公众号文章')).toBeInTheDocument()
     expect(screen.getByText('柔光生活摄影')).toBeInTheDocument()
     expect(screen.getByText('3:2')).toBeInTheDocument()
@@ -268,7 +268,7 @@ describe('TaskDetailsSheet', () => {
   it('does not fill a present partial snapshot from the mutable current project', () => {
     const changedProject: Project = {
       ...project,
-      name: '后来修改的创作项目名',
+      name: '后来修改的人设名',
       visual_style: '后来修改的视觉风格',
       image_ratio: '1:1',
       author: '后来修改的作者',
@@ -287,11 +287,11 @@ describe('TaskDetailsSheet', () => {
       />,
     )
 
-    expect(screen.queryByText('后来修改的创作项目名')).not.toBeInTheDocument()
+    expect(screen.queryByText('后来修改的人设名')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: '配置' }))
 
     for (const currentValue of [
-      '后来修改的创作项目名',
+      '后来修改的人设名',
       '后来修改的视觉风格',
       '1:1',
       'later-image-capability',
@@ -306,7 +306,7 @@ describe('TaskDetailsSheet', () => {
   it('uses current project values only for a legacy task without a snapshot', () => {
     const legacyProject: Project = {
       ...project,
-      name: '旧作品当前创作项目',
+      name: '旧作品当前人设',
       visual_style: '旧作品视觉风格',
       image_ratio: '4:3',
       author: '旧作品作者',
@@ -325,9 +325,9 @@ describe('TaskDetailsSheet', () => {
       />,
     )
 
-    expect(within(screen.getByRole('tabpanel')).queryByText('旧作品当前创作项目')).not.toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).queryByText('旧作品当前人设')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: '配置' }))
-    expect(within(screen.getByRole('tabpanel')).getByText('旧作品当前创作项目')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('旧作品当前人设')).toBeInTheDocument()
     expect(screen.getByText('旧作品视觉风格')).toBeInTheDocument()
     expect(screen.getByText('4:3')).toBeInTheDocument()
     expect(screen.getByText('配置无效（图像能力未固化）')).toBeInTheDocument()
@@ -340,12 +340,12 @@ describe('TaskDetailsSheet', () => {
   it('treats an empty snapshot object as legacy override plus current project data', () => {
     const legacyProject: Project = {
       ...project,
-      name: '空快照当前创作项目',
-      visual_style: '当前创作项目视觉不应覆盖',
+      name: '空快照当前人设',
+      visual_style: '当前人设视觉不应覆盖',
       image_ratio: '5:4',
-      author: '当前创作项目作者不应覆盖',
-      writer: '当前创作项目写作不应覆盖',
-      theme: '当前创作项目排版不应覆盖',
+      author: '当前人设作者不应覆盖',
+      writer: '当前人设写作不应覆盖',
+      theme: '当前人设排版不应覆盖',
       ecommerce_defaults: { image_capability_key: 'empty-snapshot-image-capability' },
     }
     const legacyTask: Task = {
@@ -365,9 +365,9 @@ describe('TaskDetailsSheet', () => {
       />,
     )
 
-    expect(within(screen.getByRole('tabpanel')).queryByText('空快照当前创作项目')).not.toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).queryByText('空快照当前人设')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: '配置' }))
-    expect(within(screen.getByRole('tabpanel')).getByText('空快照当前创作项目')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('空快照当前人设')).toBeInTheDocument()
     expect(screen.getByText('旧作品覆盖视觉')).toBeInTheDocument()
     expect(screen.getByText('旧作品覆盖作者')).toBeInTheDocument()
     expect(screen.getByText('旧作品覆盖写作')).toBeInTheDocument()
@@ -375,14 +375,14 @@ describe('TaskDetailsSheet', () => {
     expect(screen.getByText('5:4')).toBeInTheDocument()
     expect(screen.getByText('配置无效（图像能力未固化）')).toBeInTheDocument()
     expect(screen.queryByText('empty-snapshot-image-capability')).not.toBeInTheDocument()
-    expect(screen.queryByText('当前创作项目视觉不应覆盖')).not.toBeInTheDocument()
+    expect(screen.queryByText('当前人设视觉不应覆盖')).not.toBeInTheDocument()
   })
 
   it('ignores conflicting legacy style overrides when the snapshot platform is valid', () => {
     const snapshotTask: Task = {
       ...articleTask,
       project_snapshot: {
-        project_name: '冻结创作项目',
+        project_name: '冻结人设',
         platform: 'wechat',
         visual_style: '冻结视觉',
         image_ratio: '3:2',
@@ -537,7 +537,7 @@ describe('TaskConfigurationDetails', () => {
       type: 'montage',
       image_ratio: '9:16',
       project_snapshot: {
-        project_name: '短片创作项目',
+        project_name: '短片人设',
         platform: 'montage',
         image_ratio: '9:16',
       },

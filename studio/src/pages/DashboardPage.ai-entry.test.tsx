@@ -35,7 +35,7 @@ const {
     id: 'project-1',
     user_id: 'user-1',
     platform: 'wechat',
-    name: '公众号创作项目',
+    name: '公众号人设',
     description: '品牌公众号数据',
     avatar_url: '',
     profile_url: '',
@@ -58,7 +58,7 @@ const {
       ...articleProject,
       id: 'project-2',
       platform: 'seednote',
-      name: '种草创作项目',
+      name: '种草人设',
       description: '种草笔记内容',
       image_ratio: '3:4',
     } as const,
@@ -66,7 +66,7 @@ const {
       ...articleProject,
       id: 'project-4',
       platform: 'moments',
-      name: '朋友圈创作项目',
+      name: '朋友圈人设',
       description: '朋友圈内容',
       image_ratio: '1:1',
     } as const,
@@ -74,7 +74,7 @@ const {
       ...articleProject,
       id: 'project-3',
       platform: 'ecommerce',
-      name: '电商创作项目',
+      name: '电商人设',
       description: '电商图片内容',
       image_ratio: '4:3',
     } as const,
@@ -82,7 +82,7 @@ const {
       ...articleProject,
       id: 'project-5',
       platform: 'montage',
-      name: '短片创作项目',
+      name: '短片人设',
       description: '视频生成短片内容',
       image_ratio: '9:16',
       montage_defaults: {
@@ -306,7 +306,7 @@ describe('DashboardPage AI entry', () => {
     const composer = document.querySelector<HTMLElement>('[data-slot="agent-prompt-input"]')
     expect(composer).toBeInTheDocument()
     const parametersControl = await getParametersTrigger(composer!)
-    const projectControl = await within(composer!).findByRole('combobox', { name: '创作项目：公众号创作项目' })
+    const projectControl = await within(composer!).findByRole('combobox', { name: '人设：公众号人设' })
     expect(projectControl.compareDocumentPosition(parametersControl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(within(composer!).queryByRole('button', { name: /^执行配置：/ })).not.toBeInTheDocument()
     expect(within(composer!).queryByRole('button', { name: /^图像设置：/ })).not.toBeInTheDocument()
@@ -346,7 +346,7 @@ describe('DashboardPage AI entry', () => {
     vi.mocked(api.projects.list).mockResolvedValueOnce([{ ...montageProject }])
     render(<DashboardPage />)
 
-    expect(await screen.findByRole('combobox', { name: '创作项目：短片创作项目' })).toBeInTheDocument()
+    expect(await screen.findByRole('combobox', { name: '人设：短片人设' })).toBeInTheDocument()
     const parameters = await openParameters()
     expect(within(parameters).getByText('视频比例')).toBeInTheDocument()
 	  expect(within(parameters).getByRole('button', { name: '9:16' })).toHaveAttribute('aria-pressed', 'true')
@@ -390,7 +390,7 @@ describe('DashboardPage AI entry', () => {
     }))
     render(<DashboardPage />)
 
-    const projectControl = await screen.findByRole('combobox', { name: '创作项目：公众号创作项目' })
+    const projectControl = await screen.findByRole('combobox', { name: '人设：公众号人设' })
     const submit = screen.getByRole('button', { name: '发送创建作品' })
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '按平台默认比例创作' },
@@ -407,11 +407,11 @@ describe('DashboardPage AI entry', () => {
     })
 
     await waitFor(() => expect(projectControl).toBeEnabled())
-    expect(projectControl).toHaveTextContent('公众号创作项目')
+    expect(projectControl).toHaveTextContent('公众号人设')
     await expectParameterSummary('16:9', 'Standard')
 
     fireEvent.click(projectControl)
-    fireEvent.click(await screen.findByRole('option', { name: /种草创作项目/ }))
+    fireEvent.click(await screen.findByRole('option', { name: /种草人设/ }))
     await expectParameterSummary('3:4', 'Standard')
     fireEvent.click(submit)
 
@@ -429,7 +429,7 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByText('加载失败')).toBeInTheDocument()
-    const projectControl = screen.getByRole('combobox', { name: '创作项目：公众号创作项目' })
+    const projectControl = screen.getByRole('combobox', { name: '人设：公众号人设' })
     const submit = screen.getByRole('button', { name: '发送创建作品' })
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '按平台默认比例创作' },
@@ -443,7 +443,7 @@ describe('DashboardPage AI entry', () => {
 
     await waitFor(() => expect(api.projects.platformConfigs).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(projectControl).toBeEnabled())
-    expect(projectControl).toHaveTextContent('公众号创作项目')
+    expect(projectControl).toHaveTextContent('公众号人设')
     await expectParameterSummary('16:9', 'Standard')
   })
 
@@ -575,7 +575,7 @@ describe('DashboardPage AI entry', () => {
     expect(await screen.findByText('加载失败')).toBeInTheDocument()
     const submit = screen.getByRole('button', { name: '发送创建作品' })
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
-      target: { value: '创作项目缓存失效时不可提交' },
+      target: { value: '人设缓存失效时不可提交' },
     })
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
 
@@ -684,8 +684,8 @@ describe('DashboardPage AI entry', () => {
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '写一篇种草笔记' },
     })
-    fireEvent.click(screen.getByRole('combobox', { name: '创作项目：公众号创作项目' }))
-    fireEvent.click(await screen.findByRole('option', { name: /种草创作项目/ }))
+    fireEvent.click(screen.getByRole('combobox', { name: '人设：公众号人设' }))
+    fireEvent.click(await screen.findByRole('option', { name: /种草人设/ }))
 
     expect(screen.getByRole('button', { name: '发送创建作品' })).toBeDisabled()
     expect(api.aiEntry.submit).not.toHaveBeenCalled()
@@ -697,11 +697,11 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByRole('heading', { name: '今天想创作什么？' })).toBeInTheDocument()
-    const projectControl = await screen.findByRole('combobox', { name: '创作项目：未选择' })
+    const projectControl = await screen.findByRole('combobox', { name: '人设：未选择' })
     expect(projectControl).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /创建第一个创作项目/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /创建第一个人设/ })).not.toBeInTheDocument()
     fireEvent.click(projectControl)
-    expect(await screen.findByRole('link', { name: '创建创作项目' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: '创建人设' })).toHaveAttribute(
       'href',
       '/projects?return_to=%2Ftasks&create=true&type=seednote&intent=new',
     )
@@ -737,13 +737,13 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByRole('heading', { name: '今天想创作什么？' })).toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: '首页创作项目选择' })).not.toBeInTheDocument()
-    expect(await screen.findByRole('combobox', { name: '创作项目：公众号创作项目' })).toHaveTextContent('公众号创作项目')
+    expect(screen.queryByRole('region', { name: '首页人设选择' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('combobox', { name: '人设：公众号人设' })).toHaveTextContent('公众号人设')
     const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
-    expect(screen.getByRole('combobox', { name: '创作项目：公众号创作项目' })).toHaveTextContent('公众号')
+    expect(screen.getByRole('combobox', { name: '人设：公众号人设' })).toHaveTextContent('公众号')
     expect(screen.queryByRole('link', { name: '创作' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /安排自动排期/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /管理创作项目配置/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /管理人设配置/ })).not.toBeInTheDocument()
     expect(screen.queryByText('今日创作态势')).not.toBeInTheDocument()
     expect(screen.queryByText('接入状态')).not.toBeInTheDocument()
     expect(screen.queryByText('下一步')).not.toBeInTheDocument()
@@ -781,7 +781,7 @@ describe('DashboardPage AI entry', () => {
   it('exposes the selected project identity in the composer control name', async () => {
     render(<DashboardPage />)
 
-    expect(await screen.findByRole('combobox', { name: '创作项目：公众号创作项目' })).toBeInTheDocument()
+    expect(await screen.findByRole('combobox', { name: '人设：公众号人设' })).toBeInTheDocument()
   })
 
   it('keeps supported task quantities and project image defaults while clamping single-task projects', async () => {
@@ -794,7 +794,7 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     const selectProject = async (name: RegExp) => {
-      fireEvent.click(await screen.findByRole('combobox', { name: /^创作项目：/ }))
+      fireEvent.click(await screen.findByRole('combobox', { name: /^人设：/ }))
       fireEvent.click(await screen.findByRole('option', { name }))
     }
 
@@ -809,13 +809,13 @@ describe('DashboardPage AI entry', () => {
     expect(increment).toBeDisabled()
     await closeParameters()
 
-    await selectProject(/种草创作项目/)
+    await selectProject(/种草人设/)
     await expectParameterSummary('作品数量 5', '3:4', 'Professional')
 
-    await selectProject(/朋友圈创作项目/)
+    await selectProject(/朋友圈人设/)
     await expectParameterSummary('作品数量 5', '1:1', 'Professional')
 
-    await selectProject(/电商创作项目/)
+    await selectProject(/电商人设/)
     await expectParameterSummary('作品数量 1', '4:3', 'Professional')
     const ecommerceParameters = await openParameters()
     expect(within(ecommerceParameters).getByLabelText('作品数量：1，当前能力上限')).toHaveTextContent('作品数量 1 · 当前能力上限')
@@ -888,13 +888,13 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByRole('heading', { name: '今天想创作什么？' })).toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: '首页创作项目选择' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '首页人设选择' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '创作' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /安排自动排期/ })).not.toBeInTheDocument()
 
-    fireEvent.click(await screen.findByRole('combobox', { name: '创作项目：公众号创作项目' }))
-    fireEvent.click(await screen.findByRole('option', { name: /种草创作项目/ }))
-    expect(screen.getByRole('combobox', { name: '创作项目：种草创作项目' })).toHaveTextContent('种草创作项目')
+    fireEvent.click(await screen.findByRole('combobox', { name: '人设：公众号人设' }))
+    fireEvent.click(await screen.findByRole('option', { name: /种草人设/ }))
+    expect(screen.getByRole('combobox', { name: '人设：种草人设' })).toHaveTextContent('种草人设')
 
     fireEvent.change(await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '写一篇种草笔记' },
@@ -907,11 +907,11 @@ describe('DashboardPage AI entry', () => {
     })))
   })
 
-  it('选择种草笔记创作项目后用模板覆盖 Prompt 并保留附件', async () => {
+  it('选择种草笔记人设后用模板覆盖 Prompt 并保留附件', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([{ ...seednoteProject }])
     render(<DashboardPage />)
 
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '创作项目：种草创作项目' })).toHaveTextContent('种草创作项目'))
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '人设：种草人设' })).toHaveTextContent('种草人设'))
     const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
     fireEvent.change(prompt, { target: { value: '已有需求' } })
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
@@ -933,10 +933,10 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByRole('heading', { name: '今天想创作什么？' })).toBeInTheDocument()
-    expect(await screen.findByRole('combobox', { name: '创作项目：电商创作项目' })).toHaveTextContent('电商创作项目')
+    expect(await screen.findByRole('combobox', { name: '人设：电商人设' })).toHaveTextContent('电商人设')
     expect(screen.queryByRole('link', { name: '创作' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /安排自动排期/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /管理创作项目配置/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /管理人设配置/ })).not.toBeInTheDocument()
   })
 
   it('shows needs-configuration errors without navigating', async () => {

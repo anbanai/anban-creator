@@ -939,7 +939,7 @@ export default function TaskDetailPage() {
               ) : null}
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px]">
                 <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">创作项目身份</p>
+                  <p className="text-xs text-muted-foreground">人设身份</p>
                   <ProjectIdentity project={project} className="mt-1" />
                 </div>
                 <div>
@@ -1025,7 +1025,7 @@ export default function TaskDetailPage() {
                   </div>
                 </section>
               ) : null}
-              <section aria-label="项目画像" className="mt-4 border-t border-border pt-4">
+              <section aria-label="人设画像" className="mt-4 border-t border-border pt-4">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <p className="text-xs text-muted-foreground">画像资料</p>

@@ -43,7 +43,7 @@ async function openCreate() {
   return screen.findByRole('dialog', { name: '新建排期' })
 }
 async function selectProject(dialog: HTMLElement, name: string) {
-  fireEvent.click(within(dialog).getByRole('combobox', { name: /^创作项目/ }))
+  fireEvent.click(within(dialog).getByRole('combobox', { name: /^人设/ }))
   fireEvent.click(await screen.findByRole('option', { name: new RegExp(name) }))
 }
 beforeEach(() => {
@@ -124,7 +124,7 @@ describe('PlansPage multi-output plans', () => {
     render(<PlansPageWithCachedProjects projects={cachedProjects} />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建排期' })
-    expect(await within(dialog).findByRole('combobox', { name: '创作项目' })).toHaveTextContent(project.name)
+    expect(await within(dialog).findByRole('combobox', { name: '人设' })).toHaveTextContent(project.name)
     expect(api.projects.list).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(window.location.search).toBe(''))
   })
@@ -292,7 +292,7 @@ describe('PlansPage multi-output plans', () => {
     fireEvent.click(await within(dialog).findByRole('button', { name: '公众号文章' }))
     await selectProject(dialog, mockProjects[0].name)
     fireEvent.click(within(dialog).getByText('高级设置'))
-    expect(within(dialog).getByRole('img', { name: '创作项目人物参考' })).toHaveAttribute('src', portrait.download_url)
+    expect(within(dialog).getByRole('img', { name: '人设人物参考' })).toHaveAttribute('src', portrait.download_url)
     fireEvent.change(within(dialog).getByLabelText('人物参考图文件'), { target: { files: [new File(['portrait'], 'plan-person.png', { type: 'image/png' })] } })
     await waitFor(() => expect(harness.upload).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'project_portrait_reference' })))
     fireEvent.click(within(dialog).getByRole('switch', { name: '人物封面' }))

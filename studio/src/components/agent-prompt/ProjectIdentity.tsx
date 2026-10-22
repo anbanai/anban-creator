@@ -53,7 +53,7 @@ function stableIdentityIndex(value: string) {
 
 export function projectPlatformLabel(platform?: string) {
   if (!platform) return null
-  return platformLabels[platform] ?? contentTypeLabel[platform] ?? '通用项目'
+  return platformLabels[platform] ?? contentTypeLabel[platform] ?? '通用人设'
 }
 
 const defaultProjectAgentIDs: Record<string, readonly string[]> = {
@@ -77,7 +77,7 @@ export function resolveProjectIdentity({
   snapshot,
   projectId,
   fallbackPlatform,
-  fallbackName = '未设置项目',
+  fallbackName = '未设置人设',
 }: {
   project?: ProjectIdentityProject
   snapshot?: ProjectIdentitySnapshot
@@ -169,18 +169,42 @@ export function ProjectIdentity({
         <span className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate font-medium text-foreground">{project.name}</span>
         </span>
-        {showAgents ? (
+        {showAgents && showCapabilityLabels ? (
+          <span data-slot="project-identity-details" className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap">
+            <AgentIconStack
+              agentIds={agentIds}
+              compact
+              maxVisible={3}
+              className="shrink-0"
+            />
+            {keywordTags.length ? (
+              <span data-slot="project-identity-keywords" aria-label="关键词" className="flex min-w-0 items-center gap-1 overflow-hidden">
+                <span className="sr-only">关键词：</span>
+                {keywordTags.map((tag) => <Badge key={tag} variant="secondary" className="max-w-20 shrink truncate px-1.5 text-[10px]">{tag}</Badge>)}
+                {hiddenKeywordCount > 0 ? (
+                  <Badge
+                    variant="outline"
+                    title={`其余关键词：${keywords.slice(keywordTags.length).join('、')}`}
+                    className="shrink-0 px-1.5 text-[10px]"
+                  >
+                    +{hiddenKeywordCount}
+                  </Badge>
+                ) : null}
+              </span>
+            ) : null}
+          </span>
+        ) : null}
+        {showAgents && !showCapabilityLabels ? (
           <span data-slot="project-capabilities" className="flex min-w-0 items-center">
             <AgentIconStack
               agentIds={agentIds}
               compact={compact}
-              showLabels={!compact && showCapabilityLabels}
               maxVisible={3}
               className="max-w-full"
             />
           </span>
         ) : null}
-        {!compact && keywordTags.length ? (
+        {!compact && !showCapabilityLabels && keywordTags.length ? (
           <span data-slot="project-identity-keywords" aria-label="关键词" className="flex min-w-0 flex-wrap items-center gap-1 pt-0.5">
             <span className="sr-only">关键词：</span>
             {keywordTags.map((tag) => <Badge key={tag} variant="secondary" className="max-w-36 truncate">{tag}</Badge>)}

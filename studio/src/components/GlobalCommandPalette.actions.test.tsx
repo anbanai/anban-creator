@@ -50,7 +50,7 @@ vi.mock('@/lib/api', async () => {
           id: 'project-1',
           user_id: 'user-1',
           platform: 'wechat',
-          name: '公众号创作项目',
+          name: '公众号人设',
           avatar_url: '',
           profile_url: '',
           keywords: '',

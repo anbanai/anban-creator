@@ -27,8 +27,8 @@ export function buildDashboardBlocker({
   if (activeProjectCount === 0) {
     return {
       id: 'no-project',
-      message: '先创建一个创作项目，再开始创作。',
-      actionLabel: '创建创作项目',
+      message: '先创建一个人设，再开始创作。',
+      actionLabel: '创建人设',
       actionHref: projectsReturnHref({ type: 'seednote', intent: 'new' }),
       blocking: true,
     }

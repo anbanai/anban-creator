@@ -10,7 +10,7 @@ const currentProject: Project = {
   id: 'project-1',
   user_id: 'user-1',
   platform: 'seednote',
-  name: '后来修改的创作项目',
+  name: '后来修改的人设',
   avatar_url: '',
   profile_url: '',
   keywords: '',
@@ -87,7 +87,7 @@ describe('TaskContextSummary', () => {
     expect(screen.getByText('累计扣费 6,800 积分')).toBeInTheDocument()
     expect(facts).not.toHaveTextContent('茶小茶')
     expect(facts).not.toHaveTextContent('公众号文章')
-    expect(facts).not.toHaveTextContent('后来修改的创作项目')
+    expect(facts).not.toHaveTextContent('后来修改的人设')
     expect(facts).not.toHaveTextContent('后来修改的视觉')
   })
 
@@ -203,14 +203,14 @@ describe('TaskContextSummary', () => {
       },
       project: {
         ...currentProject,
-        name: '当前创作项目',
+        name: '当前人设',
         visual_style: '',
         image_ratio: '',
       },
       files: [],
     })
 
-    expect(screen.queryByText('当前创作项目')).not.toBeInTheDocument()
+    expect(screen.queryByText('当前人设')).not.toBeInTheDocument()
     expect(screen.queryByText('公众号文章')).not.toBeInTheDocument()
     expect(screen.getByText('未设置风格')).toBeInTheDocument()
     expect(screen.getByText('未指定画幅')).toBeInTheDocument()

@@ -477,7 +477,7 @@ describe('planSchema', () => {
 describe('projectSchema', () => {
   it('accepts article platform with wechat_app_id', () => {
     expect(projectSchema.safeParse({
-      name: '测试创作项目',
+      name: '测试人设',
       platform: 'wechat',
       wechat_app_id: 'wx123',
     }).success).toBe(true)
@@ -485,14 +485,14 @@ describe('projectSchema', () => {
 
   it('accepts shared project information without publishing credentials', () => {
     const result = projectSchema.safeParse({
-      name: '通用创作项目',
+      name: '通用人设',
     })
     expect(result.success).toBe(true)
   })
 
   it('accepts seednote platform without wechat_app_id', () => {
     expect(projectSchema.safeParse({
-      name: '测试创作项目',
+      name: '测试人设',
       platform: 'seednote',
     }).success).toBe(true)
   })
@@ -500,7 +500,7 @@ describe('projectSchema', () => {
   it('accepts moments platform without publishing credentials', () => {
     expect(projectSchema.safeParse({
       platform: 'moments',
-      name: '朋友圈创作项目',
+      name: '朋友圈人设',
       instructions: '私域成交内容',
       image_ratio: '3:4',
     }).success).toBe(true)
@@ -509,7 +509,7 @@ describe('projectSchema', () => {
   it('accepts montage project defaults', () => {
     const result = projectSchema.safeParse({
       platform: 'montage',
-      name: '视频生成创作项目',
+      name: '视频生成人设',
       image_ratio: '9:16',
       montage_defaults: {
         default_pipeline: 'social-short',
@@ -529,7 +529,7 @@ describe('projectSchema', () => {
 
   it('accepts all optional fields', () => {
     const result = projectSchema.safeParse({
-      name: '测试创作项目',
+      name: '测试人设',
       platform: 'wechat',
       wechat_app_id: 'wx123',
       wechat_secret: 'secret',

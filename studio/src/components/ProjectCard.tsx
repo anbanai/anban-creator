@@ -36,7 +36,7 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
   const cardTone = isArchived
     ? 'border-border/60 bg-muted/30'
     : 'border-border bg-card hover:border-foreground/20 hover:shadow-sm'
-  const editLabel = '编辑项目'
+  const editLabel = '编辑人设'
   const profileProgress = portraitProgress(project.profile)
   const profileSummary = portraitSummary(project)
   const profileAccounts = (project.profile_setup?.platform_accounts ?? []).map((account) => `${accountPlatformLabels[account.platform] ?? account.platform}${account.account_name ? ` · ${account.account_name}` : ''}`)
@@ -81,7 +81,7 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
             </div>
           </section>
         )}
-        <div className="mt-2 flex flex-wrap justify-end gap-1" aria-label={`项目操作：${project.name}`}>
+        <div className="mt-2 flex flex-wrap justify-end gap-1" aria-label={`人设操作：${project.name}`}>
           {onEdit && (
             <Tooltip>
               <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onEdit(project)} aria-label={`${editLabel}：${project.name}`} />}>
@@ -105,14 +105,14 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
             </Tooltip>
           )}
           <Tooltip>
-            <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => setMemoryOpen(true)} aria-label={`项目记忆：${project.name}`} />}>
+            <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => setMemoryOpen(true)} aria-label={`人设记忆：${project.name}`} />}>
               <Brain />
             </TooltipTrigger>
-              <TooltipContent>项目记忆</TooltipContent>
+              <TooltipContent>人设记忆</TooltipContent>
           </Tooltip>
           {!isArchived && onArchive && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={archiving} onClick={() => onArchive(project.id)} aria-label={`归档项目：${project.name}`} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={archiving} onClick={() => onArchive(project.id)} aria-label={`归档人设：${project.name}`} />}>
                 <Archive />
               </TooltipTrigger>
               <TooltipContent>归档</TooltipContent>
@@ -120,7 +120,7 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
           )}
           {isArchived && onRestore && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={restoring} onClick={() => onRestore(project.id)} aria-label={`恢复项目：${project.name}`} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={restoring} onClick={() => onRestore(project.id)} aria-label={`恢复人设：${project.name}`} />}>
                 <RotateCcw />
               </TooltipTrigger>
               <TooltipContent>恢复</TooltipContent>

@@ -259,7 +259,7 @@ export default function DashboardPage() {
   async function handleSubmit() {
     const text = prompt.trim()
     if (!selectedProject) {
-      setEntryError({ message: '请先创建或选择一个活跃创作项目。', actionUrl: '/projects' })
+      setEntryError({ message: '请先创建或选择一个活跃人设。', actionUrl: '/projects' })
       return
     }
     if (!text) {
@@ -315,8 +315,8 @@ export default function DashboardPage() {
   }
 
   const starterPrompts = selectedProject?.platform === 'montage'
-    ? ['制作一条 30 秒的品牌介绍视频，突出产品特点，画面简洁。', '把上传的口播视频剪成节奏紧凑的短片，保留重点并加上字幕。', '根据创作项目定位，制作一个适合社交平台传播的产品演示视频。']
-    : ['围绕创作项目定位，创作一篇适合新手阅读的实用指南，给出具体步骤。', '把上传的素材整理成一篇内容，突出重点，语言自然、有条理。', '围绕创作项目主题，创作一份值得收藏的实用清单，附上使用建议。']
+    ? ['制作一条 30 秒的品牌介绍视频，突出产品特点，画面简洁。', '把上传的口播视频剪成节奏紧凑的短片，保留重点并加上字幕。', '根据人设定位，制作一个适合社交平台传播的产品演示视频。']
+    : ['围绕人设定位，创作一篇适合新手阅读的实用指南，给出具体步骤。', '把上传的素材整理成一篇内容，突出重点，语言自然、有条理。', '围绕人设主题，创作一份值得收藏的实用清单，附上使用建议。']
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col pb-8">
@@ -337,7 +337,7 @@ export default function DashboardPage() {
           <h1 className="text-balance text-3xl font-semibold leading-tight tracking-tight text-foreground md:text-4xl">
             今天想创作什么？
           </h1>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">围绕项目定位开始创作，并在作品交付后查看表现与复盘线索。</p>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">围绕人设定位开始创作，并在作品交付后查看表现与复盘线索。</p>
         </div>
 
         <div ref={composerRef} className="mx-auto w-full max-w-3xl">
@@ -364,13 +364,13 @@ export default function DashboardPage() {
                   allowNoProject={false}
                   loading={projectsLoading || platformConfigsQuery.isLoading}
                   disabled={submitMutation.isPending || platformConfigsQuery.isError}
-                  placeholder="选择创作项目"
+                  placeholder="选择人设"
                   createProjectHref={projectsReturnHref({ type: 'seednote', intent: 'new' })}
                   ariaLabel={selectedProject
-                    ? `创作项目：${selectedProject.name}`
+                    ? `人设：${selectedProject.name}`
                     : projectsLoading || platformConfigsQuery.isLoading
-                      ? '创作项目：加载中'
-                      : '创作项目：未选择'}
+                      ? '人设：加载中'
+                      : '人设：未选择'}
                   compact
                 />
                 <TaskComposerParameters

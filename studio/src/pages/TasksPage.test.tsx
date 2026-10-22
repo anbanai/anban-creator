@@ -37,7 +37,7 @@ const fixtures = vi.hoisted(() => {
     id: 'project-1',
     user_id: 'user-1',
     platform: 'wechat',
-    name: '公众号创作项目',
+    name: '公众号人设',
     avatar_url: '',
     profile_url: '',
     keywords: '',
@@ -206,15 +206,15 @@ describe('TasksPage unified prompt composer', () => {
     fireEvent.click(await screen.findByRole('button', { name: '创作' }))
     const dialog = await screen.findByRole('dialog')
     expect(document.querySelector('[data-slot="agent-prompt-input"]')).not.toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '创作项目：未选择' })).toBeInTheDocument()
-    expect(screen.getByText('先选择创作项目')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '人设：未选择' })).toBeInTheDocument()
+    expect(screen.getByText('先选择人设')).toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: '创建作品' })).not.toBeInTheDocument()
     expect(within(dialog).getAllByRole('button', { name: '创建' })).toHaveLength(1)
     expect(document.querySelectorAll('form form')).toHaveLength(0)
   })
 
   it('uses the composer prompt as the Montage brief', async () => {
-    const montageProject = { ...fixtures.project, id: 'montage-project', platform: 'montage', name: '剪辑创作项目' } as Project
+    const montageProject = { ...fixtures.project, id: 'montage-project', platform: 'montage', name: '剪辑人设' } as Project
     vi.mocked(api.projects.list).mockResolvedValue([montageProject])
     vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 100000, promotional: 0, debt: 0, balance: 100000 })
     vi.mocked(api.tasks.create).mockResolvedValue({ ...fixtures.failedTask, id: 'montage-task', type: 'montage', project_id: montageProject.id } as Task)
@@ -244,14 +244,14 @@ describe('TasksPage unified prompt composer', () => {
     renderTasksPage('/tasks?create=true&type=wechat-article&project_id=project-1&intent=new')
 
     await screen.findByRole('dialog', { name: '创作' })
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '创作项目：公众号创作项目' })).toHaveTextContent('公众号创作项目'))
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '人设：公众号人设' })).toHaveTextContent('公众号人设'))
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
 
     expect(await screen.findByText('created task detail')).toBeInTheDocument()
   })
 
   it('waits for a newly created linked project when the task page has an older project cache', async () => {
-    const olderProject = { ...fixtures.project, id: 'older-project', name: '旧项目' } as Project
+    const olderProject = { ...fixtures.project, id: 'older-project', name: '旧人设' } as Project
     const newProject = { ...fixtures.project, id: 'new-project', name: '刚创建的账号' } as Project
     let resolveProjects!: (projects: Project[]) => void
     const projectListPromise = new Promise<Project[]>((resolve) => { resolveProjects = resolve })
@@ -263,7 +263,7 @@ describe('TasksPage unified prompt composer', () => {
     await act(async () => resolveProjects([newProject]))
 
     const dialog = await screen.findByRole('dialog', { name: '创作' })
-    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: `创作项目：${newProject.name}` })).toBeInTheDocument())
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: `人设：${newProject.name}` })).toBeInTheDocument())
   })
 
   it('marks attachment changes dirty so closing asks for confirmation', async () => {
@@ -331,10 +331,10 @@ describe('TasksPage URL-driven recovery filters', () => {
     renderTasksPage('/tasks?project_id=project-1')
 
     await waitFor(() => expect(api.tasks.list).toHaveBeenLastCalledWith(expect.objectContaining({ project_id: 'project-1' })))
-    expect(await screen.findByText('正在查看「公众号创作项目」的作品')).toBeInTheDocument()
+    expect(await screen.findByText('正在查看「公众号人设」的作品')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '清除人设筛选' }))
     await waitFor(() => expect(api.tasks.list).toHaveBeenLastCalledWith(expect.objectContaining({ project_id: undefined })))
-    expect(screen.queryByText('正在查看「公众号创作项目」的作品')).not.toBeInTheDocument()
+    expect(screen.queryByText('正在查看「公众号人设」的作品')).not.toBeInTheDocument()
   })
 
   it('loads archived persona context for a filtered task list', async () => {
@@ -342,7 +342,7 @@ describe('TasksPage URL-driven recovery filters', () => {
     vi.mocked(api.projects.get).mockResolvedValue({ project: { ...fixtures.project, status: 'archived' } } as never)
     renderTasksPage('/tasks?project_id=project-1')
 
-    expect(await screen.findByText('正在查看「公众号创作项目」的作品')).toBeInTheDocument()
+    expect(await screen.findByText('正在查看「公众号人设」的作品')).toBeInTheDocument()
     expect(api.projects.get).toHaveBeenCalledWith('project-1')
   })
 
@@ -688,7 +688,7 @@ describe('TasksPage URL-driven recovery filters', () => {
       ...fixtures.project,
       id: 'project-ecommerce',
       platform: 'ecommerce',
-      name: '电商创作项目',
+      name: '电商人设',
     } as Project])
 
     renderTasksPage('/tasks?create=true&type=ecommerce&project_id=project-ecommerce&intent=new')
@@ -788,7 +788,7 @@ describe('TasksPage Seednote reference materials', () => {
     ...fixtures.project,
     id: 'project-seednote',
     platform: 'seednote',
-    name: '种草创作项目',
+    name: '种草人设',
     image_ratio: '3:4',
   } as Project
 
@@ -796,7 +796,7 @@ describe('TasksPage Seednote reference materials', () => {
     ...fixtures.project,
     id: 'project-ecommerce',
     platform: 'ecommerce',
-    name: '电商创作项目',
+    name: '电商人设',
   } as Project
 
   beforeEach(() => {
@@ -980,7 +980,7 @@ describe('TasksPage Montage creation', () => {
     ...fixtures.project,
     id: 'project-montage',
     platform: 'montage',
-    name: '视频生成创作项目',
+    name: '视频生成人设',
     montage_defaults: {
       default_pipeline: 'cinematic',
       preferences: {

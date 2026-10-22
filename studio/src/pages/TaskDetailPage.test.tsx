@@ -400,7 +400,7 @@ describe('TaskDetailPage', () => {
     }))
     render(<TaskDetailPage />)
 
-    fireEvent.click(await screen.findByRole('button', { name: /查看人设详情：测试创作项目/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /查看人设详情：测试人设/ }))
     const dialog = await screen.findByRole('dialog')
     expect(await within(dialog).findByText('已就绪 · v3')).toBeInTheDocument()
     expect(within(dialog).getByText('帮助职场人写出清晰的公众号文章')).toBeInTheDocument()
@@ -430,7 +430,7 @@ describe('TaskDetailPage', () => {
       })
     render(<TaskDetailPage />)
 
-    fireEvent.click(await screen.findByRole('button', { name: /查看人设详情：测试创作项目/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /查看人设详情：测试人设/ }))
     const dialog = await screen.findByRole('dialog')
     expect(await within(dialog).findByText('画像资料加载失败')).toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: '重试' }))
@@ -796,7 +796,7 @@ describe('TaskDetailPage', () => {
     const invalidateQueries = vi.spyOn(view.queryClient, 'invalidateQueries')
 
     const dialog = await openCloneDialog()
-    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '创作项目：测试创作项目' })).toHaveTextContent('测试创作项目'))
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '人设：测试人设' })).toHaveTextContent('测试人设'))
     fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
     await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledTimes(1))
 
@@ -823,7 +823,7 @@ describe('TaskDetailPage', () => {
     const view = renderWithCachedTasks(taskA, taskB)
 
     const dialog = await openCloneDialog()
-    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '创作项目：测试创作项目' })).toHaveTextContent('测试创作项目'))
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '人设：测试人设' })).toHaveTextContent('测试人设'))
     fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
     await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledTimes(1))
 
@@ -1168,7 +1168,7 @@ describe('TaskDetailPage', () => {
       },
       input_attachments: [{ type: 'image', file_name: 'brief-reference.png' }],
       project_snapshot: {
-        project_name: '创建时创作项目快照',
+        project_name: '创建时人设快照',
         platform: 'wechat',
         visual_style: '明亮纪实摄影',
         image_ratio: '3:2',
@@ -1186,7 +1186,7 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByRole('heading', { name: '阶段日志' })).not.toBeInTheDocument()
     const context = screen.getByRole('region', { name: '关键事实' })
     expect(within(context).queryByText('茶小茶')).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '创作项目快照' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '人设快照' })).not.toBeInTheDocument()
 
     await openTaskDetails('素材')
     expect(screen.getByText('未生成素材使用结论，仅展示作品输入。')).toBeInTheDocument()
@@ -1200,7 +1200,7 @@ describe('TaskDetailPage', () => {
     })
 
     fireEvent.click(screen.getByRole('tab', { name: '配置' }))
-    expect(within(screen.getByRole('tabpanel')).getByText('创建时创作项目快照')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('创建时人设快照')).toBeInTheDocument()
     expect(within(screen.getByRole('tabpanel')).getByText('明亮纪实摄影')).toBeInTheDocument()
     expect(within(screen.getByRole('tabpanel')).getByText('3:2')).toBeInTheDocument()
   })
@@ -1684,7 +1684,7 @@ describe('TaskDetailPage', () => {
 
     const dialog = await openCloneDialog()
     expect(api.tasks.clone).not.toHaveBeenCalled()
-    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '创作项目：测试创作项目' })).toHaveTextContent('测试创作项目'))
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '人设：测试人设' })).toHaveTextContent('测试人设'))
     expect(within(dialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('原始作品要求')
     expect(within(dialog).queryByText('数量', { exact: true })).not.toBeInTheDocument()
     expect(await within(dialog).findByRole('button', {
@@ -2070,7 +2070,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('模型超时')).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '继续执行' })).toHaveLength(1)
     expect(screen.queryByRole('button', { name: /返回作品列表/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /检查创作项目配置/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /检查人设配置/ })).not.toBeInTheDocument()
   })
 
   it('shows a localized recoverable execution identity failure and preserves operator diagnostics', async () => {
@@ -2149,7 +2149,7 @@ describe('TaskDetailPage', () => {
         },
       ],
       project_snapshot: {
-        project_name: '快照创作项目',
+        project_name: '快照人设',
         platform: 'wechat',
         visual_style: '柔光生活摄影',
         image_ratio: '16:9',
@@ -2163,12 +2163,12 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(await screen.findByRole('button', { name: '打开作品概览' })).toBeInTheDocument()
-    expect(screen.queryByText('创作项目快照')).not.toBeInTheDocument()
+    expect(screen.queryByText('人设快照')).not.toBeInTheDocument()
     expect(screen.queryByText('作品配置')).not.toBeInTheDocument()
 
     await openTaskDetails('配置')
-    expect(screen.getByText('创作项目快照')).toBeInTheDocument()
-    expect(within(screen.getByRole('tabpanel')).getByText('快照创作项目')).toBeInTheDocument()
+    expect(screen.getByText('人设快照')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('快照人设')).toBeInTheDocument()
     expect(screen.queryByRole('img', { name: '参考图' })).not.toBeInTheDocument()
     expect(screen.queryByText('参考图')).not.toBeInTheDocument()
     expect(screen.getByText('视觉风格')).toBeInTheDocument()
@@ -2201,12 +2201,12 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const projectButton = await screen.findByRole('button', { name: /测试创作项目/ })
+    const projectButton = await screen.findByRole('button', { name: /测试人设/ })
     fireEvent.click(projectButton)
 
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByRole('heading', { name: '人设详情' })).toBeInTheDocument()
-    expect(within(dialog).getByText('测试创作项目')).toBeInTheDocument()
+    expect(within(dialog).getByText('测试人设')).toBeInTheDocument()
     expect(within(dialog).getByText('https://mp.weixin.qq.com/test')).toBeInTheDocument()
     expect(mockNavigate).not.toHaveBeenCalledWith('/projects')
   })
@@ -2234,7 +2234,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    fireEvent.click(await screen.findByRole('button', { name: /\u6d4b试创作项目/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /\u6d4b试人设/ }))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('视频比例')).toBeInTheDocument()
     expect(within(dialog).queryByText('图片比例')).not.toBeInTheDocument()

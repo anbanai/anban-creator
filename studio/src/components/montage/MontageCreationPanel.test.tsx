@@ -264,7 +264,7 @@ describe('MontageCreationPanel', () => {
       capabilityByKey: () => undefined,
     })
     const input: MontageInput = {
-      brief: '创作项目快照', pipeline_key: 'screen-demo', source_assets: [],
+      brief: '人设快照', pipeline_key: 'screen-demo', source_assets: [],
       preferences: { duration_seconds: 75 }, delivery_targets: [],
     }
     const { rerender } = render(<PanelHarness input={input} />)

@@ -98,10 +98,10 @@ describe('MontageProjectDefaultsPanel', () => {
     await waitFor(() => expect(screen.getByRole('radio', { name: /电影感制作/ })).toBeChecked())
 
     expect(screen.getAllByText('留空表示由每次创作自行决定。').length).toBeGreaterThan(0)
-    expect(screen.getByText('作为该创作项目每次视频创作的默认风格约束。')).toBeInTheDocument()
+    expect(screen.getByText('作为该人设每次视频创作的默认风格约束。')).toBeInTheDocument()
     expect(screen.getByText('默认配乐方向；单次创作可临时改写。')).toBeInTheDocument()
     expect(screen.getByText('长期素材规则，例如品牌必须露出、禁用第三方素材。')).toBeInTheDocument()
-    expect(screen.getByText('该创作项目视频作品的默认交付要求；单次创作可追加。')).toBeInTheDocument()
+    expect(screen.getByText('该人设视频作品的默认交付要求；单次创作可追加。')).toBeInTheDocument()
   })
 
   it('keeps following pipeline recommendations until the default duration is edited', async () => {

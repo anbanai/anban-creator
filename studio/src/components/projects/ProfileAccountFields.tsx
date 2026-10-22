@@ -16,7 +16,7 @@ export function ProfileAccountFields({ accounts, onChange }: { accounts: Account
   }
   return <section aria-label="平台账号资料" className="space-y-3 sm:col-span-2">
     <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-medium">平台账号与公开主页</p><Button type="button" variant="outline" size="sm" disabled={accounts.length >= 10} onClick={() => onChange([...accounts, { platform: 'wechat', profile_url: '' }])}><Plus />添加账号</Button></div>
-    <p className="text-xs text-muted-foreground">账号可选填；同一平台可记录多个账号，所有资料仅用于当前项目。</p>
+    <p className="text-xs text-muted-foreground">账号可选填；同一平台可记录多个账号，所有资料仅用于当前人设。</p>
     {accounts.map((account, index) => {
       const label = platforms.find(([value]) => value === account.platform)?.[1] ?? account.platform
       const duplicate = accounts.filter((entry) => entry.platform === account.platform).length > 1

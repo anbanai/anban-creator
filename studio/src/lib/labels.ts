@@ -87,7 +87,7 @@ export const progressStageLabel: Record<string, string> = {
   html: 'HTML 转换',
   draft: '草稿提交',
   // seednote-only
-  project: '创作项目信息',
+  project: '人设信息',
   material_analysis: '素材分析',
   viral_analysis: '爆文拆解',
   content_research: '内容研究',
@@ -109,7 +109,7 @@ export const taskErrorLabels: Record<string, { title: string; message: string; r
   provider_rate_limited: { title: '供应商请求受限', message: '供应商请求受到频率或配额限制。', recovery: '等待限流窗口恢复后再重试。' },
   provider_timeout: { title: '供应商请求超时', message: '供应商请求超时，远端结果仍需核对。', recovery: '检查保留的执行结果后再重试。' },
   provider_unavailable: { title: '供应商暂时不可用', message: '供应商服务暂时不可用。', recovery: '确认服务恢复后再重试。' },
-  provider_invalid_request: { title: '供应商拒绝无效请求', message: '供应商拒绝了无效请求参数。', recovery: '修复创作项目或运行配置后再重试。' },
+  provider_invalid_request: { title: '供应商拒绝无效请求', message: '供应商拒绝了无效请求参数。', recovery: '修复人设或运行配置后再重试。' },
   provider_protocol_error: { title: '供应商响应格式错误', message: '供应商响应格式不符合预期，远端结果仍需核对。', recovery: '检查保留的官方 Results，修复供应商兼容性后再重试。' },
   provider_unknown: { title: '供应商请求失败', message: '供应商请求未完成，原始执行上下文未对外披露。', recovery: '检查保留的执行结果后再重试。' },
   completion_report_failed: { title: '结果提交失败（可恢复）', message: '作品结果提交失败，但已有产物已保留。' },

@@ -48,12 +48,15 @@ describe('ProjectIdentity', () => {
     expect(screen.queryByText('种草笔记')).not.toBeInTheDocument()
   })
 
-  it('collapses capability labels after three items while exposing the complete list', () => {
+  it('shows capability icons without labels and exposes the complete list to assistive technology', () => {
     render(<ProjectIdentity showCapabilityLabels project={{ id: 'many', name: '内容矩阵', agent_ids: ['seednote', 'montage', 'hypit', 'wechat-article'] }} />)
 
-    expect(screen.getByText('种草笔记')).toBeInTheDocument()
-    expect(screen.getByText('视频生成')).toBeInTheDocument()
-    expect(screen.getByText('视频复刻')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '种草笔记' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '视频生成' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '视频复刻' })).toBeInTheDocument()
+    expect(screen.queryByText('种草笔记')).not.toBeInTheDocument()
+    expect(screen.queryByText('视频生成')).not.toBeInTheDocument()
+    expect(screen.queryByText('视频复刻')).not.toBeInTheDocument()
     const overflow = screen.getByLabelText('支持的内容类型：种草笔记、视频生成、视频复刻、公众号文章')
     expect(overflow).not.toHaveAttribute('tabindex')
     expect(overflow).toHaveAttribute('title', '支持的内容类型：种草笔记、视频生成、视频复刻、公众号文章')
@@ -61,7 +64,7 @@ describe('ProjectIdentity', () => {
   })
 
   it('uses the platform default Agent until a project has durable Agent activity', () => {
-    render(<ProjectIdentity compact project={{ id: 'fresh', name: '新种草创作项目', platform: 'seednote' }} />)
+    render(<ProjectIdentity compact project={{ id: 'fresh', name: '新种草人设', platform: 'seednote' }} />)
 
     expect(document.querySelector('[data-agent-id="seednote"]')).toBeInTheDocument()
     expect(screen.queryByText('尚未关联 Agent')).not.toBeInTheDocument()

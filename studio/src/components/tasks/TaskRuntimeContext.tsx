@@ -63,7 +63,7 @@ function runtimeStatus(task: Task): RuntimeStatus {
 
 function profileSummary(task: Task, project?: Project) {
   const snapshot = task.project_snapshot
-  const projectName = snapshot?.project_name || project?.name || '未设置创作项目'
+  const projectName = snapshot?.project_name || project?.name || '未设置人设'
   const identity = project || snapshot?.project_name || snapshot?.platform
     ? resolveProjectIdentity({
       project,
@@ -83,7 +83,7 @@ function makeItems(task: Task, project: Project | undefined, files: TaskFile[], 
   if (context) {
     const statusFor = (status: string): RuntimeStatus => status === 'healthy' || status === 'ready' || status === 'conflict' ? 'ready' : status === 'starting' ? 'starting' : status === 'recoverable' ? 'recoverable' : status === 'failed' || status === 'degraded' ? 'failed' : 'unknown'
     return [
-      { key: 'profile', label: '创作身份', value: context.profile.label, identity: projectIdentity, detail: context.profile.changed_since_snapshot ? '创作项目已更新，作品仍使用冻结版本' : context.profile.summary || '作品已冻结', status: statusFor(context.profile.status), icon: UserRound },
+      { key: 'profile', label: '创作身份', value: context.profile.label, identity: projectIdentity, detail: context.profile.changed_since_snapshot ? '人设已更新，作品仍使用冻结版本' : context.profile.summary || '作品已冻结', status: statusFor(context.profile.status), icon: UserRound },
       { key: 'execution', label: '执行环境', value: context.execution.status === 'starting' ? '建立中' : context.execution.status === 'recoverable' ? '可恢复' : context.execution.status === 'failed' ? '未建立' : '已建立', detail: context.execution.recovery_stage ? `可从${progressStageLabel[context.execution.recovery_stage] || context.execution.recovery_stage}继续` : '工作区已绑定到本次作品', status: statusFor(context.execution.status), icon: CloudCog, action: context.execution.recovery_stage ? `可从${progressStageLabel[context.execution.recovery_stage] || context.execution.recovery_stage}继续` : undefined },
       { key: 'artifacts', label: '作品文件', value: `${context.artifacts.completed} / ${context.artifacts.required || context.artifacts.completed} 个`, detail: context.artifacts.failed ? `${context.artifacts.failed} 个文件需要处理` : context.artifacts.missing ? `缺少 ${context.artifacts.missing} 个文件` : context.artifacts.completed ? '产物清单已更新' : '等待产物', status: context.artifacts.failed || context.artifacts.missing ? 'recoverable' : context.artifacts.completed ? 'ready' : 'unknown', icon: FileCheck2 },
       { key: 'connectivity', label: '连接状态', value: context.connectivity.summary, detail: context.connectivity.checked_at ? `最近检查 ${new Date(context.connectivity.checked_at).toLocaleString('zh-CN')}` : '暂无检查记录', status: statusFor(context.connectivity.status), icon: Network },
@@ -172,10 +172,10 @@ function RuntimeDetail({ item, task, project, files, context, onResume }: { item
       </div>
       {item.key === 'profile' ? (
         <dl>
-          <DetailRow label="创作项目" value={identity ? <ProjectIdentity project={identity} compact /> : projectName} />
+          <DetailRow label="人设" value={identity ? <ProjectIdentity project={identity} compact /> : projectName} />
           <DetailRow label="执行配置" value={profileLabel} />
           <DetailRow label="平台" value={contentTypeDisplayName(task.type)} />
-          <DetailRow label="状态" value={context?.profile.changed_since_snapshot ? '创作项目已更新，作品继续执行时仍使用冻结版本' : '作品继续执行时仍使用冻结版本'} />
+          <DetailRow label="状态" value={context?.profile.changed_since_snapshot ? '人设已更新，作品继续执行时仍使用冻结版本' : '作品继续执行时仍使用冻结版本'} />
           <DetailRow label="快照 ID" value={context?.profile.snapshot_id || task.agent_profile_fingerprint || '未记录'} copy={Boolean(context?.profile.snapshot_id || task.agent_profile_fingerprint)} />
         </dl>
       ) : null}

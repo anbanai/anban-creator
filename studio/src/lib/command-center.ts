@@ -216,8 +216,8 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
   const checks: CommandCenterReadiness['checks'] = {
     projects: {
       status: projectStatus,
-      label: '创作项目定位',
-      description: projects.length > 0 ? `${projects.length} 个创作项目可用` : '先创建账号/创作项目',
+      label: '人设定位',
+      description: projects.length > 0 ? `${projects.length} 个人设可用` : '先创建账号/人设',
       href: projects.length > 0 ? '/projects' : projectsReturnHref({ type: 'seednote', intent: 'new' }),
     },
     apiKeys: {
@@ -236,10 +236,10 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
       label: '发布能力',
       description:
         publishingStatus === 'ready'
-          ? `${publishableProjects.length} 个创作项目已配置公众号发布流程`
+          ? `${publishableProjects.length} 个人设已配置公众号发布流程`
           : publishingStatus === 'not_ready'
             ? '需要检查发布配置'
-            : '创建创作项目后检查发布配置',
+            : '创建人设后检查发布配置',
       href: '/settings',
     },
   }
@@ -283,7 +283,7 @@ export function buildNextBestActions(signals: CommandCenterSignals): NextBestAct
   if (!signals.readiness.projectsReady) {
     actions.push({
       id: 'create-first-project',
-      label: '创建第一个创作项目',
+      label: '创建第一个人设',
       description: '先建立账号定位，再让作品自动继承风格和配置',
       href: projectsReturnHref({ type: 'seednote' }),
       kind: 'neutral',
