@@ -2,7 +2,7 @@ import { useEffect, useCallback, useMemo, useSyncExternalStore } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTheme } from 'next-themes'
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, FileText, FolderPlus, ListChecks, Moon, Plus, Search, Settings, Sun, WandSparkles } from 'lucide-react'
+import { AlertTriangle, FileText, ListChecks, Moon, Plus, Search, Settings, Sun, UserRound, WandSparkles } from 'lucide-react'
 import {
   CommandDialog,
   CommandInput,
@@ -159,7 +159,7 @@ export default function GlobalCommandPalette() {
             创建自动排期
           </CommandItem>
           <CommandItem onSelect={() => handleSelect(() => navigate(projectsReturnHref({ type: 'seednote', intent: 'new' })))}>
-            <FolderPlus className="mr-2 h-4 w-4" />
+            <UserRound className="mr-2 h-4 w-4" />
             新建人设
           </CommandItem>
         </CommandGroup>

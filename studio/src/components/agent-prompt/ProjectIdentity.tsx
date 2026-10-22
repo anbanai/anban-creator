@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
-import { FolderKanban } from 'lucide-react'
+import { UserRound } from 'lucide-react'
 import { contentTypeLabel, platformLabels } from '@/lib/labels'
 import { SignedImage } from '@/components/ui/SignedImage'
 import { AgentIconStack, agentDisplayName } from './AgentIconStack'
@@ -136,7 +136,7 @@ export function ProjectIdentity({
     description,
   ].filter(Boolean).join('，')
   const palette = identityPalettes[stableIdentityIndex(project.id)]
-  const fallbackIcon = <FolderKanban aria-hidden="true" className={cn(compact ? 'size-3.5' : 'size-4', palette.foreground)} />
+  const fallbackIcon = <UserRound aria-hidden="true" className={cn(compact ? 'size-3.5' : 'size-4', palette.foreground)} />
   const capabilityRow = showAgents ? (
     <span data-slot="project-capabilities" className="flex min-w-0 items-center">
       <AgentIconStack

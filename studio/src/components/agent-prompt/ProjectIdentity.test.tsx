@@ -76,10 +76,10 @@ describe('ProjectIdentity', () => {
     expect(screen.getByText('尚未关联 Agent')).toBeInTheDocument()
   })
 
-  it('uses a neutral project mark when no image is available', () => {
+  it('uses a user icon when no persona image is available', () => {
     render(<ProjectIdentity project={{ id: 'project', name: 'Garden Notes' }} />)
     expect(screen.getByLabelText('Garden Notes')).toBeInTheDocument()
-    expect(document.querySelector('[data-project-mark="true"]')).toBeInTheDocument()
+    expect(document.querySelector('[data-project-mark="true"] .lucide-user-round')).toBeInTheDocument()
   })
 
   it('uses project instructions as the summary when no description is available', () => {

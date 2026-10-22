@@ -3,7 +3,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ArrowLeft, BarChart3, Ban, Copy, FolderOpen, Loader2, MessageSquare, Trash2 } from 'lucide-react'
+import { ArrowLeft, BarChart3, Ban, Copy, Loader2, MessageSquare, Trash2, UserRound } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -646,7 +646,7 @@ export default function TaskDetailPage() {
             {project && (
               <Tooltip>
                 <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" className="hover:bg-transparent dark:hover:bg-transparent focus-visible:bg-transparent" aria-label={`查看人设详情：${project.name}`} onClick={() => setShowProjectDialog(true)} />}>
-                  <FolderOpen className="size-4" aria-hidden="true" />
+                  <UserRound className="size-4" aria-hidden="true" />
                 </TooltipTrigger>
                 <TooltipContent>查看人设详情</TooltipContent>
               </Tooltip>

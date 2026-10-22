@@ -4,7 +4,7 @@ import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Bot, CalendarRange, FilePlus2, Inbox, MessagesSquare, PenLine, Settings2 } from 'lucide-react'
+import { Bot, CalendarRange, FilePlus2, MessagesSquare, PenLine, Settings2, UserRound } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { FieldHint } from '@/components/common/FieldHint'
@@ -482,8 +482,8 @@ export default function ProjectsPage() {
         </div>
       ) : filteredProjects.length === 0 ? (
         <EmptyState
-          icon={Inbox}
-          title={!visibleProjects.length ? (statusFilter === 'active' ? '没有使用中的人设' : '没有已归档人设') : '未找到匹配的人设'}
+          icon={UserRound}
+          title={!visibleProjects.length ? (statusFilter === 'all' ? '还没有人设' : statusFilter === 'active' ? '没有活跃人设' : '没有已归档人设') : '未找到匹配的人设'}
           description={!visibleProjects.length ? '创建人设后，定位、风格和画像会一起沉淀，后续创作可以直接复用。' : '换个名称、定位或平台账号试试'}
           action={!visibleProjects.length && statusFilter === 'active' && !searchFilter ? { label: '智能创建人设', onClick: openCreator } : { label: '清空筛选', onClick: () => { setSearchFilter(''); setStatusFilter('active') } }}
         />
