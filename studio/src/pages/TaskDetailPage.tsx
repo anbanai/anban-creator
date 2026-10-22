@@ -19,11 +19,10 @@ import { StatusPill } from '@/components/workspace'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import WechatAnalyticsPanel from '@/components/tasks/WechatAnalyticsPanel'
 import ChannelsAnalyticsPanel from '@/components/tasks/ChannelsAnalyticsPanel'
-import { CompletionSummary, TaskExecutionRail } from '@/components/tasks/TaskExecutionRail'
+import { TaskExecutionRail } from '@/components/tasks/TaskExecutionRail'
 import { TaskDeliverablesPanel } from '@/components/tasks/TaskDeliverablesPanel'
 import { TaskContextSummary } from '@/components/tasks/TaskContextSummary'
 import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDetailsSheet'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
 import { ImageCapabilityDisplay } from '@/components/ImageCapabilityDisplay'
 import { useImageCapabilities } from '@/hooks/useImageCapabilities'
@@ -234,7 +233,7 @@ export default function TaskDetailPage() {
   }, [id, navigate])
 
   const queryClient = useQueryClient()
-  const { token } = useAuth()
+  const { token, user } = useAuth()
 
   const [sseLogs, setSseLogs] = useState<string[]>([])
   const [sseError, setSseError] = useState<string | null>(null)
@@ -249,7 +248,6 @@ export default function TaskDetailPage() {
   const [cloneSourceTask, setCloneSourceTask] = useState<Task | null>(null)
   const [showTaskDetails, setShowTaskDetails] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
-  const [manualExecutionProcess, setManualExecutionProcess] = useState<{ taskId: string; open: boolean } | null>(null)
   const [taskDetailsTab, setTaskDetailsTab] = useState<TaskDetailsTab>('overview')
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
   const abortRef = useRef<AbortController | null>(null)
@@ -299,23 +297,7 @@ export default function TaskDetailPage() {
 
   const deliveredFiles = files?.filter((file) => file.state === 'delivered') ?? []
   const deliverableFiles = deliveredFiles.filter((file) => file.is_deliverable === true)
-  const hasDeliverableResult = files?.some((file) => (
-    (file.state === 'delivered' || file.state === 'retained') && file.is_deliverable === true
-  )) ?? false
   const hasPreservedDelivery = task?.status === 'failed' && deliverableFiles.length > 0
-  const hasPendingServerPublication = task?.lifecycle?.stages.some((stage) => (
-    stage.source === 'server'
-      && stage.kind === 'publication'
-      && (stage.state === 'pending' || stage.state === 'blocked')
-  )) ?? false
-  const defaultExecutionProcessOpen = task?.status !== 'completed'
-    || filesLoading
-    || (files !== undefined && !hasDeliverableResult)
-    || filesError
-    || hasPendingServerPublication
-  const showExecutionProcess = task && manualExecutionProcess?.taskId === task.id
-    ? manualExecutionProcess.open
-    : defaultExecutionProcessOpen
 
   // Resolve project info for the task
   const { data: projectDetail } = useQuery({
@@ -347,23 +329,6 @@ export default function TaskDetailPage() {
   const displayLifecycle = liveLifecycle && liveLifecycle.revision > persistedLifecycleRevision
     ? liveLifecycle
     : task?.lifecycle
-  const executionStages = displayLifecycle?.stages ?? []
-  const summaryStage = executionStages.find((stage) => ['active', 'blocked', 'failed', 'cancelled'].includes(stage.state))
-    ?? executionStages.find((stage) => stage.state === 'pending')
-    ?? [...executionStages].reverse().find((stage) => stage.kind === 'work')
-    ?? executionStages[executionStages.length - 1]
-  const nextExecutionStep = task?.status === 'completed'
-    ? '检查交付结果'
-    : task?.status === 'failed'
-      ? '查看原因并按需恢复'
-      : task?.status === 'cancelled'
-        ? '按需重新开始'
-        : task?.status === 'pending'
-          ? '等待开始'
-          : executionStages.find((stage) => stage.state === 'pending')?.title ?? '持续查看进度'
-  const executionSummary = task
-    ? `阶段：${summaryStage?.title ?? (task.status === 'pending' ? '等待开始' : '执行计划')} · 状态：${taskStatusLabel[task.status] || task.status} · 下一步：${nextExecutionStep}`
-    : ''
   const streamLifecycle = task ? shouldStreamTaskLifecycle(task) : false
   const cancelMutation = useMutation({
     mutationFn: (taskId: string) => api.tasks.cancel(taskId),
@@ -786,7 +751,26 @@ export default function TaskDetailPage() {
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_18rem] xl:items-start">
         <div className="min-w-0 space-y-6">
           {task.asset_id && <ContentLineagePanel assetID={task.asset_id} runID={task.reuse_run_id} taskID={task.id} />}
-          {task.status !== 'pending' && task.status !== 'running' && (
+          {task.status === 'pending' || task.status === 'running' ? (
+            <TaskExecutionRail
+              key={task.id}
+              taskId={task.id}
+              status={task.status}
+              lifecycle={displayLifecycle}
+              workflow={task.workflow_status}
+              outcome={task.outcome}
+              errorMessage={task.error_message}
+              onOpenLogs={() => openTaskDetails('logs')}
+              onResume={canResume ? () => setShowResumeDialog(true) : undefined}
+              files={files}
+              taskType={task.type}
+              filesLoading={filesLoading}
+              filesError={filesError}
+              onRetryFiles={() => void refetchFiles()}
+              showCompletionSummary={false}
+              showFiles={false}
+            />
+          ) : (
             <TaskDeliverablesPanel
               taskId={task.id}
               taskStatus={task.status}
@@ -795,47 +779,15 @@ export default function TaskDetailPage() {
               filesLoading={filesLoading}
               filesError={filesError}
               onRetryFiles={() => void refetchFiles()}
+              workflow={task.workflow_status}
+              outcome={task.outcome}
+              errorMessage={task.error_message}
+              onResume={canResume ? () => setShowResumeDialog(true) : undefined}
+              isAdmin={user?.is_admin === true}
+              lifecycle={displayLifecycle}
+              onOpenLogs={() => openTaskDetails('logs')}
             />
           )}
-          {(task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') && (
-            <CompletionSummary workflow={task.workflow_status} outcome={task.outcome} />
-          )}
-
-          <Collapsible
-            open={showExecutionProcess}
-            onOpenChange={(open) => setManualExecutionProcess({ taskId: task.id, open })}
-          >
-            <div className="rounded-lg border border-border/70 bg-card">
-              <CollapsibleTrigger aria-label="执行过程" className="flex min-h-12 w-full items-center justify-between gap-3 px-4 py-2 text-left text-sm font-semibold text-foreground hover:bg-muted/30 sm:px-5">
-                <span className="min-w-0 space-y-0.5">
-                  <span className="block">执行过程</span>
-                  <span className="block break-words text-xs font-normal leading-relaxed text-muted-foreground">{executionSummary}</span>
-                </span>
-                <span className="shrink-0 text-xs font-normal text-muted-foreground">{showExecutionProcess ? '收起' : '展开查看'}</span>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="border-t border-border/70 p-0">
-          <TaskExecutionRail
-            key={task.id}
-            taskId={task.id}
-            status={task.status}
-            lifecycle={displayLifecycle}
-            workflow={task.workflow_status}
-            outcome={task.outcome}
-            errorMessage={task.error_message}
-            onOpenLogs={() => openTaskDetails('logs')}
-            onResume={canResume ? () => setShowResumeDialog(true) : undefined}
-            showFailureSummary
-            files={files}
-            taskType={task.type}
-            filesLoading={filesLoading}
-            filesError={filesError}
-            onRetryFiles={() => void refetchFiles()}
-            showCompletionSummary={false}
-            showFiles={false}
-          />
-              </CollapsibleContent>
-            </div>
-          </Collapsible>
 
           {task.type === 'wechat-article' && task.status === 'completed' && project && (
             <WechatAnalyticsPanel taskId={task.id} />

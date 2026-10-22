@@ -1565,6 +1565,13 @@ func (h *TaskHandler) GetFiles(c fiber.Ctx) error {
 		h.logger.Error().Err(err).Msg("get task files failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to get task files")
 	}
+	if !taskUserIsAdmin(c) {
+		files, err = h.service.FilterDeliverableFiles(c.Context(), id, files)
+		if err != nil {
+			h.logger.Error().Err(err).Str("task_id", id).Msg("filter public task files failed")
+			return Error(c, fiber.StatusInternalServerError, "failed to filter task files")
+		}
+	}
 	return Success(c, files)
 }
 
@@ -1817,6 +1824,11 @@ func (h *TaskHandler) verifyTaskOwnership(c fiber.Ctx, taskID string) (*model.Ta
 	return task, nil
 }
 
+func taskUserIsAdmin(c fiber.Ctx) bool {
+	user, ok := c.Locals("user").(*model.User)
+	return ok && user != nil && user.IsAdmin
+}
+
 func taskFileContentDisposition(disposition, filename string) string {
 	value := mime.FormatMediaType(disposition, map[string]string{"filename": filename})
 	if value == "" {
@@ -1930,6 +1942,18 @@ func (h *TaskHandler) PreviewFile(c fiber.Ctx) error {
 	if err := h.service.VerifyFileBelongsToTask(c.Context(), taskID, fileID); err != nil {
 		return Error(c, fiber.StatusNotFound, "file not found")
 	}
+	fileRecord, err := h.service.Repository().TaskFiles().FindByID(c.Context(), fileID)
+	if err != nil {
+		return Error(c, fiber.StatusNotFound, "file not found")
+	}
+	_, isDeliverable, err := h.service.DeliveryMetadata(c.Context(), taskID, fileRecord)
+	if err != nil {
+		h.logger.Error().Err(err).Str("file_id", fileID).Msg("check task file preview access failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to check file preview")
+	}
+	if !isDeliverable && !taskUserIsAdmin(c) {
+		return Forbidden(c, "internal task files are only available to admins")
+	}
 	stream, file, err := h.service.GetFileStream(c.Context(), fileID)
 	if err != nil {
 		return Error(c, fiber.StatusNotFound, "file not found")
@@ -1959,6 +1983,13 @@ func (h *TaskHandler) PreviewHTML(c fiber.Ctx) error {
 	if err != nil {
 		h.logger.Error().Err(err).Str("task_id", taskID).Msg("get task files failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to get task files")
+	}
+	if !taskUserIsAdmin(c) {
+		files, err = h.service.FilterDeliverableFiles(c.Context(), taskID, files)
+		if err != nil {
+			h.logger.Error().Err(err).Str("task_id", taskID).Msg("filter preview delivery files failed")
+			return Error(c, fiber.StatusInternalServerError, "failed to filter task files")
+		}
 	}
 
 	var htmlFile *model.TaskFile

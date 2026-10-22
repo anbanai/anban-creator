@@ -68,6 +68,21 @@ describe('TaskExecutionRail', () => {
     expect(screen.getAllByText('供应商请求失败。')).toHaveLength(1)
   })
 
+  it('does not expose execution logs from the terminal delivery rail', () => {
+    render(
+      <TaskExecutionRail
+        taskId="task-1"
+        status="completed"
+        lifecycle={lifecycle}
+        onOpenLogs={vi.fn()}
+        resultMode
+      />,
+    )
+
+    expect(screen.getByText('交付处理')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '查看完整日志' })).not.toBeInTheDocument()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     // A blocked draft has no publication record yet; the API reads that 404 as null.

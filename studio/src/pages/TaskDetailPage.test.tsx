@@ -66,8 +66,9 @@ vi.mock('react-router-dom', async () => {
   }
 })
 
+const authState = vi.hoisted(() => ({ isAdmin: false }))
 vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => ({ token: 'test-token' }),
+  useAuth: () => ({ token: 'test-token', user: { is_admin: authState.isAdmin } }),
 }))
 
 vi.mock('@/lib/sse', async () => {
@@ -238,6 +239,7 @@ async function openCloneDialog() {
 describe('TaskDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    authState.isAdmin = false
     routeState.taskId = 'task-1'
     mockStreamTaskProgress.mockImplementation(async function* (_taskId, _token, signal) {
       if (signal) await waitForAbort(signal)
@@ -339,7 +341,7 @@ describe('TaskDetailPage', () => {
     expect(status.querySelector('svg')).toBeInTheDocument()
   })
 
-  it('shows delivered files before a collapsed execution process when completed', async () => {
+  it('shows only delivery content after completion', async () => {
     mockTask(taskWith({ status: 'completed' }))
     vi.mocked(api.tasks.files).mockResolvedValue([{
       id: 'deliverable-result', task_id: 'task-1', state: 'delivered', role: 'output',
@@ -349,20 +351,16 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const result = await screen.findByRole('region', { name: '交付结果' })
-    const process = await screen.findByRole('button', { name: '执行过程' })
-    expect(result.compareDocumentPosition(process) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(process).toHaveAttribute('aria-expanded', 'false')
-    expect(within(process).getByText(/阶段：完成创作 · 状态：已完成 · 下一步：检查交付结果/)).toBeVisible()
-    fireEvent.click(process)
-    expect(await screen.findByRole('button', { name: '完成创作，已完成' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: '交付结果' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '执行进展' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '执行过程' })).not.toBeInTheDocument()
   })
 
   it.each(['pending', 'running'] as const)('shows only execution content while work is %s', async (status) => {
     mockTask(taskWith({ status }))
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('button', { name: '执行过程' })).toHaveAttribute('aria-expanded', 'true')
+    expect(await screen.findByRole('heading', { name: '执行进展' })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '交付结果' })).not.toBeInTheDocument()
   })
 
@@ -380,7 +378,7 @@ describe('TaskDetailPage', () => {
     expect(await screen.findByTitle('cancelled-output.md')).toBeInTheDocument()
   })
 
-  it('opens execution process when a completed task has only stage files', async () => {
+  it('keeps internal stage files hidden from ordinary users after completion', async () => {
     mockTask(taskWith({ status: 'completed' }))
     vi.mocked(api.tasks.files).mockResolvedValue([{
       id: 'stage-result', task_id: 'task-1', state: 'delivered', role: 'research',
@@ -390,7 +388,9 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('button', { name: '执行过程' })).toHaveAttribute('aria-expanded', 'true')
+    expect(await screen.findByRole('region', { name: '交付结果' })).toBeInTheDocument()
+    expect(screen.queryByText('research.md')).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '执行进展' })).not.toBeInTheDocument()
   })
 
   it('shows live persona profile details and distinguishes the task snapshot', async () => {
@@ -444,7 +444,6 @@ describe('TaskDetailPage', () => {
 
     const result = await screen.findByRole('region', { name: '交付结果' })
     expect(await within(result).findByRole('alert')).toHaveTextContent('暂时无法确认是否有交付文件')
-    expect(screen.getByRole('button', { name: '执行过程' })).toHaveAttribute('aria-expanded', 'true')
     vi.mocked(api.tasks.files).mockResolvedValueOnce([])
     fireEvent.click(within(result).getByRole('button', { name: '重试' }))
     expect(await within(result).findByText('当前作品没有可交付文件。')).toBeInTheDocument()
@@ -479,7 +478,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '完成创作，已完成' }))
+    await screen.findByRole('region', { name: '交付结果' })
     expect(screen.getByLabelText('内容验收结果')).toHaveTextContent('有警告')
     expect(screen.getByLabelText('内容验收结果')).toHaveTextContent('请求的正文配图未全部生成。')
     expect(screen.getByLabelText('内容验收结果')).toHaveTextContent('文件 output/img_01.png 上传失败：HTTP 503')
@@ -539,7 +538,7 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(screen.queryByRole('alert', { name: '作品结果提醒' })).not.toBeInTheDocument()
-    expect(await screen.findByRole('button', { name: '完成创作，失败' })).toBeInTheDocument()
+    expect(await screen.findByText('执行失败')).toBeInTheDocument()
     expect(screen.getByText('模型超时')).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '继续执行' })).toHaveLength(1)
     expect(screen.getByRole('button', { name: '继续执行' })).not.toHaveTextContent('继续执行')
@@ -923,7 +922,7 @@ describe('TaskDetailPage', () => {
       progress_log: 'B 持久化日志',
     })
     const view = renderWithCachedTasks(taskA, taskB)
-    await waitFor(() => expect(screen.getByRole('button', { name: '执行过程' })).toHaveAttribute('aria-expanded', 'true'))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '执行进展' })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: '查看完整日志' }))
     const initialLogs = await screen.findByRole('region', { name: '执行动态' })
 
@@ -939,13 +938,9 @@ describe('TaskDetailPage', () => {
     })
     expect(streamSignals.get('task-1')).toHaveProperty('aborted', true)
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '执行过程' })).toHaveAttribute('aria-expanded', 'true'))
-    fireEvent.click(screen.getByRole('button', { name: '查看完整日志' }))
-    const logSection = await screen.findByRole('region', { name: '执行动态' })
-    expect(logSection).toHaveTextContent('B 持久化日志')
-    expect(logSection).not.toHaveTextContent('A 实时日志')
-    expect(logSection).not.toHaveTextContent('A 终止后的迟到日志')
-    expect(within(logSection).queryByRole('button', { name: '重新连接' })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '交付结果' })).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: '查看完整日志' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '执行动态' })).not.toBeInTheDocument()
   })
 
   it('restarts SSE and ignores late events when switching directly between cached running tasks', async () => {
@@ -1213,8 +1208,8 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    await screen.findByRole('button', { name: '完成创作，已完成' })
-    expect(screen.getByRole('heading', { name: '执行进展' })).toBeInTheDocument()
+    await screen.findByRole('region', { name: '交付结果' })
+    expect(screen.queryByRole('heading', { name: '执行进展' })).not.toBeInTheDocument()
     expect(screen.queryByText(/100%/)).not.toBeInTheDocument()
     expect(screen.queryByText('作品执行成功')).not.toBeInTheDocument()
     expect(screen.queryByText('结果生成后将在这里显示')).not.toBeInTheDocument()
@@ -1258,9 +1253,7 @@ describe('TaskDetailPage', () => {
     const review = await screen.findByText('内容验收')
     const files = await screen.findByText('交付成果 (1)')
     expect(review.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '执行过程' }))
-    const overview = await screen.findByRole('button', { name: '打开作品概览' })
-    expect(files.compareDocumentPosition(overview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: '执行进展' })).not.toBeInTheDocument()
     expect(screen.queryByText('创作进度')).not.toBeInTheDocument()
     expect(screen.queryByText('当前阶段')).not.toBeInTheDocument()
     expect(screen.queryByText('03-draft.md')).not.toBeInTheDocument()
@@ -1338,10 +1331,8 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
     expect(await screen.findByText('产物上传失败')).toBeInTheDocument()
     expect(screen.queryByRole('alert', { name: '作品结果提醒' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '选题研究，进度未确认' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '选题研究，失败' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '选题研究，进行中' })).not.toBeInTheDocument()
-    expect(await screen.findByText('已保留产物 (15)')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '选题研究，进度未确认' })).not.toBeInTheDocument()
+    expect(screen.queryByText('已保留产物 (15)')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '继续执行' })).toBeInTheDocument()
   })
 
@@ -1383,15 +1374,12 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(screen.queryByRole('alert', { name: '作品结果提醒' })).not.toBeInTheDocument()
-    expect(await screen.findByRole('button', { name: '完成创作，失败' })).toBeInTheDocument()
+    expect(await screen.findByText('执行失败')).toBeInTheDocument()
     const generatedHeading = await screen.findByText('交付成果 (1)')
-    const failedHeading = await screen.findByText('已保留产物 (1)')
     const generatedSection = generatedHeading.closest('section') as HTMLElement
-    const failedSection = failedHeading.closest('section') as HTMLElement
     expect(within(generatedSection).getByTitle('content.md')).toBeInTheDocument()
     expect(within(generatedSection).queryByTitle('failure-state.json')).not.toBeInTheDocument()
-    expect(within(failedSection).getByTitle('failure-state.json')).toBeInTheDocument()
-    expect(within(failedSection).queryByTitle('content.md')).not.toBeInTheDocument()
+    expect(screen.queryByTitle('failure-state.json')).not.toBeInTheDocument()
   })
 
   it('distinguishes a failed continuation from its preserved historical delivery', async () => {
@@ -1457,12 +1445,9 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const deliverables = await screen.findByRole('heading', { name: '交付成果 (1)' })
-    const previewOnly = await screen.findByLabelText('仅支持预览')
-    expect(deliverables.compareDocumentPosition(previewOnly) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(screen.getByRole('button', { name: '下载 review.json' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '下载 review.json' })).toHaveClass('min-h-11', 'min-w-11')
-    expect(screen.queryByText(/过程文件/)).not.toBeInTheDocument()
+    await screen.findByRole('heading', { name: '交付成果 (1)' })
+    expect(screen.queryByLabelText('仅支持预览')).not.toBeInTheDocument()
+    expect(screen.queryByText('review.json')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /下载交付成果/ }))
     await waitFor(() => expect(api.tasks.downloadZipBlob).toHaveBeenCalledWith('task-1'))
@@ -2048,7 +2033,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByRole('button', { name: '删除作品' })).toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: '已发布' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '更多作品操作' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '完成创作，已取消' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '交付结果' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /重新执行/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /再试一次/ })).not.toBeInTheDocument()
   })
@@ -2098,7 +2083,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('button', { name: '完成创作，失败' })).toBeInTheDocument()
+    expect(await screen.findByText('执行失败')).toBeInTheDocument()
     expect(screen.getByText('服务端没有返回失败详情，可继续执行并补充说明。')).toBeInTheDocument()
     expect(screen.queryByText('失败原因')).not.toBeInTheDocument()
     expect(screen.queryByText(/工作目录已保留/)).not.toBeInTheDocument()

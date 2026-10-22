@@ -459,7 +459,7 @@ function FilePreviewModalContent({
               toast.error(error instanceof Error ? error.message : '复制正文失败')
             }
           }}><Copy className="size-3.5" />复制正文（含图片）</Button>
-          <Button variant="ghost" size="sm" onClick={async () => {
+          {canDownload && <Button variant="ghost" size="sm" onClick={async () => {
             try {
               const embeddedHTML = await prepareWechatArticleHTMLForDownload(htmlContent, files, (id) => api.tasks.previewFileBlob(taskId, id))
               downloadWechatArticleHTML(embeddedHTML)
@@ -467,7 +467,7 @@ function FilePreviewModalContent({
             } catch (error) {
               toast.error(error instanceof Error ? error.message : '下载 HTML 失败')
             }
-          }}><Download className="size-3.5" />下载含图片 HTML</Button>
+          }}><Download className="size-3.5" />下载含图片 HTML</Button>}
           <ArticleMetadataCopy files={files} taskId={taskId} author={articleAuthor} />
           <Button variant="ghost" size="sm" onClick={() => window.open('https://mp.weixin.qq.com/', '_blank', 'noopener,noreferrer')}><ExternalLink className="size-3.5" />打开公众号后台</Button>
         </>}

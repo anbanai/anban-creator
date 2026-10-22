@@ -748,7 +748,7 @@ func (s *TaskService) deliveryContractsForFiles(ctx context.Context, taskID stri
 	contracts := make(map[string][]agentpack.DeliverySpec)
 	resolved := make(map[string]struct{})
 	for _, file := range files {
-		if file == nil || file.State != model.TaskFileStateDelivered || file.TaskID != taskID {
+		if file == nil || (file.State != model.TaskFileStateDelivered && file.State != model.TaskFileStateRetained) || file.TaskID != taskID {
 			continue
 		}
 		executionID := strings.TrimSpace(file.ExecutionID)
@@ -771,7 +771,7 @@ func (s *TaskService) deliveryContractsForFiles(ctx context.Context, taskID stri
 // DeliveryMetadata computes the authoritative user-facing status for a task
 // file. Retained files from failed executions are always process artifacts.
 func (s *TaskService) DeliveryMetadata(ctx context.Context, taskID string, file *model.TaskFile) (string, bool, error) {
-	if file == nil || file.TaskID != taskID || file.State != model.TaskFileStateDelivered {
+	if file == nil || file.TaskID != taskID || (file.State != model.TaskFileStateDelivered && file.State != model.TaskFileStateRetained) {
 		return "", false, nil
 	}
 	contract, err := s.deliveryContractForExecution(ctx, taskID, file.ExecutionID)
@@ -786,7 +786,7 @@ func (s *TaskService) DeliveryMetadata(ctx context.Context, taskID string, file 
 }
 
 func deliveryMetadataFromContract(contract []agentpack.DeliverySpec, file *model.TaskFile) (string, bool) {
-	if file == nil || file.State != model.TaskFileStateDelivered {
+	if file == nil || (file.State != model.TaskFileStateDelivered && file.State != model.TaskFileStateRetained) {
 		return "", false
 	}
 	public := make([]agentpack.DeliverySpec, 0, len(contract))
@@ -857,7 +857,7 @@ func (s *TaskService) EnrichFilesWithDeliveryMetadata(ctx context.Context, taskI
 			}
 		} else if file.State == model.TaskFileStateRetained {
 			file.URL = ""
-			file.DownloadURL = taskFileDownloadURL(taskID, file.ID)
+			file.DownloadURL = ""
 			file.MediaID = ""
 			file.WechatURL = ""
 		} else {
@@ -873,9 +873,6 @@ func (s *TaskService) EnrichFilesWithDeliveryMetadata(ctx context.Context, taskI
 }
 
 func (s *TaskService) RequireDownloadableTaskFile(ctx context.Context, taskID string, file *model.TaskFile) error {
-	if file != nil && file.TaskID == taskID && file.State == model.TaskFileStateRetained {
-		return nil
-	}
 	_, deliverable, err := s.DeliveryMetadata(ctx, taskID, file)
 	if err != nil {
 		return err

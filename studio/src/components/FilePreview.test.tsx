@@ -274,6 +274,27 @@ describe('FilePreviewGallery', () => {
     expect(api.tasks.downloadFileBlob).not.toHaveBeenCalled()
   })
 
+  it('does not offer the embedded HTML download for internal WeChat files', async () => {
+    vi.mocked(api.tasks.previewFileBlob).mockResolvedValue(new Blob([
+      '<html><body>内部检查内容</body></html>',
+    ], { type: 'text/html' }))
+    const internalArticle = fileWith({
+      id: 'internal-article',
+      file_name: 'article.html',
+      mime_type: 'text/html',
+      url: '',
+      preview_url: '/api/v1/tasks/task-1/files/internal-article/preview',
+      is_deliverable: false,
+    })
+
+    render(<FilePreviewGallery files={[internalArticle]} taskId="task-1" taskType="wechat-article" />)
+    fireEvent.click(screen.getByRole('button', { name: '预览 article.html' }))
+
+    expect(await screen.findByTitle('文章预览')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '下载含图片 HTML' })).not.toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: '下载' })).toBeDisabled()
+  })
+
   it('does not use legacy storage or download endpoints for process files without preview_url', async () => {
     const processFile = fileWith({
       id: 'legacy-process',

@@ -991,6 +991,13 @@ func (s *TaskService) DownloadRetainedZip(ctx context.Context, taskID string) (i
 	if len(files) == 0 {
 		return nil, "", ErrNoDownloadableDeliveryFiles
 	}
+	files, err = s.FilterDeliverableFiles(ctx, taskID, files)
+	if err != nil {
+		return nil, "", fmt.Errorf("filter retained delivery files: %w", err)
+	}
+	if len(files) == 0 {
+		return nil, "", ErrNoDownloadableDeliveryFiles
+	}
 	return s.downloadTaskFileSet(ctx, taskID, "retained", files)
 }
 
