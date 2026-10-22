@@ -46,8 +46,7 @@ function canViewPlatform(platform: ProjectPlatform | '', isAdmin: boolean) {
 }
 
 const statusTabs: { label: string; value: string }[] = [
-  { label: '全部', value: 'all' },
-  { label: '活跃', value: 'active' },
+  { label: '使用中', value: 'active' },
   { label: '已归档', value: 'archived' },
 ]
 
@@ -98,7 +97,7 @@ export default function ProjectsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const createIntent = parseCreationIntent(searchParams)
   const returnTo = searchParams.get('return_to')
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('active')
   const [searchFilter, setSearchFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
@@ -148,7 +147,7 @@ export default function ProjectsPage() {
     queryKey: ['projects', statusFilter],
     queryFn: () =>
       api.projects.list({
-        status: statusFilter === 'all' ? undefined : statusFilter,
+        status: statusFilter,
       }),
     staleTime: searchParams.has('onboarding') ? 0 : undefined,
     refetchInterval: (query) => {
@@ -439,7 +438,7 @@ export default function ProjectsPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <ToggleGroup
           value={[statusFilter]}
-          onValueChange={(val) => setStatusFilter(val[0] || 'all')}
+          onValueChange={(val) => setStatusFilter(val[0] || 'active')}
           variant="outline"
           size="sm"
           spacing={0}
@@ -484,9 +483,9 @@ export default function ProjectsPage() {
       ) : filteredProjects.length === 0 ? (
         <EmptyState
           icon={Inbox}
-          title={!visibleProjects.length ? (statusFilter === 'all' ? '还没有人设' : statusFilter === 'active' ? '没有活跃人设' : '没有已归档人设') : '未找到匹配的人设'}
+          title={!visibleProjects.length ? (statusFilter === 'active' ? '没有使用中的人设' : '没有已归档人设') : '未找到匹配的人设'}
           description={!visibleProjects.length ? '创建人设后，定位、风格和画像会一起沉淀，后续创作可以直接复用。' : '换个名称、定位或平台账号试试'}
-          action={!visibleProjects.length && statusFilter === 'all' && !searchFilter ? { label: '智能创建人设', onClick: openCreator } : { label: '清空筛选', onClick: () => { setSearchFilter(''); setStatusFilter('all') } }}
+          action={!visibleProjects.length && statusFilter === 'active' && !searchFilter ? { label: '智能创建人设', onClick: openCreator } : { label: '清空筛选', onClick: () => { setSearchFilter(''); setStatusFilter('active') } }}
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3">

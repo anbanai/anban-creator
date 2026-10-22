@@ -204,23 +204,26 @@ describe('ProjectsPage', () => {
     vi.restoreAllMocks()
   })
 
-  it('places archived projects after active projects in the all-projects view', async () => {
+  it('defaults to active personas and switches to archived personas', async () => {
     const archivedProject = { ...projectWithReference, id: 'archived-project', name: '已归档人设', status: 'archived' as const }
     const activeProject = { ...projectWithReference, id: 'active-project', name: '活跃人设', status: 'active' as const }
-    vi.mocked(api.projects.list).mockResolvedValue([archivedProject, activeProject])
+    vi.mocked(api.projects.list).mockImplementation(async ({ status } = {}) => status === 'archived' ? [archivedProject] : [activeProject])
     vi.mocked(api.projects.stats).mockResolvedValue({
-      'archived-project': { total_tasks: 0, completed_tasks: 0, failed_tasks: 0, running_tasks: 0, pending_tasks: 0, unused_topics: 0, success_rate: 0, last_activity_at: '' },
       'active-project': { total_tasks: 0, completed_tasks: 0, failed_tasks: 0, running_tasks: 0, pending_tasks: 0, unused_topics: 0, success_rate: 0, last_activity_at: '' },
+      'archived-project': { total_tasks: 0, completed_tasks: 0, failed_tasks: 0, running_tasks: 0, pending_tasks: 0, unused_topics: 0, success_rate: 0, last_activity_at: '' },
     })
 
     render(<ProjectsPage />)
 
-    await screen.findByText('活跃人设')
-    const identities = Array.from(document.querySelectorAll<HTMLElement>('[data-slot="project-identity"]'))
-    expect(identities.map((identity) => identity.getAttribute('aria-label'))).toEqual([
-      '活跃人设，公众号文章，测试，测试定位',
-      '已归档人设，公众号文章，测试，测试定位',
-    ])
+    expect(await screen.findByRole('button', { name: '使用中' })).toHaveAttribute('aria-pressed', 'true')
+    expect(await screen.findByText('活跃人设')).toBeInTheDocument()
+    expect(screen.queryByText('已归档人设')).not.toBeInTheDocument()
+    expect(api.projects.list).toHaveBeenCalledWith({ status: 'active' })
+
+    fireEvent.click(screen.getByRole('button', { name: '已归档' }))
+    expect(await screen.findByText('已归档人设')).toBeInTheDocument()
+    expect(screen.queryByText('活跃人设')).not.toBeInTheDocument()
+    expect(api.projects.list).toHaveBeenLastCalledWith({ status: 'archived' })
   })
 
   it('requires a nonblank project name before creating a shared project', async () => {
