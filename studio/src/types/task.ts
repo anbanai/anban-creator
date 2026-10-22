@@ -289,6 +289,7 @@ export interface TaskFile {
   download_url?: string
   media_id?: string
   wechat_url?: string
+  platform_image_url?: string
   created_at: string
 }
 

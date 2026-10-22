@@ -178,7 +178,11 @@ func uploadSessionStatStore(repo repository.UploadSessionRepository) *fakeStorag
 	return &fakeStorageProvider{sessionRepo: repo}
 }
 
-func (f *fakeStorageProvider) Delete(context.Context, string) error { return nil }
+func (f *fakeStorageProvider) Delete(_ context.Context, key string) error {
+	delete(f.data, key)
+	delete(f.objects, key)
+	return nil
+}
 
 func (f *fakeStorageProvider) DownloadURL(_ context.Context, key string, _ int) (string, error) {
 	return f.GetURL(key), nil

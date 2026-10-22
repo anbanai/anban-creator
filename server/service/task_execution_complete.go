@@ -20,6 +20,7 @@ import (
 
 	appwechat "github.com/anbanai/anban-creator/server/app/wechat"
 	"github.com/google/uuid"
+	xhtml "golang.org/x/net/html"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
@@ -34,6 +35,7 @@ var ErrTaskCompletionConflict = errors.New("task completion result conflicts wit
 var ErrFinalizationLeaseLost = errors.New("task execution finalization lease lost")
 var ErrCloudPublishingAmbiguous = errors.New("cloud draft publication outcome is ambiguous and requires reconciliation")
 var pictureContentImagePathPattern = regexp.MustCompile(`^image_\d+\.png$`)
+var articleLayoutPlanPattern = regexp.MustCompile("(?s)```json\\s*(\\{.*?\\})\\s*```")
 
 func taskUsesChannel(task *model.Task, channel string) bool {
 	if task == nil {
@@ -50,6 +52,161 @@ func taskUsesChannel(task *model.Task, channel string) bool {
 	default:
 		return false
 	}
+}
+
+func (s *TaskService) validateArticleImageHTML(ctx context.Context, task *model.Task, files []*model.TaskFile) error {
+	if task.ArticleWithContentImages != nil && !*task.ArticleWithContentImages {
+		return nil
+	}
+	var articleHTML []byte
+	seen := make(map[string]bool)
+	for _, file := range files {
+		if file == nil || !strings.EqualFold(filepath.Ext(file.FilePath), ".html") || file.OSSKey == "" {
+			continue
+		}
+		data, err := storage.ReadObject(ctx, s.store, file.OSSKey, 20<<20)
+		if err != nil {
+			return fmt.Errorf("read final article HTML for image validation: %w", err)
+		}
+		if len(articleHTML) > 0 {
+			return fmt.Errorf("article delivery has more than one HTML artifact")
+		}
+		articleHTML = data
+	}
+	if len(articleHTML) == 0 {
+		return fmt.Errorf("article delivery is missing final HTML for image validation")
+	}
+	imageSources, err := articleHTMLImageSources(string(articleHTML))
+	if err != nil {
+		return fmt.Errorf("parse final article HTML for image validation: %w", err)
+	}
+	decision := wechatDeliveryDecision(task)
+	uploadedImages := 0
+	for _, file := range files {
+		if file == nil || file.Role != model.FileRoleImage {
+			continue
+		}
+		if file.State != model.TaskFileStatePending && file.State != model.TaskFileStateDelivered {
+			if file.PlatformImageURL != "" || file.WechatURL != "" || file.MediaID != "" {
+				return fmt.Errorf("article image %s has upload metadata but is not in the current delivery state", file.ID)
+			}
+			continue
+		}
+		if file.PlatformImageURL == "" && file.WechatURL == "" && file.MediaID == "" {
+			continue
+		}
+		uploadedImages++
+		url := file.WechatURL
+		if decision.IsUserAssisted() {
+			if file.WechatURL != "" || file.MediaID != "" || !model.IsPublicArticleImageURL(file.PlatformImageURL) {
+				return fmt.Errorf("user-assisted article image %s does not use the platform asset URL", file.ID)
+			}
+			url = file.PlatformImageURL
+		} else if file.PlatformImageURL != "" || file.WechatURL == "" || file.MediaID == "" {
+			return fmt.Errorf("automatic article image %s does not use WeChat material metadata", file.ID)
+		}
+		if strings.TrimSpace(url) == "" || imageSources[url] != 1 {
+			return fmt.Errorf("uploaded article image %s must appear exactly once in final HTML", file.ID)
+		}
+		if seen[url] {
+			return fmt.Errorf("article image URL is mapped to more than one uploaded TaskFile")
+		}
+		seen[url] = true
+	}
+	if uploadedImages == 0 {
+		return nil
+	}
+	if err := s.validateRequiredArticleImageSlots(ctx, task, files, string(articleHTML)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func articleHTMLImageSources(source string) (map[string]int, error) {
+	doc, err := xhtml.Parse(strings.NewReader(source))
+	if err != nil {
+		return nil, err
+	}
+	sources := make(map[string]int)
+	var visit func(*xhtml.Node)
+	visit = func(node *xhtml.Node) {
+		if node.Type == xhtml.ElementNode && strings.EqualFold(node.Data, "img") {
+			for _, attr := range node.Attr {
+				if strings.EqualFold(attr.Key, "src") && strings.TrimSpace(attr.Val) != "" {
+					sources[attr.Val]++
+					break
+				}
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			visit(child)
+		}
+	}
+	visit(doc)
+	return sources, nil
+}
+
+func (s *TaskService) validateRequiredArticleImageSlots(ctx context.Context, task *model.Task, files []*model.TaskFile, articleHTML string) error {
+	if task.ArticleWithContentImages != nil && !*task.ArticleWithContentImages {
+		return nil
+	}
+	if task.CurrentExecutionID == nil || strings.TrimSpace(*task.CurrentExecutionID) == "" {
+		return fmt.Errorf("task has no current execution for article image validation")
+	}
+	planMarkdown, found, err := s.readExecutionArtifact(ctx, *task.CurrentExecutionID, "output/visual-rhythm-plan.md", maxTaskDeliveryMarkdownBytes)
+	if err != nil {
+		return fmt.Errorf("read visual rhythm plan for image validation: %w", err)
+	}
+	if !found {
+		return fmt.Errorf("visual rhythm plan is missing for requested article images")
+	}
+	match := articleLayoutPlanPattern.FindSubmatch(planMarkdown)
+	if len(match) != 2 {
+		return fmt.Errorf("visual rhythm plan has no machine-readable layout_plan")
+	}
+	var plan LayoutPlan
+	if err := json.Unmarshal(match[1], &plan); err != nil {
+		return fmt.Errorf("decode visual rhythm layout_plan: %w", err)
+	}
+	available := make(map[string]bool, len(files))
+	for _, file := range files {
+		if file == nil || file.Role != model.FileRoleImage || (file.State != model.TaskFileStatePending && file.State != model.TaskFileStateDelivered) {
+			continue
+		}
+		url := file.WechatURL
+		if wechatDeliveryDecision(task).IsUserAssisted() {
+			url = file.PlatformImageURL
+		}
+		if url != "" {
+			available[url] = true
+		}
+	}
+	seen := make(map[string]bool)
+	for _, slot := range append(append([]LayoutPlanSlot(nil), plan.Slots...), func() []LayoutPlanSlot {
+		if plan.Footer == nil {
+			return nil
+		}
+		return []LayoutPlanSlot{*plan.Footer}
+	}()...) {
+		if !slot.ImageRequired {
+			continue
+		}
+		if strings.TrimSpace(slot.ImageURL) == "" || !available[slot.ImageURL] {
+			return fmt.Errorf("required article image slot %s has no uploaded image", slot.SlotID)
+		}
+		if seen[slot.ImageURL] {
+			return fmt.Errorf("required article image URL is assigned to multiple slots")
+		}
+		seen[slot.ImageURL] = true
+		imageSources, err := articleHTMLImageSources(articleHTML)
+		if err != nil {
+			return fmt.Errorf("parse final article HTML for required image slot %s: %w", slot.SlotID, err)
+		}
+		if imageSources[slot.ImageURL] != 1 {
+			return fmt.Errorf("required article image slot %s is missing from final HTML", slot.SlotID)
+		}
+	}
+	return nil
 }
 
 // CompleteCloudExecution records one attempt's immutable terminal outcome, then
@@ -827,6 +984,9 @@ func (s *TaskService) finalizeArticlePublication(ctx context.Context, task *mode
 	if coverRequested && len(coverMediaIDs) == 0 {
 		return block("cover_media_missing", "retry_visuals")
 	}
+	if err := s.validateArticleImageHTML(ctx, task, files); err != nil {
+		return block("content_image_source_invalid", "retry_visuals")
+	}
 	if contentImagesRequested && len(contentImageURLs) == 0 {
 		return block("content_images_missing", "retry_visuals")
 	}
@@ -1364,6 +1524,11 @@ func (s *TaskService) buildCloudTaskOutcome(ctx context.Context, task *model.Tas
 	}
 	if taskUsesChannel(task, model.ChannelArticle) || taskUsesChannel(task, model.ChannelWechatPicture) {
 		outcome.Visual.Status = articleVisualOutcome(task, files)
+		if taskUsesChannel(task, model.ChannelArticle) {
+			if imageErr := s.validateArticleImageHTML(ctx, task, files); imageErr != nil {
+				outcome.Visual.Status = model.TaskVisualPartial
+			}
+		}
 		if outcome.Visual.Status == model.TaskVisualPartial {
 			outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{
 				Code: "visual_partial", Stage: "visual", Message: "请求的封面或正文配图未全部生成，现有图片已保留。",

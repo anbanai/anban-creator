@@ -2,10 +2,28 @@ package model
 
 import (
 	"errors"
+	"net/url"
+	"strings"
 	"time"
 )
 
 var ErrAssetNotFound = errors.New("asset not found")
+
+const AssetPurposeArticleImage = "article_image"
+
+func IsPublicArticleImageURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
+		return false
+	}
+	const marker = "/api/v1/article-assets/"
+	index := strings.LastIndex(u.Path, marker)
+	if index < 0 {
+		return false
+	}
+	id := strings.TrimPrefix(u.Path[index:], marker)
+	return id != "" && !strings.Contains(id, "/") && u.RawQuery == "" && u.Fragment == ""
+}
 
 // Asset is an immutable storage object owned by a user.
 type Asset struct {

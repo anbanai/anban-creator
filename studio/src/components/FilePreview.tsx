@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { FileText, Download, Eye, Loader2, FileCode, File, ChevronLeft, ChevronRight, Video, RefreshCw, CheckCircle2, Copy, ExternalLink } from 'lucide-react'
+import { FileText, Download, Eye, Loader2, FileCode, File, ChevronLeft, ChevronRight, Video, RefreshCw, CheckCircle2, Copy, ExternalLink, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { TaskFile } from '@/types'
 import { api } from '../lib/api'
@@ -152,6 +152,7 @@ function FilePreviewModalContent({
   files,
   taskId,
   taskType,
+  articleImageDeliveryBlocked,
   articleAuthor,
   previewTitle,
   details,
@@ -163,6 +164,7 @@ function FilePreviewModalContent({
   files: TaskFile[]
   taskId: string
   taskType?: string
+  articleImageDeliveryBlocked?: boolean
   articleAuthor?: string
   previewTitle?: string
   details?: React.ReactNode
@@ -177,6 +179,8 @@ function FilePreviewModalContent({
   const [previewError, setPreviewError] = useState('')
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [downloading, setDownloading] = useState(false)
+  const [deletingArticleImage, setDeletingArticleImage] = useState(false)
+  const [articleImageDeleted, setArticleImageDeleted] = useState(false)
   const blobUrlRef = useRef('')
 
   const isImage = file.mime_type?.startsWith('image/')
@@ -305,6 +309,23 @@ function FilePreviewModalContent({
     }
   }
 
+  const handleDeleteArticleImage = async () => {
+    if (!file.platform_image_url || !window.confirm('删除后，已经复制到外部文章的图片也会失效。确定删除吗？')) return
+    setDeletingArticleImage(true)
+    try {
+      const segments = file.platform_image_url.split('/').filter(Boolean)
+      const assetID = segments[segments.length - 1]
+      if (!assetID) throw new Error('无法识别图片资产')
+      await api.articleAssets.remove(assetID)
+      setArticleImageDeleted(true)
+      toast.success('图片资产已删除')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '删除图片失败')
+    } finally {
+      setDeletingArticleImage(false)
+    }
+  }
+
   // Determine modal size
   const modalClass = isImage
     ? 'sm:max-w-4xl'
@@ -329,6 +350,8 @@ function FilePreviewModalContent({
           <span className="ml-2 text-sm text-muted-foreground">加载中...</span>
         </div>
       )}
+
+      {articleImageDeleted && <p role="status" className="text-sm text-muted-foreground">图片已删除，公开链接已失效。</p>}
 
       {!loading && previewError && (
         <div role="alert" className="flex min-h-52 flex-col items-center justify-center gap-3 rounded-lg border border-destructive/40 bg-destructive/5 px-6 text-center">
@@ -392,6 +415,7 @@ function FilePreviewModalContent({
       )}
 
       <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+        {file.platform_image_url && !articleImageDeleted && <Button type="button" variant="destructive" size="sm" disabled={deletingArticleImage} onClick={() => void handleDeleteArticleImage()}><Trash2 className="size-3.5" />{deletingArticleImage ? '删除中' : '删除公开图片'}</Button>}
         {navigation}
         {isMD && textContent && (
           <Button
@@ -450,7 +474,8 @@ function FilePreviewModalContent({
             复制文本
           </Button>
         )}
-        {isHTML && htmlContent && taskType === 'wechat-article' && <>
+        {isHTML && htmlContent && taskType === 'wechat-article' && articleImageDeliveryBlocked && <p role="alert" className="mr-auto text-sm text-destructive">正文配图交付未通过，暂不能复制为完整文章。</p>}
+        {isHTML && htmlContent && taskType === 'wechat-article' && !articleImageDeliveryBlocked && <>
           <Button variant="secondary" size="sm" onClick={async () => {
             try {
               await copyWechatArticle(htmlContent, files, (id) => api.tasks.previewFileBlob(taskId, id))
@@ -494,6 +519,7 @@ export function FilePreviewGallery({
   articleAuthor,
   taskId,
   taskType,
+  articleImageDeliveryBlocked,
   inlineItemClassName,
   renderPreviewDetails,
   renderTrigger,
@@ -505,6 +531,7 @@ export function FilePreviewGallery({
   articleAuthor?: string
   taskId: string
   taskType?: string
+  articleImageDeliveryBlocked?: boolean
   inlineItemClassName?: string
   renderPreviewDetails?: (file: TaskFile) => React.ReactNode
   renderTrigger?: (file: TaskFile, open: () => void) => React.ReactNode
@@ -575,6 +602,7 @@ export function FilePreviewGallery({
             files={relatedFiles || files}
             taskId={taskId}
             taskType={taskType}
+            articleImageDeliveryBlocked={articleImageDeliveryBlocked}
             articleAuthor={articleAuthor}
             previewTitle={previewTitle}
             details={renderPreviewDetails?.(currentFile)}

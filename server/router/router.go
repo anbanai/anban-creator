@@ -92,6 +92,11 @@ func NewRouter(svc *Services) *fiber.App {
 		IdleTimeout:       120 * time.Second,
 		StreamRequestBody: true,
 	})
+	if svc.Repo != nil && svc.StorageProvider != nil {
+		articleAssets := handler.NewArticleAssetHandler(svc.Repo, svc.StorageProvider, svc.Logger)
+		app.Get("/api/v1/article-assets/:id", articleAssets.Get)
+		app.Delete("/api/v1/article-assets/:id", appmiddleware.AuthMiddleware(svc.JWTService, svc.Repo, svc.Logger), articleAssets.Delete)
+	}
 
 	// ---------------------------------------------------------------------------
 	// Global middleware (in order)

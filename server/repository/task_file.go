@@ -570,6 +570,49 @@ func (r *taskFileRepository) UpdatePendingCurrentExecutionMetadata(ctx context.C
 	return &persisted, nil
 }
 
+// UpdatePendingArticleImageURL stores the platform-hosted render URL on the
+// exact pending image file from the active execution.
+func (r *taskFileRepository) UpdatePendingArticleImageURL(ctx context.Context, original *model.TaskFile, platformURL string) (*model.TaskFile, error) {
+	if original == nil || strings.TrimSpace(original.ID) == "" || strings.TrimSpace(original.TaskID) == "" ||
+		strings.TrimSpace(original.ExecutionID) == "" || strings.TrimSpace(original.FilePath) == "" || strings.TrimSpace(original.OSSKey) == "" {
+		return nil, fmt.Errorf("complete original task file delivery identity is required")
+	}
+	if !model.IsPublicArticleImageURL(platformURL) {
+		return nil, fmt.Errorf("platform article image URL must use the public HTTPS asset endpoint")
+	}
+	var persisted model.TaskFile
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		task, execution, err := lockCurrentArtifactExecution(tx, original.TaskID, original.ExecutionID)
+		if err != nil {
+			return err
+		}
+		if task.DeletingAt != nil {
+			return ErrTaskFileTaskNotRunning
+		}
+		if err := tx.Where("id = ? AND task_id = ? AND execution_id = ?", original.ID, original.TaskID, original.ExecutionID).First(&persisted).Error; err != nil {
+			return err
+		}
+		if persisted.FilePath != original.FilePath || persisted.OSSKey != original.OSSKey || persisted.ContentHash != original.ContentHash {
+			return ErrTaskFileDeliveryIdentityChanged
+		}
+		if execution.ManifestSealed || (execution.ManifestStatus != "" && execution.ManifestStatus != model.TaskExecutionManifestPending) || persisted.State != model.TaskFileStatePending {
+			return ErrTaskFileManifestState
+		}
+		if err := requireRunningArtifactExecution(task, execution); err != nil {
+			return err
+		}
+		if err := tx.Model(&model.TaskFile{}).Where("id = ? AND state = ?", persisted.ID, model.TaskFileStatePending).Update("platform_image_url", platformURL).Error; err != nil {
+			return err
+		}
+		persisted.PlatformImageURL = platformURL
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &persisted, nil
+}
+
 // UpdatePublicationMetadata records provider-owned media identity after an
 // execution manifest has been delivered. It is limited to the immutable file
 // identity and never changes path, bytes, or delivery state.

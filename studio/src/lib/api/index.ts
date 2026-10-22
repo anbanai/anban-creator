@@ -32,6 +32,7 @@ import { trendsApi } from './trends'
 import { interactiveApi } from './interactive'
 import { contentAssetsApi } from './content-assets'
 import { assistantApi } from './assistant'
+import { articleAssetsApi } from './article-assets'
 
 export const api = {
   auth: authApi,
@@ -69,4 +70,5 @@ export const api = {
   interactive: interactiveApi,
   assistant: assistantApi,
   contentAssets: contentAssetsApi,
+  articleAssets: articleAssetsApi,
 }

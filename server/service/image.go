@@ -55,9 +55,11 @@ type ImageResult struct {
 
 // UploadImageResult is the response for image upload.
 type UploadImageResult struct {
-	URL       string `json:"url"`
-	MediaID   string `json:"media_id,omitempty"`
-	WechatURL string `json:"wechat_url,omitempty"`
+	URL         string `json:"url"`
+	MediaID     string `json:"media_id,omitempty"`
+	WechatURL   string `json:"wechat_url,omitempty"`
+	PlatformURL string `json:"platform_url,omitempty"`
+	RenderURL   string `json:"render_url,omitempty"`
 }
 
 // ImageService handles image generation, upload, and compression

@@ -4,11 +4,18 @@ import { articleMetadataValue, copyWechatArticle, downloadWechatArticleHTML, pre
 
 const imageFile: TaskFile = {
   id: 'img-1', task_id: 'task-1', state: 'delivered', role: 'image', file_name: 'inline.png', mime_type: 'image/png',
-  file_size: 3, url: '/files/inline.png', preview_url: '/api/tasks/task-1/files/img-1/preview', is_deliverable: true, created_at: '',
+  file_size: 3, url: '/files/inline.png', platform_image_url: 'https://creator.anbanai.com/api/v1/article-assets/img-1', preview_url: '/api/tasks/task-1/files/img-1/preview', is_deliverable: true, created_at: '',
 }
 
 describe('WeChat clipboard', () => {
-  beforeEach(() => vi.restoreAllMocks())
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.stubGlobal('Image', class {
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      set src(_value: string) { queueMicrotask(() => this.onload?.()) }
+    })
+  })
 
   it('sanitizes active content, unsafe CSS and dangerous links', () => {
     const result = sanitizeWechatHTML('<p onclick="run()" style="color:red;background-image:url(https://bad.invalid/x);position:fixed">Safe<script>bad()</script><img src="x" onerror="run()"><a href="data:text/html,bad">Link</a></p>')
@@ -21,15 +28,24 @@ describe('WeChat clipboard', () => {
     expect(result).not.toContain('href="data:')
   })
 
-  it('embeds referenced image bytes as a data URI', async () => {
-    const html = await prepareWechatArticleHTML('<p>Hello<img src="/files/inline.png"></p>', [imageFile], async () => new Blob(['png'], { type: 'image/png' }))
-    expect(html).toContain('src="data:image/png;base64,cG5n"')
+  it('preserves the durable public image URL in copied HTML', async () => {
+    const html = await prepareWechatArticleHTML(`<p>Hello<img src="${imageFile.platform_image_url}"></p>`, [imageFile], async () => new Blob())
+    expect(html).toContain(`src="${imageFile.platform_image_url}"`)
+    expect(html).not.toContain('data:image')
   })
 
-  it('matches re-signed storage URLs by their stable object path', async () => {
-    const file = { ...imageFile, url: 'https://oss.example.com/tasks/image.png?signature=fresh' }
-    const html = await prepareWechatArticleHTML('<img src="https://oss.example.com/tasks/image.png?signature=old">', [file], async () => new Blob(['png'], { type: 'image/png' }))
-    expect(html).toContain('src="data:image/png;base64,cG5n"')
+  it('rejects article images without a public HTTPS URL', async () => {
+    const privateURLFile = { ...imageFile, platform_image_url: '/api/v1/tasks/task-1/files/img-1/preview' }
+    await expect(prepareWechatArticleHTML('<img src="/api/v1/tasks/task-1/files/img-1/preview">', [privateURLFile], async () => new Blob())).rejects.toThrow('公开 HTTPS')
+  })
+
+  it('rejects copy when a public image cannot load', async () => {
+    vi.stubGlobal('Image', class {
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      set src(_value: string) { queueMicrotask(() => this.onerror?.()) }
+    })
+    await expect(prepareWechatArticleHTML(`<img src="${imageFile.platform_image_url}">`, [imageFile], async () => new Blob())).rejects.toThrow('无法加载')
   })
 
   it('rejects oversized clipboard content but allows HTML download preparation', async () => {
@@ -53,16 +69,14 @@ describe('WeChat clipboard', () => {
     expect(item.data).toHaveProperty('text/plain')
   })
 
-  it('starts the Clipboard API write during the click before awaiting image bytes', async () => {
+  it('starts rich clipboard write with the durable image URL', async () => {
     const write = vi.fn().mockResolvedValue(undefined)
     vi.stubGlobal('ClipboardItem', class { constructor(readonly data: Record<string, Blob | Promise<Blob>>) {} })
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write } })
-    let resolveImage!: (blob: Blob) => void
-    const fetchFile = vi.fn(() => new Promise<Blob>((resolve) => { resolveImage = resolve }))
-    const copy = copyWechatArticle('<img src="/files/inline.png">', [imageFile], fetchFile)
+    const copy = copyWechatArticle(`<img src="${imageFile.platform_image_url}">`, [imageFile], vi.fn())
     expect(write).toHaveBeenCalledOnce()
-    resolveImage(new Blob(['png'], { type: 'image/png' }))
     await copy
+    expect((write.mock.calls[0][0] as unknown as { 0: { data: Record<string, Blob | Promise<Blob>> } })[0].data['text/html']).toBeDefined()
   })
 
   it('falls back when a browser rejects the async ClipboardItem write', async () => {

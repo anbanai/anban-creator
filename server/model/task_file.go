@@ -16,6 +16,7 @@ type TaskFile struct {
 	ContentHash                  string     `gorm:"type:char(64);index" json:"-"`
 	MediaID                      string     `gorm:"type:varchar(200)" json:"media_id,omitempty"`
 	WechatURL                    string     `gorm:"type:varchar(500)" json:"wechat_url,omitempty"`
+	PlatformImageURL             string     `gorm:"type:varchar(700)" json:"platform_image_url,omitempty"`
 	PublicationUploadStatus      string     `gorm:"type:varchar(24);not null;default:''" json:"-"`
 	PublicationUploadError       string     `gorm:"type:text;not null;default:''" json:"-"`
 	PublicationUploadAttemptedAt *time.Time `gorm:"index" json:"-"`

@@ -394,6 +394,33 @@ func TestRenderTemplate_AllSlotsRendered(t *testing.T) {
 	}
 }
 
+func TestAuditRenderedSlotsMarksMissingImageURL(t *testing.T) {
+	slots := []LayoutPlanSlot{
+		{SlotID: "hero", SectionIndex: 0, ImageRequired: true},
+		{SlotID: "footer", SectionIndex: -1, Module: strPtr("cta")},
+	}
+	audits := auditRenderedSlots("<p>body</p>", slots)
+	if len(audits) != 2 {
+		t.Fatalf("audits len = %d, want 2", len(audits))
+	}
+	if audits[0].Status != "missing-image" {
+		t.Fatalf("hero status = %q, want missing-image", audits[0].Status)
+	}
+	if audits[1].Status != "rendered" {
+		t.Fatalf("module-only footer status = %q, want rendered", audits[1].Status)
+	}
+}
+
+func TestAuditRenderedSlotsRequiresImageSourceAttribute(t *testing.T) {
+	url := "https://example.com/image.png"
+	audits := auditRenderedSlots(`<a href="`+url+`">`+url+`</a>`, []LayoutPlanSlot{
+		{SlotID: "hero", SectionIndex: 0, ImageURL: url, ImageRequired: true},
+	})
+	if len(audits) != 1 || audits[0].Status != "missing-image" {
+		t.Fatalf("audit = %#v, want missing-image when URL is not an img src", audits)
+	}
+}
+
 // Regression: when the source markdown already inlines an image AND a slot
 // carries the same URL, the rendered HTML must contain exactly ONE <img> for
 // that URL — the slot is deduped against the inline image.

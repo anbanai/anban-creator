@@ -1,6 +1,7 @@
 import type { TaskFile } from '@/types'
 
 const MAX_CLIPBOARD_BYTES = 8 * 1024 * 1024
+const IMAGE_LOAD_TIMEOUT_MS = 15_000
 const SAFE_TAGS = new Set(['A', 'B', 'BLOCKQUOTE', 'BR', 'CODE', 'DIV', 'EM', 'H1', 'H2', 'H3', 'H4', 'HR', 'IMG', 'LI', 'OL', 'P', 'PRE', 'S', 'SPAN', 'STRONG', 'TABLE', 'TBODY', 'TD', 'TH', 'THEAD', 'TR', 'UL'])
 const SAFE_STYLE_PROPERTIES = new Set(['background-color', 'border', 'border-bottom', 'border-left', 'border-right', 'border-top', 'color', 'display', 'font-family', 'font-size', 'font-style', 'font-weight', 'height', 'line-height', 'margin', 'margin-bottom', 'margin-left', 'margin-right', 'margin-top', 'max-width', 'padding', 'padding-bottom', 'padding-left', 'padding-right', 'padding-top', 'text-align', 'text-decoration', 'text-indent', 'vertical-align', 'white-space', 'width'])
 
@@ -70,19 +71,33 @@ function sameTaskFileReference(source: string, reference: string | undefined): b
   }
 }
 
-async function prepareArticleHTML(source: string, files: TaskFile[], fetchFile: (fileId: string) => Promise<Blob>, maxBytes: number): Promise<string> {
+async function prepareArticleHTML(source: string, files: TaskFile[], _fetchFile: (fileId: string) => Promise<Blob>, maxBytes: number): Promise<string> {
   const document = new DOMParser().parseFromString(sanitizeWechatHTML(source), 'text/html')
   const images = Array.from(document.body.querySelectorAll('img'))
-  if (new Blob([document.body.innerHTML]).size > maxBytes) throw new Error('文章和图片超过剪贴板容量，请下载 HTML 后手动处理')
+  if (new Blob([document.body.innerHTML]).size > maxBytes) throw new Error('文章正文超过剪贴板容量，请下载 HTML 后手动处理')
+  const imageURLs = new Set<string>()
   for (const image of images) {
     const src = (image.getAttribute('src') || '').trim()
-    const file = files.find((candidate) => candidate.mime_type?.startsWith('image/') && [candidate.url, candidate.preview_url, candidate.download_url, candidate.wechat_url].some((reference) => sameTaskFileReference(src, reference)))
+    const file = files.find((candidate) => candidate.mime_type?.startsWith('image/') && [candidate.platform_image_url, candidate.wechat_url].some((reference) => sameTaskFileReference(src, reference)))
     if (!file) throw new Error(`找不到图片素材：${src || '图片缺少来源'}`)
-    const blob = await fetchFile(file.id)
-    image.src = `data:${blob.type || file.mime_type};base64,${await blobToBase64(blob)}`
-    if (new Blob([document.body.innerHTML]).size > maxBytes) throw new Error('文章和图片超过剪贴板容量，请下载 HTML 后手动处理')
+    if (!/^https:\/\//i.test(src)) throw new Error('公众号正文图片必须使用公开 HTTPS 地址')
+    imageURLs.add(src)
   }
+  await Promise.all(Array.from(imageURLs, verifyImageLoadable))
   return document.body.innerHTML
+}
+
+function verifyImageLoadable(src: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    const timeout = window.setTimeout(() => {
+      image.src = ''
+      reject(new Error('正文配图加载超时，请检查图片后重试'))
+    }, IMAGE_LOAD_TIMEOUT_MS)
+    image.onload = () => { window.clearTimeout(timeout); resolve() }
+    image.onerror = () => { window.clearTimeout(timeout); reject(new Error('正文配图无法加载，请检查图片后重试')) }
+    image.src = src
+  })
 }
 
 export function prepareWechatArticleHTML(source: string, files: TaskFile[], fetchFile: (fileId: string) => Promise<Blob>): Promise<string> {
@@ -100,15 +115,6 @@ export function downloadWechatArticleHTML(html: string, filename = 'wechat-artic
   link.download = filename
   link.click()
   URL.revokeObjectURL(url)
-}
-
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result).split(',', 2)[1] || '')
-    reader.onerror = () => reject(reader.error || new Error('读取图片失败'))
-    reader.readAsDataURL(blob)
-  })
 }
 
 function writeWechatRichTextFallback(safeHTML: string): void {

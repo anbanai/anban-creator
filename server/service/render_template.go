@@ -25,6 +25,7 @@ type LayoutPlanSlot struct {
 	SectionTitle        string            `json:"section_title,omitempty"`         // convenience for logging/audit
 	AfterParagraphIndex int               `json:"after_paragraph_index,omitempty"` // for inline_detail: 0-based paragraph within section
 	ImageURL            string            `json:"image_url,omitempty"`             // empty for module-only slots (e.g. footer CTA)
+	ImageRequired       bool              `json:"image_required,omitempty"`        // true when this slot must contain an accepted body image
 	ImageSize           string            `json:"image_size,omitempty"`            // full-bleed / full-width / inline
 	Module              *string           `json:"module,omitempty"`                // layout module name, nil for none
 	ModuleVars          map[string]string `json:"module_vars,omitempty"`           // module template variables
@@ -645,11 +646,11 @@ func imageBearingSlots(plan *LayoutPlan) []LayoutPlanSlot {
 func auditableSlots(plan *LayoutPlan) []LayoutPlanSlot {
 	var out []LayoutPlanSlot
 	for _, slot := range plan.Slots {
-		if slot.ImageURL != "" || slot.Module != nil {
+		if slot.ImageRequired || slot.ImageURL != "" || slot.Module != nil {
 			out = append(out, slot)
 		}
 	}
-	if plan.Footer != nil && (plan.Footer.ImageURL != "" || plan.Footer.Module != nil) {
+	if plan.Footer != nil && (plan.Footer.ImageRequired || plan.Footer.ImageURL != "" || plan.Footer.Module != nil) {
 		out = append(out, *plan.Footer)
 	}
 	return out
@@ -763,6 +764,8 @@ func splitMarkdownByH2(markdown string) []string {
 
 func auditRenderedSlots(html string, slots []LayoutPlanSlot) []RenderedSlotAudit {
 	out := make([]RenderedSlotAudit, 0, len(slots))
+	imageSources, parseErr := articleHTMLImageSources(html)
+	seenURLs := make(map[string]bool)
 	for _, slot := range slots {
 		audit := RenderedSlotAudit{
 			SlotID:       slot.SlotID,
@@ -772,11 +775,20 @@ func auditRenderedSlots(html string, slots []LayoutPlanSlot) []RenderedSlotAudit
 		if slot.Module != nil {
 			audit.Module = *slot.Module
 		}
-		if slot.ImageURL != "" && !strings.Contains(html, slot.ImageURL) {
+		if slot.ImageRequired && slot.ImageURL == "" {
 			audit.Status = "missing-image"
-			audit.Note = "image URL not found in rendered HTML"
+			audit.Note = "image slot has no image URL"
+		} else if slot.ImageURL != "" && seenURLs[slot.ImageURL] {
+			audit.Status = "duplicate-image"
+			audit.Note = "image URL is assigned to more than one slot"
+		} else if slot.ImageURL != "" && (parseErr != nil || imageSources[slot.ImageURL] != 1) {
+			audit.Status = "missing-image"
+			audit.Note = "image URL must appear exactly once in rendered HTML"
 		} else {
 			audit.Status = "rendered"
+		}
+		if slot.ImageURL != "" {
+			seenURLs[slot.ImageURL] = true
 		}
 		out = append(out, audit)
 	}

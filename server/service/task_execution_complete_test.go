@@ -302,6 +302,29 @@ func TestCompleteCloudExecutionUsesValidatedCoreArtifactsAfterProviderPolicyFail
 	}
 }
 
+func TestValidateArticleImageHTMLRequiresEachUploadedImageExactlyOnce(t *testing.T) {
+	url := "https://creator.anbanai.com/api/v1/article-assets/image-id"
+	for _, tc := range []struct {
+		name, html string
+		wantErr    bool
+	}{
+		{name: "present once", html: `<p>Text</p><img src="` + url + `">`},
+		{name: "missing", html: `<p>Text</p>`, wantErr: true},
+		{name: "URL outside img src", html: `<a href="` + url + `">` + url + `</a>`, wantErr: true},
+		{name: "duplicate", html: `<img src="` + url + `"><img src="` + url + `">`, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sources, err := articleHTMLImageSources(tc.html)
+			if err != nil {
+				t.Fatalf("articleHTMLImageSources: %v", err)
+			}
+			if (sources[url] == 1) == tc.wantErr {
+				t.Fatalf("img src count = %d, wantErr %v", sources[url], tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestCompleteCloudExecutionBuildsIndependentArticleOutcome(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, true)
 	ctx := context.Background()
@@ -544,7 +567,7 @@ func TestResolveCloudDraftDeliveryDoesNotPublishFailedExecution(t *testing.T) {
 	}
 }
 
-func TestCompleteCloudExecutionBlocksWhenRequestedContentImageIsNotInFinalHTML(t *testing.T) {
+func TestCompleteCloudExecutionDeliversArticleAndMarksImageIncompleteWhenImageIsNotInHTML(t *testing.T) {
 	svc, repo, db, task, execution := setupCloudCompletionTestWithDB(t, true)
 	ctx := context.Background()
 	withContentImages := true
@@ -558,7 +581,7 @@ func TestCompleteCloudExecutionBlocksWhenRequestedContentImageIsNotInFinalHTML(t
 	if err := db.Model(&model.TaskFile{}).
 		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/img_01.png").
 		Updates(map[string]any{
-			"role": model.FileRoleImage, "wechat_url": "https://mmbiz.qpic.cn/current-execution.png",
+			"role": model.FileRoleImage, "wechat_url": "https://mmbiz.qpic.cn/current-execution.png", "media_id": "current-execution-media",
 		}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -575,16 +598,43 @@ func TestCompleteCloudExecutionBlocksWhenRequestedContentImageIsNotInFinalHTML(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if found.Outcome == nil || found.Outcome.Publication.Status != model.TaskPublicationBlocked ||
-		found.Outcome.Publication.Code != "content_images_missing" || found.Outcome.Publication.Attempted {
-		t.Fatalf("publication outcome = %#v", found.Outcome)
+	if found.Status != model.TaskStatusCompleted || found.Outcome == nil || found.Outcome.Visual.Status != model.TaskVisualPartial || found.Outcome.Publication.Attempted {
+		t.Fatalf("article or image completeness status = %q, outcome=%#v; want article delivered with partial visuals", found.Status, found.Outcome)
 	}
+	files, err := repo.TaskFiles().FindByExecutionID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if file.FilePath == "output/05-article.html" && file.State == model.TaskFileStateDelivered {
+			goto articleDelivered
+		}
+	}
+	t.Fatal("final article HTML was not delivered")
+articleDelivered:
 	if api.addCalls != 0 || api.draftListCalls != 0 {
 		t.Fatalf("WeChat calls = add:%d list:%d, want none", api.addCalls, api.draftListCalls)
 	}
 	if _, err := repo.WechatPublications().FindByTaskID(ctx, task.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("publication intent unexpectedly exists: %v", err)
 	}
+}
+
+func TestRequiredArticleImageSlotsMustResolveToUploadedImagesAndFinalHTML(t *testing.T) {
+	svc, repo, _, task, execution := setupCloudCompletionTestWithDB(t, true)
+	withImages := true
+	task.ArticleWithContentImages = &withImages
+	plan := []byte("# Rhythm plan\n\n```json\n{\"article_type\":\"essay\",\"template_name\":\"essay\",\"slots\":[{\"slot_id\":\"section_opener\",\"section_index\":0,\"image_required\":true,\"image_url\":\"\"}]}\n```\n")
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/visual-rhythm-plan.md", "text/markdown", plan)
+	if err := svc.validateRequiredArticleImageSlots(t.Context(), task, nil, "<p>Article</p>"); err == nil || !strings.Contains(err.Error(), "required article image slot") {
+		t.Fatalf("missing required slot error = %v", err)
+	}
+}
+
+func addRequiredArticleImagePlan(t *testing.T, svc *TaskService, repo repository.Repository, task *model.Task, execution *model.TaskExecution, imageURL string) {
+	t.Helper()
+	plan := []byte(fmt.Sprintf("# Rhythm plan\n\n```json\n{\"article_type\":\"essay\",\"template_name\":\"essay\",\"slots\":[{\"slot_id\":\"section_opener\",\"section_index\":0,\"image_required\":true,\"image_url\":%q}]}\n```\n", imageURL))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/visual-rhythm-plan.md", "text/markdown", plan)
 }
 
 func TestFinalizeArticlePublicationRejectsBodyImageOutsideCurrentExecution(t *testing.T) {
@@ -619,10 +669,11 @@ func TestFinalizeArticlePublicationRejectsBodyImageOutsideCurrentExecution(t *te
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/final-review.md", "text/markdown", []byte("# Final review\n\nPassed.\n"))
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/viral-audit.md", "text/markdown", []byte("# Viral audit\n\nPassed.\n"))
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/img_01.png", "image/png", []byte("content-image"))
+	addRequiredArticleImagePlan(t, svc, repo, task, execution, "https://mmbiz.qpic.cn/current-execution.png")
 	if err := db.Model(&model.TaskFile{}).
 		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/img_01.png").
 		Updates(map[string]any{
-			"role": model.FileRoleImage, "wechat_url": "https://mmbiz.qpic.cn/current-execution.png",
+			"role": model.FileRoleImage, "media_id": "content-media-id", "wechat_url": "https://mmbiz.qpic.cn/current-execution.png",
 		}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -643,7 +694,7 @@ func TestFinalizeArticlePublicationRejectsBodyImageOutsideCurrentExecution(t *te
 	if err := json.Unmarshal(evidence, &result); err != nil {
 		t.Fatal(err)
 	}
-	if status != model.TaskExecutionDraftDeliveryFailed || result.Code != "content_image_source_invalid" || result.Attempted {
+	if status != model.TaskExecutionDraftDeliveryBlocked || result.Code != "content_image_source_invalid" || result.Attempted {
 		t.Fatalf("status=%q evidence=%s", status, evidence)
 	}
 	if api.addCalls != 0 || api.draftListCalls != 0 {
@@ -688,6 +739,7 @@ func TestFinalizeArticlePublicationAllowsCurrentCoverHeroAndContentImage(t *test
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover-exact.png", "image/png", []byte("selected-cover-image"))
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover-alternative.png", "image/png", []byte("alternative-cover-image"))
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/img_01.png", "image/png", []byte("content-image"))
+	addRequiredArticleImagePlan(t, svc, repo, task, execution, contentURL)
 	if err := db.Model(&model.TaskFile{}).
 		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/cover-exact.png").
 		Updates(map[string]any{
@@ -706,7 +758,7 @@ func TestFinalizeArticlePublicationAllowsCurrentCoverHeroAndContentImage(t *test
 	if err := db.Model(&model.TaskFile{}).
 		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/img_01.png").
 		Updates(map[string]any{
-			"role": model.FileRoleImage, "wechat_url": contentURL,
+			"role": model.FileRoleImage, "media_id": "content-media-id", "wechat_url": contentURL,
 		}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -746,7 +798,7 @@ func TestFinalizeArticlePublicationAllowsCurrentCoverHeroAndContentImage(t *test
 func TestFinalizeArticlePublicationRequiresContentImageInFinalHTML(t *testing.T) {
 	assertArticlePublicationVisualHTML(t, func(coverURL, _ string) []byte {
 		return []byte(`<section><img src="` + coverURL + `"><p>Final article without its generated body image.</p></section>`)
-	}, model.TaskExecutionDraftDeliveryBlocked, "content_images_missing")
+	}, model.TaskExecutionDraftDeliveryBlocked, "content_image_source_invalid")
 }
 
 func TestFinalizeArticlePublicationRejectsCoverOutsideHeroPosition(t *testing.T) {
@@ -793,6 +845,7 @@ func assertArticlePublicationVisualHTML(
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/marketing-scan.json", "application/json", scanBody)
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/final-review.md", "text/markdown", []byte("# Final review\n\nPassed.\n"))
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/viral-audit.md", "text/markdown", []byte("# Viral audit\n\nPassed.\n"))
+	addRequiredArticleImagePlan(t, svc, repo, task, execution, contentURL)
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover.png", "image/png", []byte("cover-image"))
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/img_01.png", "image/png", []byte("content-image"))
 	if err := db.Model(&model.TaskFile{}).
@@ -805,7 +858,7 @@ func assertArticlePublicationVisualHTML(
 	if err := db.Model(&model.TaskFile{}).
 		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/img_01.png").
 		Updates(map[string]any{
-			"role": model.FileRoleImage, "wechat_url": contentURL,
+			"role": model.FileRoleImage, "media_id": "content-media-id", "wechat_url": contentURL,
 		}).Error; err != nil {
 		t.Fatal(err)
 	}

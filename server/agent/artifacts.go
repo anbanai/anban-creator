@@ -49,6 +49,15 @@ func ValidateTaskArtifactsFromTaskFiles(task *model.Task, taskFiles []*model.Tas
 		if isDeliverableArtifact(file.FileName) || isDeliverableArtifact(file.FilePath) {
 			meaningful++
 		}
+		if task != nil && file.Role == model.FileRoleImage && (task.Type == model.TaskTypeWechatArticle || task.Channel == model.ChannelArticle) && (file.PlatformImageURL != "" || file.WechatURL != "" || file.MediaID != "") {
+			decision := task.ProjectSnapshot.Data().WechatDelivery
+			if decision.IsUserAssisted() && (file.WechatURL != "" || file.MediaID != "" || !model.IsPublicArticleImageURL(file.PlatformImageURL)) {
+				return ArtifactValidation{MeaningfulFileCount: meaningful, Missing: []string{"mode-matched public article image URL"}, Reason: "user-assisted article image metadata must contain only the durable Anban platform URL"}
+			}
+			if !decision.IsUserAssisted() && (file.PlatformImageURL != "" || file.WechatURL == "" || file.MediaID == "") {
+				return ArtifactValidation{MeaningfulFileCount: meaningful, Missing: []string{"mode-matched WeChat material image metadata"}, Reason: "automatic article image metadata must contain WeChat media_id and wechat_url only"}
+			}
+		}
 	}
 	return validateTaskArtifacts(task, files, meaningful)
 }
