@@ -2400,7 +2400,7 @@
     },
     {
       "id": "project-creator",
-      "version": "1.0.5",
+      "version": "1.0.6",
       "kind": "managed",
       "display_name": "画像模式",
       "description": "通过中文对话判断 Anban 项目适配性，选择内容类型并创建或更新六维项目画像。",
@@ -2541,7 +2541,7 @@
       "ui": {
         "renderer": "custom:project-creator"
       },
-      "digest": "5796548e615bb89f62f623a03742b08900ef540e7282c44b409f7bff65173c6f"
+      "digest": "ae655f4631283965da80b86b5f747e039df552052b876561e0429949c12e6f17"
     },
     {
       "id": "seednote",

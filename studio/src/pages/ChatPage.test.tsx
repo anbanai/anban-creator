@@ -1,4 +1,4 @@
-import { act, fireEvent, render as renderWithoutProviders, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render as renderWithoutProviders, screen, waitFor, within } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -28,6 +28,7 @@ const assistantMocks = vi.hoisted(() => ({
 }))
 const streamMock = vi.hoisted(() => vi.fn())
 const authState = vi.hoisted(() => ({ userId: 'test-user' }))
+const pendingInitialMessages: Promise<void>[] = []
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ token: 'test-token', user: { id: authState.userId } }),
@@ -94,11 +95,17 @@ function renderChat(path = '/projects/create', options: { initialMessage?: strin
   }
   if (options.initialMessage !== false && !hasResumableSession) {
     const initialMessage = options.initialMessage ?? '测试首条消息'
-    void screen.findByRole('textbox', { name: '发送消息' }).then(async (composer) => {
+    const page = within(view.container)
+    const pendingStart = page.findByRole('textbox', { name: '发送消息' }).then(async (composer) => {
       await waitFor(() => expect(composer).toBeEnabled())
+      const previousMessageCalls = interactiveMocks.message.mock.calls.length
+      const previousStreamCalls = streamMock.mock.calls.length
       fireEvent.change(composer, { target: { value: initialMessage } })
-      fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+      fireEvent.click(page.getByRole('button', { name: '发送消息' }))
+      await waitFor(() => expect(interactiveMocks.message).toHaveBeenCalledTimes(previousMessageCalls + 1))
+      await waitFor(() => expect(streamMock).toHaveBeenCalledTimes(previousStreamCalls + 1))
     }).catch(() => undefined)
+    pendingInitialMessages.push(pendingStart)
   }
   return view
 }
@@ -109,8 +116,9 @@ function RouteLocation() {
 }
 
 describe('ChatPage', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
+  beforeEach(async () => {
+    await Promise.all(pendingInitialMessages.splice(0))
+    vi.resetAllMocks()
     authState.userId = 'test-user'
     sessionStorage.clear()
     localStorage.clear()
@@ -1019,25 +1027,29 @@ describe('ChatPage', () => {
     expect(JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}')).not.toHaveProperty('confirmation_token')
   })
 
-  it('shows live agent activity while a turn is running', async () => {
+  it('shows one generic live status without adding turn lifecycle rows to chat history', async () => {
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
       { event: 'turn.start', data: JSON.stringify({ turn: 1 }) },
     ], signal))
 
-    renderChat()
+    const { container } = renderChat()
 
-    expect(await screen.findByText('Agent 本轮开始处理')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('Agent 本轮开始处理')
+    const liveStatus = await screen.findByTestId('chat-live-status')
+    expect(liveStatus).toHaveTextContent('正在整理画像…')
+    expect(container.querySelector('[data-testid="chat-scroll-region"]')).not.toHaveTextContent('本轮开始处理')
   })
 
-  it('shows the current agent tool activity when the runtime reports it', async () => {
+  it('does not expose raw tool names in the live status or conversation history', async () => {
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
       { event: 'agent.activity', data: JSON.stringify({ name: 'get_project_profile' }) },
     ], signal))
 
-    renderChat()
+    const { container } = renderChat()
 
-    expect(await screen.findByText('Agent 正在执行：get project profile')).toBeInTheDocument()
+    const liveStatus = await screen.findByTestId('chat-live-status')
+    expect(liveStatus).toHaveTextContent('正在整理画像…')
+    expect(liveStatus).not.toHaveTextContent('get project profile')
+    expect(container.querySelector('[data-testid="chat-scroll-region"]')).not.toHaveTextContent('get project profile')
   })
 
   it('shows a failed draft staging call as an error instead of completed work', async () => {
@@ -1063,8 +1075,9 @@ describe('ChatPage', () => {
 
     renderChat()
 
-    expect(await screen.findByText('Agent 本轮发生错误')).toBeInTheDocument()
-    expect(screen.getByText('Agent 工具执行失败')).toBeInTheDocument()
+    expect(await screen.findByText('本次处理未能完成')).toBeInTheDocument()
+    expect(screen.getByText('当前步骤未能完成')).toBeInTheDocument()
+    expect(screen.queryByText('Agent 正在执行：get project profile')).not.toBeInTheDocument()
     expect(screen.queryByText('Agent 本轮已完成')).not.toBeInTheDocument()
   })
 
@@ -1083,8 +1096,9 @@ describe('ChatPage', () => {
     renderChat()
 
     await waitFor(() => {
-      expect(screen.getAllByText('Agent 本轮发生错误')).toHaveLength(1)
-      expect(screen.getAllByText('Agent 本轮已完成')).toHaveLength(1)
+      expect(screen.getAllByText('本次处理未能完成')).toHaveLength(1)
+      expect(screen.queryByText('Agent 本轮已完成')).not.toBeInTheDocument()
+      expect(screen.getByText('当前步骤未能完成')).toBeInTheDocument()
     })
   })
 
@@ -1097,11 +1111,11 @@ describe('ChatPage', () => {
 
     renderChat()
 
-    expect(await screen.findByText('Agent 本轮发生错误')).toBeInTheDocument()
+    expect(await screen.findByText('本次处理未能完成')).toBeInTheDocument()
     expect(screen.queryByText('Agent 本轮已完成')).not.toBeInTheDocument()
   })
 
-  it('keeps the agent activity history and completed state in the chat timeline', async () => {
+  it('keeps successful runtime activity out of the conversation history', async () => {
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
       { id: '1', event: 'turn.start', data: JSON.stringify({ turn: 1 }) },
       { id: '2', event: 'agent.activity', data: JSON.stringify({ name: 'get_project_profile' }) },
@@ -1110,11 +1124,11 @@ describe('ChatPage', () => {
     ], signal))
     const { container } = renderChat()
 
-    await screen.findByText('Agent 本轮已完成')
-    const content = container.textContent ?? ''
-    expect(content.indexOf('Agent 本轮开始处理')).toBeLessThan(content.indexOf('Agent 正在执行：get project profile'))
-    expect(content.indexOf('Agent 正在执行：get project profile')).toBeLessThan(content.indexOf('Agent 正在执行：update project profile'))
-    expect(content.indexOf('Agent 正在执行：update project profile')).toBeLessThan(content.indexOf('Agent 本轮已完成'))
+    await waitFor(() => expect(screen.queryByTestId('chat-live-status')).not.toBeInTheDocument())
+    const history = container.querySelector('[data-testid="chat-scroll-region"]')
+    expect(history).not.toHaveTextContent('Agent 本轮开始处理')
+    expect(history).not.toHaveTextContent('Agent 正在执行')
+    expect(history).not.toHaveTextContent('Agent 本轮已完成')
     await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').timeline).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'activity', eventId: 1, status: 'completed' }),
       expect.objectContaining({ kind: 'activity', eventId: 2, status: 'completed' }),
@@ -1126,15 +1140,18 @@ describe('ChatPage', () => {
   it('shows aborted DSH turns as stopped', async () => {
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
       { id: '1', event: 'turn.start', data: JSON.stringify({ turn: 1 }) },
-      { id: '2', event: 'turn.end', data: JSON.stringify({ turn: 1, reason: { kind: 'aborted' } }) },
+      { id: '2', event: 'agent.activity', data: JSON.stringify({ name: 'get_project_profile' }) },
+      { id: '3', event: 'turn.end', data: JSON.stringify({ turn: 1, reason: { kind: 'aborted' } }) },
     ], signal))
     renderChat()
 
-    expect(await screen.findByText('Agent 本轮已停止')).toBeInTheDocument()
-    expect(screen.getByText('已停止')).toBeInTheDocument()
+    expect(await screen.findByText('对话已停止')).toBeInTheDocument()
+    expect(screen.getByText('当前步骤已停止')).toBeInTheDocument()
+    expect(screen.queryByText('Agent 正在执行：get project profile')).not.toBeInTheDocument()
+    expect(screen.getAllByText('已停止')).toHaveLength(2)
   })
 
-  it('shows only the latest tool as running while the agent continues its turn', async () => {
+  it('shows one generic live status while the agent continues its turn', async () => {
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
       { id: '1', event: 'turn.start', data: JSON.stringify({ turn: 1 }) },
       { id: '2', event: 'agent.activity', data: JSON.stringify({ name: 'get_project_profile' }) },
@@ -1142,10 +1159,12 @@ describe('ChatPage', () => {
     ], signal))
     renderChat()
 
-    const previousActivity = await screen.findByText('Agent 正在执行：get project profile')
-    const currentActivity = await screen.findByText('Agent 正在执行：update project profile')
-    expect(previousActivity.parentElement).toHaveTextContent('已完成')
-    expect(currentActivity.parentElement).toHaveTextContent('进行中')
+    const liveStatus = await screen.findByTestId('chat-live-status')
+    expect(liveStatus).toHaveTextContent('正在整理画像…')
+    expect(liveStatus).not.toHaveTextContent('get project profile')
+    expect(liveStatus).not.toHaveTextContent('update project profile')
+    expect(liveStatus.closest('[aria-live="polite"]')).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' }).parentElement?.parentElement?.parentElement).toContainElement(liveStatus)
   })
 
   it('keeps the current agent activity visible above the composer as history grows', async () => {
@@ -1158,8 +1177,9 @@ describe('ChatPage', () => {
     ], signal))
     renderChat()
 
-    const liveStatus = await screen.findByRole('status')
-    expect(liveStatus).toHaveTextContent('Agent 正在执行：update project profile')
+    const liveStatus = await screen.findByTestId('chat-live-status')
+    expect(liveStatus).toHaveTextContent('正在整理画像…')
+    expect(liveStatus).not.toHaveTextContent('update project profile')
     expect(liveStatus.closest('[aria-live="polite"]')).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '发送消息' }).parentElement?.parentElement?.parentElement).toContainElement(liveStatus)
   })
@@ -1172,8 +1192,8 @@ describe('ChatPage', () => {
     ], signal))
     renderChat()
 
-    const activity = await screen.findByText('Agent 正在执行：get project profile')
-    await waitFor(() => expect(activity.parentElement).toHaveTextContent('已完成'))
+    await waitFor(() => expect(screen.queryByTestId('chat-live-status')).not.toBeInTheDocument())
+    expect(screen.queryByText('Agent 正在执行：get project profile')).not.toBeInTheDocument()
   })
 
   it('clears a stale running activity from a resumed session snapshot', async () => {
@@ -1187,9 +1207,9 @@ describe('ChatPage', () => {
     ], signal))
     renderChat('/projects/create')
 
-    const activity = await screen.findByText('Agent 正在执行：get project profile')
-    await waitFor(() => expect(activity.parentElement).toHaveTextContent('已完成'))
-    expect(activity.closest('[role="status"]')).not.toBeInTheDocument()
+    await waitFor(() => expect(streamMock).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByTestId('chat-live-status')).not.toBeInTheDocument())
+    expect(screen.queryByText('Agent 正在执行：get project profile')).not.toBeInTheDocument()
   })
 
   it('reconciles an idle snapshot as ready and completes stale activity', async () => {
@@ -1203,23 +1223,24 @@ describe('ChatPage', () => {
     ], signal))
     renderChat('/projects/create')
 
-    const activity = await screen.findByText('Agent 正在执行：get project profile')
-    await waitFor(() => expect(activity.parentElement).toHaveTextContent('已完成'))
+    await waitFor(() => expect(screen.queryByTestId('chat-live-status')).not.toBeInTheDocument())
     expect(screen.getByText('准备就绪')).toBeInTheDocument()
-    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.queryByText('Agent 正在执行：get project profile')).not.toBeInTheDocument()
   })
 
-  it('shows a waiting state without a running spinner', async () => {
+  it('uses the question card as the waiting affordance without process-history rows', async () => {
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
       { id: '1', event: 'question.opened', data: JSON.stringify({ call_id: 'call-1', questions: [{ id: 'topic', question: '创作主题是什么？' }] }) },
     ], signal))
     renderChat()
 
-    const status = (await screen.findByText('Agent 正在等待你的回答')).closest('[role="status"]')
-    expect(status).not.toBeNull()
-    expect(status!).toHaveTextContent('Agent 正在等待你的回答')
-    expect(status!).toHaveTextContent('等待中')
-    expect(status!.querySelector('.animate-spin')).not.toBeInTheDocument()
+    await waitFor(() => expect(streamMock).toHaveBeenCalled())
+    expect(await screen.findByText('创作主题是什么？')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
+    expect(screen.queryByTestId('chat-live-status')).not.toBeInTheDocument()
+    const history = screen.getByTestId('chat-scroll-region')
+    expect(history).not.toHaveTextContent('Agent 正在等待你的回答')
+    expect(history).not.toHaveTextContent('Agent 本轮')
   })
 
   it('transitions a waiting activity to a fresh running state after an answer', async () => {
@@ -1231,20 +1252,11 @@ describe('ChatPage', () => {
     ], signal))
     renderChat()
 
+    await waitFor(() => expect(streamMock).toHaveBeenCalled())
     const question = await screen.findByText('创作主题是什么？')
     expect(question).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByText('Agent 正在工作…')).toBeInTheDocument())
-    const content = document.body.textContent ?? ''
-    expect(content).toContain('Agent 正在等待你的回答')
-    expect(content.indexOf('Agent 正在等待你的回答')).toBeLessThan(content.indexOf('Agent 正在工作…'))
-    await waitFor(() => {
-      const timeline = JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').timeline
-      expect(timeline).toEqual(expect.arrayContaining([
-        expect.objectContaining({ text: 'Agent 正在等待你的回答', status: 'completed' }),
-        expect.objectContaining({ text: 'Agent 正在工作…', status: 'running' }),
-      ]))
-    })
-    expect(screen.getByRole('status')).toHaveTextContent('Agent 正在工作…')
+    await waitFor(() => expect(screen.getByTestId('chat-live-status')).toHaveTextContent('正在整理画像…'))
+    expect(screen.queryByText('Agent 正在等待你的回答')).not.toBeInTheDocument()
   })
 
   it('reconciles a started turn with a resumed busy snapshot without duplicating activity', async () => {
@@ -1267,6 +1279,7 @@ describe('ChatPage', () => {
     ], signal))
     renderChat('/projects/create')
 
+    await waitFor(() => expect(streamMock).toHaveBeenCalled())
     await screen.findByText('创作主题是什么？')
     await waitFor(() => {
       const timeline = JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').timeline
@@ -1274,7 +1287,7 @@ describe('ChatPage', () => {
     })
   })
 
-  it('marks active timeline entries as failed when the runtime reports an error', async () => {
+  it('shows a runtime error without exposing the active tool name', async () => {
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
       { id: '1', event: 'turn.start', data: JSON.stringify({ turn: 1 }) },
       { id: '2', event: 'agent.activity', data: JSON.stringify({ name: 'get_project_profile' }) },
@@ -1282,8 +1295,10 @@ describe('ChatPage', () => {
     ], signal))
     renderChat()
 
-    const activity = await screen.findByText('Agent 正在执行：get project profile')
-    await waitFor(() => expect(activity.parentElement).toHaveTextContent('出错'))
+    await waitFor(() => expect(streamMock).toHaveBeenCalled())
+    expect(await screen.findByText('运行失败')).toBeInTheDocument()
+    expect(screen.getByText('当前步骤未能完成')).toBeInTheDocument()
+    expect(screen.queryByText('Agent 正在执行：get project profile')).not.toBeInTheDocument()
   })
 
   it('preserves the conversation timeline after a terminal runtime error and refresh', async () => {
@@ -1294,14 +1309,14 @@ describe('ChatPage', () => {
     ], signal))
     const first = renderChat()
 
+    await waitFor(() => expect(streamMock).toHaveBeenCalled())
     expect(await screen.findByText('运行失败')).toBeInTheDocument()
     first.unmount()
     streamMock.mockClear()
-    renderChat('/projects/create')
+    renderChat('/projects/create', { initialMessage: false })
 
     expect(await screen.findByText('错误前的聊天记录')).toBeInTheDocument()
-    expect(screen.getByText('Agent 正在执行：get project profile')).toBeInTheDocument()
-    expect(screen.getByText('出错')).toBeInTheDocument()
+    expect(screen.queryByText('Agent 正在执行：get project profile')).not.toBeInTheDocument()
     expect(streamMock).not.toHaveBeenCalled()
   })
 
@@ -1314,6 +1329,7 @@ describe('ChatPage', () => {
 
     renderChat('/projects/create')
 
+    await waitFor(() => expect(streamMock).toHaveBeenCalled())
     expect(await screen.findByText('已完成画像')).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: '恢复已保存草稿' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重新开始创建' })).toBeInTheDocument()
@@ -1330,8 +1346,8 @@ describe('ChatPage', () => {
     })
     renderChat('/projects/create')
 
-    expect(await screen.findByText('Agent 正在工作…')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('Agent 正在工作…')
+    await waitFor(() => expect(streamMock).toHaveBeenCalled())
+    expect(await screen.findByTestId('chat-live-status')).toHaveTextContent('正在整理画像…')
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
     expect(interactiveMocks.createSession).not.toHaveBeenCalled()
   })
@@ -1347,9 +1363,11 @@ describe('ChatPage', () => {
     })
     renderChat('/projects/create')
 
+    await waitFor(() => expect(streamMock).toHaveBeenCalled())
     expect(await screen.findByText('创作主题是什么？')).toBeInTheDocument()
-    expect(screen.getAllByText('等待回答')).toHaveLength(2)
-    expect(screen.getByText('Agent 正在等待你的回答')).toBeInTheDocument()
+    expect(screen.getAllByText('等待回答')).toHaveLength(1)
+    expect(screen.queryByTestId('chat-live-status')).not.toBeInTheDocument()
+    expect(screen.queryByText('Agent 正在等待你的回答')).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
     expect(interactiveMocks.createSession).not.toHaveBeenCalled()
   })
@@ -1363,6 +1381,7 @@ describe('ChatPage', () => {
       ], signal))
     renderChat('/projects/create')
 
+    await waitFor(() => expect(streamMock).toHaveBeenCalled())
     const reconnect = await screen.findByRole('button', { name: '重新连接' })
     expect(interactiveMocks.close).not.toHaveBeenCalled()
     expect(JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').sessionId).toBe('session-1')

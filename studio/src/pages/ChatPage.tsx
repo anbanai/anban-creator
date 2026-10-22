@@ -1060,7 +1060,7 @@ function ChatConversation() {
           unscopedToolFailureRef.current = false
           if (currentTurnRef.current === turn) currentTurnRef.current = undefined
           const status: Extract<TimelineItem, { kind: 'activity' }>['status'] = toolFailed || reason.kind === 'error' ? 'error' : reason.kind === 'aborted' || reason.kind === 'interrupted' || reason.kind === 'cancelled' ? 'stopped' : 'completed'
-          const text = status === 'error' ? 'Agent 本轮发生错误' : status === 'stopped' ? 'Agent 本轮已停止' : 'Agent 本轮已完成'
+          const text = status === 'error' ? '本次处理未能完成' : status === 'stopped' ? '对话已停止' : 'Agent 本轮已完成'
           const completion: TimelineItem = { kind: 'activity', id: `turn-end-${eventId ?? crypto.randomUUID()}`, eventId, status, text }
           updateTimelineNow((items) => upsertTimeline(
             items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
@@ -1133,8 +1133,8 @@ function ChatConversation() {
                 ? '画像草稿已暂存，等待确认'
                 : !ok && lostSession
                   ? '画像草稿暂存失败'
-                  : !ok
-                    ? 'Agent 工具执行失败'
+                    : !ok
+                    ? '当前步骤未能完成'
                     : item.text,
             }
           }))
@@ -1734,15 +1734,19 @@ function ChatConversation() {
     && !committed
     && !sendingMessage
     && !turnActive
-  const currentActivity = [...timeline].reverse().find((item): item is Extract<TimelineItem, { kind: 'activity' }> => item.kind === 'activity' && (item.status === 'started' || item.status === 'running'))
+  const workingMessage = assistantSession && assistantModeId === 'creation'
+    ? '正在整理创作计划…'
+    : assistantSession && assistantModeId === 'review'
+      ? '正在准备复盘建议…'
+      : isProjectUpdate ? '正在整理画像变更…' : '正在整理画像…'
   const liveStatus = awaitingConfirmation
     ? '请先确认上面的草稿'
     : runState === 'starting'
     ? messages.length === 0 ? '正在准备对话…' : '正在恢复会话…'
     : runState === 'waiting_answer'
-      ? 'Agent 正在等待你的回答'
+      ? null
       : turnActive
-        ? currentActivity?.text ?? 'Agent 正在工作…'
+        ? workingMessage
         : null
   const liveStatusLabel = awaitingConfirmation ? '等待确认' : runState === 'starting' ? '准备中' : runState === 'waiting_answer' ? '等待中' : '进行中'
   const emptyRegistry = assistantSession
@@ -1850,10 +1854,13 @@ function ChatConversation() {
                   return <DshQuestionComposer key={`question-${batch.callId}`} questions={batch.questions} answers={batch.answers} submitted={Boolean(batch.answers)} disabled={!sessionId || runState === 'starting' || runState === 'expired' || runState === 'closed' || runState === 'error'} onSubmit={(answer) => submitAnswers(batch, answer)} />
                 }
                 if (item.kind === 'activity') {
+                  const actionable = item.status === 'stopped' || item.status === 'error'
+                  if (!actionable) return null
                   const statusLabel = item.status === 'started' ? '已开始' : item.status === 'running' ? '进行中' : item.status === 'waiting' ? '等待回答' : item.status === 'completed' ? '已完成' : item.status === 'stopped' ? '已停止' : '出错'
-                  const active = item.status === 'started' || item.status === 'running'
-                  const text = active ? item.text.replace(/^Agent /, '') : item.status === 'waiting' ? '等待你的回答' : item.text
-                  return <div key={`activity-${item.id}`} className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-sm text-muted-foreground"><Loader2 className={`size-4 shrink-0 ${active ? 'animate-spin text-primary' : 'hidden'}`} /><span className="min-w-0 flex-1 break-words">{text}</span><span className="shrink-0 text-xs">{statusLabel}</span></div>
+                  const text = item.text.startsWith('Agent 正在执行：')
+                    ? item.status === 'stopped' ? '当前步骤已停止' : item.status === 'error' ? '当前步骤未能完成' : item.text
+                    : item.text
+                  return <div key={`activity-${item.id}`} className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-sm text-muted-foreground"><span className="min-w-0 flex-1 break-words">{text}</span><span className="shrink-0 text-xs">{statusLabel}</span></div>
                 }
                 if (!draft?.ready || committed) return null
                 return <ConfirmCard key="draft-card" draft={draft} mode={assistantSession ? assistantModeId : 'profile'} isProjectUpdate={isProjectUpdate} needsReconfirmation={draftNeedsReconfirmation} canCommit={!turnActive && !sendingMessage && pendingQuestions.length === 0 && !draftNeedsReconfirmation && (assistantSession && assistantModeId !== 'profile' ? draft.ready === true : Boolean(confirmationTokenRef.current))} committing={committing} error={commitError} onCommit={() => void commitProject()} onContinue={async () => { if (!sessionId) return; confirmationTokenRef.current = null; setDraft((value) => value ? { ...value, ready: false } : value); setTimeline((items) => items.filter((entry) => entry.kind !== 'draft')); await sendAssistantMessage(sessionId, '继续编辑当前草稿').catch(() => undefined) }} />
@@ -1863,7 +1870,7 @@ function ChatConversation() {
             </div>
             {newMessageCount > 0 && <Button type="button" variant="secondary" size="sm" className="absolute bottom-20 left-1/2 z-10 -translate-x-1/2 shadow-md" onClick={() => scrollToLatest()}><ChevronDown className="size-4" />有 {newMessageCount} 条新消息</Button>}
             <div className="sticky bottom-0 border-t border-border bg-background/95 px-1 py-3 backdrop-blur sm:px-4 sm:py-4">
-              {liveStatus && <div role="status" className="mb-3 flex min-h-9 items-center gap-2 border-b border-border/60 pb-3 text-sm text-muted-foreground">{liveStatusLabel === '等待中' ? <MessageSquare className="size-4 shrink-0 text-muted-foreground" /> : <Loader2 className="size-4 shrink-0 animate-spin text-primary" />}<span className="min-w-0 flex-1 break-words">{liveStatus}</span><span className="shrink-0 text-xs">{liveStatusLabel}</span></div>}
+              {liveStatus && <div data-testid="chat-live-status" role="status" className="mb-3 flex min-h-9 items-center gap-2 border-b border-border/60 pb-3 text-sm text-muted-foreground">{liveStatusLabel === '等待中' ? <MessageSquare className="size-4 shrink-0 text-muted-foreground" /> : <Loader2 className="size-4 shrink-0 animate-spin text-primary" />}<span className="min-w-0 flex-1 break-words">{liveStatus}</span><span className="shrink-0 text-xs">{liveStatusLabel}</span></div>}
               <div className="flex items-end gap-2 rounded-xl border border-input bg-background p-2 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"><Textarea value={composer} onChange={(event) => { const value = event.target.value; if (portraitHandoffIdeaRef.current && !value.includes(portraitHandoffIdeaRef.current) && projectId) { clearPortraitCreationHandoff(projectId); portraitHandoffIdeaRef.current = null }; setComposer(value) }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!canCompose} placeholder={pendingQuestions.length > 0 ? '请先完成上面的回答' : awaitingConfirmation ? '请先确认上面的草稿' : runState === 'error' && sessionId ? '连接已中断，请先重新连接' : canCompose ? '说说你现在想做什么…' : '正在准备会话…'} aria-label="发送消息" className="min-h-10 resize-none border-0 bg-transparent p-1 shadow-none focus-visible:ring-0" /><Button size="icon-md" onClick={() => void sendMessage()} disabled={!canCompose || !composer.trim()} aria-label="发送消息" title="发送消息"><Send className="size-4" /></Button></div>
             </div>
         </section>
