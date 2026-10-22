@@ -106,9 +106,8 @@ type Bindings struct {
 }
 
 type RuntimeSpec struct {
-	Profile  string `yaml:"profile" json:"profile,omitempty"`
-	Adapter  string `yaml:"adapter" json:"adapter,omitempty"`
-	MaxTurns int    `yaml:"max_turns" json:"max_turns,omitempty"`
+	Profile string `yaml:"profile" json:"profile,omitempty"`
+	Adapter string `yaml:"adapter" json:"adapter,omitempty"`
 }
 
 type ArtifactSpec struct {

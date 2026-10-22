@@ -370,12 +370,6 @@ claude:
     max_depth: 4
     max_file_bytes: 65536
     max_preview_bytes: 262144
-  max_turns:
-    wechat-article: 10
-    wechat-picture: 10
-    seednote: 10
-    montage: 10
-    whiteboard-animation: 10
   docker:
     network: "${ANBAN_RUNTIME_SMOKE_NETWORK}"
     project_memory_volume: "${COMPOSE_PROJECT}-project-memory"

@@ -106,7 +106,7 @@ func TestAgentHandlerExecutionTokenAndWorkloadBootstrap(t *testing.T) {
 	}
 	req = httptest.NewRequest("POST", "/agent/bootstrap", nil)
 	req.Header.Set("Authorization", "Bearer workload-token")
-	req.Header.Set("X-Anban-Agent-Contract-Version", "6")
+	req.Header.Set("X-Anban-Agent-Contract-Version", "7")
 	req.Header.Set("X-Anban-Agent-Pack-Catalog-Digest", agentpack.CatalogDigest())
 	resp, err = app.Test(req)
 	if err != nil {
@@ -129,7 +129,7 @@ func TestAgentBootstrapRejectsCallerSuppliedIdentity(t *testing.T) {
 	app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
 	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
 	req.Header.Set("Authorization", "Bearer workload-token")
-	req.Header.Set("X-Anban-Agent-Contract-Version", "6")
+	req.Header.Set("X-Anban-Agent-Contract-Version", "7")
 	req.Header.Set("X-Anban-Agent-Pack-Catalog-Digest", agentpack.CatalogDigest())
 	resp, err := app.Test(req)
 	if err != nil {
@@ -160,7 +160,7 @@ func TestAgentBootstrapRejectsResponseTokenOutsideWorkloadIdentity(t *testing.T)
 	app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
 	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", nil)
 	req.Header.Set("Authorization", "Bearer workload-token")
-	req.Header.Set("X-Anban-Agent-Contract-Version", "6")
+	req.Header.Set("X-Anban-Agent-Contract-Version", "7")
 	req.Header.Set("X-Anban-Agent-Pack-Catalog-Digest", agentpack.CatalogDigest())
 	resp, err := app.Test(req)
 	if err != nil {
@@ -234,7 +234,7 @@ func TestAgentBootstrapRejectsMismatchedResponseExecutionID(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", nil)
 	req.Header.Set("Authorization", "Bearer workload-token")
-	req.Header.Set("X-Anban-Agent-Contract-Version", "6")
+	req.Header.Set("X-Anban-Agent-Contract-Version", "7")
 	req.Header.Set("X-Anban-Agent-Pack-Catalog-Digest", agentpack.CatalogDigest())
 	resp, err := app.Test(req)
 	if err != nil {
@@ -333,7 +333,7 @@ func TestAgentBootstrapRedactsInternalErrors(t *testing.T) {
 			app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
 			req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", nil)
 			req.Header.Set("Authorization", "Bearer workload-token")
-			req.Header.Set("X-Anban-Agent-Contract-Version", "6")
+			req.Header.Set("X-Anban-Agent-Contract-Version", "7")
 			req.Header.Set("X-Anban-Agent-Pack-Catalog-Digest", agentpack.CatalogDigest())
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := app.Test(req)
@@ -363,7 +363,7 @@ func TestAgentBootstrapLogsWorkloadVerificationErrorWithoutLeakingIt(t *testing.
 	app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
 	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", nil)
 	req.Header.Set("Authorization", "Bearer workload-token")
-	req.Header.Set("X-Anban-Agent-Contract-Version", "6")
+	req.Header.Set("X-Anban-Agent-Contract-Version", "7")
 	req.Header.Set("X-Anban-Agent-Pack-Catalog-Digest", agentpack.CatalogDigest())
 	resp, err := app.Test(req)
 	if err != nil {
@@ -399,7 +399,7 @@ func TestAgentBootstrapLogsRuntimeContractMismatch(t *testing.T) {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusUpgradeRequired)
 	}
 	line := logs.String()
-	for _, field := range []string{"agent bootstrap rejected: runtime contract mismatch", `"received_contract_version":""`, `"expected_contract_version":"6"`} {
+	for _, field := range []string{"agent bootstrap rejected: runtime contract mismatch", `"received_contract_version":""`, `"expected_contract_version":"7"`} {
 		if !strings.Contains(line, field) {
 			t.Fatalf("runtime contract diagnostic missing %q in %s", field, line)
 		}

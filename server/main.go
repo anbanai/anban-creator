@@ -357,7 +357,6 @@ func main() {
 	activeDeadline := reconcilerConfig.ActiveDeadline
 	defaultImageAPI, _ := cfg.ImageAPIForCapability("")
 	bootstrapSvc = service.NewAgentBootstrapService(repo, executionTokens, service.AgentBootstrapConfig{
-		MaxTurns:                cfg.Claude.MaxTurns,
 		TokenTTL:                activeDeadline,
 		ActiveDeadline:          activeDeadline,
 		SignedURLTTL:            cfg.Storage.DirectUploadExpiresSeconds,

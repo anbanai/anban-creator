@@ -20,8 +20,7 @@
       "bindings": {},
       "runtime": {
         "profile": "ecommerce",
-        "adapter": "standard",
-        "max_turns": 90
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -160,7 +159,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "1886fee8d7efcb24b82db59561ce41c6a08c35cece3f7c8242d5717f9049909a"
+      "digest": "f4424ca3d2a2be68e1342b393b2e44a35caa064f131ba8c080ca43c2d9d7be94"
     },
     {
       "id": "content-planning",
@@ -185,8 +184,7 @@
       },
       "runtime": {
         "profile": "content-planning",
-        "adapter": "standard",
-        "max_turns": 80
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -1299,7 +1297,7 @@
       "ui": {
         "renderer": "custom:content-planning"
       },
-      "digest": "64bd22496a0f9ad7f6f03830c7b58b711cf472beaa9ac9ab30525fd0380c8b98"
+      "digest": "ac0ad5c21147b1a37b211c75c26d1252b8b2efba900ffdec92f4bf97f3e2f97e"
     },
     {
       "id": "creation-planner",
@@ -1327,8 +1325,7 @@
       "bindings": {},
       "runtime": {
         "profile": "creation-planner",
-        "adapter": "standard",
-        "max_turns": 80
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin"
@@ -1337,7 +1334,7 @@
         "interactive-creation-clarification"
       ],
       "ui": {},
-      "digest": "7fa17de85134e713d105b0ed90638774e57a54f640eb41d99b04cc6ed2fba44e"
+      "digest": "01bb548742cde76872ea0afe69191c9922657a3e0193e0a9a5548f56c36b2810"
     },
     {
       "id": "feedback-analysis",
@@ -1365,8 +1362,7 @@
       },
       "runtime": {
         "profile": "feedback-analysis",
-        "adapter": "standard",
-        "max_turns": 40
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -1419,7 +1415,7 @@
         }
       ],
       "ui": {},
-      "digest": "a80be6a909654867f5864f7a5903998d2393da781e90658f4ae11a05fcf93926"
+      "digest": "897f2ba8e88b8de251b8769b1f12f7d7b74fae1d26047951d060ffc31077b208"
     },
     {
       "id": "hypit",
@@ -1444,8 +1440,7 @@
       },
       "runtime": {
         "profile": "hypit",
-        "adapter": "standard",
-        "max_turns": 180
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -1631,7 +1626,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "4d2f7ff1b3ea048f4d89c7ae52688420a1424d1b7c641eb46e2a8276dfc53892"
+      "digest": "3ee0889b8f864bd41cd51b2ec2a67928f0132e8620c6fd7b075e739987e9c1ec"
     },
     {
       "id": "local-life",
@@ -1656,8 +1651,7 @@
       },
       "runtime": {
         "profile": "local-life",
-        "adapter": "standard",
-        "max_turns": 120
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -1780,7 +1774,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "50e56cb4a58e85b5f508d063a4c9bf49d70d752cda391a1b1f837b245369176f"
+      "digest": "41c62ad1d99cc0d0e5fafab4fbd17aec166f1b04c172efe5f8a537eb8a510bbc"
     },
     {
       "id": "moments",
@@ -1799,8 +1793,7 @@
       "bindings": {},
       "runtime": {
         "profile": "moments",
-        "adapter": "standard",
-        "max_turns": 25
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -1889,7 +1882,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "1d23c4f3806150b52c5d85ebeb58cd253b4b676e74afb36cf4976aafe14b72a4"
+      "digest": "18837835e13e09056391490af866baa389daa4cc2adcabd0c76a107f1cfae577"
     },
     {
       "id": "montage",
@@ -1915,8 +1908,7 @@
       },
       "runtime": {
         "profile": "montage",
-        "adapter": "openmontage",
-        "max_turns": 40
+        "adapter": "openmontage"
       },
       "surfaces": [
         "plugin",
@@ -2048,7 +2040,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "d024b0e23f3052f9a701b93cad50fc059b79e06643ce8aeba3253abf81582073"
+      "digest": "9bfab6b236bb4f5fee51a8aedbad91d47b57513b54c9051305d35698daa55878"
     },
     {
       "id": "postmortem-review",
@@ -2076,8 +2068,7 @@
       "bindings": {},
       "runtime": {
         "profile": "postmortem-review",
-        "adapter": "standard",
-        "max_turns": 80
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin"
@@ -2086,7 +2077,7 @@
         "interactive-postmortem-review"
       ],
       "ui": {},
-      "digest": "b4f10f5f955ca9b46b37ea0fd66854c992cc4f311e28b740dfc06c95f4f13049"
+      "digest": "cfde65a8a15b81e0d6e4ec2bf781d552436e1d5e19d3042355c1f6fd313a706d"
     },
     {
       "id": "profile-analysis",
@@ -2109,8 +2100,7 @@
       },
       "runtime": {
         "profile": "profile-analysis",
-        "adapter": "standard",
-        "max_turns": 40
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -2396,11 +2386,11 @@
       "ui": {
         "renderer": "custom:profile-analysis"
       },
-      "digest": "171f914cbc842ba143e3de6f0b72e3d4c1bfc95a492690961edbf174833dcdea"
+      "digest": "7e99a3e4ac85f92a40e1a02b5663cb569776f68ca50e8b06b9c90489c98e5686"
     },
     {
       "id": "project-creator",
-      "version": "1.0.6",
+      "version": "1.0.5",
       "kind": "managed",
       "display_name": "画像模式",
       "description": "通过中文对话判断 Anban 项目适配性，选择内容类型并创建或更新六维项目画像。",
@@ -2425,8 +2415,7 @@
       "bindings": {},
       "runtime": {
         "profile": "project-creator",
-        "adapter": "standard",
-        "max_turns": 120
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin"
@@ -2541,7 +2530,7 @@
       "ui": {
         "renderer": "custom:project-creator"
       },
-      "digest": "ae655f4631283965da80b86b5f747e039df552052b876561e0429949c12e6f17"
+      "digest": "a14fd132209038ca2afa0488ea1c25a1982bbe8597d2be640d0c8278c2283f02"
     },
     {
       "id": "seednote",
@@ -2577,8 +2566,7 @@
       },
       "runtime": {
         "profile": "seednote",
-        "adapter": "standard",
-        "max_turns": 20
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -2801,7 +2789,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "6008eb3b5a2b7b8ef014e009ddaf42cad7cad8658684987108c9885075d368df"
+      "digest": "b353b7e1ab8c232ed20be626527073fe499e310f9611cfa52a6cd1b48d908413"
     },
     {
       "id": "wechat-article",
@@ -2839,8 +2827,7 @@
       },
       "runtime": {
         "profile": "wechat-article",
-        "adapter": "standard",
-        "max_turns": 60
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -3067,7 +3054,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "51ee338ae3799659af0b08699d209bcde942defd7f50d85957ad2e1076646e77"
+      "digest": "06e342e92f2a1cd712ef5cdfd1f86287a19e02651074677dfc7ce38c5bd1bcd2"
     },
     {
       "id": "wechat-picture",
@@ -3093,8 +3080,7 @@
       },
       "runtime": {
         "profile": "wechat-picture",
-        "adapter": "standard",
-        "max_turns": 60
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -3246,7 +3232,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "2e24c806a061e31b4af46d98da9db85d15c2306ec4e75d967aa4adca7600adae"
+      "digest": "759b02ebd664f54505f281c2f5dcdbeeb652f6ef71a2eda30f5805fed0809c44"
     },
     {
       "id": "whiteboard-animation",
@@ -3271,8 +3257,7 @@
       },
       "runtime": {
         "profile": "whiteboard-animation",
-        "adapter": "standard",
-        "max_turns": 120
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -3425,7 +3410,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "8c758d454277ce1f20e4dd31e40adaeaa5b14ddc9771f3e9e8c028f637cd5655"
+      "digest": "b42ae58cc015df815e733f4d299b8e330355ca5216f632d38e7a44e4ea541d5a"
     }
   ]
 }
