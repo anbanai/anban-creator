@@ -2,7 +2,7 @@
   "packs": [
     {
       "id": "ecommerce",
-      "version": "2.0.3",
+      "version": "2.0.4",
       "kind": "plugin",
       "display_name": "电商素材",
       "description": "基于产品图片生成完整电商文案和视觉素材包。",
@@ -15,7 +15,7 @@
           "ecommerce-visual-design",
           "ecommerce-platform-specs"
         ],
-        "max_turns": 120
+        "max_turns": 240
       },
       "bindings": {},
       "runtime": {
@@ -159,7 +159,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "f4424ca3d2a2be68e1342b393b2e44a35caa064f131ba8c080ca43c2d9d7be94"
+      "digest": "52fc5babc8b992317f3edc2029633aa82364eeeee198eb897b4369d2c2c1560e"
     },
     {
       "id": "content-planning",
@@ -1420,7 +1420,7 @@
     {
       "id": "hypit",
       "channel": "hypit",
-      "version": "0.3.2",
+      "version": "0.3.3",
       "kind": "managed",
       "display_name": "视频复刻",
       "description": "根据参考视频和替换要求生成成片，保留完整工程用于再次改编。",
@@ -1431,7 +1431,7 @@
           "portrait-cover-design",
           "content-reuse"
         ],
-        "max_turns": 180
+        "max_turns": 400
       },
       "bindings": {
         "task_kinds": [
@@ -1626,7 +1626,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "3ee0889b8f864bd41cd51b2ec2a67928f0132e8620c6fd7b075e739987e9c1ec"
+      "digest": "c6d4d0e4b6b1b06a3b2f09dd2a485b7be0b82e38e1e7e995a02f32d57ae109d9"
     },
     {
       "id": "local-life",
@@ -1778,7 +1778,7 @@
     },
     {
       "id": "moments",
-      "version": "2.0.3",
+      "version": "2.0.4",
       "kind": "plugin",
       "display_name": "朋友圈素材包",
       "description": "从素材拆解到朋友圈正文、质量复盘和交付的创作流程。",
@@ -1788,7 +1788,7 @@
           "moments",
           "humanizer"
         ],
-        "max_turns": 20
+        "max_turns": 60
       },
       "bindings": {},
       "runtime": {
@@ -1882,12 +1882,12 @@
           "funnel_stage"
         ]
       },
-      "digest": "18837835e13e09056391490af866baa389daa4cc2adcabd0c76a107f1cfae577"
+      "digest": "12031a8b3aa13c6833486d5f6e5c68023f58baec0968e0da99fbe60fc93bb70e"
     },
     {
       "id": "montage",
       "channel": "montage",
-      "version": "2.0.6",
+      "version": "2.0.7",
       "kind": "managed",
       "display_name": "视频生成",
       "description": "从素材和业务输入生成最终视频与交付清单。",
@@ -1899,7 +1899,7 @@
           "portrait-cover-design",
           "content-reuse"
         ],
-        "max_turns": 180
+        "max_turns": 400
       },
       "bindings": {
         "task_kinds": [
@@ -2040,7 +2040,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "9bfab6b236bb4f5fee51a8aedbad91d47b57513b54c9051305d35698daa55878"
+      "digest": "cbc4ef8ae6ae11331c1e32f6ef00182969e2f1f35a1b231a586ab934d872056f"
     },
     {
       "id": "postmortem-review",
@@ -2536,7 +2536,7 @@
       "id": "seednote",
       "channel": "seednote",
       "plan_task_kind": "content_generation",
-      "version": "2.0.7",
+      "version": "2.0.8",
       "kind": "managed",
       "display_name": "种草笔记",
       "description": "支持原创、复刻和爆款分析的种草笔记图文创作流程。",
@@ -2556,7 +2556,7 @@
           "content-tagging",
           "content-reuse"
         ],
-        "max_turns": 20
+        "max_turns": 180
       },
       "bindings": {
         "task_kinds": [
@@ -2789,13 +2789,13 @@
           "funnel_stage"
         ]
       },
-      "digest": "b353b7e1ab8c232ed20be626527073fe499e310f9611cfa52a6cd1b48d908413"
+      "digest": "622fd6153b22910c11d7328a896b59e01965448b1d47f32e35e5df9c0144988e"
     },
     {
       "id": "wechat-article",
       "channel": "wechat-article",
       "plan_task_kind": "content_generation",
-      "version": "2.0.9",
+      "version": "2.0.10",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到文章交付物的完整创作流程。",
@@ -2818,7 +2818,7 @@
           "article-publishing",
           "content-reuse"
         ],
-        "max_turns": 300
+        "max_turns": 180
       },
       "bindings": {
         "task_kinds": [
@@ -3054,7 +3054,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "06e342e92f2a1cd712ef5cdfd1f86287a19e02651074677dfc7ce38c5bd1bcd2"
+      "digest": "74993b698cb5a0eaaafd3b05927b2c009e414518db51bcb46295b7e0de50db2a"
     },
     {
       "id": "wechat-picture",
@@ -3237,7 +3237,7 @@
     {
       "id": "whiteboard-animation",
       "channel": "whiteboard-animation",
-      "version": "2.0.4",
+      "version": "2.0.5",
       "kind": "managed",
       "display_name": "白板动画",
       "description": "根据 SRT 字幕生成分镜、白板手绘场景和最终动画视频。",
@@ -3247,7 +3247,7 @@
           "whiteboard-animation",
           "content-reuse"
         ],
-        "max_turns": 120
+        "max_turns": 240
       },
       "interaction": {},
       "bindings": {
@@ -3410,7 +3410,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "b42ae58cc015df815e733f4d299b8e330355ca5216f632d38e7a44e4ea541d5a"
+      "digest": "705af8ca7ab9d3bf82f03c7c81cf9fbccc1d4e735c6795cb824de948ed04d174"
     }
   ]
 }
