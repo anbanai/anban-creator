@@ -22,6 +22,13 @@ async function sendIntro() {
   fireEvent.click(screen.getByRole('button',{name:'发送消息'}))
   await waitFor(()=>expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow','50'))
 }
+it('carries unsent home input into the lightweight interview without sending it', async () => {
+  render(<MemoryRouter initialEntries={[{ pathname: '/portraits/new', state: { interviewInput: intro } }]}><PortraitOnboardingPage /></MemoryRouter>)
+  expect(screen.getByRole('textbox')).toHaveValue(intro)
+  expect(onboardingApi.chat).not.toHaveBeenCalled()
+  await sendIntro()
+  expect(onboardingApi.chat).toHaveBeenCalledOnce()
+})
 it('uses the formal transport and restores a per-account draft without restoring confirmation', async () => {
   const view=render(page());await sendIntro()
   expect(onboardingApi.chat).toHaveBeenCalledOnce()

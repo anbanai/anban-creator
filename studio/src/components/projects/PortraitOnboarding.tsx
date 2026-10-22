@@ -10,13 +10,14 @@ const OnlinePortraitDelivery = lazy(()=>import('./PortraitDelivery'))
 const welcome: PortraitMessage = { id: 'welcome', role: 'assistant', text: '你好，很高兴认识你。你平时在做什么？最近为什么想开始做内容？\n\n打字或用语音说都可以。从你最想聊的地方开始。' }
 type Connection = { configured: boolean; model?: string; error?: string }
 
-export default function PortraitOnboarding({ initialConversation, initialSession, onlineDelivery = false, transport, production = false, sessionId, onSessionChange, onReset }: {
+export default function PortraitOnboarding({ initialConversation, initialSession, initialInput = '', onlineDelivery = false, transport, production = false, sessionId, onSessionChange, onReset }: {
   transport: PortraitTransport
   production?: boolean
   sessionId?: string
   onSessionChange?: (session: { messages: PortraitChatMessage[]; candidate: PortraitCandidate }) => void
   onReset?: () => void
   initialConversation?: PortraitChatMessage[]
+  initialInput?: string
   initialSession?: { messages: PortraitChatMessage[]; candidate: PortraitCandidate }
   onlineDelivery?: boolean
 }) {
@@ -29,7 +30,7 @@ export default function PortraitOnboarding({ initialConversation, initialSession
     return {messages:restored,candidate:validatePortraitCandidate(initialSession.candidate,restored)}
   })
   const [messages, setMessages] = useState<PortraitMessage[]>(session?.messages ?? recovered?.slice(0, -1) ?? [welcome])
-  const [recoveredInput, setRecoveredInput] = useState(recovered ? recovered[recovered.length - 1].text : '')
+  const [recoveredInput, setRecoveredInput] = useState(recovered ? recovered[recovered.length - 1].text : initialInput)
   const [candidate, setCandidate] = useState<PortraitCandidate | null>(session?.candidate ?? null)
   const [connection, setConnection] = useState<Connection>({ configured: false })
   const [checking, setChecking] = useState(false)

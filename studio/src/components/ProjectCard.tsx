@@ -42,7 +42,8 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
   const profileAccounts = (project.profile_setup?.platform_accounts ?? []).map((account) => `${accountPlatformLabels[account.platform] ?? account.platform}${account.account_name ? ` · ${account.account_name}` : ''}`)
 
   return (
-    <div className={`flex h-full flex-col rounded-lg border p-4 transition-[border-color,box-shadow] ${cardTone}`}>
+    <div className={`relative isolate flex h-full flex-col rounded-lg border p-4 transition-[border-color,box-shadow] [&_button]:relative [&_button]:z-10 [&_a]:relative [&_a]:z-10 ${cardTone}`}>
+      <Link to={`/portraits/${project.id}`} aria-label={`查看人设详情：${project.name}`} className="!absolute inset-0 !z-0 rounded-lg focus-visible:outline-2 focus-visible:outline-primary" />
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <h3 className="min-w-0 flex-1">
@@ -120,10 +121,10 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
           )}
           {isArchived && onRestore && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={restoring} onClick={() => onRestore(project.id)} aria-label={`恢复项目：${project.name}`} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={restoring} onClick={() => onRestore(project.id)} aria-label={`取消归档项目：${project.name}`} />}>
                 <RotateCcw />
               </TooltipTrigger>
-              <TooltipContent>恢复</TooltipContent>
+              <TooltipContent>取消归档</TooltipContent>
             </Tooltip>
           )}
           <Tooltip>

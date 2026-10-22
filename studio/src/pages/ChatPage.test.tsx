@@ -1457,6 +1457,33 @@ describe('ChatPage', () => {
     resolveMessage?.()
   })
 
+  it('releases the send lock when the stream acknowledges before the message request resolves', async () => {
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({ sessionId: 'session-1', turnActive: false }))
+    let acknowledge: (() => void) | undefined
+    let resolveRequest: (() => void) | undefined
+    interactiveMocks.message.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveRequest = resolve }))
+    streamMock.mockImplementationOnce((_id: string, _token: string, signal?: AbortSignal) => (async function* () {
+      yield { event: 'session.snapshot', data: JSON.stringify({ status: 'idle', busy: false }) }
+      await new Promise<void>((resolve) => { acknowledge = resolve; signal?.addEventListener('abort', () => resolve(), { once: true }) })
+      yield { id: '1', event: 'user.message', data: JSON.stringify({ text: '第一轮访谈' }) }
+      yield { id: '2', event: 'turn.end', data: JSON.stringify({ turn: 1, reason: { kind: 'completed' } }) }
+      await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
+    })())
+    renderChat(undefined, { initialMessage: false })
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    await waitFor(() => { expect(composer).toBeEnabled(); expect(acknowledge).toBeDefined() })
+    fireEvent.change(composer, { target: { value: '第一轮访谈' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(resolveRequest).toBeDefined())
+    await act(async () => { acknowledge?.() })
+    await screen.findByText('Agent 本轮已完成')
+    await act(async () => { resolveRequest?.() })
+    await waitFor(() => expect(composer).toBeEnabled())
+    fireEvent.change(composer, { target: { value: '继续补充' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(interactiveMocks.message).toHaveBeenCalledWith('session-1', '继续补充'))
+  })
+
   it('keeps the composer disabled until the runtime reports the turn end', async () => {
     let releaseTurn: (() => void) | undefined
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => (async function* () {
