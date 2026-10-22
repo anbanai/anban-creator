@@ -1,5 +1,6 @@
 server:
   port: 8080
+  public_base_url: "${ANBAN_PUBLIC_BASE_URL:-https://creator.anbanai.com}"
   tls_cert_file: "${ANBAN_SERVER_TLS_CERT_FILE}"
   tls_key_file: "${ANBAN_SERVER_TLS_KEY_FILE}"
   host: "0.0.0.0"

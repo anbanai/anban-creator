@@ -14,8 +14,10 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -50,6 +52,8 @@ var (
 	ErrTaskImageOperationSourceRequired   = errors.New("either image_url or file_path is required")
 	ErrImageUnderstandingUnavailable      = errors.New("image understanding model is not configured")
 )
+
+var articleBodyImagePathPattern = regexp.MustCompile(`^output/img_\d+\.(png|jpe?g|webp)$`)
 
 type UploadTaskImageRequest struct {
 	UserID, ExecutionID, ProjectID, TaskID, FilePath string
@@ -92,6 +96,7 @@ type AnalyzeTaskImageResult struct {
 type TaskImageOperationsConfig struct {
 	UnderstandingProvider string
 	UnderstandingModel    string
+	PublicBaseURL         string
 }
 
 type taskImageOperationsImage interface {
@@ -144,7 +149,7 @@ func (s *TaskImageOperationsService) Upload(ctx context.Context, req UploadTaskI
 	if req.FilePath == "" {
 		return nil, ErrTaskImageOperationFileRequired
 	}
-	if s == nil || s.images == nil {
+	if s == nil {
 		return nil, errors.New("image service not available")
 	}
 	if err := s.validateTask(ctx, req.UserID, req.TaskID, req.ProjectID); err != nil {
@@ -155,8 +160,11 @@ func (s *TaskImageOperationsService) Upload(ctx context.Context, req UploadTaskI
 		return nil, err
 	}
 	decision := wechatDeliveryDecision(task)
-	if decision.IsUserAssisted() || !decision.MayUploadMaterial {
+	if !decision.IsUserAssisted() && !decision.MayUploadMaterial {
 		return nil, ErrWechatDeliveryModeUserAssisted
+	}
+	if !decision.IsUserAssisted() && s.images == nil {
+		return nil, errors.New("image service not available")
 	}
 	taskFile, filePath, cleanup, err := s.resolveUploadPath(ctx, req)
 	if err != nil {
@@ -165,17 +173,89 @@ func (s *TaskImageOperationsService) Upload(ctx context.Context, req UploadTaskI
 	if cleanup != nil {
 		defer cleanup()
 	}
-	result, err := s.images.UploadImage(ctx, req.UserID, req.ProjectID, req.TaskID, filePath)
+	var result *UploadImageResult
+	if decision.IsUserAssisted() {
+		if taskFile.Role != model.FileRoleImage || !articleBodyImagePathPattern.MatchString(filepath.ToSlash(taskFile.FilePath)) {
+			return nil, errors.New("only generated article body images can be published as platform assets")
+		}
+		result, err = s.publishArticleImage(ctx, req.UserID, taskFile, filePath)
+	} else {
+		result, err = s.images.UploadImage(ctx, req.UserID, req.ProjectID, req.TaskID, filePath)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("upload image: %w", err)
 	}
 	if result == nil {
 		return nil, errors.New("upload image: provider returned no result")
 	}
-	if _, err := s.tasks.UpdateTaskFileMetadata(ctx, taskFile, taskFile.Role, result.MediaID, result.WechatURL); err != nil {
-		return nil, fmt.Errorf("persist uploaded image metadata: %w", err)
+	if !decision.IsUserAssisted() {
+		if _, err := s.tasks.UpdateTaskFileMetadata(ctx, taskFile, taskFile.Role, result.MediaID, result.WechatURL); err != nil {
+			return nil, fmt.Errorf("persist uploaded image metadata: %w", err)
+		}
 	}
 	return result, nil
+}
+
+func (s *TaskImageOperationsService) publishArticleImage(ctx context.Context, userID string, taskFile *model.TaskFile, path string) (*UploadImageResult, error) {
+	if s.tasks == nil || s.tasks.Repository() == nil || s.tasks.Storage() == nil || taskFile == nil {
+		return nil, errors.New("article image hosting is unavailable")
+	}
+	actualMIME, _, err := validateTaskRasterImageFile(path, taskFile.FilePath, maxCompressedTaskImageInputBytes)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.EqualFold(actualMIME, strings.TrimSpace(taskFile.MimeType)) {
+		return nil, fmt.Errorf("article image MIME type does not match its file content")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	assetID := uuid.NewString()
+	ext := strings.ToLower(filepath.Ext(taskFile.FileName))
+	if ext == "" {
+		ext = ".img"
+	}
+	key := "article-assets/" + assetID + ext
+	_, err = s.tasks.Storage().Upload(ctx, key, file, taskFile.MimeType)
+	if err != nil {
+		return nil, fmt.Errorf("store article image: %w", err)
+	}
+	asset := &model.Asset{ID: assetID, UserID: userID, Purpose: model.AssetPurposeArticleImage, StorageKey: key, FileName: taskFile.FileName, ContentType: taskFile.MimeType, Size: taskFile.FileSize, ETag: taskFile.ContentHash}
+	if err := s.tasks.Repository().Assets().Create(ctx, asset); err != nil {
+		_ = s.tasks.Storage().Delete(context.WithoutCancel(ctx), key)
+		return nil, fmt.Errorf("persist article image asset: %w", err)
+	}
+	baseURL, err := articleAssetBaseURL(s.config.PublicBaseURL)
+	if err != nil {
+		_ = s.tasks.Storage().Delete(context.WithoutCancel(ctx), key)
+		_ = s.tasks.Repository().Assets().DeleteOwnedArticleImage(context.WithoutCancel(ctx), assetID, userID)
+		return nil, err
+	}
+	publicURL := baseURL + assetID
+	if _, err := s.tasks.Repository().TaskFiles().UpdatePendingArticleImageURL(ctx, taskFile, publicURL); err != nil {
+		if deleter, ok := s.tasks.Repository().Assets().(interface {
+			DeleteByID(context.Context, string) error
+		}); ok {
+			_ = deleter.DeleteByID(context.WithoutCancel(ctx), assetID)
+		}
+		_ = s.tasks.Storage().Delete(context.WithoutCancel(ctx), key)
+		return nil, fmt.Errorf("persist article image URL: %w", err)
+	}
+	return &UploadImageResult{URL: publicURL, PlatformURL: publicURL, RenderURL: publicURL}, nil
+}
+
+func articleAssetBaseURL(raw string) (string, error) {
+	raw = strings.TrimRight(strings.TrimSpace(raw), "/")
+	if raw == "" {
+		raw = "https://creator.anbanai.com"
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return "", errors.New("server.public_base_url must be a valid HTTPS base URL")
+	}
+	return raw + "/api/v1/article-assets/", nil
 }
 
 func (s *TaskImageOperationsService) resolveUploadPath(ctx context.Context, req UploadTaskImageRequest) (*model.TaskFile, string, func(), error) {

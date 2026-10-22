@@ -253,20 +253,38 @@ func newTaskImageOperationsCropFixture(t *testing.T) *taskImageOperationsCropFix
 	}
 }
 
-func TestTaskImageUploadRejectsUserAssistedTaskBeforeProviderCall(t *testing.T) {
+func TestTaskImageUploadPublishesUserAssistedImageOnPlatform(t *testing.T) {
 	f := newTaskImageOperationsCropFixture(t)
-	f.service.images = &fakeTaskImageOperationsImage{}
 	f.task.SetProjectSnapshot(model.ProjectSnapshot{WechatDelivery: model.WechatDeliveryDecision{
 		Mode: model.WechatDeliveryModeUserAssisted, ReasonCodes: []string{model.WechatDeliveryReasonMissingAppSecret},
 	}})
 	if err := f.repo.Tasks().Update(context.Background(), f.task); err != nil {
 		t.Fatal(err)
 	}
-	_, err := f.service.Upload(context.Background(), UploadTaskImageRequest{
-		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID, FilePath: "output/source-a.png",
+	if _, err := f.repo.TaskFiles().UpsertPendingCurrentExecution(context.Background(), f.task.ID, f.executionID, &model.TaskFile{
+		TaskID: f.task.ID, ExecutionID: f.executionID, Role: model.FileRoleImage,
+		FilePath: "output/img_1.png", FileName: "img_1.png", MimeType: "image/png", FileSize: 84,
+		ContentHash: "accepted-body-image", OSSKey: "fixtures/source-a.png", StorageProvider: f.store.Name(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := f.service.Upload(context.Background(), UploadTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID, FilePath: "output/img_1.png",
 	})
-	if !errors.Is(err, ErrWechatDeliveryModeUserAssisted) {
-		t.Fatalf("Upload error = %v, want user-assisted mode refusal", err)
+	if err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if result.PlatformURL == "" || result.PlatformURL != result.RenderURL || result.WechatURL != "" || result.MediaID != "" {
+		t.Fatalf("user-assisted result = %#v, want only typed platform/render URL", result)
+	}
+	assetID := strings.TrimPrefix(result.PlatformURL, "https://creator.anbanai.com/api/v1/article-assets/")
+	asset, err := f.repo.Assets().FindByID(context.Background(), assetID)
+	if err != nil || asset.Purpose != model.AssetPurposeArticleImage {
+		t.Fatalf("persistent article asset = %#v, err = %v", asset, err)
+	}
+	persisted := findTaskImageOperationOutputFile(t, f.repo, f.executionID, "output/img_1.png")
+	if persisted.PlatformImageURL != result.PlatformURL || persisted.WechatURL != "" {
+		t.Fatalf("persisted image metadata = %#v", persisted)
 	}
 }
 
@@ -763,6 +781,23 @@ func TestTaskImageOperationsUploadRejectsUnsafeTaskRelativePathsBeforeDelegation
 				t.Fatalf("unsafe upload delegated with path %q", images.uploadPath)
 			}
 		})
+	}
+}
+
+func TestTaskImageUploadRejectsNonBodyImageInUserAssistedMode(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	f.task.SetProjectSnapshot(model.ProjectSnapshot{WechatDelivery: model.WechatDeliveryDecision{
+		Mode: model.WechatDeliveryModeUserAssisted,
+	}})
+	if err := f.repo.Tasks().Update(context.Background(), f.task); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.service.Upload(context.Background(), UploadTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID,
+		FilePath: "output/source-a.png",
+	})
+	if err == nil || !strings.Contains(err.Error(), "only generated article body images") {
+		t.Fatalf("Upload error = %v, want body-image restriction", err)
 	}
 }
 

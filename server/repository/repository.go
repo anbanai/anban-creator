@@ -230,6 +230,7 @@ type TaskFileRepository interface {
 	DiscardCurrentExecution(ctx context.Context, taskID, executionID string) error
 	UpsertPendingCurrentExecution(ctx context.Context, taskID, executionID string, file *model.TaskFile) (*model.TaskFile, error)
 	UpdatePendingCurrentExecutionMetadata(ctx context.Context, original *model.TaskFile, role, mediaID, wechatURL string) (*model.TaskFile, error)
+	UpdatePendingArticleImageURL(ctx context.Context, original *model.TaskFile, platformURL string) (*model.TaskFile, error)
 	UpdatePublicationMetadata(ctx context.Context, fileID, taskID, executionID, role, mediaID, wechatURL string) (*model.TaskFile, error)
 	MarkPublicationUploadAttempt(ctx context.Context, fileID, taskID, executionID string, attemptedAt time.Time) (*model.TaskFile, error)
 	RecordPublicationUploadFailure(ctx context.Context, fileID, taskID, executionID, reason string) error
@@ -299,6 +300,7 @@ type AssetRepository interface {
 	Create(ctx context.Context, asset *model.Asset) error
 	FindByID(ctx context.Context, id string) (*model.Asset, error)
 	FindOwnedByID(ctx context.Context, id, userID string) (*model.Asset, error)
+	DeleteOwnedArticleImage(ctx context.Context, id, userID string) error
 }
 
 // FeedbackRepository provides access to the feedbacks table.

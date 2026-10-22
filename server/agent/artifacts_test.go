@@ -24,6 +24,31 @@ func TestValidateSeednoteArtifactsFromTaskFiles(t *testing.T) {
 	}
 }
 
+func TestValidateArticleImageMetadataMatchesFrozenDeliveryMode(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		mode  string
+		file  model.TaskFile
+		valid bool
+	}{
+		{name: "manual platform URL", mode: model.WechatDeliveryModeUserAssisted, file: model.TaskFile{Role: model.FileRoleImage, PlatformImageURL: "https://creator.anbanai.com/api/v1/article-assets/id"}, valid: true},
+		{name: "manual rejects WeChat metadata", mode: model.WechatDeliveryModeUserAssisted, file: model.TaskFile{Role: model.FileRoleImage, WechatURL: "https://mmbiz.qpic.cn/a", MediaID: "media"}},
+		{name: "automatic WeChat metadata", mode: model.WechatDeliveryModeAutomatic, file: model.TaskFile{Role: model.FileRoleImage, WechatURL: "https://mmbiz.qpic.cn/a", MediaID: "media"}, valid: true},
+		{name: "automatic rejects platform URL", mode: model.WechatDeliveryModeAutomatic, file: model.TaskFile{Role: model.FileRoleImage, PlatformImageURL: "https://creator.anbanai.com/api/v1/article-assets/id"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &model.Task{Type: model.TaskTypeWechatArticle}
+			task.SetProjectSnapshot(model.ProjectSnapshot{WechatDelivery: model.WechatDeliveryDecision{Mode: tc.mode, AutomaticEnabled: true, AppIDConfigured: true, SecretConfigured: true}})
+			article := tc.file
+			article.FileName = "05-article.html"
+			got := ValidateTaskArtifactsFromTaskFiles(task, []*model.TaskFile{&article})
+			if got.Valid != tc.valid {
+				t.Fatalf("validation = %#v, want valid=%v", got, tc.valid)
+			}
+		})
+	}
+}
+
 func TestValidateWechatPictureArtifactsRequiresConcreteContentImage(t *testing.T) {
 	task := &model.Task{Type: model.TaskTypeWechatPicture}
 	required := []string{"topic-analysis.md", "content-dna.json", "content-script.md", "content.md", "image-plan.md", "image-prompts.md", "publish-package.json", "quality-review.md", "cover.png"}

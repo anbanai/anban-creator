@@ -407,10 +407,11 @@ type EmailConfig struct {
 }
 
 type ServerConfig struct {
-	Port        int    `yaml:"port"` // default 8080
-	Host        string `yaml:"host"` // default "0.0.0.0"
-	TLSCertFile string `yaml:"tls_cert_file"`
-	TLSKeyFile  string `yaml:"tls_key_file"`
+	Port          int    `yaml:"port"` // default 8080
+	Host          string `yaml:"host"` // default "0.0.0.0"
+	TLSCertFile   string `yaml:"tls_cert_file"`
+	TLSKeyFile    string `yaml:"tls_key_file"`
+	PublicBaseURL string `yaml:"public_base_url"`
 }
 
 type LoggingConfig struct {
@@ -2029,6 +2030,12 @@ func (c *Config) Validate() error {
 		return err
 	}
 	var errs []string
+	if raw := strings.TrimSpace(c.Server.PublicBaseURL); raw != "" {
+		u, err := url.Parse(raw)
+		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			errs = append(errs, "server.public_base_url must be an HTTPS base URL without credentials, query, or fragment")
+		}
+	}
 	if err := c.Dsh.Validate(); err != nil {
 		errs = append(errs, err.Error())
 	}

@@ -42,3 +42,25 @@ func TestAssetRepositoryFindOwnedByIDIsOpaque(t *testing.T) {
 		t.Fatalf("missing FindOwnedByID error = %v, want ErrAssetNotFound", err)
 	}
 }
+
+func TestAssetRepositoryDeleteArticleImageRequiresOwner(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	asset := &model.Asset{ID: "article-image", UserID: "owner", Purpose: model.AssetPurposeArticleImage, StorageKey: "article-assets/article-image.png", FileName: "article.png", ContentType: "image/png", Size: 1, ETag: "etag"}
+	if err := repo.Assets().Create(ctx, asset); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Assets().DeleteOwnedArticleImage(ctx, asset.ID, "other"); !errors.Is(err, model.ErrAssetNotFound) {
+		t.Fatalf("foreign delete error = %v, want ErrAssetNotFound", err)
+	}
+	if _, err := repo.Assets().FindByID(ctx, asset.ID); err != nil {
+		t.Fatalf("foreign delete removed asset: %v", err)
+	}
+	if err := repo.Assets().DeleteOwnedArticleImage(ctx, asset.ID, "owner"); err != nil {
+		t.Fatalf("owner delete: %v", err)
+	}
+	if _, err := repo.Assets().FindByID(ctx, asset.ID); !errors.Is(err, model.ErrAssetNotFound) {
+		t.Fatalf("asset after owner delete = %v, want ErrAssetNotFound", err)
+	}
+}

@@ -909,6 +909,7 @@ func main() {
 			TaskImageOperationsSvc: service.NewTaskImageOperationsService(taskSvc, imageSvc, imageUnderstandingClient, fixedBilling.Cost, service.TaskImageOperationsConfig{
 				UnderstandingProvider: cfg.ImageUnderstanding.ProviderKey,
 				UnderstandingModel:    cfg.ImageUnderstanding.Model,
+				PublicBaseURL:         cfg.Server.PublicBaseURL,
 			}, log),
 			TaskVideoOperationsSvc: service.NewTaskVideoOperationsService(repo, store, videoUnderstandingClient, fixedBilling.Cost, service.TaskVideoOperationsConfig{
 				UnderstandingProvider: cfg.VideoUnderstanding.ProviderKey,
@@ -1314,8 +1315,9 @@ func requireServerOwnedArticlePublicationSchema(db *gorm.DB) error {
 		!db.Migrator().HasColumn(&model.WechatPublication{}, "DraftRetryAuthorizedAt") ||
 		!db.Migrator().HasColumn(&model.WechatPublication{}, "DraftArticleType") ||
 		!db.Migrator().HasColumn(&model.WechatPublication{}, "DraftImageMediaIDs") ||
-		!db.Migrator().HasColumn(&model.WechatPublication{}, "DraftCoverCropPercentList") {
-		return fmt.Errorf("existing database requires server/migrations/20260916_server_owned_article_publication.sql and 20261001_wechat_picture_publication_evidence.sql before startup")
+		!db.Migrator().HasColumn(&model.WechatPublication{}, "DraftCoverCropPercentList") ||
+		!db.Migrator().HasColumn(&model.TaskFile{}, "PlatformImageURL") {
+		return fmt.Errorf("existing database requires server/migrations/20260916_server_owned_article_publication.sql, 20261001_wechat_picture_publication_evidence.sql, and 20261022_article_image_platform_url.sql before startup")
 	}
 	return migrations.RequireWechatPublicationStatusConstraint(context.Background(), db)
 }

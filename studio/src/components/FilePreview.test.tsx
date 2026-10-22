@@ -96,6 +96,15 @@ describe('FilePreviewGallery', () => {
     expect(frame).toHaveAttribute('sandbox', '')
   })
 
+  it('blocks article copy controls when image delivery is partial', async () => {
+    vi.mocked(api.tasks.previewFileBlob).mockResolvedValue(new Blob(['<p>正文</p>'], { type: 'text/html' }))
+    const htmlFile = fileWith({ file_name: '05-article.html', mime_type: 'text/html' })
+    render(<FilePreviewGallery files={[htmlFile]} taskId="task-1" taskType="wechat-article" articleImageDeliveryBlocked />)
+    fireEvent.click(screen.getByRole('button', { name: /预览/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('正文配图交付未通过')
+    expect(screen.queryByRole('button', { name: '复制正文（含图片）' })).not.toBeInTheDocument()
+  })
+
   it('uses the file preview endpoint for HTML files when the server provides preview_url', async () => {
     vi.mocked(api.tasks.previewFileBlob).mockResolvedValue(new Blob([
       '<main>过程 HTML</main>',
