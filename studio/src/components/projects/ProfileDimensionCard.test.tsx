@@ -27,11 +27,25 @@ describe('ProfileDimensionCard', () => {
     const change = vi.fn()
     const content = { details: { name: '旧名称', count: 3, enabled: false, unknown: null }, readers: ['新手', '资深爱好者'], extra: { preserved: true } }
     render(<ProfileDimensionCard label="定位" dimension={{ content, sources: [], evidence: [], missing_fields: [] }} text={JSON.stringify(content)} onTextChange={change} />)
-    fireEvent.click(screen.getByRole('button', { name: '修改定位' }))
-    fireEvent.change(screen.getByLabelText('定位 · details · 名称'), { target: { value: '新名称' } })
+    const editButton = screen.getByRole('button', { name: '修改定位' })
+    expect(editButton.querySelector('svg')).toBeInTheDocument()
+    expect(editButton).toHaveClass('size-7')
+    fireEvent.click(editButton)
+    expect(screen.queryByRole('button', { name: '高级编辑（JSON）' })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('定位 · 详情 · 账号名称'), { target: { value: '新名称' } })
     expect(JSON.parse(change.mock.calls[0][0])).toEqual({ ...content, details: { ...content.details, name: '新名称' } })
-    fireEvent.change(screen.getByLabelText('定位 · readers 2'), { target: { value: '老茶客' } })
-    expect(JSON.parse(change.mock.calls[1][0])).toEqual({ ...content, readers: ['新手', '老茶客'] })
+    const count = screen.getByLabelText('定位 · 详情 · Count')
+    fireEvent.change(count, { target: { value: '-4.5' } })
+    expect(JSON.parse(change.mock.calls[1][0])).toEqual({ ...content, details: { ...content.details, count: -4.5 } })
+    fireEvent.change(count, { target: { value: '0.' } })
+    expect(count).toHaveValue('0.')
+    expect(JSON.parse(change.mock.calls[2][0])).toEqual({ ...content, details: { ...content.details, count: 0 } })
+    fireEvent.click(screen.getByLabelText('定位 · 详情 · Enabled'))
+    expect(JSON.parse(change.mock.calls[3][0])).toEqual({ ...content, details: { ...content.details, enabled: true } })
+    fireEvent.change(screen.getByLabelText('定位 · 详情 · Unknown'), { target: { value: '已补充' } })
+    expect(JSON.parse(change.mock.calls[4][0])).toEqual({ ...content, details: { ...content.details, unknown: '已补充' } })
+    fireEvent.change(screen.getByLabelText('定位 · Readers'), { target: { value: '新手\n老茶客' } })
+    expect(JSON.parse(change.mock.calls[5][0])).toEqual({ ...content, readers: ['新手', '老茶客'] })
   })
 
   it('keeps focus while adding a plain-language summary to an empty dimension', () => {
@@ -48,6 +62,16 @@ describe('ProfileDimensionCard', () => {
     expect(input).toHaveFocus()
     fireEvent.change(input, { target: { value: '白茶商家' } })
     expect(input).toHaveValue('白茶商家')
+  })
+
+  it('disables structured fields when the dimension becomes unavailable', () => {
+    const props = { label: '定位', dimension: { content: { summary: '原定位', active: true }, sources: [], evidence: [], missing_fields: [] }, text: '{"summary":"原定位","active":true}', onTextChange: vi.fn() }
+    const view = render(<ProfileDimensionCard {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: '修改定位' }))
+    view.rerender(<ProfileDimensionCard {...props} disabled />)
+
+    expect(screen.getByLabelText('定位 · 概述')).toBeDisabled()
+    expect(screen.getByLabelText('定位 · Active')).toBeDisabled()
   })
 
   it('renders an incomplete server dimension with null evidence fields as empty', () => {

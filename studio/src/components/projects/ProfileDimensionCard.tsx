@@ -1,8 +1,11 @@
 import { useState } from 'react'
+import { Pencil } from 'lucide-react'
 import type { ProfileDimension } from '@/types/project'
 import { normalizeProfileDimension } from '@/lib/project-profile'
 import { Button } from '@/components/common/button'
+import { ProfileContentFields } from '@/components/projects/ProfileContentFields'
 import { Textarea } from '@/components/ui/textarea'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 const fieldLabels: Record<string, string> = {
   name: '名称', summary: '概述', description: '说明', positioning: '定位',
@@ -32,7 +35,7 @@ function ContentValue({ value, label, editing, disabled, onChange }: {
       <ContentValue value={item} label={`${label} · ${fieldLabels[key] ?? key}`} editing={editing} disabled={disabled} onChange={(next) => onChange({ ...value, [key]: next })} />
     </div>)}
   </div>
-  // Preserve unknown values and their types. Structural edits remain available in advanced mode.
+  // Preserve unknown values and their types while keeping the default editor readable.
   return <p className="text-sm">{value === null ? '尚不确定' : typeof value === 'boolean' ? (value ? '是' : '否') : String(value)}</p>
 }
 
@@ -41,18 +44,39 @@ export function ProfileDimensionCard({ label, dimension, text, error, disabled =
   onTextChange: (text: string) => void; onSave?: () => void
 }) {
   const [editing, setEditing] = useState(false)
-  const [advanced, setAdvanced] = useState(false)
   const safeDimension = normalizeProfileDimension(dimension)
   const { sources, missing_fields: missingFields, evidence, content } = safeDimension
   const hasSupplementalInfo = sources.length > 0 || missingFields.length > 0 || evidence.length > 0
+  let editableContent = content
+  if (editing) {
+    try {
+      const parsed = JSON.parse(text)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) editableContent = parsed as Record<string, unknown>
+    } catch {
+      // Keep the last readable content visible while a parent validates the draft.
+    }
+  }
   return <section aria-label={`${label}资料`} className="space-y-4 border-b py-6 first:pt-0 last:border-b-0 last:pb-0">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h3 className="text-sm font-semibold">{label}</h3>
-      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => setEditing(!editing)}>{editing ? `收起${label}编辑` : `修改${label}`}</Button>
+      <Tooltip>
+        <TooltipTrigger render={<Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          disabled={disabled}
+          aria-label={editing ? `收起${label}编辑` : `修改${label}`}
+          onClick={() => setEditing(!editing)}
+        />}>
+          <Pencil className="size-3.5" />
+        </TooltipTrigger>
+        <TooltipContent>{editing ? `收起${label}编辑` : `修改${label}`}</TooltipContent>
+      </Tooltip>
     </div>
-    {advanced ? <Textarea aria-label={`${label}画像内容`} value={text} disabled={disabled} onChange={(event) => onTextChange(event.target.value)} className="min-h-32 font-mono text-xs" />
-      : Object.keys(content).length || editing ? <ContentValue value={Object.keys(content).length ? content : { summary: '' }} label={label} editing={editing} disabled={disabled} onChange={(value) => onTextChange(JSON.stringify(value, null, 2))} />
-        : <p className="text-sm text-muted-foreground">还没有足够信息，可以稍后补充。</p>}
+    {Object.keys(content).length || editing ? editing
+      ? <ProfileContentFields content={Object.keys(editableContent).length ? editableContent : { summary: '' }} prefix={label} disabled={disabled} onChange={(value) => onTextChange(JSON.stringify(value, null, 2))} />
+      : <ContentValue value={editableContent} label={label} editing={false} disabled={disabled} onChange={() => undefined} />
+      : <p className="text-sm text-muted-foreground">还没有足够信息，可以稍后补充。</p>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {hasSupplementalInfo && <details className="text-xs text-muted-foreground">
       <summary className="cursor-pointer">补充信息</summary>
@@ -64,7 +88,6 @@ export function ProfileDimensionCard({ label, dimension, text, error, disabled =
     </details>}
     {editing && <div className="flex flex-wrap gap-2">
       {onSave && <Button size="sm" variant="secondary" disabled={disabled || Boolean(error)} onClick={onSave}>保存此维度</Button>}
-      <Button size="sm" variant="ghost" disabled={disabled || Boolean(error)} onClick={() => setAdvanced(!advanced)}>{advanced ? '返回易读编辑' : '高级编辑（JSON）'}</Button>
     </div>}
   </section>
 }

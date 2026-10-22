@@ -208,7 +208,7 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('object required')
       content = parsed as Record<string, unknown>
     } catch {
-      setProfileErrors((current) => ({ ...current, [name]: `${dimensionLabels[name] ?? name} 的内容必须是有效 JSON 对象` }))
+      setProfileErrors((current) => ({ ...current, [name]: `${dimensionLabels[name] ?? name}的画像内容格式不正确，请检查后保存` }))
       return
     }
     setProfileErrors((current) => ({ ...current, [name]: '' }))
