@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { ChevronDown, Folder, Loader2, Send, ShieldCheck } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -152,6 +152,7 @@ export default function AssistantHome() {
         </div>
       </section>
 
+      {modeId === 'profile' && !selectedProject && <div className="mt-4 text-center text-sm"><Link to="/portraits/new" state={{ interviewInput: composer }} className="font-medium text-primary underline">快速访谈建立人设</Link><p className="mt-1 text-xs text-muted-foreground">边聊边看六项画像和完善进度，支持语音输入。已输入的文字会带入访谈，确认后再发送。</p></div>}
       {modeNotice && <p role="status" className="mt-3 text-center text-xs text-muted-foreground">{modeNotice}</p>}
       {hiddenUnconfirmedProjectCount > 0 && mode?.available && <p className="mt-3 text-center text-xs text-muted-foreground">创作和复盘模式只显示已确认的人设；未显示的人设请先在画像模式完成确认。</p>}
       {modeId === 'review' && selectedProject && works.length === 0 && mode?.available && !worksQuery.isLoading && !worksQuery.isError && <p className="mt-3 text-center text-xs text-muted-foreground">这个画像下还没有可复盘的已完成作品。</p>}

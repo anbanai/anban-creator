@@ -1556,7 +1556,9 @@ function ChatConversation() {
         setRunState('running')
       }
     } finally {
-      if (!pendingSubmission || pendingSubmissionRef.current === pendingSubmission) {
+      // The stream can acknowledge and clear the submission before the HTTP
+      // request settles. That is still our send, and must release its lock.
+      if (!pendingSubmission || pendingSubmissionRef.current === pendingSubmission || (sessionRef.current === activeSessionId && pendingSubmissionRef.current === null)) {
         if (pendingSubmission?.status === 'failed') pendingSubmissionRef.current = null
         sendingMessageRef.current = false
         setSendingMessage(false)
@@ -1853,7 +1855,7 @@ function ChatConversation() {
                   const statusLabel = item.status === 'started' ? '已开始' : item.status === 'running' ? '进行中' : item.status === 'waiting' ? '等待回答' : item.status === 'completed' ? '已完成' : item.status === 'stopped' ? '已停止' : '出错'
                   const active = item.status === 'started' || item.status === 'running'
                   const text = active ? item.text.replace(/^Agent /, '') : item.status === 'waiting' ? '等待你的回答' : item.text
-                  return <div key={`activity-${item.id}`} className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-sm text-muted-foreground"><Loader2 className={`size-4 shrink-0 ${active ? 'animate-spin text-primary' : 'hidden'}`} /><span className="min-w-0 flex-1 break-words">{text}</span><span className="shrink-0 text-xs">{statusLabel}</span></div>
+                  return <details key={`activity-${item.id}`} className="rounded-lg border border-border/70 px-3 py-2 text-xs text-muted-foreground"><summary className="cursor-pointer">{active ? '正在整理，可展开查看进展' : item.status === 'error' ? '处理遇到问题，展开查看' : '处理记录'}</summary><div className="mt-2 flex items-center gap-2"><Loader2 className={`size-4 shrink-0 ${active ? 'animate-spin text-primary' : 'hidden'}`} /><span className="min-w-0 flex-1 break-words">{text}</span><span className="shrink-0 text-xs">{statusLabel}</span></div></details>
                 }
                 if (!draft?.ready || committed) return null
                 return <ConfirmCard key="draft-card" draft={draft} mode={assistantSession ? assistantModeId : 'profile'} isProjectUpdate={isProjectUpdate} needsReconfirmation={draftNeedsReconfirmation} canCommit={!turnActive && !sendingMessage && pendingQuestions.length === 0 && !draftNeedsReconfirmation && (assistantSession && assistantModeId !== 'profile' ? draft.ready === true : Boolean(confirmationTokenRef.current))} committing={committing} error={commitError} onCommit={() => void commitProject()} onContinue={async () => { if (!sessionId) return; confirmationTokenRef.current = null; setDraft((value) => value ? { ...value, ready: false } : value); setTimeline((items) => items.filter((entry) => entry.kind !== 'draft')); await sendAssistantMessage(sessionId, '继续编辑当前草稿').catch(() => undefined) }} />

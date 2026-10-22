@@ -152,7 +152,7 @@ function AppRoutes() {
               </AdminRoute>
             )}
           />
-          <Route path="projects/new/interview" element={<Navigate to="/chat?mode=profile" replace />} />
+          <Route path="projects/new/interview" element={<LazyPage component={PortraitOnboardingPage} />} />
           <Route path="portraits/new" element={<LazyPage component={PortraitOnboardingPage} />} />
           <Route path="portraits" element={<Navigate to="/projects" replace />} />
           <Route path="portraits/:projectId" element={<LazyPage component={PortraitDetailPage} />} />

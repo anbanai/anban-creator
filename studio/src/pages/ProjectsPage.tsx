@@ -292,12 +292,12 @@ export default function ProjectsPage() {
   const restoreMutation = useMutation({
     mutationFn: (id: string) => api.projects.restore(id),
     onSuccess: () => {
-      toast.success('项目已恢复')
+      toast.success('项目已取消归档')
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
     },
     onError: () => {
-      toast.error('恢复项目失败，请重试')
+      toast.error('取消归档项目失败，请重试')
     },
   })
 
@@ -317,7 +317,7 @@ export default function ProjectsPage() {
   }
 
   function openCreator() {
-    navigate('/chat?mode=profile')
+    navigate('/portraits/new')
   }
 
   function openProfileCreator(project: Project) {

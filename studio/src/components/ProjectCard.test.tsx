@@ -58,6 +58,14 @@ describe('ProjectCard', () => {
     unused_topics: 6,
   }
 
+  it('offers a whole-card detail link independently of archive actions', () => {
+    const onArchive = vi.fn()
+    render(<ProjectCard project={project()} onArchive={onArchive} />)
+    expect(screen.getByRole('link', { name: '查看人设详情：公众号创作项目' })).toHaveAttribute('href', '/portraits/project-1')
+    fireEvent.click(screen.getByRole('button', { name: '归档项目：公众号创作项目' }))
+    expect(onArchive).toHaveBeenCalledWith('project-1')
+  })
+
   it('shows project identity with a neutral project mark and Agent icon', () => {
     render(<ProjectCard project={project({ name: '共享品牌', avatar_url: 'https://example.com/avatar.png', keywords: '科技, 内容' })} />)
     expect(screen.getByText('共享品牌')).toBeInTheDocument()
@@ -206,7 +214,7 @@ describe('ProjectCard', () => {
     )
 
     expect(screen.queryByRole('button', { name: '归档项目：公众号创作项目' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '恢复项目：公众号创作项目' }))
+    fireEvent.click(screen.getByRole('button', { name: '取消归档项目：公众号创作项目' }))
     expect(onRestore).toHaveBeenCalledWith('project-1')
   })
 
