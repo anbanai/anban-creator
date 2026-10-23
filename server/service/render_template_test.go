@@ -118,6 +118,51 @@ func TestParseLayoutPlan_Valid(t *testing.T) {
 	if plan.Footer == nil || plan.Footer.Module == nil || *plan.Footer.Module != "cta" {
 		t.Errorf("[FAIL] Footer module wrong: %v", plan.Footer)
 	}
+	if plan.Footer.SlotID != "footer" || plan.Footer.SectionIndex != -1 {
+		t.Errorf("[FAIL] Footer position = %q/%d, want footer/-1", plan.Footer.SlotID, plan.Footer.SectionIndex)
+	}
+}
+
+func TestParseLayoutPlanRejectsMisclassifiedFooter(t *testing.T) {
+	_, err := ParseLayoutPlan(map[string]any{
+		"article_type": "listicle",
+		"slots": []any{
+			map[string]any{"slot_id": "hero", "section_index": 0},
+		},
+		"footer": map[string]any{"slot_id": "hero", "module": "cta"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "must be footer") {
+		t.Fatalf("ParseLayoutPlan error = %v, want misclassified footer rejection", err)
+	}
+}
+
+func TestRenderTemplateRendersFooterShorthandModule(t *testing.T) {
+	svc, repo := setupConvertTest(t)
+	userID := "user-footer-shorthand-001"
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
+	plan, err := ParseLayoutPlan(map[string]any{
+		"article_type": "listicle",
+		"slots": []any{
+			map[string]any{"slot_id": "hero", "section_index": 0},
+		},
+		"footer": map[string]any{
+			"module":      "cta",
+			"module_vars": map[string]string{"title": "下一步"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.RenderTemplate(t.Context(), userID, projectID, "# 标题\n\n## 正文\n\n内容。", plan, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.HTML, "下一步") {
+		t.Fatalf("footer module was not rendered:\n%s", result.HTML)
+	}
+	if len(result.SlotsRendered) != 1 || result.SlotsRendered[0].SlotID != "footer" || result.SlotsRendered[0].Status != "rendered" {
+		t.Fatalf("footer audit = %#v", result.SlotsRendered)
+	}
 }
 
 // ---------------------------------------------------------------------------

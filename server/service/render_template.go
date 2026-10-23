@@ -96,8 +96,16 @@ func ParseLayoutPlan(raw any) (*LayoutPlan, error) {
 			return nil, fmt.Errorf("slot[%d].slot_id %q is not a recognized slot (want one of hero/section_opener/inline_detail/footer)", i, slot.SlotID)
 		}
 	}
-	if plan.Footer != nil && plan.Footer.SlotID != "" && !validSlotIDs[plan.Footer.SlotID] {
-		return nil, fmt.Errorf("footer.slot_id %q is not a recognized slot", plan.Footer.SlotID)
+	if plan.Footer != nil {
+		// The public MCP footer shorthand omits slot_id/section_index. Normalize
+		// it before rendering so the footer module is not silently dropped by the
+		// slot dispatcher, while still rejecting an explicitly misclassified slot.
+		if plan.Footer.SlotID == "" {
+			plan.Footer.SlotID = "footer"
+			plan.Footer.SectionIndex = -1
+		} else if plan.Footer.SlotID != "footer" {
+			return nil, fmt.Errorf("footer.slot_id %q must be footer", plan.Footer.SlotID)
+		}
 	}
 	return &plan, nil
 }

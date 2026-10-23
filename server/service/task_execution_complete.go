@@ -173,9 +173,13 @@ func (s *TaskService) validateRequiredArticleImageSlots(ctx context.Context, tas
 	if len(match) != 2 {
 		return fmt.Errorf("visual rhythm plan has no machine-readable layout_plan")
 	}
-	var plan LayoutPlan
-	if err := json.Unmarshal(match[1], &plan); err != nil {
+	var rawPlan any
+	if err := json.Unmarshal(match[1], &rawPlan); err != nil {
 		return fmt.Errorf("decode visual rhythm layout_plan: %w", err)
+	}
+	plan, err := ParseLayoutPlan(rawPlan)
+	if err != nil {
+		return fmt.Errorf("validate visual rhythm layout_plan: %w", err)
 	}
 	available := make(map[string]bool, len(files))
 	for _, file := range files {
@@ -1168,8 +1172,12 @@ func (s *TaskService) inspectArticleDelivery(ctx context.Context, task *model.Ta
 	if len(match) != 2 {
 		return false, nil
 	}
-	var layoutPlan LayoutPlan
-	if err := json.Unmarshal(match[1], &layoutPlan); err != nil {
+	var rawPlan any
+	if err := json.Unmarshal(match[1], &rawPlan); err != nil {
+		return false, nil
+	}
+	layoutPlan, err := ParseLayoutPlan(rawPlan)
+	if err != nil {
 		return false, nil
 	}
 	renderer := s.contentRenderSvc
@@ -1177,7 +1185,7 @@ func (s *TaskService) inspectArticleDelivery(ctx context.Context, task *model.Ta
 		renderer = NewContentRenderService(s.repo, s.logger)
 	}
 	inspection, err := renderer.InspectArticle(ctx, task.UserID, InspectArticleRequest{
-		ProjectID: task.ProjectID, TaskID: task.ID, Markdown: string(markdown), LayoutPlan: &layoutPlan,
+		ProjectID: task.ProjectID, TaskID: task.ID, Markdown: string(markdown), LayoutPlan: layoutPlan,
 		Target: "delivery", HTML: string(htmlBody), Title: pkg.Article.Title,
 		Author: task.ProjectSnapshot.Data().Author, Digest: pkg.Article.Digest,
 		EvidencePaths: pkg.Readiness.EvidencePaths,

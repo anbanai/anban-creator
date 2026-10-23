@@ -898,6 +898,102 @@ func TestFinalizeArticlePublicationRejectsReadyPackageWithUnrenderedHTML(t *test
 	}
 }
 
+func TestFinalizeArticlePublicationRejectsInvalidDeliveryLayoutPlan(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		plan string
+	}{
+		{
+			name: "unknown slot",
+			plan: `{"article_type":"long-form-essay","template_name":"long-form-essay","slots":[{"slot_id":"typo","section_index":0}]}`,
+		},
+		{
+			name: "empty slots",
+			plan: `{"article_type":"long-form-essay","template_name":"long-form-essay","slots":[]}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo, db, task, execution := setupCloudCompletionTestWithDB(t, true)
+			ctx := context.Background()
+			execution.AgentPackVersion = articleServerInspectionPackVersion
+			if err := db.Model(&model.TaskExecution{}).Where("id = ?", execution.ID).Update("agent_pack_version", articleServerInspectionPackVersion).Error; err != nil {
+				t.Fatal(err)
+			}
+			withoutImages := false
+			task.ArticleWithCover = &withoutImages
+			task.ArticleWithContentImages = &withoutImages
+			if err := repo.Tasks().Update(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+
+			markdown := "# Final article\n\n## Body\n\nA deterministic article.\n"
+			rhythmPlan := []byte("# Rhythm plan\n\n```json\n" + tc.plan + "\n```\n")
+			var layoutPlan LayoutPlan
+			if err := json.Unmarshal([]byte(tc.plan), &layoutPlan); err != nil {
+				t.Fatal(err)
+			}
+			renderLogger := zerolog.Nop()
+			rendered, err := NewContentRenderService(repo, &renderLogger).RenderTemplate(ctx, task.UserID, task.ProjectID, markdown, &layoutPlan, "", task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			articleHTML := []byte(rendered.HTML)
+			packageBody, _ := json.Marshal(map[string]any{
+				"schema_version": "1.0",
+				"article": map[string]string{
+					"title": "Final article", "digest": "A deterministic article",
+					"content_path": "output/05-article.html", "content_sha256": fmt.Sprintf("%x", sha256.Sum256(articleHTML)),
+				},
+				"readiness": map[string]any{
+					"status": "ready", "code": "",
+					"evidence_paths": []string{"output/marketing-scan.json", "output/final-review.md", "output/viral-audit.md"},
+				},
+			})
+			scanBody, _ := json.Marshal(map[string]any{
+				"version": "1.0", "status": "passed", "content_hash": fmt.Sprintf("%x", sha256.Sum256([]byte(markdown))), "findings": []any{},
+			})
+			for _, artifact := range []struct {
+				path string
+				mime string
+				body []byte
+			}{
+				{path: "output/04-article-final.md", mime: "text/markdown", body: []byte(markdown)},
+				{path: "output/visual-rhythm-plan.md", mime: "text/markdown", body: rhythmPlan},
+				{path: "output/05-article.html", mime: "text/html", body: articleHTML},
+				{path: "output/draft.json", mime: "application/json", body: packageBody},
+				{path: "output/marketing-scan.json", mime: "application/json", body: scanBody},
+				{path: "output/final-review.md", mime: "text/markdown", body: []byte("# Final review\n\nPassed.\n")},
+				{path: "output/viral-audit.md", mime: "text/markdown", body: []byte("# Viral audit\n\nPassed.\n")},
+			} {
+				addCloudOutcomeArtifact(t, svc, repo, task, execution, artifact.path, artifact.mime, artifact.body)
+			}
+			if err := repo.TaskFiles().DeliverCurrentExecution(ctx, task.ID, execution.ID); err != nil {
+				t.Fatal(err)
+			}
+			api := &fakeWechatPublicationAPI{addResponse: &appwechat.DraftAddResponse{MediaID: "must-not-publish"}}
+			logger := zerolog.New(io.Discard)
+			svc.SetWechatPublicationService(NewWechatPublicationService(repo, func(*model.Project) (WechatPublicationAPI, error) {
+				return api, nil
+			}, &logger))
+
+			status, evidence, err := svc.finalizeArticlePublication(ctx, task, execution)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result publicationDeliveryResult
+			if err := json.Unmarshal(evidence, &result); err != nil {
+				t.Fatal(err)
+			}
+			if status != model.TaskExecutionDraftDeliveryBlocked || result.Code != "article_inspection_blocked" || result.Attempted {
+				t.Fatalf("status=%q evidence=%s", status, evidence)
+			}
+			if api.addCalls != 0 || api.draftListCalls != 0 {
+				t.Fatalf("WeChat calls = add:%d list:%d, want none", api.addCalls, api.draftListCalls)
+			}
+		})
+	}
+}
+
 func TestFinalizeArticlePublicationRequiresContentImageInFinalHTML(t *testing.T) {
 	assertArticlePublicationVisualHTML(t, func(coverURL, _ string) []byte {
 		return []byte(`<section><img src="` + coverURL + `"><p>Final article without its generated body image.</p></section>`)
