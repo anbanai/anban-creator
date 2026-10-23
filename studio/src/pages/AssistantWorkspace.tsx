@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowUp, Check, ChevronDown, Loader2, MessageSquare, Sparkles, UserRound } from 'lucide-react'
+import { ArrowUp, Check, Loader2, MessageSquare, Sparkles, UserRound } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 import { useLocation } from 'react-router-dom'
 import { api } from '@/lib/api'
@@ -8,12 +8,12 @@ import type { AssistantModeID, AssistantWorkspace as AssistantWorkspaceState, As
 import { useAuth } from '@/contexts/AuthContext'
 import { streamAssistantWorkspace, type InteractiveStreamEvent } from '@/lib/interactive-events'
 import { Button } from '@/components/ui/button'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from '@/components/ui/input-group'
 import { DshQuestionComposer, type DshQuestion, type DshQuestionAnswer } from '@/components/dsh-user-questions/DshQuestionComposer'
 import { AssistantVideoEditInputs } from '@/components/video-edit/AssistantVideoEditInputs'
 import { VideoEditProjectDefaultsPanel } from '@/components/video-edit/VideoEditProjectDefaultsPanel'
 import { TaskResults } from '@/components/tasks/TaskResults'
+import { AssistantContextBar } from '@/components/assistant/AssistantContextBar'
 import type { InputAttachment } from '@/types/input-attachment'
 import type { VideoEditDefaults, VideoEditPreferences } from '@/types/video-edit'
 import type { Task, TaskFile } from '@/types'
@@ -22,11 +22,10 @@ type Message = { id: string; role: 'user' | 'assistant'; text: string }
 type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers'] }
 type Draft = Record<string, unknown>
 type RouteState = { modeId?: AssistantModeID; projectId?: string; contentId?: string; checkpointId?: string; initialMessage?: string }
-type PersistedWorkspace = { workspace: AssistantWorkspaceState; lastEventIds: Record<string, string | undefined> }
+type PersistedWorkspace = { workspace: AssistantWorkspaceState; lastEventIds: Record<string, string | undefined>; creationType?: string }
 
 const WORKSPACE_STORAGE_KEY = 'anban:assistant-workspace'
 
-const MODES: AssistantModeID[] = ['profile', 'creation', 'review']
 const CREATION_TYPES: Record<string, { value: string; label: string }[]> = {
   wechat: [{ value: 'wechat-article', label: '公众号文章' }, { value: 'wechat-picture', label: '公众号贴图' }],
   seednote: [{ value: 'seednote', label: '种草笔记' }],
@@ -103,7 +102,7 @@ function readPersistedWorkspace(): PersistedWorkspace | null {
     if (!value || typeof value !== 'object' || !('workspace' in value)) return null
     const candidate = value as Partial<PersistedWorkspace>
     if (!candidate.workspace || typeof candidate.workspace !== 'object' || !isMode(candidate.workspace.mode_id) || typeof candidate.workspace.id !== 'string') return null
-    return { workspace: candidate.workspace as AssistantWorkspaceState, lastEventIds: candidate.lastEventIds ?? {} }
+    return { workspace: candidate.workspace as AssistantWorkspaceState, lastEventIds: candidate.lastEventIds ?? {}, creationType: typeof candidate.creationType === 'string' ? candidate.creationType : undefined }
   } catch {
     return null
   }
@@ -122,7 +121,7 @@ export default function AssistantWorkspace() {
   const [projectId, setProjectId] = useState(routeState.projectId ?? persisted?.workspace.project_id ?? '')
   const [contentId, setContentId] = useState(routeState.contentId ?? persisted?.workspace.content_id ?? '')
   const [composer, setComposer] = useState(routeState.initialMessage ?? '')
-  const [creationType, setCreationType] = useState('')
+  const [creationType, setCreationType] = useState(routeHasContext ? '' : persisted?.creationType ?? '')
   const [videoEditAssets, setVideoEditAssets] = useState<InputAttachment[]>([])
   const [videoEditBrief, setVideoEditBrief] = useState('')
   const [videoEditPreferences, setVideoEditPreferences] = useState<VideoEditPreferences>({})
@@ -130,14 +129,13 @@ export default function AssistantWorkspace() {
   const [videoEditUploading, setVideoEditUploading] = useState(false)
   const [videoEditUploadFailed, setVideoEditUploadFailed] = useState(false)
   const [workspace, setWorkspace] = useState<AssistantWorkspaceState | null>(() => routeHasContext ? null : persisted?.workspace ?? null)
+  const [conversationPhase, setConversationPhase] = useState<'setup' | 'active'>(() => routeHasContext ? 'setup' : persisted?.workspace ? 'active' : 'setup')
   const [messagesByMode, setMessagesByMode] = useState<Record<string, Message[]>>({})
   const [questionsByMode, setQuestionsByMode] = useState<Record<string, QuestionBatch[]>>({})
   const [draftByMode, setDraftByMode] = useState<Record<string, Draft | null>>({})
   const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [responding, setResponding] = useState(false)
-  const [switching, setSwitching] = useState(false)
-  const [pendingMode, setPendingMode] = useState<AssistantModeID | null>(null)
   const [committing, setCommitting] = useState(false)
   const [lastEventIds, setLastEventIds] = useState<Record<string, string | undefined>>(persisted?.lastEventIds ?? {})
   const streamAbort = useRef<AbortController | null>(null)
@@ -147,16 +145,18 @@ export default function AssistantWorkspace() {
 
   useEffect(() => {
     if (!workspace) {
-      if (routeHasContext) sessionStorage.removeItem(WORKSPACE_STORAGE_KEY)
+      sessionStorage.removeItem(WORKSPACE_STORAGE_KEY)
       return
     }
-    sessionStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({ workspace, lastEventIds }))
-  }, [workspace, lastEventIds, routeHasContext])
+    sessionStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({ workspace, lastEventIds, creationType }))
+  }, [workspace, lastEventIds, creationType, routeHasContext])
 
   const projects = bootstrap?.projects ?? []
-  const selectionMode = pendingMode ?? mode
+  const selectionMode = mode
   const selectableProjects = selectionMode === 'profile' ? projects : projects.filter((project) => project.profileReady)
-  const selectedProject = selectableProjects.find((project) => project.id === projectId) ?? (selectionMode !== 'profile' && selectableProjects.length === 1 ? selectableProjects[0] : undefined)
+  const resolvedProjectId = conversationPhase === 'active' ? workspace?.project_id ?? projectId : projectId
+  const selectedProject = selectableProjects.find((project) => project.id === resolvedProjectId) ?? (selectionMode !== 'profile' && selectableProjects.length === 1 ? selectableProjects[0] : undefined)
+  const contextProjectId = selectedProject?.id ?? resolvedProjectId
   const creationTypes = CREATION_TYPES[selectedProject?.platform ?? ''] ?? []
   const selectedCreationType = creationTypes.some((item) => item.value === creationType) ? creationType : creationTypes[0]?.value ?? ''
   const isVideoEditCreation = mode === 'creation' && selectedCreationType === 'video-edit'
@@ -169,7 +169,8 @@ export default function AssistantWorkspace() {
     staleTime: 30_000,
   })
   const works = worksQuery.data?.pages.flatMap((page) => page.items) ?? []
-  const selectedWork = works.find((work) => work.id === contentId) ?? (selectionMode === 'review' && works.length === 1 ? works[0] : undefined)
+  const resolvedContentId = conversationPhase === 'active' ? workspace?.content_id ?? contentId : contentId
+  const selectedWork = works.find((work) => work.id === resolvedContentId) ?? (selectionMode === 'review' && works.length === 1 ? works[0] : undefined)
   const reviewVideoQuery = useQuery({
     queryKey: ['assistant-review-video', selectedWork?.id],
     queryFn: async () => Promise.all([api.tasks.get(selectedWork!.id), api.tasks.files(selectedWork!.id)]),
@@ -203,11 +204,31 @@ export default function AssistantWorkspace() {
     : undefined
   const profilePlatform = selectedProject?.platform ?? stringValue(draftProject?.platform)
   const isVideoEditProfile = mode === 'profile' && profilePlatform === 'video-edit'
-  const canSend = Boolean(composer.trim()) && Boolean(activeMode?.available) && (mode === 'profile' || Boolean(selectedProject)) && (mode !== 'review' || Boolean(selectedWork)) && !sending && !responding && !switching
+  const canSend = Boolean(composer.trim()) && Boolean(activeMode?.available) && (mode === 'profile' || Boolean(selectedProject)) && (mode !== 'review' || Boolean(selectedWork)) && !sending && !responding
+
+  const resetExpiredWorkspace = () => {
+    setWorkspace(null)
+    setConversationPhase('setup')
+    setLastEventIds({})
+    setResponding(false)
+    setMessagesByMode((current) => ({ ...current, [mode]: [] }))
+    setQuestionsByMode((current) => ({ ...current, [mode]: [] }))
+    setDraftByMode((current) => ({ ...current, [mode]: null }))
+  }
 
   useEffect(() => {
     if (mode === 'profile' && selectedProject) setVideoEditDefaults(selectedProject.video_edit_defaults ?? {})
   }, [mode, selectedProject?.id])
+
+  useEffect(() => {
+    if (conversationPhase !== 'setup' || mode !== 'creation') return
+    if (creationTypes.length && !creationTypes.some((item) => item.value === creationType)) setCreationType(creationTypes[0].value)
+    if (!creationTypes.length && creationType) setCreationType('')
+  }, [conversationPhase, mode, creationType, creationTypes])
+
+  useEffect(() => {
+    if (conversationPhase === 'setup' && mode !== 'profile' && !projectId && selectableProjects.length === 1) setProjectId(selectableProjects[0].id)
+  }, [conversationPhase, mode, projectId, selectableProjects])
 
   useEffect(() => {
     if (!workspace || !token) return
@@ -291,23 +312,34 @@ export default function AssistantWorkspace() {
     setError(null)
     setComposer('')
     setMessagesByMode((current) => ({ ...current, [mode]: [...(current[mode] ?? []), { id: optimisticID, role: 'user', text: messageText }] }))
+    let createdWorkspace: AssistantWorkspaceState | null = null
     try {
       let currentWorkspace = workspace
       if (!currentWorkspace) {
         if (!workspaceCreateKey.current) workspaceCreateKey.current = crypto.randomUUID()
         currentWorkspace = await api.assistant.createWorkspace({ mode_id: mode, ...(selectedProject ? { project_id: selectedProject.id } : {}), ...(selectedWork ? { content_id: selectedWork.id } : {}), ...(routeState.checkpointId ? { checkpoint_id: routeState.checkpointId } : {}) }, workspaceCreateKey.current)
         workspaceCreateKey.current = null
-        setWorkspace(currentWorkspace)
+        createdWorkspace = currentWorkspace
       }
       await api.assistant.workspaceMessage(currentWorkspace.id, mode, messageText)
+      if (!workspace) {
+        const acceptedWorkspace: AssistantWorkspaceState = {
+          ...currentWorkspace,
+          mode_id: mode,
+          ...(selectedProject ? { project_id: selectedProject.id } : {}),
+          ...(selectedWork ? { content_id: selectedWork.id } : {}),
+        }
+        setWorkspace(acceptedWorkspace)
+        setConversationPhase('active')
+      }
       setResponding(true)
     } catch (sendError) {
+      if (createdWorkspace) void Promise.resolve(api.assistant.closeWorkspace(createdWorkspace.id)).catch(() => undefined)
       setComposer(text)
       setMessagesByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).filter((message) => message.id !== optimisticID) }))
       const errorCode = assistantWorkspaceErrorCode(sendError)
       if (errorCode === 'assistant_workspace_expired') {
-        setWorkspace(null)
-        setLastEventIds({})
+        resetExpiredWorkspace()
         setError('对话已过期。消息仍保留在输入框中，重新发送后会建立新会话。')
       } else if (errorCode === 'assistant_workspace_busy') {
         setError('助手正在处理上一条消息，输入已保留，请稍后重试。')
@@ -326,8 +358,8 @@ export default function AssistantWorkspace() {
     }
   }
 
-  const chooseMode = async (nextMode: AssistantModeID, context?: { projectId?: string; contentId?: string }) => {
-    if (nextMode === mode && !pendingMode || switching) return
+  const chooseMode = (nextMode: AssistantModeID) => {
+    if (conversationPhase === 'active' || nextMode === mode) return
     const candidate = bootstrap?.modes.find((item) => item.id === nextMode)
     if (!candidate) {
       setError('当前模式暂时无法加载，请稍后重试')
@@ -338,46 +370,12 @@ export default function AssistantWorkspace() {
       return
     }
     setError(null)
-    if (!workspace) {
-      setPendingMode(null)
+    if (conversationPhase === 'setup') {
       setMode(nextMode)
       setContentId('')
       return
     }
-    const requestedProjectId = context?.projectId ?? selectedProject?.id ?? projectId
-    const requestedContentId = context?.contentId ?? selectedWork?.id ?? contentId
-    if (nextMode === 'review' && (!requestedProjectId || !requestedContentId)) {
-      setPendingMode(nextMode)
-      setProjectId(requestedProjectId)
-      setContentId('')
-      return
-    }
-    setSwitching(true)
-    try {
-      const nextWorkspace = await api.assistant.switchWorkspaceMode(workspace.id, nextMode, {
-        ...(requestedProjectId ? { project_id: requestedProjectId } : {}),
-        ...(requestedContentId ? { content_id: requestedContentId } : {}),
-      })
-      setMode(nextMode)
-      setPendingMode(null)
-      setProjectId(nextWorkspace.project_id ?? projectId)
-      setContentId(nextWorkspace.content_id ?? contentId)
-      setWorkspace(nextWorkspace)
-      setResponding(false)
-    } catch (switchError) {
-      const errorCode = assistantWorkspaceErrorCode(switchError)
-      if (errorCode === 'assistant_workspace_expired') {
-        setWorkspace(null)
-        setLastEventIds({})
-        setError('对话已过期，请重新发送消息以建立新会话。')
-      } else if (errorCode === 'assistant_workspace_busy') {
-        setError('助手仍在处理上一条消息，请稍后切换。')
-      } else {
-        setError(switchError instanceof Error ? switchError.message : '当前模式正在处理，请稍后切换')
-      }
-    } finally {
-      setSwitching(false)
-    }
+    return
   }
 
   const submitAnswers = async (batch: QuestionBatch, answer: DshQuestionAnswer) => {
@@ -388,8 +386,7 @@ export default function AssistantWorkspace() {
     } catch (answerError) {
       const errorCode = assistantWorkspaceErrorCode(answerError)
       if (errorCode === 'assistant_workspace_expired') {
-        setWorkspace(null)
-        setLastEventIds({})
+        resetExpiredWorkspace()
         setError('对话已过期，请重新发送消息以建立新会话。')
       } else if (errorCode === 'assistant_workspace_busy') {
         setError('助手仍在处理上一条消息，请稍后提交回答。')
@@ -477,24 +474,17 @@ export default function AssistantWorkspace() {
       setVideoEditUploadFailed(false)
     }
   }
-  const resetCreationProject = (value: string) => {
-    setProjectId(value)
+  const resetCreationProject = (value: string | null) => {
+    const nextValue = value ?? ''
+    setProjectId(nextValue)
     setContentId('')
-    setVideoEditDefaults(projects.find((project) => project.id === value)?.video_edit_defaults ?? {})
+    setVideoEditDefaults(projects.find((project) => project.id === nextValue)?.video_edit_defaults ?? {})
     setCreationType('')
     setVideoEditAssets([])
     setVideoEditBrief('')
     setVideoEditPreferences({})
     setVideoEditUploadFailed(false)
   }
-  const creationTypeSelector = mode === 'creation' && selectedProject ? (
-    <label className="mx-auto mt-3 block w-full max-w-xs space-y-1.5 text-left text-sm">
-      <span>创作类型</span>
-      <NativeSelect className="w-full" aria-label="创作类型" value={selectedCreationType} onChange={(event) => chooseCreationType(event.target.value)}>
-        {creationTypes.map((item) => <NativeSelectOption key={item.value} value={item.value}>{item.label}</NativeSelectOption>)}
-      </NativeSelect>
-    </label>
-  ) : null
   const videoEditInputs = isVideoEditCreation && selectedProject ? (
     <AssistantVideoEditInputs
       assets={videoEditAssets}
@@ -512,9 +502,9 @@ export default function AssistantWorkspace() {
   const selectModePrerequisiteAction = () => {
     setError(null)
     setMode(modePrerequisiteAction.mode)
-    setPendingMode(null)
     setContentId('')
   }
+
 
   return (
     <main data-testid="assistant-workspace" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
@@ -522,27 +512,56 @@ export default function AssistantWorkspace() {
         <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground"><Sparkles className="size-4" /></span><span className="text-sm font-semibold">AI 助手</span>
       </header>
 
-      {!workspace ? (
-        <section className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-5 py-12 text-center">
+      {conversationPhase === 'setup' ? (
+        <section className="mx-auto flex w-full max-w-4xl flex-1 flex-col justify-center px-5 py-12 text-center">
           <p className="text-sm font-medium text-primary">Anban AI</p>
           <h1 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{heading}</h1>
-          <nav className="mx-auto mt-10 flex flex-wrap justify-center gap-1" aria-label="助手模式">{MODES.map((candidate) => { const item = bootstrap?.modes.find((entry) => entry.id === candidate); const blockedByRuntime = item?.disabledReason === '助手运行环境暂不可用，请稍后重试'; return <button key={candidate} type="button" aria-pressed={mode === candidate} disabled={bootstrapQuery.isLoading || blockedByRuntime} aria-disabled={blockedByRuntime} onClick={() => void chooseMode(candidate)} className={`rounded-full px-4 py-2 text-sm ${mode === candidate ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'} ${blockedByRuntime ? 'opacity-50' : ''}`}>{modeLabel(candidate)}</button> })}</nav>
-          <p className="mx-auto mt-2 min-h-6 max-w-xl text-sm leading-6 text-muted-foreground" aria-live="polite">{activeMode?.description ?? (bootstrapQuery.isLoading ? '正在准备创作空间…' : '')}</p>
           {!activeMode?.available && activeMode?.disabledReason && !isRuntimeUnavailable && <div className="mx-auto mt-3 flex w-full max-w-xl flex-col items-center gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3 sm:flex-row sm:justify-between"><p role="status" className="text-left text-sm leading-6 text-muted-foreground">{activeMode.disabledReason}</p><Button type="button" variant="outline" size="sm" className="shrink-0" onClick={selectModePrerequisiteAction}>{modePrerequisiteAction.label}</Button></div>}
           {bootstrapQuery.isError && <div className="mt-3 flex flex-wrap items-center justify-center gap-3"><p role="alert" className="text-sm text-destructive">AI 助手暂时无法加载，请稍后重试。</p><Button type="button" variant="outline" size="sm" disabled={bootstrapQuery.isFetching} onClick={() => void bootstrapQuery.refetch()}>{bootstrapQuery.isFetching ? <Loader2 className="size-4 animate-spin" /> : '重试加载'}</Button></div>}
           {bootstrapQuery.isLoading && <p role="status" className="sr-only">正在加载创作模式</p>}
-          {(mode === 'profile' || selectedProject || activeMode?.available) && <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} onProject={resetCreationProject} onContent={setContentId} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />}
+          <AssistantContextBar
+            phase="setup"
+            disabled={sending}
+            mode={mode}
+            modes={bootstrap?.modes ?? []}
+            projects={modePrerequisiteBlocked ? [] : selectableProjects}
+            projectId={modePrerequisiteBlocked ? '' : contextProjectId}
+            works={works}
+            contentId={selectedWork?.id ?? contentId}
+            creationType={selectedCreationType}
+            creationTypeOptions={creationTypes}
+            loadingProjects={bootstrapQuery.isLoading}
+            loadingWorks={worksQuery.isLoading}
+            hasMoreWorks={Boolean(worksQuery.hasNextPage)}
+            onModeChange={(nextMode) => void chooseMode(nextMode)}
+            onProjectChange={resetCreationProject}
+            onContentChange={(value) => { setContentId(value); if (!projectId && selectedProject) setProjectId(selectedProject.id) }}
+            onCreationTypeChange={chooseCreationType}
+            onLoadMoreWorks={() => void worksQuery.fetchNextPage()}
+          />
           {isVideoEditProfile && <VideoEditProjectDefaultsPanel value={videoEditDefaults} onChange={setVideoEditDefaults} />}
           {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
           {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && (
             <VideoEditReviewResults query={reviewVideoQuery} />
           )}
-          {creationTypeSelector}
           {videoEditInputs}
-          <Composer value={composer} placeholder={composerPlaceholder} inputDisabled={sending || switching || composerBlocked} sendDisabled={!canSend} status={missingContextInstruction} onChange={setComposer} onSend={() => void sendMessage()} />
+          <Composer value={composer} placeholder={composerPlaceholder} inputDisabled={sending || composerBlocked} sendDisabled={!canSend} status={missingContextInstruction} onChange={setComposer} onSend={() => void sendMessage()} />
         </section>
       ) : (
         <section className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col px-4 pb-3 md:px-8">
+          <AssistantContextBar
+            phase="locked"
+            mode={mode}
+            modes={bootstrap?.modes ?? []}
+            projects={selectableProjects}
+            projectId={contextProjectId}
+            works={works}
+            contentId={resolvedContentId}
+            creationType={selectedCreationType}
+            creationTypeOptions={creationTypes}
+            loadingProjects={bootstrapQuery.isLoading}
+            loadingWorks={worksQuery.isLoading}
+          />
           <div data-testid="assistant-conversation" className="min-h-0 flex-1 overflow-y-auto py-4" aria-live="polite">
             {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && (
               <VideoEditReviewResults query={reviewVideoQuery} />
@@ -551,7 +570,7 @@ export default function AssistantWorkspace() {
             {activeDraft && <div className="mt-6 rounded-xl border border-primary/30 bg-primary/[0.04] p-4"><div className="flex items-center gap-2 text-sm font-medium"><Check className="size-4 text-emerald-600" />{modeLabel(mode)}已整理完成</div><p className="mt-2 text-xs text-muted-foreground">确认后保存当前结构化结果。</p><Button className="mt-4" size="sm" disabled={committing || (mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0))} onClick={() => void commitDraft()}>{committing ? <Loader2 className="size-4 animate-spin" /> : '确认并保存'}</Button></div>}
             {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
           </div>
-          <Composer value={composer} placeholder={activeQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || activeQuestions.length > 0} sendDisabled={!canSend || activeQuestions.length > 0} status={responding ? '助手正在回复…' : undefined} onChange={setComposer} onSend={() => void sendMessage()} />
+          <Composer value={composer} placeholder={activeQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || activeQuestions.length > 0} sendDisabled={!canSend || activeQuestions.length > 0} status={responding ? '助手正在回复…' : undefined} onChange={setComposer} onSend={() => void sendMessage()} />
         </section>
       )}
     </main>
@@ -563,10 +582,6 @@ function VideoEditReviewResults({ query }: { query: { data?: [Task, TaskFile[]];
   if (query.isError) return <p role="alert" className="py-4 text-sm text-destructive">作品产物暂时无法加载。</p>
   if (!query.data) return null
   return <div className="mb-6"><TaskResults task={query.data[0]} files={query.data[1]} /></div>
-}
-
-function WorkspaceSelectors({ mode, projects, projectId, contentId, works, disabled = false, onProject, onContent, onMore, hasMore }: { mode: AssistantModeID; projects: AssistantProject[]; projectId: string; contentId: string; works: AssistantProject['works']; disabled?: boolean; onProject: (value: string) => void; onContent: (value: string) => void; onMore: () => void; hasMore: boolean }) {
-  return <div className="mx-auto mt-6 flex w-full max-w-xs flex-col items-stretch gap-3"><NativeSelect className="w-full" aria-label="选择画像" value={projectId} disabled={disabled} onChange={(event) => onProject(event.target.value)}><NativeSelectOption value="">{mode === 'profile' ? '新建画像' : '选择画像'}</NativeSelectOption>{projects.map((project) => <NativeSelectOption key={project.id} value={project.id}>{project.name}</NativeSelectOption>)}</NativeSelect>{mode === 'review' && <NativeSelect className="w-full" aria-label="选择作品" value={contentId} disabled={disabled} onChange={(event) => onContent(event.target.value)}><NativeSelectOption value="">选择作品</NativeSelectOption>{works.map((work) => <NativeSelectOption key={work.id} value={work.id}>{work.title}</NativeSelectOption>)}</NativeSelect>}{mode === 'review' && hasMore && <Button type="button" variant="ghost" size="sm" className="self-end" aria-label="加载更多作品" disabled={disabled} onClick={onMore}><ChevronDown className="size-4" />加载更多作品</Button>}</div>
 }
 
 function Composer({ value, placeholder, inputDisabled, sendDisabled, status, onChange, onSend }: { value: string; placeholder: string; inputDisabled: boolean; sendDisabled: boolean; status?: string; onChange: (value: string) => void; onSend: () => void }) {
