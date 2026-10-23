@@ -4,10 +4,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -32,6 +36,108 @@ func TestOnboardingRoutesRequireAuthentication(t *testing.T) {
 		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusUnauthorized {
 			t.Fatalf("%s status %d", entry.path, resp.StatusCode)
+		}
+	}
+}
+
+func TestConfiguredRateLimitTiersAreAppliedPerRoute(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	t.Cleanup(func() { _ = repo.Close() })
+	userID := uuid.NewString()
+	if err := repo.Users().Create(t.Context(), &model.User{ID: userID, Email: "rate-limit@example.com", Tier: model.TierPro}); err != nil {
+		t.Fatal(err)
+	}
+	jwtSvc, err := auth.NewJWTService("rate-limit-router-secret", "24h", "168h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := jwtSvc.GenerateAccessToken(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	miniRedis := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: miniRedis.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	logger := zerolog.New(io.Discard)
+	cfg := &config.Config{
+		RateLimit: config.RateLimitConfig{
+			API:      config.RateLimitTierConfig{Requests: 1, Window: time.Minute},
+			Auth:     config.RateLimitTierConfig{Requests: 1, Window: time.Minute},
+			SendCode: config.RateLimitTierConfig{Requests: 1, Window: time.Minute},
+			Agent:    config.RateLimitTierConfig{Requests: 1, Window: time.Minute},
+			Admin:    config.RateLimitTierConfig{Requests: 1, Window: time.Minute},
+		},
+	}
+	app := NewRouter(&Services{
+		Config:         cfg,
+		Logger:         &logger,
+		Redis:          rdb,
+		Repo:           repo,
+		JWTService:     jwtSvc,
+		AuthHandler:    handler.NewAuthHandler(jwtSvc, nil, nil, repo, nil, &logger, nil, false, 3, rdb),
+		AgentHandler:   handler.NewAgentHandler(nil, nil, &logger),
+		BillingHandler: handler.NewBillingHandler(nil, nil, nil, nil, handler.BillingHandlerOptions{}, &logger),
+	})
+
+	assertTier := func(name, method, path, authorization string, wantLimit string) {
+		t.Helper()
+		request := func() *http.Response {
+			req := httptest.NewRequest(method, path, nil)
+			if authorization != "" {
+				req.Header.Set("Authorization", authorization)
+			}
+			resp, requestErr := app.Test(req)
+			if requestErr != nil {
+				t.Fatalf("%s request: %v", name, requestErr)
+			}
+			return resp
+		}
+		first := request()
+		_ = first.Body.Close()
+		if first.StatusCode == http.StatusTooManyRequests {
+			t.Fatalf("%s first request unexpectedly rate limited", name)
+		}
+		if first.Header.Get("X-RateLimit-Limit") != wantLimit {
+			t.Fatalf("%s first limit = %q, want %q", name, first.Header.Get("X-RateLimit-Limit"), wantLimit)
+		}
+		second := request()
+		body, readErr := io.ReadAll(second.Body)
+		_ = second.Body.Close()
+		if readErr != nil {
+			t.Fatalf("%s response body: %v", name, readErr)
+		}
+		if second.StatusCode != http.StatusTooManyRequests {
+			t.Fatalf("%s second status = %d, want %d", name, second.StatusCode, http.StatusTooManyRequests)
+		}
+		if !strings.Contains(string(body), `"code":42900`) || !strings.Contains(string(body), "too many requests, please try again later") {
+			t.Fatalf("%s second body = %s, want the established 429 response contract", name, body)
+		}
+	}
+
+	assertTier("protected API", http.MethodGet, "/api/v1/auth/me", "Bearer "+token, "1")
+	assertTier("auth", http.MethodPost, "/api/v1/auth/login", "", "1")
+	assertTier("send code", http.MethodPost, "/api/v1/auth/send-code", "", "1")
+	assertTier("agent", http.MethodPost, "/api/v1/agent/bootstrap", "Bearer workload-token", "1")
+	assertTier("admin", http.MethodPost, "/api/admin/billing/topups", "", "1")
+
+	keys := miniRedis.Keys()
+	for _, bucket := range []string{"auth", "api"} {
+		found := false
+		for _, key := range keys {
+			if strings.HasPrefix(key, "ratelimit:"+bucket+":") && strings.HasSuffix(key, ":/api/v1/auth/me") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("protected API request did not create an independent %s limiter key; keys=%v", bucket, keys)
 		}
 	}
 }

@@ -5,6 +5,24 @@ server:
   tls_key_file: "${ANBAN_SERVER_TLS_KEY_FILE}"
   host: "0.0.0.0"
 
+# Per-bucket, per-IP, per-request-path limits. Windows use Go duration syntax.
+rate_limit:
+  api:
+    requests: ${ANBAN_RATE_LIMIT_API_REQUESTS:-300}
+    window: ${ANBAN_RATE_LIMIT_API_WINDOW:-1m}
+  auth:
+    requests: ${ANBAN_RATE_LIMIT_AUTH_REQUESTS:-20}
+    window: ${ANBAN_RATE_LIMIT_AUTH_WINDOW:-1m}
+  send_code:
+    requests: ${ANBAN_RATE_LIMIT_SEND_CODE_REQUESTS:-5}
+    window: ${ANBAN_RATE_LIMIT_SEND_CODE_WINDOW:-10m}
+  agent:
+    requests: ${ANBAN_RATE_LIMIT_AGENT_REQUESTS:-300}
+    window: ${ANBAN_RATE_LIMIT_AGENT_WINDOW:-1m}
+  admin:
+    requests: ${ANBAN_RATE_LIMIT_ADMIN_REQUESTS:-10}
+    window: ${ANBAN_RATE_LIMIT_ADMIN_WINDOW:-1m}
+
 logging:
   level: info
 

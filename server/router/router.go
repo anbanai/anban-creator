@@ -185,10 +185,9 @@ func NewRouter(svc *Services) *fiber.App {
 	// Public API group — /api/v1/auth
 	// ---------------------------------------------------------------------------
 
-	// Stricter rate limiter for auth endpoints (10 requests per minute per IP).
-	authRateLimit := appmiddleware.RateLimit(svc.Redis, 10, 1*time.Minute)
-	// Rate limit for send-code: 10 requests per 10 minutes per IP.
-	sendCodeRateLimit := appmiddleware.RateLimit(svc.Redis, 10, 10*time.Minute)
+	// Auth and verification-code requests have separate, configurable limits.
+	authRateLimit := appmiddleware.RateLimit(svc.Redis, "auth", svc.Config.RateLimit.Auth.Requests, svc.Config.RateLimit.Auth.Window)
+	sendCodeRateLimit := appmiddleware.RateLimit(svc.Redis, "send_code", svc.Config.RateLimit.SendCode.Requests, svc.Config.RateLimit.SendCode.Window)
 	authPublic := app.Group("/api/v1/auth", authRateLimit)
 	if svc.AuthHandler != nil {
 		authPublic.Post("/send-code", sendCodeRateLimit, svc.AuthHandler.SendCode)
@@ -209,7 +208,7 @@ func NewRouter(svc *Services) *fiber.App {
 	// ---------------------------------------------------------------------------
 
 	if svc.AgentHandler != nil {
-		agentLimiter := appmiddleware.RateLimit(svc.Redis, 300, 1*time.Minute)
+		agentLimiter := appmiddleware.RateLimit(svc.Redis, "agent", svc.Config.RateLimit.Agent.Requests, svc.Config.RateLimit.Agent.Window)
 		app.Post("/api/v1/agent/bootstrap", agentLimiter, svc.AgentHandler.WorkloadAuthMiddleware, svc.AgentHandler.Bootstrap)
 		// Register each Agent route explicitly. A prefix group here also applies its
 		// execution-token middleware to user-facing GET routes under /agent, such
@@ -240,7 +239,7 @@ func NewRouter(svc *Services) *fiber.App {
 	// ---------------------------------------------------------------------------
 
 	authMiddleware := appmiddleware.AuthMiddleware(svc.JWTService, svc.Repo, svc.Logger)
-	rateLimiter := appmiddleware.RateLimit(svc.Redis, 100, 1*time.Minute)
+	rateLimiter := appmiddleware.RateLimit(svc.Redis, "api", svc.Config.RateLimit.API.Requests, svc.Config.RateLimit.API.Window)
 	apiV1 := app.Group("/api/v1", authMiddleware, rateLimiter)
 	if svc.InteractiveHandler != nil {
 		interactive := apiV1.Group("/interactive")
@@ -286,7 +285,7 @@ func NewRouter(svc *Services) *fiber.App {
 		billingAPI.Post("/quotes", svc.BillingHandler.CreateTaskQuote)
 		billingAPI.Get("/referral", svc.BillingHandler.Referral)
 
-		adminBillingLimiter := appmiddleware.RateLimit(svc.Redis, 10, 1*time.Minute)
+		adminBillingLimiter := appmiddleware.RateLimit(svc.Redis, "admin", svc.Config.RateLimit.Admin.Requests, svc.Config.RateLimit.Admin.Window)
 		app.Post("/api/admin/billing/topups", adminBillingLimiter, svc.BillingHandler.AdminAuth, svc.BillingHandler.AdminTopUp)
 		if svc.BillingAdminHandler != nil {
 			app.Get("/api/admin/billing/costs", adminBillingLimiter, svc.BillingHandler.AdminAuth, svc.BillingAdminHandler.Costs)

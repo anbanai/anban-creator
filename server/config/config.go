@@ -25,6 +25,7 @@ import (
 // Config holds all server configuration.
 type Config struct {
 	Onboarding         OnboardingConfig                `yaml:"onboarding"`
+	RateLimit          RateLimitConfig                 `yaml:"rate_limit"`
 	Server             ServerConfig                    `yaml:"server"`
 	Logging            LoggingConfig                   `yaml:"logging"`
 	Database           DatabaseConfig                  `yaml:"database"`
@@ -54,6 +55,75 @@ type Config struct {
 	Trends             TrendsConfig                    `yaml:"trends"`
 	Search             SearchConfig                    `yaml:"search"`
 	Dsh                DshConfig                       `yaml:"dsh"`
+}
+
+// RateLimitConfig configures the independent request limits for API tiers.
+type RateLimitConfig struct {
+	API      RateLimitTierConfig `yaml:"api"`
+	Auth     RateLimitTierConfig `yaml:"auth"`
+	SendCode RateLimitTierConfig `yaml:"send_code"`
+	Agent    RateLimitTierConfig `yaml:"agent"`
+	Admin    RateLimitTierConfig `yaml:"admin"`
+}
+
+// RateLimitTierConfig defines a maximum request count within a fixed window.
+type RateLimitTierConfig struct {
+	Requests    int           `yaml:"requests"`
+	Window      time.Duration `yaml:"window"`
+	requestsSet bool
+	windowSet   bool
+}
+
+func (c *RateLimitConfig) UnmarshalYAML(value *yaml.Node) error {
+	if err := validateYAMLMappingFields(value, "rate_limit", map[string]bool{
+		"api": true, "auth": true, "send_code": true, "agent": true, "admin": true,
+	}); err != nil {
+		return err
+	}
+	type plain RateLimitConfig
+	return value.Decode((*plain)(c))
+}
+
+func (c *RateLimitTierConfig) UnmarshalYAML(value *yaml.Node) error {
+	if err := validateYAMLMappingFields(value, "rate_limit tier", map[string]bool{
+		"requests": true, "window": true,
+	}); err != nil {
+		return err
+	}
+	type plain RateLimitTierConfig
+	if err := value.Decode((*plain)(c)); err != nil {
+		return err
+	}
+	for i := 0; i < len(value.Content); i += 2 {
+		switch value.Content[i].Value {
+		case "requests":
+			c.requestsSet = true
+		case "window":
+			c.windowSet = true
+		}
+	}
+	return nil
+}
+
+func (c RateLimitConfig) Validate() error {
+	for _, tier := range []struct {
+		name   string
+		config RateLimitTierConfig
+	}{
+		{name: "api", config: c.API},
+		{name: "auth", config: c.Auth},
+		{name: "send_code", config: c.SendCode},
+		{name: "agent", config: c.Agent},
+		{name: "admin", config: c.Admin},
+	} {
+		if tier.config.Requests <= 0 {
+			return fmt.Errorf("rate_limit.%s.requests must be positive", tier.name)
+		}
+		if tier.config.Window <= 0 {
+			return fmt.Errorf("rate_limit.%s.window must be positive", tier.name)
+		}
+	}
+	return nil
 }
 
 // DshConfig owns the independent DSH interactive runtime configuration.
@@ -1377,6 +1447,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 	}
 	known := map[string]bool{
 		"server":          true,
+		"rate_limit":      true,
 		"logging":         true,
 		"database":        true,
 		"redis":           true,
@@ -1482,6 +1553,11 @@ func expandEnvVars(data []byte) []byte {
 
 // applyDefaults fills in zero-value fields with sensible defaults.
 func (c *Config) applyDefaults() {
+	applyRateLimitTierDefaults(&c.RateLimit.API, 300, time.Minute)
+	applyRateLimitTierDefaults(&c.RateLimit.Auth, 20, time.Minute)
+	applyRateLimitTierDefaults(&c.RateLimit.SendCode, 5, 10*time.Minute)
+	applyRateLimitTierDefaults(&c.RateLimit.Agent, 300, time.Minute)
+	applyRateLimitTierDefaults(&c.RateLimit.Admin, 10, time.Minute)
 	c.Search.Web.Provider = strings.ToLower(strings.TrimSpace(c.Search.Web.Provider))
 	c.Search.Fetch.Provider = strings.ToLower(strings.TrimSpace(c.Search.Fetch.Provider))
 	if c.Search.Providers.Doubao.CustomEndpoint == "" {
@@ -1808,6 +1884,15 @@ func (c *Config) applyDefaults() {
 	// Auto-detect plugin_dir by searching for agents/.
 	if c.Claude.PluginDir == "" {
 		c.Claude.PluginDir = detectPluginDir()
+	}
+}
+
+func applyRateLimitTierDefaults(tier *RateLimitTierConfig, requests int, window time.Duration) {
+	if !tier.requestsSet {
+		tier.Requests = requests
+	}
+	if !tier.windowSet {
+		tier.Window = window
 	}
 }
 
@@ -2164,6 +2249,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	var errs []string
+	if err := c.RateLimit.Validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if raw := strings.TrimSpace(c.Server.PublicBaseURL); raw != "" {
 		u, err := url.Parse(raw)
 		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {

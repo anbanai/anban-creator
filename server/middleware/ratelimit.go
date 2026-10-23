@@ -8,10 +8,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// RateLimit creates a rate limiting middleware using Redis.
-// Limits to maxRequests per window per IP address.
+// RateLimit creates a fixed-window rate limiting middleware using Redis.
+// Limits to maxRequests per window per bucket, IP address, and request path.
 // If redisClient is nil, rate limiting is skipped (pass-through).
-func RateLimit(redisClient *redis.Client, maxRequests int, window time.Duration) fiber.Handler {
+func RateLimit(redisClient *redis.Client, bucket string, maxRequests int, window time.Duration) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		if redisClient == nil {
 			return c.Next()
@@ -22,10 +22,10 @@ func RateLimit(redisClient *redis.Client, maxRequests int, window time.Duration)
 			ip = "unknown"
 		}
 
-		key := fmt.Sprintf("ratelimit:%s:%s", ip, c.Path())
+		key := fmt.Sprintf("ratelimit:%s:%s:%s", bucket, ip, c.Path())
 		ctx := c.Context()
 
-		// Use Redis INCR + EXPIRE for sliding window rate limiting.
+		// INCR + EXPIRE on the first hit implements a fixed window.
 		count, err := redisClient.Incr(ctx, key).Result()
 		if err != nil {
 			// On Redis error, allow the request through (graceful degradation).

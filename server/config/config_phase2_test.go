@@ -37,6 +37,99 @@ func TestClaudeConfigRejectsCatalogDigestRuntimeSetting(t *testing.T) {
 	}
 }
 
+func TestRateLimitConfigDefaults(t *testing.T) {
+	cfg, err := loadClaudeConfigYAML(t, validClaudeConfigYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := RateLimitConfig{
+		API:      RateLimitTierConfig{Requests: 300, Window: time.Minute},
+		Auth:     RateLimitTierConfig{Requests: 20, Window: time.Minute},
+		SendCode: RateLimitTierConfig{Requests: 5, Window: 10 * time.Minute},
+		Agent:    RateLimitTierConfig{Requests: 300, Window: time.Minute},
+		Admin:    RateLimitTierConfig{Requests: 10, Window: time.Minute},
+	}
+	assertRateLimitConfig(t, cfg.RateLimit, want)
+}
+
+func TestRateLimitConfigLoadsYAMLAndEnvironmentValues(t *testing.T) {
+	t.Setenv("ANBAN_TEST_RATE_LIMIT_API_REQUESTS", "42")
+	body := strings.Replace(validClaudeConfigYAML, "claude:\n", `rate_limit:
+  api:
+    requests: ${ANBAN_TEST_RATE_LIMIT_API_REQUESTS:-41}
+    window: 2m
+  auth:
+    requests: 25
+    window: 30s
+  send_code:
+    requests: 7
+    window: 15m
+  agent:
+    requests: 450
+    window: 45s
+  admin:
+    requests: 15
+    window: 2m
+claude:
+`, 1)
+	cfg, err := loadClaudeConfigYAML(t, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := RateLimitConfig{
+		API:      RateLimitTierConfig{Requests: 42, Window: 2 * time.Minute},
+		Auth:     RateLimitTierConfig{Requests: 25, Window: 30 * time.Second},
+		SendCode: RateLimitTierConfig{Requests: 7, Window: 15 * time.Minute},
+		Agent:    RateLimitTierConfig{Requests: 450, Window: 45 * time.Second},
+		Admin:    RateLimitTierConfig{Requests: 15, Window: 2 * time.Minute},
+	}
+	assertRateLimitConfig(t, cfg.RateLimit, want)
+}
+
+func assertRateLimitConfig(t *testing.T, got, want RateLimitConfig) {
+	t.Helper()
+	for name, gotTier := range map[string]RateLimitTierConfig{
+		"api": got.API, "auth": got.Auth, "send_code": got.SendCode, "agent": got.Agent, "admin": got.Admin,
+	} {
+		var wantTier RateLimitTierConfig
+		switch name {
+		case "api":
+			wantTier = want.API
+		case "auth":
+			wantTier = want.Auth
+		case "send_code":
+			wantTier = want.SendCode
+		case "agent":
+			wantTier = want.Agent
+		case "admin":
+			wantTier = want.Admin
+		}
+		if gotTier.Requests != wantTier.Requests || gotTier.Window != wantTier.Window {
+			t.Errorf("RateLimit.%s = requests %d/window %s, want requests %d/window %s", name, gotTier.Requests, gotTier.Window, wantTier.Requests, wantTier.Window)
+		}
+	}
+}
+
+func TestRateLimitConfigRejectsNonPositiveValues(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		field string
+		value string
+	}{
+		{name: "zero requests", field: "requests", value: "0"},
+		{name: "negative requests", field: "requests", value: "-1"},
+		{name: "zero window", field: "window", value: "0s"},
+		{name: "negative window", field: "window", value: "-1s"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := strings.Replace(validClaudeConfigYAML, "claude:\n", "rate_limit:\n  api:\n    "+tc.field+": "+tc.value+"\nclaude:\n", 1)
+			if _, err := loadClaudeConfigYAML(t, body); err == nil || !strings.Contains(err.Error(), "rate_limit.api") {
+				t.Fatalf("NewConfig error = %v, want rate_limit.api validation error", err)
+			}
+		})
+	}
+}
+
 func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 	raw, err := os.ReadFile("../config.example.yaml")
 	if err != nil {
