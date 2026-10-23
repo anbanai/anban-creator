@@ -270,6 +270,7 @@ func validateAssistantCommitScope(ctx context.Context, repo repository.Repositor
 type assistantCreationPlan struct {
 	Goal                 string                      `json:"goal"`
 	ContentType          string                      `json:"content_type"`
+	ExecutionProfile     string                      `json:"execution_profile,omitempty"`
 	ExpectedResult       string                      `json:"expected_result,omitempty"`
 	Requirements         []string                    `json:"requirements,omitempty"`
 	Constraints          []string                    `json:"constraints,omitempty"`
@@ -289,15 +290,16 @@ type assistantCreationPlan struct {
 }
 
 type assistantCreationAsset struct {
-	Type       string `json:"type,omitempty"`
-	AssetID    string `json:"asset_id,omitempty"`
-	UploadID   string `json:"upload_id,omitempty"`
-	URL        string `json:"url,omitempty"`
-	TaskFileID string `json:"task_file_id,omitempty"`
-	Text       string `json:"text,omitempty"`
-	FileName   string `json:"file_name,omitempty"`
-	MimeType   string `json:"mime_type,omitempty"`
-	FileSize   int64  `json:"file_size,omitempty"`
+	Type        string `json:"type,omitempty"`
+	AssetID     string `json:"asset_id,omitempty"`
+	UploadID    string `json:"upload_id,omitempty"`
+	URL         string `json:"url,omitempty"`
+	TaskFileID  string `json:"task_file_id,omitempty"`
+	Text        string `json:"text,omitempty"`
+	FileName    string `json:"file_name,omitempty"`
+	MimeType    string `json:"mime_type,omitempty"`
+	FileSize    int64  `json:"file_size,omitempty"`
+	Instruction string `json:"instruction,omitempty"`
 }
 
 func (asset *assistantCreationAsset) UnmarshalJSON(data []byte) error {
@@ -430,8 +432,12 @@ func commitAssistantCreation(ctx context.Context, userID string, checkpoint *mod
 		return AssistantCommitResult{}, ErrAssistantCheckpointInvalid
 	}
 
+	executionProfile := strings.TrimSpace(plan.ExecutionProfile)
+	if executionProfile == "" {
+		executionProfile = "effective"
+	}
 	params := CreateManualParams{
-		UserID: userID, ProjectID: checkpoint.ProjectID, ExecutionProfile: "effective",
+		UserID: userID, ProjectID: checkpoint.ProjectID, ExecutionProfile: executionProfile,
 		AgentID: selected.Agent.Name, Channel: selected.Channel, TaskKind: taskKind,
 		RequestedTaskType:     taskType,
 		AssistantCheckpointID: checkpoint.ID, AssistantProfileRevision: &checkpoint.BaseProfileRevision, Prompt: prompt, Quantity: 1,
@@ -451,7 +457,7 @@ func commitAssistantCreation(ctx context.Context, userID string, checkpoint *mod
 			Preferences: preferences,
 		}
 	} else {
-		inputAttachments, attachmentErr := assistantCreationAttachments(ctx, userID, plan.Assets, repo)
+		inputAttachments, attachmentErr := assistantCreationAttachmentsWithTasks(ctx, userID, plan.Assets, tasks, repo)
 		if attachmentErr != nil {
 			return AssistantCommitResult{}, attachmentErr
 		}
@@ -481,12 +487,38 @@ func commitAssistantCreation(ctx context.Context, userID string, checkpoint *mod
 }
 
 func assistantCreationAttachments(ctx context.Context, userID string, assets []assistantCreationAsset, repo repository.Repository) ([]model.EntryAttachment, error) {
+	return assistantCreationAttachmentsWithTasks(ctx, userID, assets, nil, repo)
+}
+
+func assistantCreationAttachmentsWithTasks(ctx context.Context, userID string, assets []assistantCreationAsset, tasks *TaskService, repo repository.Repository) ([]model.EntryAttachment, error) {
 	attachments := make([]model.EntryAttachment, 0, len(assets))
+	var finalStore DirectUploadFinalizationStorage
+	var now time.Time
+	if tasks != nil {
+		finalStore, _ = tasks.store.(DirectUploadFinalizationStorage)
+		now = tasks.now()
+	}
 	for _, asset := range assets {
 		attachment := model.EntryAttachment{
 			AssetID: strings.TrimSpace(asset.AssetID), Type: strings.TrimSpace(asset.Type), URL: strings.TrimSpace(asset.URL),
 			Text: asset.Text, FileName: strings.TrimSpace(asset.FileName), ContentType: strings.TrimSpace(asset.MimeType),
-			Size: asset.FileSize,
+			Size: asset.FileSize, Instruction: strings.TrimSpace(asset.Instruction),
+		}
+		if uploadID := strings.TrimSpace(asset.UploadID); uploadID != "" {
+			stored, err := FinalizeUploadSession(ctx, finalStore, repo, FinalizeUploadRequest{
+				SessionID: uploadID, UserID: userID,
+				AllowedPurposes: []string{DirectUploadPurposeAIEntryAttachment, DirectUploadPurposeTaskReference},
+				Now:             now,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("%w: 素材上传尚未完成或不可访问，请重新上传", ErrAssistantCreationAssetUnavailable)
+			}
+			attachment.AssetID = stored.ID
+			attachment.FileName = stored.FileName
+			attachment.ContentType = stored.ContentType
+			attachment.Size = stored.Size
+			attachment.Type = ClassifyDirectUploadFile(stored.ContentType, strings.ToLower(filepath.Ext(strings.TrimSpace(stored.FileName))))
+			attachment.URL = ""
 		}
 		if attachment.AssetID != "" {
 			owned, err := NewReferenceAssetService(repo, nil, nil).RequireOwnedAttachment(ctx, userID, attachment.AssetID, []string{DirectUploadPurposeAIEntryAttachment, DirectUploadPurposeTaskReference})
@@ -497,6 +529,7 @@ func assistantCreationAttachments(ctx context.Context, userID string, assets []a
 			attachment.FileName = owned.FileName
 			attachment.ContentType = owned.ContentType
 			attachment.Size = owned.Size
+			attachment.Instruction = strings.TrimSpace(asset.Instruction)
 			attachment.URL = ""
 		}
 		if attachment.AssetID != "" || attachment.URL != "" || attachment.Text != "" {

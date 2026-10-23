@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   workspaceCheckpoint: vi.fn(),
   taskGet: vi.fn(),
   taskFiles: vi.fn(),
+  agentProfiles: vi.fn(),
   streamEvents: [] as { event: string; id: string; data: string }[],
 }))
 
@@ -29,6 +30,7 @@ vi.mock('@/lib/api', async () => {
     api: {
       ...actual.api,
       assistant: { ...actual.api.assistant, ...mocks },
+      agentProfiles: { ...actual.api.agentProfiles, list: mocks.agentProfiles },
       projects: { ...actual.api.projects, list: mocks.projectsList },
       tasks: { ...actual.api.tasks, get: mocks.taskGet, files: mocks.taskFiles },
     },
@@ -93,6 +95,7 @@ describe('AssistantWorkspace', () => {
       { id: 'edit-list', task_id: 'video-task-1', state: 'delivered', role: 'artifact', delivery_role: 'edit_decision_list', file_name: 'edit-decision-list.json', mime_type: 'application/json', file_size: 10, url: '', created_at: '', is_deliverable: true },
       { id: 'strategy', task_id: 'video-task-1', state: 'delivered', role: 'artifact', delivery_role: 'edit_strategy', file_name: 'edit-strategy.md', mime_type: 'text/markdown', file_size: 10, url: '', created_at: '', is_deliverable: true },
     ])
+    mocks.agentProfiles.mockResolvedValue([{ id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-flash', description: '日常创作', min_tier: 'free', available: true }])
   })
 
   it('allows drafting while bootstrap is pending and enables sending when it is ready', async () => {
@@ -587,7 +590,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.click(within(card).getByRole('button', { name: '确认并创建任务' }))
 
     await waitFor(() => expect(mocks.workspaceCheckpoint).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
-      payload: { plan: { goal: '发布春季新品', content_type: 'wechat-article', target_audience: '关注茶饮的年轻人' } },
+      payload: { plan: { goal: '发布春季新品', content_type: 'wechat-article', execution_profile: 'effective', target_audience: '关注茶饮的年轻人' } },
       status: 'ready',
     })))
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
@@ -598,7 +601,43 @@ describe('AssistantWorkspace', () => {
     expect(await screen.findByTestId('location')).toHaveTextContent('/tasks/task-created-1')
   })
 
-  it('closes the current workspace before starting a new persona', async () => {
+  it('keeps uploaded composer attachments in the creation confirmation plan', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'creation',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划', available: true },
+        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: true },
+      ],
+      projects: [{ id: 'project-1', name: '我的人设', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'project-1', runtime_status: 'starting', expires_at: '' })
+    mocks.streamEvents = [{
+      event: 'draft.ready',
+      id: 'event-attachment-draft',
+      data: JSON.stringify({ mode_id: 'creation', session_id: 'session-1', draft: { ready: true, payload: { plan: { goal: '基于资料创作', content_type: 'wechat-article' } } } }),
+    }]
+    uploadToOSSMock.mockResolvedValue({ uploadSessionId: 'upload-session-1', uploadId: 'upload-session-1', key: 'staging/brief.pdf', previewUrl: '', publicUrl: '', contentType: 'application/pdf', size: 16 })
+    renderPage({ modeId: 'creation', projectId: 'project-1' })
+
+    fireEvent.change(await screen.findByLabelText('选择附件文件'), { target: { files: [new File(['brief'], 'brief.pdf', { type: 'application/pdf' })] } })
+    await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'ai_entry_attachment' })))
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '按照资料完成文章' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    const card = await screen.findByRole('region', { name: '创作计划确认' })
+    fireEvent.click(within(card).getByRole('button', { name: '确认并创建任务' }))
+
+    await waitFor(() => expect(mocks.workspaceCheckpoint).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
+      payload: { plan: {
+        goal: '基于资料创作',
+        content_type: 'wechat-article',
+        execution_profile: 'effective',
+        assets: [{ type: 'document', upload_id: 'upload-session-1', file_name: 'brief.pdf', mime_type: 'application/pdf', file_size: 16 }],
+      } },
+    })))
+  })
+
+  it('closes the current workspace before starting a new persona from the composer context', async () => {
     mocks.bootstrap.mockResolvedValue({
       defaultModeId: 'profile',
       modes: [
@@ -617,7 +656,8 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(screen.queryByText('助手正在回复…')).not.toBeInTheDocument())
 
-    fireEvent.click(await screen.findByRole('button', { name: '创建新人设' }))
+    fireEvent.click(screen.getByRole('combobox', { name: '人设配置' }))
+    fireEvent.click(await screen.findByRole('option', { name: '创建新人设' }))
     await waitFor(() => expect(mocks.closeWorkspace).toHaveBeenCalledWith('workspace-1'))
 
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '建立一个全新的人设' } })
@@ -656,7 +696,8 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(screen.queryByText('助手正在回复…')).not.toBeInTheDocument())
 
-    fireEvent.click(await screen.findByRole('button', { name: '选择人设：第二个人设' }))
+    fireEvent.click(screen.getByRole('combobox', { name: '人设配置' }))
+    fireEvent.click(await screen.findByRole('option', { name: /第二个人设/ }))
     const workSelector = await screen.findByRole('combobox', { name: '选择作品' })
     await waitFor(() => expect(workSelector).toBeEnabled())
     fireEvent.change(workSelector, { target: { value: 'work-2' } })
