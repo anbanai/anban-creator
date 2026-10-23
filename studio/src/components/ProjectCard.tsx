@@ -56,7 +56,7 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
       </div>
       <div className="flex flex-1 flex-col pt-4">
         {supportsProfileLab(project) && (
-          <section className="mb-3 border-t border-border py-3" aria-label={`人设画像：${project.name}`}>
+          <section className="mb-3 border-t border-border pt-3" aria-label={`人设画像：${project.name}`}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -69,12 +69,12 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
               </div>
               <span className="shrink-0 text-xs font-medium text-muted-foreground">{profileProgress.count}/6 项</span>
             </div>
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={`${project.name}画像完善度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={profileProgress.percent}>
+            <div className="mt-3 mb-1 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={`${project.name}画像完善度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={profileProgress.percent}>
               <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${profileProgress.percent}%` }} />
             </div>
           </section>
         )}
-        <div className="mt-auto flex flex-wrap justify-end gap-1 border-t border-border pt-3" aria-label={`人设操作：${project.name}`}>
+        <div className="mt-auto flex flex-wrap justify-end gap-1" aria-label={`人设操作：${project.name}`}>
           {supportsProfileLab(project) && (
             <Tooltip>
               <TooltipTrigger render={<Link to={`/portraits/${project.id}`} className={buttonVariants({ variant: 'ghost', size: 'icon-md' })} aria-label={`查看画像：${project.name}`} />}>

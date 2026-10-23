@@ -159,6 +159,16 @@ describe('ProjectCard', () => {
     expect(portraitLink.closest('[aria-label="人设操作：公众号人设"]')).toContainElement(portraitLink)
   })
 
+  it('uses the profile progress bar as the divider before card actions', () => {
+    render(<ProjectCard project={project()} />)
+
+    const progress = screen.getByRole('progressbar', { name: '公众号人设画像完善度' })
+    const actions = screen.getByLabelText('人设操作：公众号人设')
+
+    expect(progress).toHaveClass('mb-1')
+    expect(actions).not.toHaveClass('border-t')
+  })
+
   it('shows common actions directly and opens the topic pool', async () => {
     const onEdit = vi.fn()
     const onArchive = vi.fn()
