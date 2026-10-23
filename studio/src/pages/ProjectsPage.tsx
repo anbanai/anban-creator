@@ -295,12 +295,12 @@ export default function ProjectsPage() {
   const restoreMutation = useMutation({
     mutationFn: (id: string) => api.projects.restore(id),
     onSuccess: () => {
-      toast.success('人设已恢复')
+      toast.success('人设已取消归档')
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
     },
     onError: () => {
-      toast.error('恢复人设失败，请重试')
+      toast.error('取消归档人设失败，请重试')
     },
   })
 

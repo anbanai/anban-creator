@@ -26,6 +26,7 @@ const PortraitOnboardingPage = lazyWithRecovery(() => import('@/pages/PortraitOn
 const PortraitDetailPage = lazyWithRecovery(() => import('@/pages/PortraitDetailPage'))
 const ProjectsPage = lazyWithRecovery(() => import('@/pages/ProjectsPage'))
 const PlansPage = lazyWithRecovery(() => import('@/pages/PlansPage'))
+const TaskCreatePage = lazyWithRecovery(() => import('@/pages/TaskCreatePage'))
 const TasksPage = lazyWithRecovery(() => import('@/pages/TasksPage'))
 const TaskDetailPage = lazyWithRecovery(() => import('@/pages/TaskDetailPage'))
 const BillingPage = lazyWithRecovery(() => import('@/pages/BillingPage'))
@@ -179,6 +180,7 @@ function AppRoutes() {
           <Route path="chat" element={<ChatRedirect />} />
           <Route path="plans" element={<LazyPage component={PlansPage} />} />
           <Route path="tasks" element={<LazyPage component={TasksPage} />} />
+          <Route path="tasks/new" element={<LazyPage component={TaskCreatePage} />} />
           <Route path="tasks/:id" element={<LazyPage component={TaskDetailPage} />} />
           <Route
             path="templates"

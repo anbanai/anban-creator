@@ -1092,3 +1092,16 @@ describe('TasksPage Montage creation', () => {
     expect(api.tasks.create).not.toHaveBeenCalled()
   })
 })
+
+it('keeps the identity filter after consuming create intent and when reopening creation', async () => {
+  vi.mocked(api.projects.list).mockResolvedValue([fixtures.project as Project])
+  renderTasksPage('/tasks?create=true&project_id=project-1')
+  const dialog = await screen.findByRole('dialog', { name: '创作' })
+  await waitFor(() => expect(within(dialog).getByRole('combobox', { name: /^人设：/ })).toHaveTextContent('公众号人设'))
+  fireEvent.click(within(dialog).getByRole('button', { name: /^取消$/ }))
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '创作' })).not.toBeInTheDocument())
+  expect(api.tasks.list).toHaveBeenLastCalledWith(expect.objectContaining({ project_id: 'project-1' }))
+  fireEvent.click(screen.getByRole('button', { name: /^创作$/ }))
+  const reopened = await screen.findByRole('dialog', { name: '创作' })
+  await waitFor(() => expect(within(reopened).getByRole('combobox', { name: /^人设：/ })).toHaveTextContent('公众号人设'))
+})

@@ -121,10 +121,10 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
           )}
           {isArchived && onRestore && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={restoring} onClick={() => onRestore(project.id)} aria-label={`恢复人设：${project.name}`} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={restoring} onClick={() => onRestore(project.id)} aria-label={`取消归档人设：${project.name}`} />}>
                 <RotateCcw />
               </TooltipTrigger>
-              <TooltipContent>恢复</TooltipContent>
+              <TooltipContent>取消归档</TooltipContent>
             </Tooltip>
           )}
           <Tooltip>

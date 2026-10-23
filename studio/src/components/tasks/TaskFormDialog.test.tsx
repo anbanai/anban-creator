@@ -17,6 +17,7 @@ const toastMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('sonner', () => ({ toast: toastMocks }))
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { is_admin: false } }) }))
 
 const uploadToOSSMock = vi.hoisted(() => vi.fn())
 const useAgentPacksMock = vi.hoisted(() => vi.fn())
@@ -1384,7 +1385,7 @@ describe('task creation type selection', () => {
     renderDialog({ initialProjectId: emptyProject.id })
     const dialog = await screen.findByRole('dialog', { name: '创作' })
     expect(await within(dialog).findByText('可用输出：未配置')).toBeInTheDocument()
-    expect(within(dialog).getByText('当前人设未配置可用输出方式，请先完善人设设置。')).toBeInTheDocument()
+    expect(within(dialog).getByText('还未选择这个人设要创作的内容类型，例如公众号文章或种草笔记。')).toBeInTheDocument()
     expect(within(dialog).queryByRole('textbox', { name: 'Agent prompt' })).not.toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
   })
@@ -1454,5 +1455,46 @@ describe('task creation type selection', () => {
       type: 'wechat-picture',
       agent_input: { picture_image_count: 5, picture_image_count_mode: 'exact', picture_publish_draft: true },
     })))
+  })
+})
+
+describe('identity creation page and inline settings', () => {
+  it('renders a dedicated page with the selected identity and no work list', async () => {
+    renderDialog({ presentation: 'page' })
+    expect(await screen.findByRole('heading', { name: '创作' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '创建作品' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /^人设：/ })).toHaveTextContent('公众号人设'))
+  })
+  it('opens the exact missing setting, saves it and continues without creating a task', async () => {
+    const empty = { ...fixtures.articleProject, agent_ids: [] }
+    const configured = { ...empty, agent_ids: ['seednote'] }
+    vi.mocked(api.projects.list).mockResolvedValue([empty])
+    const update = vi.spyOn(api.projects, 'update').mockImplementation(async () => {
+      vi.mocked(api.projects.list).mockResolvedValue([configured])
+      return configured
+    })
+    renderDialog({ presentation: 'page' })
+    fireEvent.click(await screen.findByRole('button', { name: '设置创作类型' }))
+    const settings = await screen.findByRole('dialog', { name: '设置创作类型' })
+    expect(within(settings).queryByRole('button', { name: '视频复刻' })).not.toBeInTheDocument()
+    expect(within(settings).getByRole('button', { name: '保存并继续创作' })).toBeDisabled()
+    fireEvent.click(within(settings).getByRole('button', { name: '种草笔记' }))
+    fireEvent.click(within(settings).getByRole('button', { name: '保存并继续创作' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '设置创作类型' })).not.toBeInTheDocument())
+    expect(update).toHaveBeenCalledWith(empty.id, { agent_ids: ['seednote'] })
+    expect(await screen.findByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toBeInTheDocument()
+    expect(api.tasks.create).not.toHaveBeenCalled()
+  })
+  it('keeps settings and selections open after a failed save', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([{ ...fixtures.articleProject, agent_ids: [] }])
+    vi.spyOn(api.projects, 'update').mockRejectedValue(new Error('保存失败，请重试。'))
+    renderDialog()
+    fireEvent.click(await screen.findByRole('button', { name: '设置创作类型' }))
+    const settings = await screen.findByRole('dialog', { name: '设置创作类型' })
+    fireEvent.click(within(settings).getByRole('button', { name: '公众号文章' }))
+    fireEvent.click(within(settings).getByRole('button', { name: '保存并继续创作' }))
+    expect(await within(settings).findByRole('alert')).toHaveTextContent('保存失败')
+    expect(within(settings).getByRole('button', { name: '公众号文章' })).toHaveAttribute('aria-pressed', 'true')
   })
 })
