@@ -71,13 +71,25 @@ func TestTokenPlayerDeepseekFlashProfileUsesConfiguredCostAlias(t *testing.T) {
 		t.Fatalf("effective profile unavailable: %v", err)
 	}
 
-	cost, err := NewProviderCostCalculator(bundle.Costs).TokenCost("tokenplayer_anthropic/"+resolved.ModelUsageAliases["deepseek-flash[1m]"], TokenUsage{
-		Input: 1_000_000, CacheRead: 1_000_000, CacheCreation: 1_000_000, Output: 1_000_000,
-	})
-	if err != nil {
-		t.Fatal(err)
+	deepSeekFlash := bundle.Costs.Models["deepseek/deepseek-flash"]
+	tokenPlayerFlash := bundle.Costs.Models["tokenplayer_anthropic/deepseek-v4.1-flash"]
+	if tokenPlayerFlash.Currency != deepSeekFlash.Currency || tokenPlayerFlash.Unit != deepSeekFlash.Unit ||
+		tokenPlayerFlash.Input != deepSeekFlash.Input || tokenPlayerFlash.CacheReadInput != deepSeekFlash.CacheReadInput ||
+		tokenPlayerFlash.CacheCreationInput != deepSeekFlash.CacheCreationInput || tokenPlayerFlash.Output != deepSeekFlash.Output {
+		t.Fatalf("TokenPlayer pricing = %#v, want DeepSeek Flash pricing = %#v", tokenPlayerFlash, deepSeekFlash)
 	}
-	if cost.ModelID != "tokenplayer_anthropic/deepseek-v4.1-flash" || cost.MicroCNY != 4_052_160 {
-		t.Fatalf("cost = %d for %q, want 4052160 for tokenplayer_anthropic/deepseek-v4.1-flash", cost.MicroCNY, cost.ModelID)
+
+	calculator := NewProviderCostCalculator(bundle.Costs)
+	for _, raw := range []string{"deepseek-flash", "deepseek-flash[1m]"} {
+		modelID := "tokenplayer_anthropic/" + resolved.ModelUsageAliases[raw]
+		cost, err := calculator.TokenCost(modelID, TokenUsage{
+			Input: 1_000_000, CacheRead: 1_000_000, CacheCreation: 1_000_000, Output: 1_000_000,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cost.ModelID != "tokenplayer_anthropic/deepseek-v4.1-flash" || cost.MicroCNY != 4_052_160 {
+			t.Fatalf("raw model %q cost = %d for %q, want 4052160 for tokenplayer_anthropic/deepseek-v4.1-flash", raw, cost.MicroCNY, cost.ModelID)
+		}
 	}
 }
