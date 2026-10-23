@@ -164,6 +164,18 @@ func TestInspectRenderedHTMLRejectsIllegalURL(t *testing.T) {
 	}
 }
 
+func TestInspectAllowsMailtoAndTelLinks(t *testing.T) {
+	markdown := "# Title\n\n## Body\n\n[Email](mailto:author@example.com) or [Call](tel:+8613800000000)."
+	if result := Inspect(Request{Target: "source", Markdown: markdown}); result.Readiness.Status != "ready" {
+		t.Fatalf("safe contact links blocked in Markdown: %#v", result.Readiness)
+	}
+
+	html := `<section><p><a href="mailto:author@example.com">Email</a> <a href="tel:+8613800000000">Call</a></p></section>`
+	if result := Inspect(Request{Target: "rendered", Markdown: markdown, HTML: html}); result.Readiness.Status != "ready" {
+		t.Fatalf("safe contact links blocked in HTML: %#v", result.Readiness)
+	}
+}
+
 func containsFinding(values []string, want string) bool {
 	for _, value := range values {
 		if value == want || strings.HasPrefix(value, want+":") {

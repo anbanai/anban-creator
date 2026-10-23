@@ -436,7 +436,11 @@ func unsafeURL(raw string, image bool) bool {
 	if parsed.Scheme == "" {
 		return strings.HasPrefix(raw, "//") || (!strings.HasPrefix(raw, "#") && strings.Contains(raw, ":"))
 	}
-	return !strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https")
+	if strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https") ||
+		strings.EqualFold(parsed.Scheme, "mailto") || strings.EqualFold(parsed.Scheme, "tel") {
+		return false
+	}
+	return true
 }
 
 func contains(values []string, want string) bool {
