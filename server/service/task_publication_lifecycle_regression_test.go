@@ -173,6 +173,8 @@ func TestFinalizePicturePublicationRejectsInvalidCopyBeforePublishing(t *testing
 		{name: "tab separated tags", title: "图片消息", content: "这是纯文本说明。\n\n#标签一\t#标签二\t#标签三\t#标签四\t#标签五"},
 		{name: "markdown content", title: "图片消息", content: "**这是说明**\n\n#标签一 #标签二 #标签三 #标签四 #标签五"},
 		{name: "markdown bullet", title: "图片消息", content: "- 这是说明\n\n#标签一 #标签二 #标签三 #标签四 #标签五"},
+		{name: "markdown blockquote", title: "图片消息", content: "> 这是说明\n\n#标签一 #标签二 #标签三 #标签四 #标签五"},
+		{name: "markdown table", title: "图片消息", content: "| 名称 | 用途 |\n| --- | --- |\n| 示例 | 内容 |\n\n#标签一 #标签二 #标签三 #标签四 #标签五"},
 		{name: "html content", title: "图片消息", content: "<p>这是说明</p>\n\n#标签一 #标签二 #标签三 #标签四 #标签五"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
