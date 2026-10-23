@@ -9,6 +9,7 @@ import type { InteractiveDraft } from '@/lib/api/interactive'
 import { useAuth } from '@/contexts/AuthContext'
 import { streamAssistantWorkspace, type InteractiveStreamEvent } from '@/lib/interactive-events'
 import { Button } from '@/components/ui/button'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from '@/components/ui/input-group'
 import { DshQuestionComposer, type DshQuestion, type DshQuestionAnswer } from '@/components/dsh-user-questions/DshQuestionComposer'
 import { AssistantVideoEditInputs } from '@/components/video-edit/AssistantVideoEditInputs'
@@ -129,12 +130,15 @@ export default function AssistantWorkspace() {
   const [videoEditUploadFailed, setVideoEditUploadFailed] = useState(false)
   const [workspace, setWorkspace] = useState<AssistantWorkspaceState | null>(() => routeHasContext ? null : persisted?.workspace ?? null)
   const [newProfile, setNewProfile] = useState(false)
+  const [conversationPhase, setConversationPhase] = useState<'setup' | 'active'>(() => routeHasContext ? 'setup' : persisted?.workspace ? 'active' : 'setup')
   const [messagesByMode, setMessagesByMode] = useState<Record<string, Message[]>>({})
   const [questionsByMode, setQuestionsByMode] = useState<Record<string, QuestionBatch[]>>({})
   const [draftByMode, setDraftByMode] = useState<Record<string, Draft | null>>({})
   const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [responding, setResponding] = useState(false)
+  const [switching, setSwitching] = useState(false)
+  const [pendingMode, setPendingMode] = useState<AssistantModeID | null>(null)
   const [committing, setCommitting] = useState(false)
   const [lastEventIds, setLastEventIds] = useState<Record<string, string | undefined>>(persisted?.lastEventIds ?? {})
   const streamAbort = useRef<AbortController | null>(null)
@@ -396,6 +400,7 @@ export default function AssistantWorkspace() {
       setContentId('')
       return
     }
+    if (!workspace) return
     const requestedProjectId = context && Object.prototype.hasOwnProperty.call(context, 'projectId') ? context.projectId ?? '' : selectedProject?.id ?? projectId
     const requestedContentId = context && Object.prototype.hasOwnProperty.call(context, 'contentId') ? context.contentId ?? '' : selectedWork?.id ?? contentId
     if (nextMode === 'review' && (!requestedProjectId || !requestedContentId)) {
@@ -544,6 +549,14 @@ export default function AssistantWorkspace() {
     setVideoEditPreferences({})
     setVideoEditUploadFailed(false)
   }
+  const creationTypeSelector = mode === 'creation' && selectedProject ? (
+    <label className="mx-auto mt-3 block w-full max-w-xs space-y-1.5 text-left text-sm">
+      <span>创作类型</span>
+      <NativeSelect className="w-full" aria-label="创作类型" value={selectedCreationType} onChange={(event) => chooseCreationType(event.target.value)}>
+        {creationTypes.map((item) => <NativeSelectOption key={item.value} value={item.value}>{item.label}</NativeSelectOption>)}
+      </NativeSelect>
+    </label>
+  ) : null
   const videoEditInputs = isVideoEditCreation && selectedProject ? (
     <AssistantVideoEditInputs
       assets={videoEditAssets}
@@ -561,6 +574,7 @@ export default function AssistantWorkspace() {
   const selectModePrerequisiteAction = () => {
     setError(null)
     setMode(modePrerequisiteAction.mode)
+    setPendingMode(null)
     setContentId('')
   }
 
@@ -619,7 +633,7 @@ export default function AssistantWorkspace() {
 
       {!workspace ? (
         <section className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col px-4 pb-3 md:px-8">
-          <div className="min-h-0 flex-1 overflow-y-auto py-5 md:py-8">
+          <div data-testid="assistant-conversation" className="min-h-0 flex-1 overflow-y-auto py-5 md:py-8">
             <HomeStage project={selectedProject} hasReadyPersona={readyProjects.length > 0} />
             {personaRail}
             {routeHasContext && mode === 'review' && <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} onProject={resetCreationProject} onContent={setContentId} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />}
@@ -636,19 +650,6 @@ export default function AssistantWorkspace() {
         </section>
       ) : (
         <section className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col px-4 pb-3 md:px-8">
-          <AssistantContextBar
-            phase="locked"
-            mode={mode}
-            modes={bootstrap?.modes ?? []}
-            projects={selectableProjects}
-            projectId={contextProjectId}
-            works={works}
-            contentId={resolvedContentId}
-            creationType={selectedCreationType}
-            creationTypeOptions={creationTypes}
-            loadingProjects={bootstrapQuery.isLoading}
-            loadingWorks={worksQuery.isLoading}
-          />
           <div data-testid="assistant-conversation" className="min-h-0 flex-1 overflow-y-auto py-4" aria-live="polite">
             {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && (
               <VideoEditReviewResults query={reviewVideoQuery} />
