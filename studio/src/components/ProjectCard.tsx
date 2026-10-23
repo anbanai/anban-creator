@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { portraitProgress, portraitStatus, portraitSummary } from '@/lib/portrait-library'
-import { Archive, Settings2, Brain, Lightbulb, ListChecks, RotateCcw, SquarePen, ScanFace } from 'lucide-react'
+import { Archive, Brain, Lightbulb, ListChecks, RotateCcw, SquarePen, ScanFace } from 'lucide-react'
 import type { Project, ProjectStats } from '@/types'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -20,7 +20,6 @@ interface ProjectCardProps {
   project: Project
   stats?: ProjectStats
   onEdit?: (project: Project) => void
-  onChannelConfig?: (project: Project) => void
   onUpdateProfile?: (project: Project) => void
   archiving?: boolean
   restoring?: boolean
@@ -28,7 +27,7 @@ interface ProjectCardProps {
   onRestore?: (id: string) => void
 }
 
-export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannelConfig, archiving, restoring, onArchive, onRestore }: ProjectCardProps) {
+export function ProjectCard({ project, stats, onEdit, onUpdateProfile, archiving, restoring, onArchive, onRestore }: ProjectCardProps) {
   const [topicPoolOpen, setTopicPoolOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
   const isArchived = project.status === 'archived'
@@ -65,7 +64,7 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
                     {profileStatusLabel(project)}
                   </span>
                 </div>
-                <p className="mt-1 line-clamp-2 text-sm leading-5 text-foreground">{profileSummary}</p>
+                <p className="mt-1 h-10 line-clamp-2 text-sm leading-5 text-foreground">{profileSummary}</p>
               </div>
               <span className="shrink-0 text-xs font-medium text-muted-foreground">{profileProgress.count}/6 项</span>
             </div>
@@ -97,14 +96,6 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
             </TooltipTrigger>
             <TooltipContent>{unusedTopics === undefined ? '选题资产' : `选题资产：待研究 ${unusedTopics} 个`}</TooltipContent>
           </Tooltip>
-          {onChannelConfig && (project.platform === 'wechat' || project.agent_ids?.some((id) => id === 'wechat-article' || id === 'wechat-picture')) && (
-            <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onChannelConfig(project)} aria-label={`平台设置：${project.name}`} />}>
-                <Settings2 />
-              </TooltipTrigger>
-              <TooltipContent>平台设置</TooltipContent>
-            </Tooltip>
-          )}
           <Tooltip>
             <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => setMemoryOpen(true)} aria-label={`人设记忆：${project.name}`} />}>
               <Brain />

@@ -558,17 +558,39 @@ describe('ProjectsPage', () => {
     }))
   })
 
-  it('opens shared WeChat settings from the project editor', async () => {
+  it('opens shared WeChat settings in the project editor platform tab', async () => {
+    vi.mocked(api.projects.list).mockResolvedValueOnce([{ ...projectWithReference, agent_ids: ['wechat-article'] }])
     render(<ProjectsPage />)
 
     await clickProjectAction('测试人设', '编辑人设')
     const dialog = await screen.findByRole('dialog', { name: '编辑人设' })
-    expect(within(dialog).getByRole('heading', { name: '公众号自动发布' })).toBeInTheDocument()
-    fireEvent.click(within(dialog).getByRole('button', { name: '配置自动发布' }))
+    fireEvent.click(within(dialog).getByRole('tab', { name: '平台设置' }))
 
-    const settings = await screen.findByRole('dialog', { name: '配置自动发布' })
-    expect(await within(settings).findByLabelText('微信 AppID')).toHaveValue('wx-test')
-    expect(within(settings).getByLabelText('微信 AppSecret')).toBeInTheDocument()
+    expect(await within(dialog).findByLabelText('微信 AppID')).toHaveValue('wx-test')
+    expect(within(dialog).getByLabelText('微信 AppSecret')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('dialog', { name: '配置自动发布' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '更新' })).not.toBeInTheDocument()
+  })
+
+  it('confirms before closing the project editor with unsaved platform settings', async () => {
+    vi.mocked(api.projects.list).mockResolvedValueOnce([{ ...projectWithReference, agent_ids: ['wechat-article'] }])
+    render(<ProjectsPage />)
+
+    await clickProjectAction('测试人设', '编辑人设')
+    const dialog = await screen.findByRole('dialog', { name: '编辑人设' })
+    fireEvent.click(within(dialog).getByRole('tab', { name: '平台设置' }))
+    const appID = await within(dialog).findByLabelText('微信 AppID')
+    fireEvent.change(appID, { target: { value: 'wx-unsaved' } })
+    fireEvent.click(within(dialog).getByRole('tab', { name: '人设资料' }))
+    fireEvent.click(within(dialog).getByRole('tab', { name: '平台设置' }))
+    expect(await within(dialog).findByLabelText('微信 AppID')).toHaveValue('wx-unsaved')
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
+
+    const confirmation = await screen.findByRole('alertdialog')
+    expect(within(confirmation).getByText('你有未保存的更改，确定要关闭吗？')).toBeInTheDocument()
+    fireEvent.click(within(confirmation).getByRole('button', { name: '继续编辑' }))
+    expect(dialog).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('微信 AppID')).toHaveValue('wx-unsaved')
   })
 
   it('opens shared WeChat settings after creating a project that publishes to WeChat', async () => {

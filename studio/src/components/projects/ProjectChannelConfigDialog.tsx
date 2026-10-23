@@ -6,7 +6,7 @@ import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import type { WechatPlatformConfig } from '@/types'
 import { Button } from '@/components/common/button'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -19,7 +19,14 @@ interface Props {
   onClose: () => void
 }
 
-function ChannelConfigEditor({ project, config, onClose, onStateChange }: Props & { config: WechatPlatformConfig; onStateChange: (dirty: boolean, busy: boolean) => void }) {
+interface EmbeddedProps {
+  project: ProjectIdentityProject
+  onStateChange: (dirty: boolean, busy: boolean) => void
+  onClose?: () => void
+  embedded?: boolean
+}
+
+function ChannelConfigEditor({ project, config, onClose, onStateChange, embedded = false }: Props & { config: WechatPlatformConfig; onStateChange: (dirty: boolean, busy: boolean) => void; embedded?: boolean }) {
   const queryClient = useQueryClient()
   const active = useRef(true)
   useEffect(() => {
@@ -99,12 +106,27 @@ function ChannelConfigEditor({ project, config, onClose, onStateChange }: Props 
           {' '}保存后密钥不会回显。
         </p>
       </div>
-      <DialogFooter>
-        <Button type="button" variant="secondary" disabled={save.isPending} onClick={onClose}>关闭</Button>
-        <Button type="submit" loading={save.isPending} disabled={!canSave}>保存</Button>
-      </DialogFooter>
+      <div className="flex justify-end gap-2">
+        {!embedded && <Button type="button" variant="secondary" disabled={save.isPending} onClick={onClose}>关闭</Button>}
+        <Button type="submit" loading={save.isPending} disabled={!canSave}>{embedded ? '保存平台设置' : '保存'}</Button>
+      </div>
     </form>
   )
+}
+
+export function WechatPlatformSettingsPanel({ project, onStateChange, onClose = () => {}, embedded = true }: EmbeddedProps) {
+  const configs = useQuery({
+    queryKey: ['project-wechat-platform-config', project.id],
+    queryFn: () => api.projects.getWechatPlatformConfig(project.id),
+    retry: false,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  })
+  if (configs.isPending || (!configs.isFetchedAfterMount && !configs.isError)) return <p role="status">正在加载自动发布设置…</p>
+  if (configs.isError) return <div role="alert" className="space-y-3"><p>自动发布设置加载失败：{getApiErrorMessage(configs.error, '请重试')}</p><Button variant="secondary" onClick={() => void configs.refetch()}>重试</Button></div>
+  return <ChannelConfigEditor project={project} config={configs.data} onClose={onClose} onStateChange={onStateChange} embedded={embedded} />
 }
 
 export function ProjectChannelConfigDialog({ project, onClose }: Props) {
@@ -116,15 +138,6 @@ export function ProjectChannelConfigDialog({ project, onClose }: Props) {
     else onClose()
   }
   const onEditorStateChange = useCallback((dirty: boolean, busy: boolean) => setEditorState({ dirty, busy }), [])
-  const configs = useQuery({
-    queryKey: ['project-wechat-platform-config', project.id],
-    queryFn: () => api.projects.getWechatPlatformConfig(project.id),
-    retry: false,
-    staleTime: 0,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-  })
   return (
     <><Dialog open onOpenChange={(open) => { if (!open) requestClose() }}>
       <DialogContent className="sm:max-w-lg" closeButtonDisabled={editorState.busy}>
@@ -135,12 +148,7 @@ export function ProjectChannelConfigDialog({ project, onClose }: Props) {
             <span className="block">管理此人设的公众号自动发布账号。</span>
           </DialogDescription>
         </DialogHeader>
-        {configs.isPending || (!configs.isFetchedAfterMount && !configs.isError) ? <p role="status">正在加载自动发布设置…</p> : configs.isError ? (
-          <div role="alert" className="space-y-3">
-            <p>自动发布设置加载失败：{getApiErrorMessage(configs.error, '请重试')}</p>
-            <Button variant="secondary" onClick={() => void configs.refetch()}>重试</Button>
-          </div>
-        ) : <ChannelConfigEditor project={project} config={configs.data} onClose={requestClose} onStateChange={onEditorStateChange} />}
+        <WechatPlatformSettingsPanel project={project} onStateChange={onEditorStateChange} onClose={requestClose} embedded={false} />
       </DialogContent>
     </Dialog>
     <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>

@@ -1,10 +1,10 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Bot, CalendarRange, FilePlus2, MessagesSquare, PenLine, Settings2, UserRound } from 'lucide-react'
+import { Bot, CalendarRange, FilePlus2, MessagesSquare, PenLine, UserRound } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { FieldHint } from '@/components/common/FieldHint'
@@ -24,6 +24,7 @@ import { TagInput } from '@/components/ui/TagInput'
 import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
 import { AnalyzedImageField } from '@/components/image-analysis/AnalyzedImageField'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { projectSchema, type ProjectFormValues } from '@/lib/schemas'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
@@ -32,7 +33,7 @@ import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import { createPlanHref, createTaskHref, parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
 import { referenceSelectionFromValue } from '@/lib/reference-image'
-import { ProjectChannelConfigDialog } from '@/components/projects/ProjectChannelConfigDialog'
+import { ProjectChannelConfigDialog, WechatPlatformSettingsPanel } from '@/components/projects/ProjectChannelConfigDialog'
 import { useAuth } from '@/contexts/AuthContext'
 import { CreationTypePicker } from '@/components/tasks/CreationTypePicker'
 import { profileLabAgents, projectAgentIDs, supportsProfileLab } from '@/lib/project-capabilities'
@@ -91,6 +92,10 @@ function usesWechatPublishing(agentIDs: readonly string[]) {
   return agentIDs.some((id) => id === 'wechat-article' || id === 'wechat-picture')
 }
 
+function projectUsesWechatPublishing(project: Project) {
+  return project.agent_ids != null && usesWechatPublishing(project.agent_ids)
+}
+
 const selectableProjectTypeIDs: Set<string> = new Set(profileLabAgents.map((agent) => agent.id))
 
 export default function ProjectsPage() {
@@ -118,8 +123,15 @@ export default function ProjectsPage() {
   const editingAnalysisUpdatedAtRef = useRef('')
   const [referenceUploading, setReferenceUploading] = useState(false)
   const [channelProject, setChannelProject] = useState<Project | null>(null)
+  const [platformSettingsDirty, setPlatformSettingsDirty] = useState(false)
+  const [platformSettingsBusy, setPlatformSettingsBusy] = useState(false)
+  const [settingsTab, setSettingsTab] = useState('profile')
   const [onboardingProject, setOnboardingProject] = useState<Project | null>(null)
   const { submit } = useSubmitLock()
+  const handlePlatformSettingsStateChange = useCallback((dirty: boolean, busy: boolean) => {
+    setPlatformSettingsDirty(dirty)
+    setPlatformSettingsBusy(busy)
+  }, [])
 
   useEffect(() => {
     if (modalOpen || !pendingChannelProjectRef.current) return
@@ -316,6 +328,9 @@ export default function ProjectsPage() {
     setEditingAnalysis(null)
     editingAnalysisUpdatedAtRef.current = ''
     setReferenceUploading(false)
+    setPlatformSettingsDirty(false)
+    setPlatformSettingsBusy(false)
+    setSettingsTab('profile')
     setModalOpen(true)
   }
 
@@ -344,6 +359,9 @@ export default function ProjectsPage() {
     setEditingAnalysis(project.image_analysis ?? null)
     editingAnalysisUpdatedAtRef.current = project.image_analysis?.updated_at ?? ''
     setReferenceUploading(false)
+    setPlatformSettingsDirty(false)
+    setPlatformSettingsBusy(false)
+    setSettingsTab('profile')
     form.reset(projectToForm(project))
     setModalOpen(true)
   }
@@ -355,7 +373,8 @@ export default function ProjectsPage() {
   }
 
   function closeModal() {
-    if (form.formState.isDirty) {
+    if (platformSettingsBusy) return
+    if (form.formState.isDirty || platformSettingsDirty) {
       setShowDirtyDialog(true)
       return
     }
@@ -371,6 +390,9 @@ export default function ProjectsPage() {
     setEditingAnalysis(null)
     editingAnalysisUpdatedAtRef.current = ''
     setReferenceUploading(false)
+    setPlatformSettingsDirty(false)
+    setPlatformSettingsBusy(false)
+    setSettingsTab('profile')
     form.reset(PROJECT_FORM_DEFAULTS)
     if (createIntent.shouldCreate) {
       setSearchParams({}, { replace: true })
@@ -501,7 +523,6 @@ export default function ProjectsPage() {
               stats={projectStats[project.id]}
               onEdit={openEdit}
               onUpdateProfile={openProfileCreator}
-              onChannelConfig={setChannelProject}
               archiving={archiveMutation.isPending}
               restoring={restoreMutation.isPending}
               onArchive={(id) => { void submit(async () => archiveMutation.mutateAsync(id)).catch(() => {}) }}
@@ -517,8 +538,19 @@ export default function ProjectsPage() {
           <DialogHeader>
             <DialogTitle>{editingProject ? '编辑人设' : '新建人设'}</DialogTitle>
           </DialogHeader>
+          {editingProject && <Tabs value={settingsTab} onValueChange={setSettingsTab}>
+            <TabsList variant="line" aria-label="人设设置分区" className="w-full justify-start rounded-none border-b border-border p-0">
+              <TabsTrigger value="profile" className="flex-none px-3 py-2">人设资料</TabsTrigger>
+              {projectUsesWechatPublishing(editingProject) && <TabsTrigger value="platform" className="flex-none px-3 py-2">平台设置</TabsTrigger>}
+            </TabsList>
+            {projectUsesWechatPublishing(editingProject) && (
+              <TabsContent value="platform" keepMounted className="max-h-[72vh] overflow-y-auto p-1">
+                <WechatPlatformSettingsPanel project={editingProject} onStateChange={handlePlatformSettingsStateChange} />
+              </TabsContent>
+            )}
+          </Tabs>}
           <Form {...form}>
-            <form id="project-form" onSubmit={handleProjectSubmit} className="max-h-[72vh] space-y-4 overflow-y-auto p-1">
+            <form id="project-form" onSubmit={handleProjectSubmit} className={`${editingProject && settingsTab !== 'profile' ? 'hidden' : ''} max-h-[72vh] space-y-4 overflow-y-auto p-1`}>
               <FormField control={form.control} name="name" render={({ field }) => (
                 <FormItem className="flex items-center gap-3 space-y-0">
                   <FormLabel className="w-20 shrink-0 text-right">人设名称</FormLabel>
@@ -557,7 +589,7 @@ export default function ProjectsPage() {
                 />
               )}
 
-              {hasWechatPublishing && (
+              {hasWechatPublishing && !editingProject && (
                 <section className="rounded-lg border border-[#07C160]/25 bg-[#07C160]/5 p-4" aria-labelledby="wechat-publishing-title">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="flex min-w-0 items-start gap-3">
@@ -569,11 +601,7 @@ export default function ProjectsPage() {
                         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">文章与贴图共用一个公众号账号。AppSecret 只在保存时提交，之后不会回显。</p>
                       </div>
                     </div>
-                    {editingProject ? (
-                      <Button type="button" variant="outline" size="sm" onClick={() => setChannelProject(editingProject)}>
-                        <Settings2 />配置自动发布
-                      </Button>
-                    ) : <span className="shrink-0 text-xs font-medium text-muted-foreground">创建后自动配置</span>}
+                    <span className="shrink-0 text-xs font-medium text-muted-foreground">创建后自动配置</span>
                   </div>
                 </section>
               )}
@@ -662,9 +690,11 @@ export default function ProjectsPage() {
           </Form>
           <DialogFooter>
             <Button variant="secondary" onClick={closeModal}>取消</Button>
-            <Button type="submit" form="project-form" loading={isSubmitting} disabled={referenceUploading}>
-              {editingProject ? '更新' : '创建'}
-            </Button>
+            {(!editingProject || settingsTab === 'profile') && (
+              <Button type="submit" form="project-form" loading={isSubmitting} disabled={referenceUploading}>
+                {editingProject ? '更新' : '创建'}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

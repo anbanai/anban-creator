@@ -94,7 +94,7 @@ describe('ProjectCard', () => {
   })
 
   it('does not expose WeChat platform settings for non-WeChat projects', () => {
-    render(<ProjectCard project={project({ platform: 'seednote', agent_ids: ['seednote'] })} onChannelConfig={vi.fn()} />)
+    render(<ProjectCard project={project({ platform: 'seednote', agent_ids: ['seednote'] })} />)
     expect(screen.queryByRole('button', { name: /平台设置/ })).not.toBeInTheDocument()
   })
 
@@ -159,6 +159,15 @@ describe('ProjectCard', () => {
     expect(portraitLink.closest('[aria-label="人设操作：公众号人设"]')).toContainElement(portraitLink)
   })
 
+  it('reserves two lines for every profile summary so progress bars align', () => {
+    const short = render(<ProjectCard project={project({ keywords: '' })} />)
+    expect(short.container.querySelector('[aria-label="人设画像：公众号人设"] p.line-clamp-2')).toHaveClass('h-10')
+
+    short.unmount()
+    const long = render(<ProjectCard project={project({ keywords: '较长的画像摘要内容用于测试卡片高度对齐' })} />)
+    expect(long.container.querySelector('[aria-label="人设画像：公众号人设"] p.line-clamp-2')).toHaveClass('h-10')
+  })
+
   it('uses the profile progress bar as the divider before card actions', () => {
     render(<ProjectCard project={project()} />)
 
@@ -186,21 +195,18 @@ describe('ProjectCard', () => {
     expect(await screen.findByRole('dialog', { name: /选题资产 - 公众号人设/ })).toBeInTheDocument()
   })
 
-  it('lists project actions directly without a more menu and uses accessible icon targets', async () => {
-    const onChannelConfig = vi.fn()
+  it('keeps project settings under the single edit entry and uses accessible icon targets', async () => {
     const onEdit = vi.fn()
     const onUpdateProfile = vi.fn()
-    render(<ProjectCard project={project()} onChannelConfig={onChannelConfig} onEdit={onEdit} onUpdateProfile={onUpdateProfile} onArchive={vi.fn()} />)
+    render(<ProjectCard project={project()} onEdit={onEdit} onUpdateProfile={onUpdateProfile} onArchive={vi.fn()} />)
 
     expect(screen.queryByText('更多')).not.toBeInTheDocument()
-    const channelConfig = screen.getByRole('button', { name: '平台设置：公众号人设' })
     const edit = screen.getByRole('button', { name: '编辑人设：公众号人设' })
     const memory = screen.getByRole('button', { name: '人设记忆：公众号人设' })
-    for (const control of [channelConfig, edit, memory]) expect(control).toHaveClass('size-11')
+    for (const control of [edit, memory]) expect(control).toHaveClass('size-11')
+    expect(screen.queryByRole('button', { name: '平台设置：公众号人设' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '人设画像：公众号人设' })).not.toBeInTheDocument()
 
-    fireEvent.click(channelConfig)
-    expect(onChannelConfig).toHaveBeenCalledWith(expect.objectContaining({ id: 'project-1' }))
     fireEvent.click(edit)
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'project-1' }))
     fireEvent.click(memory)
