@@ -1,3 +1,4 @@
+import { BuildVersion } from '@/components/BuildVersion'
 import { Link } from 'react-router-dom'
 import { PenLine, ImagePlus, Send, TrendingUp, type LucideIcon } from 'lucide-react'
 
@@ -24,7 +25,7 @@ export default function AuthLayout({
   footerLinkTo: string
 }) {
   return (
-    <div className="relative flex min-h-dvh items-center justify-center xl:justify-end overflow-hidden bg-gradient-to-br from-amber-50 via-amber-100 to-amber-300 dark:from-amber-950 dark:via-amber-900 dark:to-amber-800">
+    <div className="relative flex min-h-dvh py-24 items-center justify-center xl:justify-end overflow-hidden bg-gradient-to-br from-amber-50 via-amber-100 to-amber-300 dark:from-amber-950 dark:via-amber-900 dark:to-amber-800">
       {/* Decorative circles */}
       <div className="pointer-events-none absolute -right-16 -top-16 h-52 w-52 rounded-full bg-amber-400/30 dark:bg-amber-600/20" />
       <div className="pointer-events-none absolute -bottom-10 right-80 h-36 w-36 rounded-full bg-amber-500/20 dark:bg-amber-700/20" />
@@ -89,6 +90,7 @@ export default function AuthLayout({
 
       {/* ICP footer */}
       <div className="absolute bottom-4 w-full text-center text-xs text-amber-600/70 dark:text-amber-400/50">
+        <p className="mb-2"><BuildVersion /></p>
         <p>© {new Date().getFullYear()} 成都北冕星辰科技有限公司</p>
         <a
           href="https://beian.miit.gov.cn/"

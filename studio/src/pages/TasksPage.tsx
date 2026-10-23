@@ -206,11 +206,11 @@ export default function TasksPage() {
       toast.error(projectsQuery.isError
         ? '无法加载对应的人设，请刷新后重试。'
         : '所选人设不存在或已归档，请返回人设页重试。')
-      setSearchParams({}, { replace: true })
+      setSearchParams(current => { const next = new URLSearchParams(current); for (const key of ['create', 'type', 'intent']) next.delete(key); return next }, { replace: true })
       return
     }
     openCreate()
-    setSearchParams({}, { replace: true })
+    setSearchParams(current => { const next = new URLSearchParams(current); for (const key of ['create', 'type', 'intent']) next.delete(key); return next }, { replace: true })
   }, [shouldCreate, projectsLoading, createIntent.projectId, projectMap, projectsQuery.isFetching, projectsQuery.isError, projectsQuery.refetch, setSearchParams])
 
   useEffect(() => {
@@ -401,7 +401,7 @@ export default function TasksPage() {
 
   function openCreate() {
     if (projectsLoading) {
-      setCreateDialogIntent({ projectId: createIntent.projectId, type: createIntent.type })
+      setCreateDialogIntent({ projectId: createIntent.projectId || projectFilter || undefined, type: createIntent.type })
       setModalOpen(true)
       return
     }
@@ -410,7 +410,7 @@ export default function TasksPage() {
       navigate(projectsReturnHref({ type: createIntent.type ?? 'seednote', intent: createIntent.intent ?? 'new' }))
       return
     }
-    setCreateDialogIntent({ projectId: createIntent.projectId, type: createIntent.type })
+    setCreateDialogIntent({ projectId: createIntent.projectId || projectFilter || undefined, type: createIntent.type })
     setModalOpen(true)
   }
 

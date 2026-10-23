@@ -1,7 +1,7 @@
 import { PortraitCoverControl } from './PortraitCoverControl'
 import { HypitCreationPanel } from '@/components/hypit/HypitCreationPanel'
 import { initialHypitInput } from '@/lib/hypit-form'
-import { useEffect, useMemo, useRef, useState, type BaseSyntheticEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type BaseSyntheticEvent, type ReactNode } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm, useWatch, type FieldPath, type FieldPathValue, type Resolver } from 'react-hook-form'
@@ -51,6 +51,7 @@ import { contentTypeOptions } from '@/lib/labels'
 import { TaskComposerParameters } from './TaskComposerParameters'
 import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
 import { SeednoteTemplateGallery } from '@/components/templates/SeednoteTemplateGallery'
+import { ProjectOutputSettingsDialog } from '@/components/projects/ProjectOutputSettingsDialog'
 import { projectAgentIDs } from '@/lib/project-capabilities'
 
 const SEEDNOTE_ATTACHMENT_POLICY = {
@@ -89,6 +90,7 @@ function preferredProjectTaskType(project: Project, preferred?: string): TaskTyp
 
 export interface TaskFormDialogProps {
   open: boolean
+  presentation?: 'dialog' | 'page'
   mode: 'create' | 'clone'
   sourceTask?: Task
   initialProjectId?: string
@@ -127,6 +129,7 @@ function createInitialDefaults(project?: Project, initialType?: TaskType): TaskF
 
 export function TaskFormDialog({
   open,
+  presentation = 'dialog',
   mode,
   sourceTask,
   initialProjectId,
@@ -143,6 +146,7 @@ export function TaskFormDialog({
   const [montageReady, setMontageReady] = useState(false)
   const [portraitUploading, setPortraitUploading] = useState(false)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
+  const [outputSettingsOpen, setOutputSettingsOpen] = useState(false)
 
   const { data: projects = [], isLoading: projectsLoading } = useQuery({
     queryKey: ['projects', 'active'],
@@ -468,7 +472,7 @@ export function TaskFormDialog({
       : !selectedProject
         ? { message: '先选择一个人设。', href: '' }
         : !hasProjectOutputs
-          ? { message: '当前人设未配置可用输出方式，请先完善人设设置。', href: '/projects' }
+          ? { message: '请先选择这个人设要创作的内容类型。', href: '' }
         : !selectedTypeSupported
           ? { message: '当前输出方式与人设不匹配，请重新选择。', href: '' }
         : executionProfilesQuery.isError
@@ -595,7 +599,7 @@ export function TaskFormDialog({
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/70 pt-3 text-xs text-muted-foreground">
           <ProjectIdentity project={selectedProject} compact showAgents={false} className="font-medium" />
           <span>可用输出：{taskTypeOptions.map((option) => option.label).join('、') || (hasProjectOutputs ? '加载中' : '未配置')}</span>
-          {!hasProjectOutputs ? <p role="alert" className="basis-full text-sm font-medium text-destructive">当前人设未配置可用输出方式，请先完善人设设置。</p> : null}
+          {!hasProjectOutputs ? <div role="alert" className="basis-full space-y-2"><p className="text-sm font-medium text-destructive">还未选择这个人设要创作的内容类型，例如公众号文章或种草笔记。</p><Button type="button" variant="secondary" onClick={() => setOutputSettingsOpen(true)}>设置创作类型</Button></div> : null}
         </div>
       ) : (
         <div className="mt-3 border-t border-border/70 pt-3">
@@ -656,13 +660,14 @@ export function TaskFormDialog({
 
   const submitLabel = mode === 'clone' ? (watchedType === 'hypit' ? '再次改编' : '克隆') : quantity > 1 ? `创建 ${quantity} 个作品` : '创建'
 
+  const Title = presentation === 'page' ? 'h1' : DialogTitle
+  const Description = presentation === 'page' ? 'p' : DialogDescription
   return (
     <>
-      <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen && !isSubmitting) requestClose() }}>
-        <DialogContent closeButtonDisabled={isSubmitting} className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+      <ComposerSurface open={open} page={presentation === 'page'} busy={isSubmitting} onClose={requestClose}>
           <DialogHeader className="shrink-0 border-b border-border px-4 py-3">
-            <DialogTitle>{mode === 'clone' ? (watchedType === 'hypit' ? '再次改编' : '克隆作品') : '创作'}</DialogTitle>
-            <DialogDescription>
+            <Title className="text-lg font-semibold">{mode === 'clone' ? (watchedType === 'hypit' ? '再次改编' : '克隆作品') : '创作'}</Title>
+            <Description className="text-sm text-muted-foreground">
               {mode === 'clone'
                 ? '编辑完整配置并创建一份新作品。'
                 : watchedType === 'whiteboard-animation'
@@ -670,7 +675,7 @@ export function TaskFormDialog({
                 : isMontageTask || isVideoEditTask
                   ? '配置视频目标、来源素材和成片方式。'
                   : '配置内容目标、图片选项和执行方式。'}
-            </DialogDescription>
+            </Description>
           </DialogHeader>
           <Form {...form}>
             <form id="task-create-form" onSubmit={handleSubmit} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
@@ -1031,8 +1036,15 @@ export function TaskFormDialog({
               {submitLabel}
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      </ComposerSurface>
+      {outputSettingsOpen && selectedProject && <ProjectOutputSettingsDialog project={selectedProject}
+        onClose={() => setOutputSettingsOpen(false)} onSaved={project => {
+          if (!projectTaskTypes(project).includes(form.getValues('type'))) {
+            form.setValue('type', preferredProjectTaskType(project), { shouldValidate: true })
+            form.setValue('execution_profile', '', { shouldValidate: true })
+          }
+          setOutputSettingsOpen(false)
+        }} />}
 
       <AlertDialog open={showDirtyDialog} onOpenChange={(nextOpen) => { if (!isSubmitting) setShowDirtyDialog(nextOpen) }}>
         <AlertDialogContent>
@@ -1048,4 +1060,11 @@ export function TaskFormDialog({
       </AlertDialog>
     </>
   )
+}
+
+function ComposerSurface({ open, page, busy, onClose, children }: { open: boolean; page: boolean; busy: boolean; onClose: () => void; children: ReactNode }) {
+  if (page) return <section className="flex min-h-[70dvh] flex-col overflow-hidden rounded-xl border bg-card" aria-label="创建作品">{children}</section>
+  return <Dialog open={open} onOpenChange={next => { if (!next && !busy) onClose() }}>
+    <DialogContent closeButtonDisabled={busy} className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">{children}</DialogContent>
+  </Dialog>
 }
