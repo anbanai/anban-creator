@@ -181,7 +181,9 @@ export default function AssistantWorkspace() {
     staleTime: 30_000,
   })
   const works = worksQuery.data?.pages.flatMap((page) => page.items) ?? []
-  const resolvedContentId = conversationPhase === 'active' ? workspace?.content_id ?? contentId : contentId
+  const resolvedContentId = pendingMode === 'review'
+    ? contentId
+    : conversationPhase === 'active' ? workspace?.content_id ?? contentId : contentId
   const selectedWork = works.find((work) => work.id === resolvedContentId) ?? (selectionMode === 'review' && works.length === 1 ? works[0] : undefined)
   const reviewVideoQuery = useQuery({
     queryKey: ['assistant-review-video', selectedWork?.id],
@@ -383,7 +385,7 @@ export default function AssistantWorkspace() {
   const chooseMode = async (nextMode: AssistantModeID, context?: { projectId?: string; contentId?: string }) => {
     const contextProjectChanged = context && Object.prototype.hasOwnProperty.call(context, 'projectId') && (context.projectId ?? '') !== projectId
     const contextContentChanged = context && Object.prototype.hasOwnProperty.call(context, 'contentId') && (context.contentId ?? '') !== contentId
-    if (nextMode === mode && !pendingMode && !contextProjectChanged && !contextContentChanged || switching) return
+    if (nextMode === mode && !pendingMode && !contextProjectChanged && !contextContentChanged || switching || committing || sending || responding) return
     const candidate = bootstrap?.modes.find((item) => item.id === nextMode)
     if (!candidate) {
       setError('当前模式暂时无法加载，请稍后重试')
@@ -415,6 +417,14 @@ export default function AssistantWorkspace() {
         ...(requestedProjectId ? { project_id: requestedProjectId } : {}),
         ...(requestedContentId ? { content_id: requestedContentId } : {}),
       })
+      const contextChanged = (workspace.project_id ?? '') !== (nextWorkspace.project_id ?? '') || (workspace.content_id ?? '') !== (nextWorkspace.content_id ?? '')
+      const sessionChanged = workspace.sessions[nextMode] !== nextWorkspace.sessions[nextMode]
+      if (contextChanged) {
+        setMessagesByMode((current) => ({ ...current, [nextMode]: [] }))
+        setQuestionsByMode((current) => ({ ...current, [nextMode]: [] }))
+        setDraftByMode((current) => ({ ...current, [nextMode]: null }))
+      }
+      if (sessionChanged) setLastEventIds((current) => ({ ...current, [nextMode]: undefined }))
       setMode(nextMode)
       setPendingMode(null)
       setProjectId(nextWorkspace.project_id ?? projectId)
@@ -549,6 +559,12 @@ export default function AssistantWorkspace() {
     setVideoEditPreferences({})
     setVideoEditUploadFailed(false)
   }
+  const selectReviewContent = (value: string) => {
+    setContentId(value)
+    if (pendingMode === 'review' && value && projectId) {
+      void chooseMode('review', { projectId, contentId: value })
+    }
+  }
   const creationTypeSelector = mode === 'creation' && selectedProject ? (
     <label className="mx-auto mt-3 block w-full max-w-xs space-y-1.5 text-left text-sm">
       <span>创作类型</span>
@@ -579,6 +595,7 @@ export default function AssistantWorkspace() {
   }
 
   const selectPersona = (nextProjectId: string) => {
+    if (switching || committing || sending || responding) return
     setNewProfile(false)
     setError(null)
     setContentId('')
@@ -586,16 +603,44 @@ export default function AssistantWorkspace() {
       void chooseMode(mode, { projectId: nextProjectId })
       return
     }
+    if (workspace && mode === 'review') {
+      void chooseMode('review', { projectId: nextProjectId, contentId: '' })
+      return
+    }
     setProjectId(nextProjectId)
   }
 
-  const startNewProfile = () => {
+  const startNewProfile = async () => {
+    if (switching || committing || sending || responding) return
     setNewProfile(true)
     setProjectId('')
     setContentId('')
     setError(null)
-    if (workspace) void chooseMode('profile', { projectId: '' })
-    else setMode('profile')
+    if (!workspace) {
+      setMode('profile')
+      return
+    }
+    const previousProjectId = workspace.project_id ?? projectId
+    setSwitching(true)
+    try {
+      await api.assistant.closeWorkspace(workspace.id)
+      streamAbort.current?.abort()
+      setWorkspace(null)
+      setConversationPhase('setup')
+      setLastEventIds({})
+      setMessagesByMode({})
+      setQuestionsByMode({})
+      setDraftByMode({})
+      setPendingMode(null)
+      setResponding(false)
+      setMode('profile')
+    } catch (closeError) {
+      setNewProfile(false)
+      setProjectId(previousProjectId)
+      setError(closeError instanceof Error ? closeError.message : '当前对话无法结束，请稍后重试')
+    } finally {
+      setSwitching(false)
+    }
   }
 
   const editPersona = (nextProjectId: string) => {
@@ -613,6 +658,8 @@ export default function AssistantWorkspace() {
   const viewPersonaWorks = (nextProjectId: string) => {
     navigate(`/tasks?project_id=${encodeURIComponent(nextProjectId)}`)
   }
+
+  const activeReviewSelectors = workspace && pendingMode === 'review' ? <WorkspaceSelectors mode="review" projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={contentId} works={works} disabled={switching} onProject={selectPersona} onContent={selectReviewContent} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} /> : null
 
   const personaRail = bootstrap ? (
     <PersonaRail
@@ -655,6 +702,7 @@ export default function AssistantWorkspace() {
               <VideoEditReviewResults query={reviewVideoQuery} />
             )}
             <Conversation messages={activeMessages} questions={activeQuestions} onAnswer={submitAnswers} />
+            {activeReviewSelectors}
             {activeDraft && <DraftConfirmationCard mode={mode} draft={activeDraft} committing={committing} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} />}
             {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
           </div>

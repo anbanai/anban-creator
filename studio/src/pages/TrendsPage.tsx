@@ -168,6 +168,6 @@ export default function TrendsPage() {
     </div>
 
     {!trendsQuery.isPending && activePlatforms.length > 0 && groups.length === 0 && <p className="py-12 text-center text-sm text-muted-foreground">暂无热点数据</p>}
-    <p className="text-xs text-muted-foreground">数据会根据各平台更新情况自动刷新 · <Link className="text-primary" to="/">返回 AI 助手</Link></p>
+    <p className="text-xs text-muted-foreground">数据会根据各平台更新情况自动刷新 · <Link className="text-primary" to="/">返回首页</Link></p>
   </div>
 }
