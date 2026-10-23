@@ -183,6 +183,56 @@ describe('AssistantWorkspace', () => {
     expect(await screen.findByRole('button', { name: '创作模式' })).toBeDisabled()
   })
 
+  it('blocks input until a required profile is selected for creation', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'creation',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划', available: true },
+        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: true },
+      ],
+      projects: [
+        { id: 'project-1', name: '画像一', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] },
+        { id: 'project-2', name: '画像二', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] },
+      ],
+    })
+    renderPage()
+
+    await clickMode('创作模式')
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveAttribute('placeholder', '先选择画像后即可输入消息')
+
+    fireEvent.change(screen.getByRole('combobox', { name: '选择画像' }), { target: { value: 'project-1' } })
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled())
+  })
+
+  it('blocks input until a work is selected for review', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'review',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划', available: true },
+        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: true },
+      ],
+      projects: [{ id: 'project-1', name: '画像一', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    mocks.works.mockResolvedValue({ items: [
+      { id: 'work-1', title: '作品一', type: 'article', createdAt: '2026-10-22T00:00:00Z' },
+      { id: 'work-2', title: '作品二', type: 'article', createdAt: '2026-10-21T00:00:00Z' },
+    ], has_more: false })
+    renderPage()
+
+    await clickMode('复盘模式')
+    const composer = screen.getByRole('textbox', { name: '发送消息' })
+    expect(composer).toBeDisabled()
+    expect(composer).toHaveAttribute('placeholder', '先选择作品后即可输入消息')
+
+    const workSelect = await screen.findByRole('combobox', { name: '选择作品' })
+    await screen.findByRole('option', { name: '作品一' })
+    fireEvent.change(workSelect, { target: { value: 'work-1' } })
+    await waitFor(() => expect(composer).toBeEnabled())
+  })
+
   it('prevents duplicate commands from two immediate sends', async () => {
     let resolveMessage!: () => void
     mocks.workspaceMessage.mockReturnValue(new Promise<void>((resolve) => { resolveMessage = resolve }))
