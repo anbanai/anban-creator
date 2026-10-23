@@ -37,7 +37,7 @@ var ErrCloudPublishingAmbiguous = errors.New("cloud draft publication outcome is
 var pictureContentImagePathPattern = regexp.MustCompile(`^image_\d+\.png$`)
 var articleLayoutPlanPattern = regexp.MustCompile("(?s)```json\\s*(\\{.*?\\})\\s*```")
 var picturePublicationHTMLPattern = regexp.MustCompile(`(?is)<[^>]+>`)
-var picturePublicationMarkdownPattern = regexp.MustCompile("(?m)^\\s{0,3}(#{1,6}\\s|[-+]\\s|>\\s)|[*_`~\\[\\]]")
+var picturePublicationMarkdownPattern = regexp.MustCompile("(?m)^\\s{0,3}(#{1,6}\\s|[-+]\\s|>|[-*_](?:\\s*[-*_]){2,}\\s*$)|[*_`~\\[\\]]")
 var picturePublicationMarkdownTablePattern = regexp.MustCompile(`(?m)^\s*\|.*\|\s*$|^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$`)
 var picturePublicationTagPattern = regexp.MustCompile(`^#[\p{L}\p{N}_-]+$`)
 

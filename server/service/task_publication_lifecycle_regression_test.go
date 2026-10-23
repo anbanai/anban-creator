@@ -174,6 +174,8 @@ func TestFinalizePicturePublicationRejectsInvalidCopyBeforePublishing(t *testing
 		{name: "markdown content", title: "图片消息", content: "**这是说明**\n\n#标签一 #标签二 #标签三 #标签四 #标签五"},
 		{name: "markdown bullet", title: "图片消息", content: "- 这是说明\n\n#标签一 #标签二 #标签三 #标签四 #标签五"},
 		{name: "markdown blockquote", title: "图片消息", content: "> 这是说明\n\n#标签一 #标签二 #标签三 #标签四 #标签五"},
+		{name: "markdown blockquote without space", title: "图片消息", content: ">这是说明\n\n#标签一 #标签二 #标签三 #标签四 #标签五"},
+		{name: "markdown horizontal rule", title: "图片消息", content: "这是说明。\n\n---\n\n#标签一 #标签二 #标签三 #标签四 #标签五"},
 		{name: "markdown table", title: "图片消息", content: "| 名称 | 用途 |\n| --- | --- |\n| 示例 | 内容 |\n\n#标签一 #标签二 #标签三 #标签四 #标签五"},
 		{name: "html content", title: "图片消息", content: "<p>这是说明</p>\n\n#标签一 #标签二 #标签三 #标签四 #标签五"},
 	} {
