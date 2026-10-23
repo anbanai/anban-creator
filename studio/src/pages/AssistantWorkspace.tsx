@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, ChevronDown, Loader2, MessageSquare, Send, Sparkles, UserRound } from 'lucide-react'
+import { ArrowUp, Check, ChevronDown, Loader2, MessageSquare, Sparkles, UserRound } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 import { useLocation } from 'react-router-dom'
 import { api } from '@/lib/api'
@@ -8,8 +8,8 @@ import type { AssistantModeID, AssistantWorkspace as AssistantWorkspaceState, As
 import { useAuth } from '@/contexts/AuthContext'
 import { streamAssistantWorkspace, type InteractiveStreamEvent } from '@/lib/interactive-events'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from '@/components/ui/input-group'
 import { DshQuestionComposer, type DshQuestion, type DshQuestionAnswer } from '@/components/dsh-user-questions/DshQuestionComposer'
 import { AssistantVideoEditInputs } from '@/components/video-edit/AssistantVideoEditInputs'
 import { VideoEditProjectDefaultsPanel } from '@/components/video-edit/VideoEditProjectDefaultsPanel'
@@ -89,6 +89,12 @@ function assistantWorkspaceErrorCode(error: unknown): string | undefined {
   return typeof code === 'string' ? code : undefined
 }
 
+function assistantWorkspaceHttpStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object' || !('response' in error)) return undefined
+  const status = (error as { response?: { status?: unknown } }).response?.status
+  return typeof status === 'number' ? status : undefined
+}
+
 function readPersistedWorkspace(): PersistedWorkspace | null {
   try {
     const raw = sessionStorage.getItem(WORKSPACE_STORAGE_KEY)
@@ -129,6 +135,7 @@ export default function AssistantWorkspace() {
   const [draftByMode, setDraftByMode] = useState<Record<string, Draft | null>>({})
   const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
+  const [responding, setResponding] = useState(false)
   const [switching, setSwitching] = useState(false)
   const [pendingMode, setPendingMode] = useState<AssistantModeID | null>(null)
   const [committing, setCommitting] = useState(false)
@@ -136,6 +143,7 @@ export default function AssistantWorkspace() {
   const streamAbort = useRef<AbortController | null>(null)
   const userMessageCounter = useRef(0)
   const workspaceCreateKey = useRef<string | null>(null)
+  const sendInFlight = useRef(false)
 
   useEffect(() => {
     if (!workspace) {
@@ -177,7 +185,7 @@ export default function AssistantWorkspace() {
     : undefined
   const profilePlatform = selectedProject?.platform ?? stringValue(draftProject?.platform)
   const isVideoEditProfile = mode === 'profile' && profilePlatform === 'video-edit'
-  const canSend = Boolean(composer.trim()) && Boolean(activeMode?.available) && (mode === 'profile' || Boolean(selectedProject)) && (mode !== 'review' || Boolean(selectedWork)) && !sending && !switching
+  const canSend = Boolean(composer.trim()) && Boolean(activeMode?.available) && (mode === 'profile' || Boolean(selectedProject)) && (mode !== 'review' || Boolean(selectedWork)) && !sending && !responding && !switching
 
   useEffect(() => {
     if (mode === 'profile' && selectedProject) setVideoEditDefaults(selectedProject.video_edit_defaults ?? {})
@@ -197,6 +205,9 @@ export default function AssistantWorkspace() {
         for await (const event of stream) {
           if (event.id) setLastEventIds((current) => ({ ...current, [mode]: event.id }))
           const data = parseEventData(event)
+          if (event.event === 'turn.start') setResponding(true)
+          if (event.event === 'turn.end' || event.event === 'question.opened' || event.event === 'session.error') setResponding(false)
+          if (event.event === 'session.status' && ['idle', 'waiting_answer', 'runtime_failed'].includes(String(data.status))) setResponding(false)
           const eventMode = isMode(data.mode_id) ? data.mode_id : mode
           const eventSession = stringValue(data.session_id)
           if (eventSession && workspace.sessions[eventMode] && eventSession !== workspace.sessions[eventMode]) {
@@ -236,7 +247,10 @@ export default function AssistantWorkspace() {
           }
         }
       } catch (streamError) {
-        if (!controller.signal.aborted) setError(streamError instanceof Error ? streamError.message : '助手连接已中断')
+        if (!controller.signal.aborted) {
+          setResponding(false)
+          setError(streamError instanceof Error ? streamError.message : '助手连接已中断')
+        }
       }
     })()
     return () => controller.abort()
@@ -244,7 +258,8 @@ export default function AssistantWorkspace() {
 
   const sendMessage = async (override?: string) => {
     const text = (override ?? composer).trim()
-    if (!text || !canSend) return
+    if (!text || !canSend || sendInFlight.current) return
+    sendInFlight.current = true
     const contextLines = mode === 'creation' && selectedCreationType
       ? [`创作类型：${selectedCreationType}`, ...(isVideoEditCreation ? [
           `剪辑要求：${videoEditBrief.trim() || '按本次创作需求自动决定'}`,
@@ -253,10 +268,11 @@ export default function AssistantWorkspace() {
         ] : [])]
       : []
     const messageText = contextLines.length ? `${text}\n\n${contextLines.join('\n')}` : text
+    const optimisticID = `optimistic-${++userMessageCounter.current}`
     setSending(true)
     setError(null)
     setComposer('')
-    setMessagesByMode((current) => ({ ...current, [mode]: [...(current[mode] ?? []), { id: `optimistic-${++userMessageCounter.current}`, role: 'user', text: messageText }] }))
+    setMessagesByMode((current) => ({ ...current, [mode]: [...(current[mode] ?? []), { id: optimisticID, role: 'user', text: messageText }] }))
     try {
       let currentWorkspace = workspace
       if (!currentWorkspace) {
@@ -266,19 +282,28 @@ export default function AssistantWorkspace() {
         setWorkspace(currentWorkspace)
       }
       await api.assistant.workspaceMessage(currentWorkspace.id, mode, messageText)
+      setResponding(true)
     } catch (sendError) {
       setComposer(text)
+      setMessagesByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).filter((message) => message.id !== optimisticID) }))
       const errorCode = assistantWorkspaceErrorCode(sendError)
       if (errorCode === 'assistant_workspace_expired') {
         setWorkspace(null)
         setLastEventIds({})
         setError('对话已过期。消息仍保留在输入框中，重新发送后会建立新会话。')
       } else if (errorCode === 'assistant_workspace_busy') {
-        setError('助手仍在处理上一条消息，请稍后重试。')
+        setError('助手正在处理上一条消息，输入已保留，请稍后重试。')
+      } else if (errorCode === 'interactive_session_busy' || errorCode === 'interactive_question_pending') {
+        setError(errorCode === 'interactive_question_pending'
+          ? '请先完成上方的问题，再发送新消息。输入已保留。'
+          : '助手正在处理上一条消息，输入已保留，请稍后重试。')
+      } else if (assistantWorkspaceHttpStatus(sendError) === 409) {
+        setError('对话状态刚刚发生变化，输入已保留，请稍后重试。')
       } else {
         setError(sendError instanceof Error ? sendError.message : '消息发送失败')
       }
     } finally {
+      sendInFlight.current = false
       setSending(false)
     }
   }
@@ -316,6 +341,7 @@ export default function AssistantWorkspace() {
       setProjectId(nextWorkspace.project_id ?? projectId)
       setContentId(nextWorkspace.content_id ?? contentId)
       setWorkspace(nextWorkspace)
+      setResponding(false)
     } catch (switchError) {
       const errorCode = assistantWorkspaceErrorCode(switchError)
       if (errorCode === 'assistant_workspace_expired') {
@@ -463,9 +489,9 @@ export default function AssistantWorkspace() {
   ) : null
 
   return (
-    <main data-testid="assistant-workspace" className="flex min-h-dvh w-full flex-col bg-background">
-      <header className="flex h-16 shrink-0 items-center justify-between border-b border-border/70 px-5 md:px-10">
-        <div className="flex items-center gap-3"><span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground"><Sparkles className="size-4" /></span><span className="text-sm font-semibold">AI 助手</span>{workspace && <span className="text-xs text-muted-foreground">{modeLabel(mode)}</span>}</div>
+    <main data-testid="assistant-workspace" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
+      <header className="hidden h-14 shrink-0 items-center gap-3 border-b border-border/70 px-5 md:flex md:px-8">
+        <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground"><Sparkles className="size-4" /></span><span className="text-sm font-semibold">AI 助手</span>
       </header>
 
       {!workspace ? (
@@ -487,15 +513,8 @@ export default function AssistantWorkspace() {
           <Composer value={composer} placeholder={modePlaceholder(mode)} inputDisabled={sending || switching} sendDisabled={!canSend} onChange={setComposer} onSend={() => void sendMessage()} />
         </section>
       ) : (
-        <section className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col px-4 pb-4 md:px-8">
-          <div className="flex shrink-0 flex-wrap items-center justify-center gap-1 py-4">{MODES.map((candidate) => { const item = bootstrap?.modes.find((entry) => entry.id === candidate); return <button key={candidate} type="button" aria-pressed={mode === candidate} disabled={bootstrapQuery.isLoading || !item?.available || switching} onClick={() => void chooseMode(candidate)} className={`rounded-full px-4 py-2 text-sm ${mode === candidate ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'} ${!item?.available ? 'opacity-50' : ''}`}>{modeLabel(candidate)}</button> })}</div>
-          <p className="shrink-0 pb-2 text-center text-sm leading-6 text-muted-foreground" aria-live="polite">{activeMode?.description}</p>
-          {bootstrapQuery.isError && <div className="mt-3 flex shrink-0 flex-wrap items-center justify-center gap-3"><p role="alert" className="text-center text-sm text-destructive">AI 助手暂时无法加载，请稍后重试。</p><Button type="button" variant="outline" size="sm" disabled={bootstrapQuery.isFetching} onClick={() => void bootstrapQuery.refetch()}>{bootstrapQuery.isFetching ? <Loader2 className="size-4 animate-spin" /> : '重试加载'}</Button></div>}
-          <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} disabled={Boolean(workspace && !pendingMode)} onProject={resetCreationProject} onContent={(value) => { setContentId(value); if (pendingMode && selectedProject) void chooseMode(pendingMode, { projectId: selectedProject.id, contentId: value }) }} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />
-          {isVideoEditProfile && <VideoEditProjectDefaultsPanel value={videoEditDefaults} onChange={setVideoEditDefaults} />}
-          {creationTypeSelector}
-          {videoEditInputs}
-          <div className="min-h-0 flex-1 overflow-y-auto py-4" aria-live="polite">
+        <section className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col px-4 pb-3 md:px-8">
+          <div data-testid="assistant-conversation" className="min-h-0 flex-1 overflow-y-auto py-4" aria-live="polite">
             {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && (
               <VideoEditReviewResults query={reviewVideoQuery} />
             )}
@@ -503,7 +522,7 @@ export default function AssistantWorkspace() {
             {activeDraft && <div className="mt-6 rounded-xl border border-primary/30 bg-primary/[0.04] p-4"><div className="flex items-center gap-2 text-sm font-medium"><Check className="size-4 text-emerald-600" />{modeLabel(mode)}已整理完成</div><p className="mt-2 text-xs text-muted-foreground">确认后保存当前结构化结果。</p><Button className="mt-4" size="sm" disabled={committing || (mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0))} onClick={() => void commitDraft()}>{committing ? <Loader2 className="size-4 animate-spin" /> : '确认并保存'}</Button></div>}
             {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
           </div>
-          <Composer value={composer} placeholder={activeQuestions.length ? '请先完成上面的回答' : modePlaceholder(mode)} inputDisabled={sending || switching || activeQuestions.length > 0} sendDisabled={!canSend || activeQuestions.length > 0} onChange={setComposer} onSend={() => void sendMessage()} />
+          <Composer value={composer} placeholder={activeQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || activeQuestions.length > 0} sendDisabled={!canSend || activeQuestions.length > 0} status={responding ? '助手正在回复…' : undefined} onChange={setComposer} onSend={() => void sendMessage()} />
         </section>
       )}
     </main>
@@ -521,8 +540,16 @@ function WorkspaceSelectors({ mode, projects, projectId, contentId, works, disab
   return <div className="mx-auto mt-6 flex w-full max-w-xs flex-col items-stretch gap-3"><NativeSelect className="w-full" aria-label="选择画像" value={projectId} disabled={disabled} onChange={(event) => onProject(event.target.value)}><NativeSelectOption value="">{mode === 'profile' ? '新建画像' : '选择画像'}</NativeSelectOption>{projects.map((project) => <NativeSelectOption key={project.id} value={project.id}>{project.name}</NativeSelectOption>)}</NativeSelect>{mode === 'review' && <NativeSelect className="w-full" aria-label="选择作品" value={contentId} disabled={disabled} onChange={(event) => onContent(event.target.value)}><NativeSelectOption value="">选择作品</NativeSelectOption>{works.map((work) => <NativeSelectOption key={work.id} value={work.id}>{work.title}</NativeSelectOption>)}</NativeSelect>}{mode === 'review' && hasMore && <Button type="button" variant="ghost" size="sm" className="self-end" aria-label="加载更多作品" disabled={disabled} onClick={onMore}><ChevronDown className="size-4" />加载更多作品</Button>}</div>
 }
 
-function Composer({ value, placeholder, inputDisabled, sendDisabled, onChange, onSend }: { value: string; placeholder: string; inputDisabled: boolean; sendDisabled: boolean; onChange: (value: string) => void; onSend: () => void }) {
-  return <section className="mt-8 overflow-hidden rounded-2xl border border-border bg-background shadow-sm focus-within:border-ring focus-within:ring-4 focus-within:ring-ring/10"><Textarea value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); onSend() } }} placeholder={placeholder} aria-label="发送消息" disabled={inputDisabled} className="min-h-28 resize-none border-0 px-5 py-4 shadow-none focus-visible:ring-0" /><div className="flex items-center justify-end border-t border-border/70 px-3 py-2.5"><Button size="icon-md" aria-label="发送消息" title="发送消息" disabled={sendDisabled || !value.trim()} onClick={onSend}><Send className="size-4" /></Button></div></section>
+function Composer({ value, placeholder, inputDisabled, sendDisabled, status, onChange, onSend }: { value: string; placeholder: string; inputDisabled: boolean; sendDisabled: boolean; status?: string; onChange: (value: string) => void; onSend: () => void }) {
+  return <div className="shrink-0 pt-2">
+    {status && <p role="status" className="pb-2 text-xs text-muted-foreground">{status}</p>}
+    <InputGroup className="min-h-20 items-end rounded-xl bg-background px-2 py-1 shadow-sm focus-within:ring-2 focus-within:ring-ring/20">
+      <InputGroupTextarea value={value} rows={2} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && Reflect.get(event.nativeEvent, 'keyCode') !== 229) { event.preventDefault(); onSend() } }} placeholder={placeholder} aria-label="发送消息" disabled={inputDisabled} className="max-h-48 min-h-16 px-3 py-3 leading-6" />
+      <InputGroupAddon align="inline-end" className="self-end pb-1.5 pr-1.5">
+        <InputGroupButton aria-label="发送消息" title="发送消息" size="icon-sm" variant="default" disabled={sendDisabled || !value.trim()} onClick={onSend}><ArrowUp className="size-4" /></InputGroupButton>
+      </InputGroupAddon>
+    </InputGroup>
+  </div>
 }
 
 function Conversation({ messages, questions, onAnswer }: { messages: Message[]; questions: QuestionBatch[]; onAnswer: (batch: QuestionBatch, answer: DshQuestionAnswer) => Promise<void> }) {

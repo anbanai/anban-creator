@@ -13,6 +13,18 @@ vi.mock('@/components/PageTransition', () => ({
 }))
 
 describe('AppLayout', () => {
+  it('keeps the workspace sidebar visible on the Assistant route', () => {
+    render(
+      <Routes>
+        <Route element={<AppLayout />}>
+          <Route index element={<div>页面内容</div>} />
+        </Route>
+      </Routes>,
+    )
+
+    expect(screen.getByRole('navigation', { name: '测试侧栏' })).toBeInTheDocument()
+  })
+
   it('keeps the main scroll container constrained to the viewport layout', () => {
     render(
       <Routes>

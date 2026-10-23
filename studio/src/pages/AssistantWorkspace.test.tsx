@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AssistantWorkspace from './AssistantWorkspace'
@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   workspaceCheckpoint: vi.fn(),
   taskGet: vi.fn(),
   taskFiles: vi.fn(),
+  streamEvents: [] as { event: string; id: string; data: string }[],
 }))
 
 const uploadToOSSMock = vi.hoisted(() => vi.fn())
@@ -35,6 +36,7 @@ vi.mock('@/lib/interactive-events', () => ({
   streamAssistantWorkspace: () => (async function* () {
     yield { event: 'assistant.message', id: 'event-1', data: JSON.stringify({ session_id: 'session-1', text: '收到，我开始处理。' }) }
     yield { event: 'draft.ready', id: 'event-2', data: JSON.stringify({ session_id: 'session-1', draft: { confirmation_token: 'token-1', ready: true, project: { platform: 'video-edit' } } }) }
+    for (const event of mocks.streamEvents) yield event
   })(),
 }))
 
@@ -50,9 +52,9 @@ function LocationProbe() {
   return <output data-testid="location">{location.pathname}{location.search}</output>
 }
 
-function renderPage() {
+function renderPage(state?: Partial<{ modeId: 'profile' | 'creation' | 'review'; projectId: string; contentId: string; checkpointId: string; initialMessage: string }>) {
   const queryClient = createTestQueryClient()
-  return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/']}><AssistantWorkspace /><LocationProbe /></MemoryRouter></QueryClientProvider>)
+  return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={[{ pathname: '/', state }]}><AssistantWorkspace /><LocationProbe /></MemoryRouter></QueryClientProvider>)
 }
 
 async function clickMode(mode: string) {
@@ -68,6 +70,7 @@ describe('AssistantWorkspace', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.streamEvents = []
     sessionStorage.clear()
     mocks.bootstrap.mockResolvedValue({
       defaultModeId: 'profile',
@@ -136,6 +139,61 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'profile' }, expect.any(String)))
   })
 
+  it('prevents duplicate commands from two immediate sends', async () => {
+    let resolveMessage!: () => void
+    mocks.workspaceMessage.mockReturnValue(new Promise<void>((resolve) => { resolveMessage = resolve }))
+    renderPage()
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '只发送一次' } })
+    const send = screen.getByRole('button', { name: '发送消息' })
+    fireEvent.click(send)
+    fireEvent.click(send)
+
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(1))
+    expect(mocks.workspaceMessage).toHaveBeenCalledTimes(1)
+    resolveMessage()
+  })
+
+  it('uses the DSH-style inline composer and removes setup controls after chat starts', async () => {
+    renderPage()
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '开始聊天' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(await screen.findByText('收到，我开始处理。')).toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: '助手模式' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '创作模式' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '选择画像' })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' }).closest('[data-slot="input-group"]')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '发送消息' }).parentElement).toHaveAttribute('data-align', 'inline-end')
+  })
+
+  it('keeps the draft and shows a useful message for an interactive busy conflict', async () => {
+    const busy = Object.assign(new Error('Request failed with status code 409'), {
+      response: { status: 409, data: { error_code: 'interactive_session_busy' } },
+    })
+    mocks.workspaceMessage.mockRejectedValueOnce(busy)
+    renderPage()
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '等待上一条完成' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(await screen.findByText('助手正在处理上一条消息，输入已保留，请稍后重试。')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('等待上一条完成')
+    expect(within(screen.getByTestId('assistant-conversation')).queryByText('等待上一条完成')).not.toBeInTheDocument()
+    expect(screen.queryByText('Request failed with status code 409')).not.toBeInTheDocument()
+  })
+
+  it('keeps the send action disabled while the runtime turn is active', async () => {
+    mocks.streamEvents = [{ event: 'turn.start', id: 'event-3', data: JSON.stringify({ session_id: 'session-1' }) }]
+    renderPage()
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '开始处理' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(await screen.findByText('助手正在回复…')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled())
+  })
+
   it('shows the selected mode description below the mode controls', async () => {
     renderPage()
     expect(await screen.findByText('建立画像')).toBeInTheDocument()
@@ -196,12 +254,12 @@ describe('AssistantWorkspace', () => {
     expect(screen.queryByRole('tab')).not.toBeInTheDocument()
   })
 
-  it('switches the active mode through the workspace API body', async () => {
+  it('selects a mode before starting a workspace', async () => {
     renderPage()
     await clickMode('创作模式')
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
-    // Creation is unavailable without a confirmed project, so the page stays
-    // in one place and does not invent a query-driven navigation state.
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+    expect(mocks.createWorkspace).not.toHaveBeenCalled()
     expect(screen.getByTestId('location')).toHaveTextContent('/')
   })
 
@@ -212,26 +270,27 @@ describe('AssistantWorkspace', () => {
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
         { id: 'creation', displayName: '创作模式', description: '制定计划', available: true },
         { id: 'review', displayName: '复盘模式', description: '复盘作品', available: true },
-      ], projects: [] })
+      ], projects: [{ id: 'project-new', name: '新画像', platform: 'video-edit', profileRevision: 1, profileReady: true, works: [] }] })
       .mockResolvedValue({ defaultModeId: 'profile', modes: [
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
         { id: 'creation', displayName: '创作模式', description: '制定计划', available: true },
         { id: 'review', displayName: '复盘模式', description: '复盘作品', available: true },
       ], projects: [{ id: 'project-new', name: '新画像', platform: 'video-edit', profileRevision: 1, profileReady: true, video_edit_defaults: { preferences: { quality_tier: 'quality' } }, works: [] }] })
     mocks.workspaceCommit.mockResolvedValue({ mode_id: 'profile', status: 'committed', project: { id: 'project-new', name: '新画像', platform: 'video-edit', video_edit_defaults: { preferences: { quality_tier: 'quality' } } } })
-    renderPage()
+    renderPage({ projectId: 'project-new' })
+    await screen.findByRole('combobox', { name: '默认质量档位' })
+    fireEvent.change(await screen.findByRole('combobox', { name: '默认质量档位' }), { target: { value: 'quality' } })
     fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '建立画像' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(screen.getByRole('button', { name: '确认并保存' })).toBeInTheDocument())
-    fireEvent.change(screen.getByRole('combobox', { name: '默认质量档位' }), { target: { value: 'quality' } })
     fireEvent.click(screen.getByRole('button', { name: '确认并保存' }))
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledWith('workspace-1', 'profile', expect.objectContaining({
       confirmation_token: 'token-1',
       idempotency_key: expect.any(String),
       video_edit_defaults: { preferences: { quality_tier: 'quality' } },
     })))
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '选择画像' })).toHaveValue('project-new'))
-    expect(screen.getByRole('combobox', { name: '默认质量档位' })).toHaveValue('quality')
+    expect(screen.queryByRole('combobox', { name: '选择画像' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '默认质量档位' })).not.toBeInTheDocument()
     expect(mocks.bootstrap).toHaveBeenCalledTimes(2)
   })
 
@@ -269,7 +328,7 @@ describe('AssistantWorkspace', () => {
     expect(mocks.workspaceMessage).toHaveBeenLastCalledWith('workspace-1', 'profile', '继续完善画像')
   })
 
-  it('collects review context in the same workspace before switching modes', async () => {
+  it('collects review context before the workspace starts', async () => {
     mocks.bootstrap.mockResolvedValue({
       defaultModeId: 'profile',
       modes: [
@@ -280,17 +339,16 @@ describe('AssistantWorkspace', () => {
       projects: [{ id: 'project-1', name: '我的画像', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
     })
     mocks.works.mockResolvedValue({ items: [{ id: 'work-1', title: '已完成作品', type: 'article', createdAt: '2026-10-22T00:00:00Z' }], has_more: false })
-    mocks.switchWorkspaceMode.mockResolvedValue({ id: 'workspace-1', mode_id: 'review', session_id: 'review-session', sessions: { profile: 'session-1', review: 'review-session' }, project_id: 'project-1', content_id: 'work-1', runtime_status: 'running', expires_at: '' })
     renderPage()
-    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '建立画像' } })
-    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalled())
-    fireEvent.click(screen.getByRole('button', { name: '复盘模式' }))
+    await clickMode('复盘模式')
     await waitFor(() => expect(screen.getByRole('combobox', { name: '选择画像' })).toBeEnabled())
     fireEvent.change(screen.getByRole('combobox', { name: '选择画像' }), { target: { value: 'project-1' } })
     await waitFor(() => expect(screen.getByRole('combobox', { name: '选择作品' })).toBeEnabled())
     fireEvent.change(screen.getByRole('combobox', { name: '选择作品' }), { target: { value: 'work-1' } })
-    await waitFor(() => expect(mocks.switchWorkspaceMode).toHaveBeenCalledWith('workspace-1', 'review', { project_id: 'project-1', content_id: 'work-1' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '复盘这篇作品' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'review', project_id: 'project-1', content_id: 'work-1' }, expect.any(String)))
+    expect(mocks.switchWorkspaceMode).not.toHaveBeenCalled()
   })
 
   it('previews the selected video-edit work and exposes its delivered edit artifacts in review mode', async () => {
