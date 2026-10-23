@@ -159,15 +159,6 @@
     }
 }
 
-.persona-card-scroll {
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-}
-
-.persona-card-scroll::-webkit-scrollbar {
-    display: none;
-}
-
 @keyframes pulse-dot {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }

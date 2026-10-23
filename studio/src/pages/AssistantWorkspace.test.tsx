@@ -203,6 +203,57 @@ describe('AssistantWorkspace', () => {
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
   })
 
+  it('blocks creation when the selected persona has no supported creation type', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'creation',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划', available: true },
+        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: true },
+      ],
+      projects: [{ id: 'project-unsupported', name: '未支持项目', platform: 'local-life', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    renderPage()
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    await waitFor(() => expect(composer).toHaveAttribute('placeholder', '当前人设暂不支持首页创作，请选择其他人设'))
+    expect(composer).toBeDisabled()
+    expect(composer).toHaveAttribute('placeholder', '当前人设暂不支持首页创作，请选择其他人设')
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+  })
+
+  it('only exposes creation parameters in creation mode', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'profile',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划', available: true },
+        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: true },
+      ],
+      projects: [{ id: 'project-1', name: '我的人设', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    renderPage()
+
+    await screen.findByRole('button', { name: '选择人设：我的人设' })
+    expect(screen.queryByRole('button', { name: /^创作参数：/ })).not.toBeInTheDocument()
+  })
+
+  it('only exposes attachment upload in creation mode', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'profile',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划', available: true },
+        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: true },
+      ],
+      projects: [{ id: 'project-1', name: '我的人设', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    renderPage()
+
+    await screen.findByRole('button', { name: '选择人设：我的人设' })
+    expect(screen.queryByLabelText('选择附件文件')).not.toBeInTheDocument()
+  })
+
   it('blocks input until a work is selected for review', async () => {
     mocks.bootstrap.mockResolvedValue({
       defaultModeId: 'review',
@@ -598,7 +649,42 @@ describe('AssistantWorkspace', () => {
       checkpoint_digest: 'digest-1',
       idempotency_key: expect.any(String),
     })))
-    expect(await screen.findByTestId('location')).toHaveTextContent('/tasks/task-created-1')
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tasks/task-created-1'))
+  })
+
+  it('disables the composer while a creation confirmation is committing', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'creation',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划', available: true },
+        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: true },
+      ],
+      projects: [{ id: 'project-1', name: '我的人设', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'project-1', runtime_status: 'starting', expires_at: '' })
+    let resolveCommit!: (value: unknown) => void
+    mocks.workspaceCommit.mockReturnValue(new Promise((resolve) => { resolveCommit = resolve }))
+    mocks.streamEvents = [{
+      event: 'draft.ready',
+      id: 'event-commit-lock',
+      data: JSON.stringify({ mode_id: 'creation', session_id: 'session-1', draft: { ready: true, payload: { plan: { goal: '锁定提交', content_type: 'wechat-article' } } } }),
+    }]
+    renderPage({ modeId: 'creation', projectId: 'project-1' })
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '开始创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    const card = await screen.findByRole('region', { name: '创作计划确认' })
+    fireEvent.change(composer, { target: { value: '不应并发发送' } })
+    fireEvent.click(within(card).getByRole('button', { name: '确认并创建任务' }))
+
+    await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalled())
+    expect(composer).toBeDisabled()
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+
+    resolveCommit({ mode_id: 'creation', status: 'committed', task: { id: 'task-created-2', project_id: 'project-1', status: 'pending' } })
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tasks/task-created-2'))
   })
 
   it('keeps uploaded composer attachments in the creation confirmation plan', async () => {

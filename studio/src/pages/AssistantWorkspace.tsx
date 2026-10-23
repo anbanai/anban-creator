@@ -216,6 +216,8 @@ export default function AssistantWorkspace() {
   const missingContextInstruction = activeMode?.available
     ? mode === 'creation' && !selectedProject
       ? '先选择人设后即可输入消息'
+      : mode === 'creation' && selectedProject && creationTypes.length === 0
+        ? '当前人设暂不支持首页创作，请选择其他人设'
       : mode === 'review' && !selectedProject
         ? '先选择人设后即可输入消息'
         : mode === 'review' && !selectedWork
@@ -234,7 +236,7 @@ export default function AssistantWorkspace() {
     : undefined
   const profilePlatform = selectedProject?.platform ?? stringValue(draftProject?.platform)
   const isVideoEditProfile = mode === 'profile' && profilePlatform === 'video-edit'
-  const canSend = Boolean(composer.trim()) && Boolean(activeMode?.available) && (mode === 'profile' || Boolean(selectedProject)) && (mode !== 'review' || Boolean(selectedWork)) && !sending && !responding
+  const canSend = Boolean(composer.trim()) && Boolean(activeMode?.available) && (mode === 'profile' || Boolean(selectedProject)) && (mode !== 'review' || Boolean(selectedWork)) && !sending && !responding && !committing && !composerBlocked
 
   const resetExpiredWorkspace = () => {
     setWorkspace(null)
@@ -273,6 +275,10 @@ export default function AssistantWorkspace() {
     if (creationTypes.length && !creationTypes.some((item) => item.value === creationType)) setCreationType(creationTypes[0].value)
     if (!creationTypes.length && creationType) setCreationType('')
   }, [conversationPhase, mode, creationType, creationTypes])
+
+  useEffect(() => {
+    if (mode !== 'creation' && attachments.length) setAttachments([])
+  }, [mode, attachments.length])
 
   useEffect(() => {
     if (conversationPhase === 'setup' && mode !== 'profile' && !projectId && selectableProjects.length === 1) setProjectId(selectableProjects[0].id)
@@ -744,6 +750,7 @@ export default function AssistantWorkspace() {
       disabled={switching || committing || sending || responding}
     />
   )
+  const creationComposerParameters = mode === 'creation' ? composerParameters : null
   const enterPersonaModeControl = (
     <Button
       type="button"
@@ -795,7 +802,7 @@ export default function AssistantWorkspace() {
             {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && <VideoEditReviewResults query={reviewVideoQuery} />}
             {videoEditInputs}
           </div>
-          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} placeholder={composerPlaceholder} inputDisabled={sending || switching || composerBlocked} sendDisabled={!canSend} status={missingContextInstruction} leadingTools={<>{enterPersonaModeControl}{composerPersonaControl}</>} trailingTools={<>{creationTypeSelector}{composerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} status={missingContextInstruction} leadingTools={<>{enterPersonaModeControl}{composerPersonaControl}</>} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       ) : (
         <section className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col px-4 pb-3 md:px-8">
@@ -808,7 +815,7 @@ export default function AssistantWorkspace() {
             {activeDraft && <DraftConfirmationCard mode={mode} draft={activeDraft} committing={committing} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} />}
             {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
           </div>
-          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} placeholder={activeQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || activeQuestions.length > 0} sendDisabled={!canSend || activeQuestions.length > 0} status={responding ? '助手正在回复…' : undefined} leadingTools={<>{enterPersonaModeControl}{composerPersonaControl}</>} trailingTools={<>{creationTypeSelector}{composerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} placeholder={activeQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || activeQuestions.length > 0} sendDisabled={!canSend || activeQuestions.length > 0} status={responding ? '助手正在回复…' : undefined} leadingTools={<>{enterPersonaModeControl}{composerPersonaControl}</>} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       )}
       </main>
@@ -915,10 +922,11 @@ function WorkspaceSelectors({ mode, projects, projectId, contentId, works, disab
   return <div className="mx-auto mt-6 flex w-full max-w-xs flex-col items-stretch gap-3"><NativeSelect className="w-full" aria-label="选择人设" value={projectId} disabled={disabled} onChange={(event) => onProject(event.target.value)}><NativeSelectOption value="">{mode === 'profile' ? '新建人设' : '选择人设'}</NativeSelectOption>{projects.map((project) => <NativeSelectOption key={project.id} value={project.id}>{project.name}</NativeSelectOption>)}</NativeSelect>{mode === 'review' && <NativeSelect className="w-full" aria-label="选择作品" value={contentId} disabled={disabled} onChange={(event) => onContent(event.target.value)}><NativeSelectOption value="">选择作品</NativeSelectOption>{works.map((work) => <NativeSelectOption key={work.id} value={work.id}>{work.title}</NativeSelectOption>)}</NativeSelect>}{mode === 'review' && hasMore && <Button type="button" variant="ghost" size="sm" className="self-end" aria-label="加载更多作品" disabled={disabled} onClick={onMore}><ChevronDown className="size-4" />加载更多作品</Button>}</div>
 }
 
-function Composer({ value, attachments, attachmentController, placeholder, inputDisabled, sendDisabled, status, leadingTools, trailingTools, onChange, onAttachmentsChange, onSend }: {
+function Composer({ value, attachments, attachmentController, attachmentsEnabled = true, placeholder, inputDisabled, sendDisabled, status, leadingTools, trailingTools, onChange, onAttachmentsChange, onSend }: {
   value: string
   attachments: PromptAttachment[]
   attachmentController: ReturnType<typeof usePromptAttachments>
+  attachmentsEnabled?: boolean
   placeholder: string
   inputDisabled: boolean
   sendDisabled: boolean
@@ -940,6 +948,7 @@ function Composer({ value, attachments, attachmentController, placeholder, input
       onSubmit={() => onSend()}
       attachmentController={attachmentController}
       attachmentPolicy={GENERAL_AGENT_ATTACHMENT_POLICY}
+      attachmentsEnabled={attachmentsEnabled}
       placeholder={placeholder}
       submitLabel="发送消息"
       ariaLabel="发送消息"
