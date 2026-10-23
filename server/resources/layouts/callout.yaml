@@ -1,4 +1,22 @@
 name: callout
+schema_version: "1.0"
+lifecycle: legacy
+canonical_example:
+  type: warning
+  body: "发布前请检查图片、链接和行动按钮，避免出现断链。"
+provenance:
+  source: md2wechat-skill
+  version: 3.8.0
+  reference: internal/assets/builtin/layout/sprint4/callout.yaml
+  imported_at: "2026-10-23"
+anban_contract:
+  lifecycle: compatibility
+  version: anban.layout.v1
+  required:
+    - {name: body, description: 提示正文}
+  optional:
+    - {name: type, description: 提示类型, enum: [info, tip, warning, success, danger], default: info}
+    - {name: title, description: 提示标题}
 category: attention
 serves: [attention, readability]
 description: 重要提示卡片，用于在正文中插入需要读者特别注意的信息，支持多种类型（提示、技巧、警告、成功、危险）

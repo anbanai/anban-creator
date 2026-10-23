@@ -13,12 +13,17 @@ import (
 )
 
 type ContentRenderService struct {
-	repo   repository.Repository
-	logger *zerolog.Logger
+	repo                repository.Repository
+	logger              *zerolog.Logger
+	articleResourceMode resources.LifecycleMode
 }
 
-func NewContentRenderService(repo repository.Repository, logger *zerolog.Logger) *ContentRenderService {
-	return &ContentRenderService{repo: repo, logger: logger}
+func NewContentRenderService(repo repository.Repository, logger *zerolog.Logger, modes ...resources.LifecycleMode) *ContentRenderService {
+	mode := resources.LifecycleModeLegacy
+	if len(modes) > 0 && (modes[0] == resources.LifecycleModeCompatibility || modes[0] == resources.LifecycleModeNative) {
+		mode = modes[0]
+	}
+	return &ContentRenderService{repo: repo, logger: logger, articleResourceMode: mode}
 }
 
 func (s *ContentRenderService) resolveEffectiveTheme(ctx context.Context, taskID string, project *model.Project) string {

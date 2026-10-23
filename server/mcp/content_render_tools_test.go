@@ -215,6 +215,32 @@ func TestErrorResult_ChineseMessage(t *testing.T) {
 	}
 }
 
+func TestInspectArticleHandlerReturnsVersionedSourceInspection(t *testing.T) {
+	old := svcs
+	svcs = &Services{ContentRenderSvc: stubContentRenderSvc}
+	t.Cleanup(func() { svcs = old })
+	result, err := inspectArticleHandler(context.Background(), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"project_id":"project-1","target":"source","markdown":"# 标题\n\n## 正文\n\n内容"}`)},
+	})
+	if err != nil {
+		t.Fatalf("inspectArticleHandler error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("inspectArticleHandler returned error: %#v", result)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &payload); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if payload["schema_version"] != "1.0" || payload["target"] != "source" {
+		t.Fatalf("inspection response = %#v", payload)
+	}
+	readiness, ok := payload["readiness"].(map[string]any)
+	if !ok || readiness["status"] != "ready" {
+		t.Fatalf("readiness = %#v", payload["readiness"])
+	}
+}
+
 // ---------------------------------------------------------------------------
 // billingError tests
 // ---------------------------------------------------------------------------

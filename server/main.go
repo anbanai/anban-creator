@@ -865,7 +865,11 @@ func main() {
 			imageSvc.SetProviderCostService(fixedBilling.Cost)
 		}
 		if repo != nil {
-			contentRenderSvc = service.NewContentRenderService(repo, log)
+			articleResourceMode := resources.LifecycleMode(cfg.ArticleResources.LifecycleMode)
+			contentRenderSvc = service.NewContentRenderService(repo, log, articleResourceMode)
+			if taskSvc != nil {
+				taskSvc.SetContentRenderService(contentRenderSvc)
+			}
 		}
 		if cfg.Search.Web.Enabled {
 			var searchProvider service.WebSearchProvider
@@ -907,7 +911,7 @@ func main() {
 			AgentProjectProfileSvc: agentProjectProfileSvc,
 			ArticleScoreSvc:        service.NewArticleScoreService(),
 			SeednoteExportSvc:      service.NewSeednoteExportService(),
-			ResourceCatalogSvc:     service.NewResourceCatalogService(resources.Manager()),
+			ResourceCatalogSvc:     service.NewResourceCatalogService(resources.Manager(), resources.LifecycleMode(cfg.ArticleResources.LifecycleMode)),
 			TaskImageSvc:           service.NewTaskImageService(taskSvc, imageCapabilityResolver, imageSvc, fixedBilling.Catalog, log),
 			TaskImageOperationsSvc: service.NewTaskImageOperationsService(taskSvc, imageSvc, imageUnderstandingClient, fixedBilling.Cost, service.TaskImageOperationsConfig{
 				UnderstandingProvider: cfg.ImageUnderstanding.ProviderKey,

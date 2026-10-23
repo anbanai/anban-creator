@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/resources"
 )
 
 // ---------------------------------------------------------------------------
@@ -531,6 +532,292 @@ func TestRenderTemplate_RejectsLayoutModuleMissingRequiredVars(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "module cta") || !strings.Contains(err.Error(), "title") {
 		t.Fatalf("[FAIL] module error should name cta.title, got: %v", err)
+	}
+}
+
+func TestRenderTemplateRejectsUnknownModuleWhenModuleContractIsUsed(t *testing.T) {
+	svc, repo := setupConvertTest(t)
+	svc.articleResourceMode = resources.LifecycleModeCompatibility
+	userID := "user-module-unknown-001"
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
+	plan := &LayoutPlan{
+		ArticleType:     "long-form-essay",
+		ContractVersion: "anban.layout.v1",
+		Slots: []LayoutPlanSlot{{
+			SlotID: "footer", SectionIndex: -1, Module: strPtr("unknown-module"),
+			ModuleVars: map[string]string{"title": "标题"},
+		}},
+	}
+	_, err := svc.RenderTemplate(context.Background(), userID, projectID, "# 标题\n\n## 内容\n\n正文。", plan, "", "")
+	if err == nil || !strings.Contains(err.Error(), "module.unknown:unknown-module") {
+		t.Fatalf("RenderTemplate error = %v, want unknown module blocker", err)
+	}
+}
+
+func TestRenderTemplateRejectsUnsafeMarkdownURL(t *testing.T) {
+	svc, repo := setupConvertTest(t)
+	userID := "user-unsafe-url-001"
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
+	plan := &LayoutPlan{ArticleType: "long-form-essay", Slots: []LayoutPlanSlot{{SlotID: "hero"}}}
+	_, err := svc.RenderTemplate(context.Background(), userID, projectID, "# 标题\n\n## 内容\n\n[点击](javascript:alert(1))", plan, "", "")
+	if err == nil || !strings.Contains(err.Error(), "url.unsafe_link") {
+		t.Fatalf("RenderTemplate error = %v, want unsafe URL blocker", err)
+	}
+}
+
+func TestInspectArticleSourceCanRunWithoutLayoutPlan(t *testing.T) {
+	svc, _ := setupConvertTest(t)
+	result, err := svc.InspectArticle(context.Background(), "user-inspect-source", InspectArticleRequest{
+		Target: "source", Markdown: "# 标题\n\n## 内容\n\n正文。",
+	})
+	if err != nil {
+		t.Fatalf("InspectArticle error: %v", err)
+	}
+	if result.Target != "source" || result.Readiness.Status != "ready" {
+		t.Fatalf("source inspection = %#v", result)
+	}
+}
+
+func TestInspectArticleSourceBlocksDuplicateInlineImageURLs(t *testing.T) {
+	svc, _ := setupConvertTest(t)
+	result, err := svc.InspectArticle(context.Background(), "user-inspect-source-duplicate", InspectArticleRequest{
+		Target: "source",
+		Markdown: "# 标题\n\n## 内容\n\n![图一](https://cdn.example.com/repeat.png)\n\n" +
+			"![图二](https://cdn.example.com/repeat.png)",
+	})
+	if err != nil {
+		t.Fatalf("InspectArticle error: %v", err)
+	}
+	if result.Readiness.Status != "blocked" || !strings.Contains(strings.Join(result.Readiness.Blockers, ","), "image.duplicate") {
+		t.Fatalf("duplicate inline URL was not blocked: %#v", result.Readiness)
+	}
+}
+
+func TestInspectArticleSourceBlocksMissingRequiredImageAndUnsafeSlotURL(t *testing.T) {
+	svc, _ := setupConvertTest(t)
+	tests := []struct {
+		name string
+		slot LayoutPlanSlot
+		want string
+	}{
+		{
+			name: "required URL missing",
+			slot: LayoutPlanSlot{SlotID: "section_opener", SectionIndex: 0, ImageRequired: true},
+			want: "image.required_slot_missing",
+		},
+		{
+			name: "unsafe slot URL",
+			slot: LayoutPlanSlot{SlotID: "hero", SectionIndex: 0, ImageURL: "javascript:alert(1)"},
+			want: "url.unsafe_slot",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := svc.InspectArticle(context.Background(), "user-inspect-source-slot", InspectArticleRequest{
+				Target: "source", Markdown: "# 标题\n\n## 内容\n\n正文。",
+				LayoutPlan: &LayoutPlan{TemplateName: "tutorial", Slots: []LayoutPlanSlot{tc.slot}},
+			})
+			if err != nil {
+				t.Fatalf("InspectArticle error: %v", err)
+			}
+			if result.Readiness.Status != "blocked" || !strings.Contains(strings.Join(result.Readiness.Blockers, ","), tc.want) {
+				t.Fatalf("source inspection did not block %q: %#v", tc.want, result.Readiness)
+			}
+		})
+	}
+}
+
+func TestInspectArticleSourceBlocksRepeatedPlannedImageURLs(t *testing.T) {
+	svc, _ := setupConvertTest(t)
+	result, err := svc.InspectArticle(context.Background(), "user-inspect-source-slot-duplicate", InspectArticleRequest{
+		Target: "source", Markdown: "# 标题\n\n## 内容\n\n正文。",
+		LayoutPlan: &LayoutPlan{TemplateName: "tutorial", Slots: []LayoutPlanSlot{
+			{SlotID: "hero", SectionIndex: 0, ImageURL: "https://cdn.example.com/repeat.png"},
+			{SlotID: "section_opener", SectionIndex: 0, ImageURL: "https://cdn.example.com/repeat.png"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("InspectArticle error: %v", err)
+	}
+	if result.Readiness.Status != "blocked" || !strings.Contains(strings.Join(result.Readiness.Blockers, ","), "image.duplicate") {
+		t.Fatalf("repeated planned URL was not blocked: %#v", result.Readiness)
+	}
+}
+
+func TestInspectArticleRenderedRequiresExactServerHTML(t *testing.T) {
+	svc, repo := setupConvertTest(t)
+	userID := "user-inspect-rendered"
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
+	markdown := "# 标题\n\n## 内容\n\n正文。"
+	plan := &LayoutPlan{ArticleType: "long-form-essay", Slots: []LayoutPlanSlot{{SlotID: "hero", SectionIndex: 0}}}
+	rendered, err := svc.RenderTemplate(context.Background(), userID, projectID, markdown, plan, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.InspectArticle(context.Background(), userID, InspectArticleRequest{
+		ProjectID: projectID, Markdown: markdown, LayoutPlan: plan, Target: "rendered", HTML: rendered.HTML,
+	})
+	if err != nil {
+		t.Fatalf("InspectArticle exact HTML error: %v", err)
+	}
+	if result.Readiness.Status != "ready" {
+		t.Fatalf("exact server HTML blocked: %#v", result.Readiness)
+	}
+
+	result, err = svc.InspectArticle(context.Background(), userID, InspectArticleRequest{
+		ProjectID: projectID, Markdown: markdown, LayoutPlan: plan, Target: "rendered", HTML: rendered.HTML + "<script>",
+	})
+	if err != nil {
+		t.Fatalf("InspectArticle mismatched HTML error: %v", err)
+	}
+	if !strings.Contains(strings.Join(result.Readiness.Blockers, ","), "html.server_mismatch") {
+		t.Fatalf("mismatched HTML was not blocked: %#v", result.Readiness)
+	}
+}
+
+func TestInspectArticleDeliveryRequiresRecordedHTMLAndMetadata(t *testing.T) {
+	svc, repo := setupConvertTest(t)
+	userID := "user-inspect-delivery"
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
+	markdown := "# 标题\n\n## 内容\n\n正文。"
+	plan := &LayoutPlan{ArticleType: "long-form-essay", Slots: []LayoutPlanSlot{{SlotID: "hero", SectionIndex: 0}}}
+	rendered, err := svc.RenderTemplate(context.Background(), userID, projectID, markdown, plan, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.InspectArticle(context.Background(), userID, InspectArticleRequest{
+		ProjectID: projectID, Markdown: markdown, LayoutPlan: plan, Target: "delivery",
+		HTML: rendered.HTML, Title: "标题", Digest: "摘要", EvidencePaths: []string{"output/05-article.html"},
+	})
+	if err != nil {
+		t.Fatalf("InspectArticle valid delivery error: %v", err)
+	}
+	if result.Readiness.Status != "ready" {
+		t.Fatalf("complete delivery blocked: %#v", result.Readiness)
+	}
+	result, err = svc.InspectArticle(context.Background(), userID, InspectArticleRequest{
+		ProjectID: projectID, Markdown: markdown, LayoutPlan: plan, Target: "delivery", HTML: rendered.HTML,
+	})
+	if err != nil {
+		t.Fatalf("InspectArticle incomplete delivery error: %v", err)
+	}
+	if result.Readiness.Status != "blocked" || len(result.Missing) == 0 {
+		t.Fatalf("incomplete delivery did not block: %#v", result)
+	}
+	result, err = svc.InspectArticle(context.Background(), userID, InspectArticleRequest{
+		ProjectID: projectID, Markdown: markdown, LayoutPlan: plan, Target: "rendered",
+	})
+	if err != nil {
+		t.Fatalf("InspectArticle missing HTML error: %v", err)
+	}
+	if result.Readiness.Status != "blocked" || !strings.Contains(strings.Join(result.Readiness.Blockers, ","), "html.rendered_response_required") {
+		t.Fatalf("rendered inspection without submitted HTML did not block: %#v", result.Readiness)
+	}
+}
+
+func TestRenderTemplateV1UsesDedicatedArticleModules(t *testing.T) {
+	svc, repo := setupConvertTest(t)
+	svc.articleResourceMode = resources.LifecycleModeCompatibility
+	userID := "user-module-v1-001"
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
+	markdown := "# 标题\n\n## 正文\n\n文章主体内容。"
+	cases := []struct {
+		name string
+		vars map[string]string
+		want []string
+	}{
+		{name: "quote", vars: map[string]string{"text": "核心观点", "source": "作者"}, want: []string{"<blockquote", "核心观点", "作者"}},
+		{name: "callout", vars: map[string]string{"type": "warning", "body": "检查链接"}, want: []string{"注意", "检查链接", "#fff7e0"}},
+		{name: "steps", vars: map[string]string{"title": "落地步骤", "steps": "01 | 明确目标 | 先写出目标\n02 | 检查结果 | 对照目标复核"}, want: []string{"落地步骤", "01 明确目标", "02 检查结果"}},
+		{name: "checklist", vars: map[string]string{"title": "检查清单", "items": "done | 资料完整 | 来源已核对\npending | 复核链接 | 确认可以访问"}, want: []string{"检查清单", "☑", "☐", "复核链接"}},
+		{name: "summary", vars: map[string]string{"variant": "three", "title": "带走三点", "items": "结构清楚 | 图片合规 | 结论具体"}, want: []string{"带走三点", "结构清楚", "图片合规", "结论具体"}},
+		{name: "comparison-table", vars: map[string]string{"title": "方案对比", "left_title": "方案 A", "left_items": "部署快 | 成本低", "right_title": "方案 B", "right_items": "扩展强 | 运维较多"}, want: []string{"<table", "方案 A", "方案 B", "部署快", "扩展强"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			name := tc.name
+			plan := &LayoutPlan{
+				ArticleType: "tutorial", ContractVersion: "anban.layout.v1",
+				Slots: []LayoutPlanSlot{{SlotID: "footer", SectionIndex: -1, Module: &name, ModuleVars: tc.vars}},
+			}
+			result, err := svc.RenderTemplate(t.Context(), userID, projectID, markdown, plan, "", "")
+			if err != nil {
+				t.Fatalf("RenderTemplate error: %v", err)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(result.HTML, want) {
+					t.Errorf("HTML missing %q:\n%s", want, result.HTML)
+				}
+			}
+		})
+	}
+}
+
+func TestRenderTemplateV1IsBlockedByLegacyServerMode(t *testing.T) {
+	svc, repo := setupConvertTest(t)
+	userID := "user-module-v1-disabled-001"
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
+	name := "quote"
+	plan := &LayoutPlan{
+		ArticleType: "tutorial", ContractVersion: "anban.layout.v1",
+		Slots: []LayoutPlanSlot{{SlotID: "footer", SectionIndex: -1, Module: &name, ModuleVars: map[string]string{"text": "核心观点"}}},
+	}
+	_, err := svc.RenderTemplate(t.Context(), userID, projectID, "# 标题\n\n## 正文\n\n内容。", plan, "", "")
+	if err == nil || !strings.Contains(err.Error(), "article resource lifecycle mode") {
+		t.Fatalf("legacy server RenderTemplate error = %v, want lifecycle mode blocker", err)
+	}
+}
+
+func TestRenderTemplateV1RejectsInvalidVariantAndOverlongFields(t *testing.T) {
+	svc, repo := setupConvertTest(t)
+	svc.articleResourceMode = resources.LifecycleModeCompatibility
+	userID := "user-module-v1-invalid-001"
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
+	makePlan := func(name string, vars map[string]string) *LayoutPlan {
+		return &LayoutPlan{ArticleType: "tutorial", ContractVersion: "anban.layout.v1", Slots: []LayoutPlanSlot{{
+			SlotID: "footer", SectionIndex: -1, Module: &name, ModuleVars: vars,
+		}}}
+	}
+	_, err := svc.RenderTemplate(t.Context(), userID, projectID, "# 标题\n\n## 正文\n\n内容。", makePlan("summary", map[string]string{"variant": "metrics", "items": "A | B"}), "", "")
+	if err == nil || !strings.Contains(err.Error(), "module.summary.variant:invalid_variant") {
+		t.Fatalf("invalid variant error = %v", err)
+	}
+	_, err = svc.RenderTemplate(t.Context(), userID, projectID, "# 标题\n\n## 正文\n\n内容。", makePlan("callout", map[string]string{"body": strings.Repeat("长", 2001)}), "", "")
+	if err == nil || !strings.Contains(err.Error(), "exceeds 2000 characters") {
+		t.Fatalf("overlong field error = %v", err)
+	}
+}
+
+func TestRenderTemplateV1RejectsMalformedModuleData(t *testing.T) {
+	svc, repo := setupConvertTest(t)
+	svc.articleResourceMode = resources.LifecycleModeCompatibility
+	userID := "user-module-v1-malformed-001"
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
+	markdown := "# 标题\n\n## 正文\n\n内容。"
+	tests := []struct {
+		name   string
+		module string
+		vars   map[string]string
+		want   string
+	}{
+		{name: "callout enum", module: "callout", vars: map[string]string{"type": "loud", "body": "提醒"}, want: "module.callout.type:invalid_variant"},
+		{name: "steps row columns", module: "steps", vars: map[string]string{"title": "步骤", "steps": "01 | 目标"}, want: "at least 3 pipe-separated columns"},
+		{name: "steps row limit", module: "steps", vars: map[string]string{"title": "步骤", "steps": "01 | A | a\n02 | B | b\n03 | C | c\n04 | D | d\n05 | E | e\n06 | F | f\n07 | G | g\n08 | H | h\n09 | I | i"}, want: "at most 8 rows"},
+		{name: "checklist status", module: "checklist", vars: map[string]string{"title": "清单", "items": "complete | 已完成"}, want: "invalid status"},
+		{name: "summary exact count", module: "summary", vars: map[string]string{"variant": "three", "items": "A | B"}, want: "exactly 3 items"},
+		{name: "comparison paired rows", module: "comparison-table", vars: map[string]string{"title": "对比", "left_title": "A", "left_items": "快 | 便宜", "right_title": "B", "right_items": "灵活"}, want: "same number of rows"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := &LayoutPlan{ArticleType: "tutorial", ContractVersion: "anban.layout.v1", Slots: []LayoutPlanSlot{{
+				SlotID: "footer", SectionIndex: -1, Module: &tc.module, ModuleVars: tc.vars,
+			}}}
+			_, err := svc.RenderTemplate(t.Context(), userID, projectID, markdown, plan, "", "")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("RenderTemplate error = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 

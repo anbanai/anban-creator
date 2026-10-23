@@ -63,6 +63,7 @@ type TaskService struct {
 	store                    storage.Provider
 	publishingSvc            *PublishingService
 	wechatPublicationSvc     *WechatPublicationService
+	contentRenderSvc         *ContentRenderService
 	taskLogDir               string
 	pubsub                   *RedisPubSub
 	pubsubCancel             context.CancelFunc // stops the listenCancelEvents goroutine
@@ -220,6 +221,12 @@ func (s *TaskService) SetWechatPublicationService(publication *WechatPublication
 		if publication != nil {
 			publication.SetLifecycleSync(s.SyncWechatPublicationLifecycle)
 		}
+	}
+}
+
+func (s *TaskService) SetContentRenderService(contentRender *ContentRenderService) {
+	if s != nil {
+		s.contentRenderSvc = contentRender
 	}
 }
 

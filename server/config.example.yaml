@@ -5,6 +5,11 @@ server:
   tls_key_file: "${ANBAN_SERVER_TLS_KEY_FILE}"
   host: "0.0.0.0"
 
+# Article resource rollout ceiling. Keep legacy until compatibility resources
+# pass canary review; MCP requests cannot exceed this setting.
+article_resources:
+  lifecycle_mode: legacy
+
 logging:
   level: info
 

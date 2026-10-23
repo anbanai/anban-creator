@@ -11,12 +11,13 @@ import (
 func registerResourceTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "list_resources",
-		Description: "List available embedded resources (themes, writers, layouts, WeChat article templates). Returns metadata for each resource including name, description, and category-specific fields.",
+		Description: "List available embedded resources. Article resource visibility is bounded by the Server's article_resources.lifecycle_mode configuration; a request cannot enable a mode the Server has not enabled.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"category": map[string]any{"type": "string", "enum": []any{"themes", "writers", "layouts", "article_templates"}, "description": "Resource category to list"},
-				"platform": map[string]any{"type": "string", "description": "Filter by platform: wechat or seednote (optional)"},
+				"category":       map[string]any{"type": "string", "enum": []any{"themes", "writers", "layouts", "article_templates"}, "description": "Resource category to list"},
+				"platform":       map[string]any{"type": "string", "description": "Filter by platform: wechat or seednote (optional)"},
+				"lifecycle_mode": map[string]any{"type": "string", "enum": []any{"legacy", "compatibility", "native"}, "description": "Optional narrower visibility mode; the Server configuration remains the maximum"},
 			},
 			"required": []any{"category"},
 		},
@@ -24,13 +25,14 @@ func registerResourceTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "get_resource",
-		Description: "Get detailed metadata for a specific resource including usage guidance, schema, syntax examples, and optional raw YAML.",
+		Description: "Get detailed metadata for a resource visible under the Server's configured article_resources.lifecycle_mode, including usage guidance, schema, syntax examples, and optional raw YAML.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"category":    map[string]any{"type": "string", "enum": []any{"themes", "writers", "layouts", "article_templates"}, "description": "Resource category"},
-				"name":        map[string]any{"type": "string", "description": "Resource name"},
-				"include_raw": map[string]any{"type": "boolean", "description": "Include read-only raw YAML for exact agent consumption"},
+				"category":       map[string]any{"type": "string", "enum": []any{"themes", "writers", "layouts", "article_templates"}, "description": "Resource category"},
+				"name":           map[string]any{"type": "string", "description": "Resource name"},
+				"include_raw":    map[string]any{"type": "boolean", "description": "Include read-only raw YAML for exact agent consumption"},
+				"lifecycle_mode": map[string]any{"type": "string", "enum": []any{"legacy", "compatibility", "native"}, "description": "Optional narrower visibility mode; the Server configuration remains the maximum"},
 			},
 			"required": []any{"category", "name"},
 		},
@@ -47,8 +49,9 @@ func listResourcesHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		return errorResult("category is required"), nil
 	}
 	result, err := svcs.ResourceCatalogSvc.Query(service.ResourceCatalogRequest{
-		Category: category,
-		Platform: stringArg(args, "platform"),
+		Category:      category,
+		Platform:      stringArg(args, "platform"),
+		LifecycleMode: stringArg(args, "lifecycle_mode"),
 	})
 	if err != nil {
 		return errorResult(err.Error()), nil
@@ -67,7 +70,7 @@ func getResourceHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	}
 	includeRaw, _ := args["include_raw"].(bool)
 	result, err := svcs.ResourceCatalogSvc.Query(service.ResourceCatalogRequest{
-		Category: category, Name: name, IncludeRaw: includeRaw,
+		Category: category, Name: name, IncludeRaw: includeRaw, LifecycleMode: stringArg(args, "lifecycle_mode"),
 	})
 	if err != nil {
 		return errorResult(err.Error()), nil

@@ -1,4 +1,43 @@
 name: summary
+schema_version: "1.0"
+lifecycle: legacy
+canonical_example:
+  variant: three
+  title: "读完带走三点"
+  items: "结构先于风格 | 模块服务阅读 | 主题定义气质"
+provenance:
+  source: md2wechat-skill
+  version: 3.8.0
+  reference: internal/assets/builtin/layout/conversion/summary.yaml
+  imported_at: "2026-10-23"
+anban_contract:
+  lifecycle: compatibility
+  version: anban.layout.v1
+  variant_field: variant
+  default_variant: one-line
+  optional:
+    - {name: variant, description: 总结结构, enum: [one-line, three, decision, save], default: one-line}
+    - {name: highlight, description: 一句话核心判断}
+    - {name: title, description: 总结标题}
+    - {name: label, description: 判断标签}
+    - {name: items, description: 要点列表, example: "结构先于风格 | 模块服务阅读"}
+    - {name: fit, description: 适用对象}
+    - {name: not_fit, description: 不适用对象}
+    - {name: recommendation, description: 决策建议}
+    - {name: note, description: 补充说明}
+  variants:
+    one-line:
+      required: [highlight]
+      use_when: 需要突出一个核心判断
+    three:
+      required: [items]
+      use_when: 需要归纳多个要点
+    save:
+      required: [items]
+      use_when: 需要生成可执行收藏清单
+    decision:
+      required_any: [[fit, recommendation]]
+      use_when: 需要给出适用判断或建议
 category: conversion
 serves: [memorability, readability]
 description: 核心要点总结，用于章节末尾或文章结尾帮助读者快速回顾关键信息

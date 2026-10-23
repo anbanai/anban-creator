@@ -25,6 +25,8 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/agentpack"
+	"github.com/anbanai/anban-creator/server/app/articlecheck"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
@@ -36,6 +38,9 @@ var ErrFinalizationLeaseLost = errors.New("task execution finalization lease los
 var ErrCloudPublishingAmbiguous = errors.New("cloud draft publication outcome is ambiguous and requires reconciliation")
 var pictureContentImagePathPattern = regexp.MustCompile(`^image_\d+\.png$`)
 var articleLayoutPlanPattern = regexp.MustCompile("(?s)```json\\s*(\\{.*?\\})\\s*```")
+
+const articleServerInspectionPackVersion = "2.0.12"
+
 var picturePublicationHTMLPattern = regexp.MustCompile(`(?is)<[^>]+>`)
 var picturePublicationMarkdownPattern = regexp.MustCompile("(?m)^\\s{0,3}(#{1,6}\\s|[-+]\\s|>|[-*_](?:\\s*[-*_]){2,}\\s*$)|[*_`~\\[\\]]")
 var picturePublicationMarkdownTablePattern = regexp.MustCompile(`(?m)^\s*\|.*\|\s*$|^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$`)
@@ -990,9 +995,6 @@ func (s *TaskService) finalizeArticlePublication(ctx context.Context, task *mode
 	if coverRequested && len(coverMediaIDs) == 0 {
 		return block("cover_media_missing", "retry_visuals")
 	}
-	if err := s.validateArticleImageHTML(ctx, task, files); err != nil {
-		return block("content_image_source_invalid", "retry_visuals")
-	}
 	if contentImagesRequested && len(contentImageURLs) == 0 {
 		return block("content_images_missing", "retry_visuals")
 	}
@@ -1054,6 +1056,19 @@ func (s *TaskService) finalizeArticlePublication(ctx context.Context, task *mode
 	}
 	if err := validateWechatHTMLFragment("output/05-article.html", htmlBody); err != nil {
 		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "unsafe_html", false, "review_content"), nil
+	}
+	if findings := articlecheck.ValidateHTMLFragment(string(htmlBody), nil); len(findings) > 0 {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "unsafe_html", false, "review_content"), nil
+	}
+	inspectionPassed, err := s.inspectArticleDelivery(ctx, task, execution, &pkg, htmlBody)
+	if err != nil {
+		return "", nil, fmt.Errorf("inspect final article delivery: %w", err)
+	}
+	if !inspectionPassed {
+		return block("article_inspection_blocked", "review_content")
+	}
+	if err := s.validateArticleImageHTML(ctx, task, files); err != nil {
+		return block("content_image_source_invalid", "retry_visuals")
 	}
 	imageSources, err := wechatDraftImageSources(string(htmlBody))
 	if err != nil {
@@ -1128,6 +1143,67 @@ func (s *TaskService) finalizeArticlePublication(ctx context.Context, task *mode
 		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, wechatDraftDeliveryFailureCode(createErr), false, "review_content"), nil
 	}
 	return block(wechatDraftDeliveryFailureCode(createErr), "retry_draft")
+}
+
+func (s *TaskService) inspectArticleDelivery(ctx context.Context, task *model.Task, execution *model.TaskExecution, pkg *articlePublicationPackage, htmlBody []byte) (bool, error) {
+	if task == nil || execution == nil || pkg == nil {
+		return false, nil
+	}
+	pack, ok := agentpack.Default().Pack(execution.AgentPackID)
+	if !ok || pack.Channel != model.ChannelArticle || !articlePackVersionAtLeast(execution.AgentPackVersion, articleServerInspectionPackVersion) {
+		return true, nil
+	}
+	markdown, markdownFound, err := s.readExecutionArtifact(ctx, execution.ID, "output/04-article-final.md", maxTaskDeliveryMarkdownBytes)
+	if err != nil {
+		return false, err
+	}
+	rhythmPlan, rhythmPlanFound, err := s.readExecutionArtifact(ctx, execution.ID, "output/visual-rhythm-plan.md", maxTaskDeliveryMarkdownBytes)
+	if err != nil {
+		return false, err
+	}
+	if !markdownFound || !rhythmPlanFound || len(markdown) == 0 || len(rhythmPlan) == 0 {
+		return false, nil
+	}
+	match := articleLayoutPlanPattern.FindSubmatch(rhythmPlan)
+	if len(match) != 2 {
+		return false, nil
+	}
+	var layoutPlan LayoutPlan
+	if err := json.Unmarshal(match[1], &layoutPlan); err != nil {
+		return false, nil
+	}
+	renderer := s.contentRenderSvc
+	if renderer == nil {
+		renderer = NewContentRenderService(s.repo, s.logger)
+	}
+	inspection, err := renderer.InspectArticle(ctx, task.UserID, InspectArticleRequest{
+		ProjectID: task.ProjectID, TaskID: task.ID, Markdown: string(markdown), LayoutPlan: &layoutPlan,
+		Target: "delivery", HTML: string(htmlBody), Title: pkg.Article.Title,
+		Author: task.ProjectSnapshot.Data().Author, Digest: pkg.Article.Digest,
+		EvidencePaths: pkg.Readiness.EvidencePaths,
+	})
+	if err != nil {
+		return false, err
+	}
+	return inspection != nil && inspection.Readiness.Status == "ready", nil
+}
+
+func articlePackVersionAtLeast(version, minimum string) bool {
+	var major, minor, patch int
+	var minMajor, minMinor, minPatch int
+	if _, err := fmt.Sscanf(version, "%d.%d.%d", &major, &minor, &patch); err != nil {
+		return false
+	}
+	if _, err := fmt.Sscanf(minimum, "%d.%d.%d", &minMajor, &minMinor, &minPatch); err != nil {
+		return false
+	}
+	if major != minMajor {
+		return major > minMajor
+	}
+	if minor != minMinor {
+		return minor > minMinor
+	}
+	return patch >= minPatch
 }
 
 type picturePublicationReadiness struct {

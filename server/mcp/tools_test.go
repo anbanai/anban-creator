@@ -89,6 +89,30 @@ func TestUploadImageSchemaRequiresTaskOwnershipAndRejectsUnknownFields(t *testin
 	t.Fatal("upload_image tool not found")
 }
 
+func TestRenderTemplateSchemaExposesExplicitLayoutContract(t *testing.T) {
+	for _, tool := range listRegisteredTools(t, registerContentRenderTools) {
+		if tool.Name != "render_template" {
+			continue
+		}
+		root, ok := tool.InputSchema.(map[string]any)
+		if !ok {
+			t.Fatalf("render_template schema = %T, want map", tool.InputSchema)
+		}
+		properties, _ := root["properties"].(map[string]any)
+		layoutPlan, _ := properties["layout_plan"].(map[string]any)
+		layoutProperties, _ := layoutPlan["properties"].(map[string]any)
+		contract, ok := layoutProperties["contract_version"].(map[string]any)
+		if !ok {
+			t.Fatalf("render_template layout_plan schema missing contract_version: %#v", layoutPlan)
+		}
+		if contract["type"] != "string" || !strings.Contains(tool.Description, "contract_version") {
+			t.Fatalf("contract_version schema/description incomplete: %#v / %q", contract, tool.Description)
+		}
+		return
+	}
+	t.Fatal("render_template tool not found")
+}
+
 func setupAccountInfoTest(t *testing.T) (*service.TaskService, *service.ProjectService, repository.Repository, func()) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "account_info_test.db")

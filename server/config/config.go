@@ -26,6 +26,7 @@ import (
 type Config struct {
 	Onboarding         OnboardingConfig                `yaml:"onboarding"`
 	Server             ServerConfig                    `yaml:"server"`
+	ArticleResources   ArticleResourcesConfig          `yaml:"article_resources"`
 	Logging            LoggingConfig                   `yaml:"logging"`
 	Database           DatabaseConfig                  `yaml:"database"`
 	Redis              RedisConfig                     `yaml:"redis"`
@@ -54,6 +55,27 @@ type Config struct {
 	Trends             TrendsConfig                    `yaml:"trends"`
 	Search             SearchConfig                    `yaml:"search"`
 	Dsh                DshConfig                       `yaml:"dsh"`
+}
+
+type ArticleResourcesConfig struct {
+	LifecycleMode string `yaml:"lifecycle_mode"`
+}
+
+func (c *ArticleResourcesConfig) UnmarshalYAML(value *yaml.Node) error {
+	if err := validateYAMLMappingFields(value, "article_resources", map[string]bool{"lifecycle_mode": true}); err != nil {
+		return err
+	}
+	type plain ArticleResourcesConfig
+	return value.Decode((*plain)(c))
+}
+
+func (c ArticleResourcesConfig) Validate() error {
+	switch strings.TrimSpace(c.LifecycleMode) {
+	case "legacy", "compatibility", "native":
+		return nil
+	default:
+		return fmt.Errorf("article_resources.lifecycle_mode must be legacy, compatibility, or native")
+	}
 }
 
 // DshConfig owns the independent DSH interactive runtime configuration.
@@ -1376,33 +1398,34 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		}
 	}
 	known := map[string]bool{
-		"server":          true,
-		"logging":         true,
-		"database":        true,
-		"redis":           true,
-		"jwt":             true,
-		"wechat":          true,
-		"storage":         true,
-		"mcp":             true,
-		"montage":         true,
-		"video_edit":      true,
-		"local_life":      true,
-		"hypit":           true,
-		"model_providers": true,
-		"model_routes":    true,
-		"billing_runtime": true,
-		"claude":          true,
-		"cors":            true,
-		"asynq":           true,
-		"email":           true,
-		"invitation":      true,
-		"seednote":        true,
-		"worldtree":       true,
-		"ilink":           true,
-		"trends":          true,
-		"search":          true,
-		"dsh":             true,
-		"onboarding":      true,
+		"server":            true,
+		"article_resources": true,
+		"logging":           true,
+		"database":          true,
+		"redis":             true,
+		"jwt":               true,
+		"wechat":            true,
+		"storage":           true,
+		"mcp":               true,
+		"montage":           true,
+		"video_edit":        true,
+		"local_life":        true,
+		"hypit":             true,
+		"model_providers":   true,
+		"model_routes":      true,
+		"billing_runtime":   true,
+		"claude":            true,
+		"cors":              true,
+		"asynq":             true,
+		"email":             true,
+		"invitation":        true,
+		"seednote":          true,
+		"worldtree":         true,
+		"ilink":             true,
+		"trends":            true,
+		"search":            true,
+		"dsh":               true,
+		"onboarding":        true,
 	}
 	for key := range top {
 		if !known[key] {
@@ -1482,6 +1505,9 @@ func expandEnvVars(data []byte) []byte {
 
 // applyDefaults fills in zero-value fields with sensible defaults.
 func (c *Config) applyDefaults() {
+	if strings.TrimSpace(c.ArticleResources.LifecycleMode) == "" {
+		c.ArticleResources.LifecycleMode = "legacy"
+	}
 	c.Search.Web.Provider = strings.ToLower(strings.TrimSpace(c.Search.Web.Provider))
 	c.Search.Fetch.Provider = strings.ToLower(strings.TrimSpace(c.Search.Fetch.Provider))
 	if c.Search.Providers.Doubao.CustomEndpoint == "" {
@@ -2164,6 +2190,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	var errs []string
+	if err := c.ArticleResources.Validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if raw := strings.TrimSpace(c.Server.PublicBaseURL); raw != "" {
 		u, err := url.Parse(raw)
 		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
