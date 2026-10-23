@@ -143,6 +143,25 @@ describe('ProfileLabPage', () => {
     }))
   })
 
+  it('includes video-edit defaults in the profile setup project payload', async () => {
+    renderRoute('/projects/new')
+    fireEvent.change(screen.getByLabelText('人设名称'), { target: { value: '访谈剪辑画像' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: '全自动视频剪辑' }))
+    fireEvent.change(screen.getByLabelText('默认质量档位'), { target: { value: 'balanced' } })
+    fireEvent.change(screen.getByLabelText('默认字幕'), { target: { value: 'required' } })
+    fireEvent.change(screen.getByLabelText('默认目标时长（秒）'), { target: { value: '120' } })
+    fireEvent.change(screen.getByLabelText('长期剪辑风格'), { target: { value: '保留自然语气' } })
+    finishCreation()
+
+    await waitFor(() => expect(api.projects.create).toHaveBeenCalledWith(expect.objectContaining({
+      agent_ids: ['video-edit'],
+      platform: 'video-edit',
+      video_edit_defaults: {
+        preferences: { quality_tier: 'balanced', subtitle_mode: 'required', max_duration_seconds: 120, style: '保留自然语气' },
+      },
+    })))
+  })
+
   it('sends analyze false when the user skips automatic profile analysis', async () => {
     renderRoute('/projects/new')
     fireEvent.change(screen.getByLabelText('人设名称'), { target: { value: '只建人设' } })

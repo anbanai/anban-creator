@@ -35,6 +35,7 @@ type Config struct {
 	MCP                MCPConfig                       `yaml:"mcp"`
 	Hypit              HypitConfig                     `yaml:"hypit"`
 	Montage            MontageConfig                   `yaml:"montage"`
+	VideoEdit          VideoEditConfig                 `yaml:"video_edit"`
 	LocalLife          LocalLifeConfig                 `yaml:"local_life"`
 	ServerInternal     ModelRuntimeConfig              `yaml:"-"`
 	ModelProviders     map[string]ModelProviderConfig  `yaml:"model_providers"`
@@ -465,6 +466,134 @@ type MontageConfig struct {
 	Env                map[string]string                      `yaml:"env"`
 	ToolPolicy         map[string]MontageToolCapabilityPolicy `yaml:"tool_policy"`
 	PipelineDefaults   map[string]map[string]any              `yaml:"pipeline_defaults"`
+}
+
+// VideoEditConfig configures the isolated browser-use/video-use runtime. The
+// ElevenLabs is configured by the Server and copied only into video-edit
+// executions. Agents call Scribe only when the frozen input requests subtitles.
+type VideoEditConfig struct {
+	Enabled            bool                    `yaml:"enabled"`
+	enabledSet         bool                    `yaml:"-"`
+	MaxDurationSeconds int64                   `yaml:"max_duration_seconds"`
+	MaxAssets          int                     `yaml:"max_assets"`
+	MaxAssetBytes      int64                   `yaml:"max_asset_bytes"`
+	MaxTotalInputBytes int64                   `yaml:"max_total_input_bytes"`
+	TimeoutMinutes     int                     `yaml:"timeout_minutes"`
+	DefaultPolicy      model.VideoEditDefaults `yaml:"default_policy"`
+	ElevenLabsAPIKey   string                  `yaml:"elevenlabs_api_key" json:"-"`
+	Env                map[string]string       `yaml:"env"`
+}
+
+func (c *VideoEditConfig) UnmarshalYAML(value *yaml.Node) error {
+	type rawVideoEditConfig VideoEditConfig
+	var raw rawVideoEditConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		if value.Content[i].Value == "enabled" {
+			raw.enabledSet = true
+			break
+		}
+	}
+	*c = VideoEditConfig(raw)
+	return nil
+}
+
+func (c *VideoEditConfig) ApplyDefaults() {
+	if !c.enabledSet {
+		c.Enabled = true
+	}
+	if c.MaxDurationSeconds <= 0 {
+		c.MaxDurationSeconds = 1800
+	}
+	if c.MaxAssets <= 0 {
+		c.MaxAssets = 20
+	}
+	if c.MaxAssetBytes <= 0 {
+		c.MaxAssetBytes = 256 << 20
+	}
+	if c.MaxTotalInputBytes <= 0 {
+		c.MaxTotalInputBytes = 1 << 30
+	}
+	if c.TimeoutMinutes <= 0 {
+		c.TimeoutMinutes = 90
+	}
+	if c.Env == nil {
+		c.Env = map[string]string{}
+	}
+	if strings.TrimSpace(c.DefaultPolicy.Preferences.QualityTier) == "" {
+		c.DefaultPolicy.Preferences.QualityTier = "effective"
+	}
+	if strings.TrimSpace(c.DefaultPolicy.Preferences.SubtitleMode) == "" {
+		c.DefaultPolicy.Preferences.SubtitleMode = "off"
+	}
+	if c.DefaultPolicy.DeliveryTargets == nil {
+		c.DefaultPolicy.DeliveryTargets = []string{"final_video", "edit_decision_list", "strategy", "delivery_manifest", "quality_evidence", "content_tags"}
+	}
+}
+
+func (c VideoEditConfig) Validate() error {
+	if !c.Enabled {
+		return nil
+	}
+	// Keep direct validation useful for zero-value config structs; loaded config
+	// normally receives the same values from applyDefaults.
+	if c.MaxDurationSeconds == 0 {
+		c.MaxDurationSeconds = 1800
+	}
+	if c.MaxAssets == 0 {
+		c.MaxAssets = 20
+	}
+	if c.MaxAssetBytes == 0 {
+		c.MaxAssetBytes = 256 << 20
+	}
+	if c.MaxTotalInputBytes == 0 {
+		c.MaxTotalInputBytes = 1 << 30
+	}
+	if c.TimeoutMinutes == 0 {
+		c.TimeoutMinutes = 90
+	}
+	if c.MaxDurationSeconds < 0 {
+		return fmt.Errorf("video_edit.max_duration_seconds must be positive")
+	}
+	if c.MaxAssets < 0 {
+		return fmt.Errorf("video_edit.max_assets must be positive")
+	}
+	if c.MaxAssetBytes < 0 || c.MaxAssetBytes > 256<<20 {
+		return fmt.Errorf("video_edit.max_asset_bytes must be between 1 and 268435456")
+	}
+	if c.MaxTotalInputBytes < 0 || c.MaxTotalInputBytes > 1<<30 {
+		return fmt.Errorf("video_edit.max_total_input_bytes must be between 1 and 1073741824")
+	}
+	if c.TimeoutMinutes < 0 {
+		return fmt.Errorf("video_edit.timeout_minutes must be positive")
+	}
+	policy := c.DefaultPolicy
+	policyInput := model.VideoEditInput{Brief: "server-defaults", SourceAssets: []model.VideoEditAsset{{Type: "video", AssetID: "server-default"}}, Preferences: policy.Preferences}
+	policyInput.Normalize(policy)
+	if err := policyInput.Validate(0, c.MaxDurationSeconds); err != nil {
+		return fmt.Errorf("video_edit.default_policy: %w", err)
+	}
+	for key, value := range c.Env {
+		if key == "" || strings.ContainsAny(key, "=\x00") || strings.ContainsAny(value, "\x00\r\n") {
+			return fmt.Errorf("video_edit.env contains invalid entry %q", key)
+		}
+	}
+	return nil
+}
+
+func (c VideoEditConfig) DispatchReady() bool {
+	return c.Enabled && strings.TrimSpace(c.ElevenLabsAPIKey) != ""
+}
+
+func (c VideoEditConfig) RedactedEnv() map[string]bool {
+	redacted := make(map[string]bool, len(c.Env)+1)
+	for key, value := range c.Env {
+		redacted[key] = strings.TrimSpace(value) != ""
+	}
+	redacted["ELEVENLABS_API_KEY"] = strings.TrimSpace(c.ElevenLabsAPIKey) != ""
+	return redacted
 }
 
 // LocalLifeConfig controls the experimental local-life material remix Agent.
@@ -912,7 +1041,7 @@ func (c ClaudeConfig) Validate() error {
 			errs = append(errs, path+".envs: "+err.Error())
 		}
 	}
-	requiredRuntimeProfiles := []string{"wechat-article", "wechat-picture", model.PlatformSeednote, model.PlatformMontage, "moments", "ecommerce", model.PlatformWhiteboardAnimation, "profile-analysis", "feedback-analysis"}
+	requiredRuntimeProfiles := []string{"wechat-article", "wechat-picture", model.PlatformSeednote, model.PlatformMontage, model.PlatformVideoEdit, "moments", "ecommerce", model.PlatformWhiteboardAnimation, "profile-analysis", "feedback-analysis"}
 	for _, profile := range requiredRuntimeProfiles {
 		image, ok := c.RuntimeImages[profile]
 		if !ok {
@@ -924,7 +1053,7 @@ func (c ClaudeConfig) Validate() error {
 		}
 	}
 	for profile := range c.RuntimeImages {
-		if profile != "wechat-article" && profile != "wechat-picture" && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != "moments" && profile != "ecommerce" && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != model.PlatformLocalLife && profile != "profile-analysis" && profile != "feedback-analysis" && profile != "content-planning" {
+		if profile != "wechat-article" && profile != "wechat-picture" && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != model.PlatformVideoEdit && profile != "moments" && profile != "ecommerce" && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != model.PlatformLocalLife && profile != "profile-analysis" && profile != "feedback-analysis" && profile != "content-planning" {
 			errs = append(errs, fmt.Sprintf("claude.runtime_images contains unsupported profile %q", profile))
 		}
 	}
@@ -1254,6 +1383,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"storage":         true,
 		"mcp":             true,
 		"montage":         true,
+		"video_edit":      true,
 		"local_life":      true,
 		"hypit":           true,
 		"model_providers": true,
@@ -1489,6 +1619,9 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.Claude.RuntimeImages[model.PlatformLocalLife]) == "" {
 		c.Claude.RuntimeImages[model.PlatformLocalLife] = "creator-agent-local-life:latest"
 	}
+	if strings.TrimSpace(c.Claude.RuntimeImages[model.PlatformVideoEdit]) == "" {
+		c.Claude.RuntimeImages[model.PlatformVideoEdit] = "creator-agent-video-edit:latest"
+	}
 	if c.Server.Port == 0 {
 		c.Server.Port = 8080
 	}
@@ -1553,6 +1686,7 @@ func (c *Config) applyDefaults() {
 		}
 	}
 	c.Montage.ApplyDefaults()
+	c.VideoEdit.ApplyDefaults()
 	c.Hypit.ApplyDefaults()
 	// Asynq defaults.
 	if c.Asynq.Concurrency == 0 {
@@ -2209,6 +2343,9 @@ func (c *Config) Validate() error {
 		errs = append(errs, "claude.runtime_images.hypit is required when hypit is enabled (set hypit.enabled=false or configure claude.runtime_images.hypit, typically via ANBAN_AGENT_IMAGE_HYPIT)")
 	}
 	if err := c.Montage.Validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if err := c.VideoEdit.Validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
 

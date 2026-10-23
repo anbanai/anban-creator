@@ -255,6 +255,34 @@ describe('ProjectsPage', () => {
     expect(api.projects.upsertChannelConfig).not.toHaveBeenCalled()
   })
 
+  it('saves video-edit defaults when creating a dedicated video-edit project', async () => {
+    vi.mocked(api.projects.create).mockResolvedValueOnce({ project: { ...projectWithReference, id: 'video-edit-project' } })
+    window.history.pushState({}, '', '/projects?create=true&type=video-edit&intent=new')
+    render(<ProjectsPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建人设' })
+    fireEvent.change(within(dialog).getByPlaceholderText('例如 我的科技博客'), { target: { value: '访谈剪辑人设' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '全自动视频剪辑' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '公众号文章' }))
+    fireEvent.change(within(dialog).getByLabelText('默认质量档位'), { target: { value: 'quality' } })
+    fireEvent.change(within(dialog).getByLabelText('默认字幕'), { target: { value: 'required' } })
+    fireEvent.change(within(dialog).getByLabelText('默认目标时长（秒）'), { target: { value: '90' } })
+    fireEvent.change(within(dialog).getByLabelText('长期剪辑风格'), { target: { value: '自然停顿，观点完整' } })
+    const deliveryTargets = within(dialog).getByPlaceholderText('输入后按回车添加')
+    fireEvent.change(deliveryTargets, { target: { value: 'subtitles' } })
+    fireEvent.keyDown(deliveryTargets, { key: 'Enter' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(api.projects.create).toHaveBeenCalledWith(expect.objectContaining({
+      agent_ids: ['video-edit'],
+      platform: 'video-edit',
+      video_edit_defaults: {
+        preferences: { quality_tier: 'quality', subtitle_mode: 'required', max_duration_seconds: 90, style: '自然停顿，观点完整' },
+        delivery_targets: ['subtitles'],
+      },
+    })))
+  })
+
   it('creates a project with a reference session and no legacy URL field', async () => {
     vi.mocked(api.projects.create).mockResolvedValueOnce({ project: {
       ...(await vi.mocked(api.projects.list)())[0],

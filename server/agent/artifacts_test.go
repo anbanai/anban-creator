@@ -132,6 +132,30 @@ func TestValidateLocalLifeArtifactsRequiresSharedAudioAndSubtitles(t *testing.T)
 	}
 }
 
+func TestValidateVideoEditArtifactsRequiresContentTags(t *testing.T) {
+	required := []string{
+		"final.mp4",
+		"edit-decision-list.json",
+		"edit-strategy.md",
+		"delivery-manifest.json",
+		"quality-evidence.json",
+	}
+	files := make([]*model.TaskFile, 0, len(required))
+	for _, name := range required {
+		files = append(files, &model.TaskFile{FileName: name, FilePath: filepath.Join("output", name)})
+	}
+
+	got := ValidateTaskArtifactsFromTaskFiles(&model.Task{Type: model.PlatformVideoEdit}, files)
+	if got.Valid || !containsArtifactName(got.Missing, "content-tags.json") {
+		t.Fatalf("validation = %#v, want content-tags.json missing", got)
+	}
+
+	files = append(files, &model.TaskFile{FileName: "content-tags.json", FilePath: "output/content-tags.json"})
+	if got = ValidateTaskArtifactsFromTaskFiles(&model.Task{Type: model.PlatformVideoEdit}, files); !got.Valid {
+		t.Fatalf("validation with content tags = %#v, want valid", got)
+	}
+}
+
 func TestValidateMomentsArtifactsRequiresGeneratedImage(t *testing.T) {
 	required := []string{
 		"material-analysis.md",

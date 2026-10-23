@@ -172,6 +172,7 @@ type ProjectSnapshot struct {
 	EcommerceDefaults             EcommerceProjectDefaults `json:"ecommerce_defaults,omitempty"`
 	HypitDefaults                 HypitDefaults            `json:"hypit_defaults,omitempty"`
 	MontageDefaults               MontageDefaults          `json:"montage_defaults,omitempty"`
+	VideoEditDefaults             VideoEditDefaults        `json:"video_edit_defaults,omitempty"`
 	ChannelConfig                 map[string]any           `json:"channel_config,omitempty"`
 	WechatDelivery                WechatDeliveryDecision   `json:"wechat_delivery,omitempty"`
 	Profile                       ProjectProfile           `json:"profile,omitempty"`
@@ -250,6 +251,7 @@ type Task struct {
 	HypitRuntimeSnapshot datatypes.JSON                        `gorm:"type:json" json:"-"`
 	HypitInput           datatypes.JSONType[HypitInput]        `gorm:"type:json" json:"hypit_input"`
 	MontageInput         datatypes.JSONType[MontageInput]      `gorm:"type:json" json:"montage_input"`
+	VideoEditInput       datatypes.JSONType[VideoEditInput]    `gorm:"type:json" json:"video_edit_input"`
 	LocalLifeInput       datatypes.JSONType[LocalLifeInput]    `gorm:"type:json" json:"local_life_input"`
 	AgentInput           datatypes.JSONType[map[string]any]    `gorm:"type:json" json:"agent_input"`
 	ProgressLog          string                                `gorm:"type:longtext" json:"progress_log,omitempty"`
@@ -377,6 +379,7 @@ func SnapshotProject(p *Project) ProjectSnapshot {
 		Author:                        p.Author,
 		EcommerceDefaults:             p.EcommerceDefaults.Data(),
 		MontageDefaults:               p.MontageDefaults.Data(),
+		VideoEditDefaults:             p.VideoEditDefaults.Data(),
 		HypitDefaults:                 p.HypitDefaults.Data(),
 		Profile:                       profile,
 	}
@@ -405,6 +408,7 @@ func ProjectFromSnapshot(base *Project, snap ProjectSnapshot) *Project {
 	p.Author = snap.Author
 	p.SetEcommerceDefaults(snap.EcommerceDefaults)
 	p.SetMontageDefaults(snap.MontageDefaults)
+	p.SetVideoEditDefaults(snap.VideoEditDefaults)
 	p.SetHypitDefaults(snap.HypitDefaults)
 	p.Profile = datatypes.NewJSONType(snap.Profile)
 	return &p

@@ -453,3 +453,12 @@ func TestContentMetadataServiceAcceptsFutureContentTypeFromFrozenTaggingContract
 		t.Fatalf("future content server tags = %d, want 4", count)
 	}
 }
+
+func TestVideoEditIsKnownContentAndUsesVideoMediaForm(t *testing.T) {
+	if !isKnownContentTaskType(model.PlatformVideoEdit) {
+		t.Fatal("video-edit must be recognized as content")
+	}
+	if got := serverMediaForm(model.PlatformVideoEdit); got != "video" {
+		t.Fatalf("video-edit media form = %q, want video", got)
+	}
+}

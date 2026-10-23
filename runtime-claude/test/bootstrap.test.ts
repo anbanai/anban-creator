@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { readFile } from "node:fs/promises";
 
-import { bootstrap, executionProfileFingerprint, readAgentPackCatalogWithDigest, resolveAgentPackForTaskType, validateAgentPackCatalog, validateAgentPackCatalogDigest, validateBootstrapResponse, type AgentPackCatalog, type BootstrapResponse } from "../src/bootstrap.js";
+import { bootstrap, executionProfileFingerprint, preflightBootstrapFiles, readAgentPackCatalogWithDigest, resolveAgentPackForTaskType, validateAgentPackCatalog, validateAgentPackCatalogDigest, validateBootstrapResponse, type AgentPackCatalog, type BootstrapResponse } from "../src/bootstrap.js";
 import type { JobConfig } from "../src/config.js";
 
 const tokenFor = (claims: Record<string, string>) => `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature`;
@@ -65,6 +65,27 @@ const validResponse = (): BootstrapResponse => {
 };
 
 describe("validateBootstrapResponse", () => {
+  test("accepts bounded video-edit assets and rejects aggregate input above 1 GiB", () => {
+    const makeAsset = (index: number) => ({
+      path: `.anban-creator/video-edit-assets/${index}.mp4`,
+      download_url: "https://bootstrap.example/source",
+      expected_size: 256 << 20,
+      max_bytes: 256 << 20,
+      mode: 0o644,
+    });
+    expect(() => preflightBootstrapFiles([makeAsset(1)], "video-edit")).not.toThrow();
+    expect(() => preflightBootstrapFiles([1, 2, 3, 4, 5].map(makeAsset), "video-edit")).toThrow("video-edit bootstrap files exceed total size limit");
+  });
+
+  test("requires materialized video-edit media to have a bounded remote source size", () => {
+    expect(() => preflightBootstrapFiles([{
+      path: ".anban-creator/video-edit-assets/clip.mp4",
+      text: "local path is not a source",
+      max_bytes: 1024,
+      mode: 0o644,
+    }], "video-edit")).toThrow("requires a remote source and expected size");
+  });
+
   test("rejects a runtime Catalog whose bytes do not match the Server digest", () => {
     const response = validateBootstrapResponse("execution-1", validResponse());
     expect(() => validateAgentPackCatalogDigest(response, "c".repeat(64))).toThrow("Catalog digest does not match runtime image");
@@ -180,6 +201,21 @@ describe("validateBootstrapResponse", () => {
     response.runtime_profile = "hypit";
     response.agent_flag = "anban:hypit";
     expect(validateBootstrapResponse("execution-1", response).agent_flag).toBe("anban:hypit");
+  });
+
+  test("accepts task-scoped video-edit credentials from the Server", () => {
+    const response = validResponse();
+    Object.assign(response, {
+      task_type: "video-edit",
+      task_kind: "video_edit",
+      agent_id: "video-edit",
+      channel: "video-edit",
+      agent_pack_id: "video-edit",
+      runtime_profile: "video-edit",
+      agent_flag: "anban:video-edit",
+      env: { ELEVENLABS_API_KEY: "server-managed-test-key" },
+    });
+    expect(validateBootstrapResponse("execution-1", response).env).toEqual({ ELEVENLABS_API_KEY: "server-managed-test-key" });
   });
 
   test("rejects malformed Agent Pack artifact contracts", () => {

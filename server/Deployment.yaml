@@ -140,6 +140,8 @@ spec:
               value: "${seednote_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_MONTAGE
               value: "${montage_agent_image_repo}"
+            - name: ANBAN_AGENT_IMAGE_VIDEO_EDIT
+              value: "${video_edit_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_MOMENTS
               value: "${moments_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_ECOMMERCE
@@ -156,6 +158,12 @@ spec:
               value: "${hypit_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_LOCAL_LIFE
               value: "${local_life_agent_image_repo}"
+            - name: VIDEO_EDIT_ELEVENLABS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: video-edit-elevenlabs
+                  key: api-key
+                  optional: true
             - name: ANBAN_DSH_IMAGE
               value: "${dsh_image_repo}"
             - name: ANBAN_AGENT_SERVICE_ACCOUNT

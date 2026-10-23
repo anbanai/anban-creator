@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,8 +15,10 @@ import (
 	"testing"
 	"time"
 
+	serverconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/storage"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"gorm.io/datatypes"
@@ -29,7 +32,7 @@ func newAssistantTestRepo(t *testing.T) repository.Repository {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.Project{}, &model.Task{}, &model.TaskFile{}, &model.Asset{}, &model.AssistantCheckpoint{}, &model.AssistantSession{}, &model.AssistantSessionLease{}, &model.AssistantWorkspace{}, &model.AnalyticsState{}, &model.AnalyticsContent{}, &model.AnalyticsObservation{}, &model.AnalyticsRawPayload{}, &model.AnalyticsBucket{}, &model.AnalyticsIdempotency{}, &model.FeedbackJob{}, &model.FeedbackLease{}, &model.FeedbackInsight{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Task{}, &model.TaskFile{}, &model.Asset{}, &model.UploadSession{}, &model.AssistantCheckpoint{}, &model.AssistantSession{}, &model.AssistantSessionLease{}, &model.AssistantWorkspace{}, &model.AnalyticsState{}, &model.AnalyticsContent{}, &model.AnalyticsObservation{}, &model.AnalyticsRawPayload{}, &model.AnalyticsBucket{}, &model.AnalyticsIdempotency{}, &model.FeedbackJob{}, &model.FeedbackLease{}, &model.FeedbackInsight{}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -75,6 +78,29 @@ func newAssistantWorkspaceTestService(repo repository.Repository) *InteractiveSe
 }
 
 func TestAssistantBootstrapReturnsAllModesAndServerDefaults(t *testing.T) {
+	t.Run("video-edit project defaults are returned to the workspace", func(t *testing.T) {
+		repo := newAssistantTestRepo(t)
+		project := createAssistantProject(t, repo, "user-1", "视频项目")
+		project.Platform = model.PlatformVideoEdit
+		project.SetVideoEditDefaults(model.VideoEditDefaults{
+			Preferences:     model.VideoEditPreferences{QualityTier: "balanced", SubtitleMode: "off", Style: "保留原声"},
+			DeliveryTargets: []string{"final_video", "edit_decision_list"},
+		})
+		if err := repo.Projects().Update(context.Background(), project); err != nil {
+			t.Fatal(err)
+		}
+		svc := NewInteractiveServiceWithRuntime(repo, interactiveTestRuntimeFactory{})
+		svc.SetEnabled(true)
+		bootstrap, err := svc.AssistantBootstrap(context.Background(), "user-1")
+		if err != nil {
+			t.Fatalf("AssistantBootstrap() error = %v", err)
+		}
+		defaults := bootstrap.Projects[0].VideoEditDefaults
+		if defaults == nil || defaults.Preferences.QualityTier != "balanced" || defaults.Preferences.Style != "保留原声" || !reflect.DeepEqual(defaults.DeliveryTargets, []string{"final_video", "edit_decision_list"}) {
+			t.Fatalf("video-edit defaults = %#v, want the project's frozen preference defaults", defaults)
+		}
+	})
+
 	t.Run("no profile", func(t *testing.T) {
 		repo := newAssistantTestRepo(t)
 		svc := NewInteractiveServiceWithRuntime(repo, interactiveTestRuntimeFactory{})
@@ -906,6 +932,14 @@ func TestCreationRequestNeedsOnlyGoalAndContentType(t *testing.T) {
 	if err != nil || len(request.Assets) != 1 || request.Assets[0].Type != "text" || request.Assets[0].Text != "参考链接：https://example.com/source" {
 		t.Fatalf("decode string asset = %#v, %v", request.Assets, err)
 	}
+	otherType := `{"goal":"介绍新茶","content_type":"wechat-article","assets":[{"type":"image"},{"type":"image"},{"type":"image"},{"type":"image"},{"type":"image"},{"type":"image"}]}`
+	if _, _, err := decodeAssistantCreationPlan([]byte(otherType)); !errors.Is(err, ErrAssistantCheckpointInvalid) {
+		t.Fatalf("non-video plan over five assets error = %v, want invalid checkpoint", err)
+	}
+	videoEditType := `{"goal":"剪辑访谈","content_type":"video-edit","assets":[{"type":"video","upload_id":"1"},{"type":"video","upload_id":"2"},{"type":"video","upload_id":"3"},{"type":"video","upload_id":"4"},{"type":"video","upload_id":"5"},{"type":"video","upload_id":"6"}]}`
+	if plan, _, err := decodeAssistantCreationPlan([]byte(videoEditType)); err != nil || len(plan.Assets) != 6 {
+		t.Fatalf("video-edit plan with six uploaded assets = %#v, %v", plan, err)
+	}
 
 	for _, invalid := range []string{
 		`{"content_type":"video"}`,
@@ -932,6 +966,7 @@ func TestAssistantCreationIdentityRoutesByProjectPlatformAndContentType(t *testi
 		{"wechat picture", model.PlatformWechat, "wechat-picture", model.AgentIDWechatPicture, model.TaskTypeWechatPicture, model.TaskKindContentGeneration, false},
 		{"seednote", model.PlatformSeednote, "seednote", model.AgentIDSeednote, model.PlatformSeednote, model.TaskKindContentGeneration, false},
 		{"video", model.PlatformMontage, "video", model.AgentIDMontage, model.PlatformMontage, model.PlatformMontage, false},
+		{"video-edit", model.PlatformVideoEdit, "video-edit", model.AgentIDVideoEdit, model.PlatformVideoEdit, model.TaskKindVideoEdit, false},
 		{"cross platform", model.PlatformWechat, "video", "", "", "", true},
 		{"unknown type", model.PlatformWechat, "unknown", "", "", "", true},
 	}
@@ -949,6 +984,127 @@ func TestAssistantCreationIdentityRoutesByProjectPlatformAndContentType(t *testi
 				t.Fatalf("identity = %q/%q/%q, %v", pack.Agent.Name, taskType, taskKind, err)
 			}
 		})
+	}
+}
+
+func TestAssistantCreationCommitCreatesVideoEditTaskFromOwnedUpload(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	userID := "user-1"
+	if err := repo.Users().Create(context.Background(), &model.User{ID: userID, Email: "video-edit@example.com", Password: "test", InviteCode: "VIDEOEDIT01", Tier: model.TierFree}); err != nil {
+		t.Fatal(err)
+	}
+	project := createAssistantProject(t, repo, userID, "视频剪辑")
+	project.Platform = model.PlatformVideoEdit
+	project.AgentIDs = []string{model.AgentIDVideoEdit}
+	project.AgentIDsSet = true
+	if err := repo.Projects().Update(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	asset := &model.Asset{
+		ID: "assistant-clip", UserID: userID, Purpose: DirectUploadPurposeAIEntryAttachment,
+		StorageKey: "assets/users/user-1/assistant-clip/interview.mp4", FileName: "interview.mp4",
+		ContentType: "video/mp4", Size: 4096, ETag: "verified-etag",
+	}
+	if err := repo.Assets().Create(context.Background(), asset); err != nil {
+		t.Fatal(err)
+	}
+	// The task service must see an OSS provider because video-edit inputs are
+	// materialized only from finalized Server-owned object storage.
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	tasks := newTestTaskService(repo, &mockEnqueuer{}, &fakeTaskStorage{name: "oss"}, &logger, "", nil, nil)
+	tasks.SetVideoEditConfig(serverconfig.VideoEditConfig{ElevenLabsAPIKey: "server-managed-key"})
+	checkpoint := &model.AssistantCheckpoint{
+		ID: uuid.NewString(), UserID: userID, ModeID: AssistantModeCreation, ProjectID: project.ID,
+		BaseProfileRevision: 1, Status: model.AssistantCheckpointReady, ExpiresAt: time.Now().Add(time.Hour),
+		Payload: json.RawMessage(`{"plan":{"goal":"剪成访谈短片","content_type":"video-edit","video_edit_brief":"保留关键问答，剪成 60 秒短片","video_edit_preferences":{"quality_tier":"balanced","subtitle_mode":"required","style":"克制快剪","max_duration_seconds":60},"assets":[{"type":"video","asset_id":"assistant-clip"}]}}`),
+	}
+	result, err := commitAssistantCreation(context.Background(), userID, checkpoint, tasks, repo)
+	if err != nil {
+		t.Fatalf("commitAssistantCreation(video-edit): %v", err)
+	}
+	if result.Task == nil || result.Task.Status != model.TaskStatusPending {
+		t.Fatalf("assistant result = %#v, want pending video-edit task", result)
+	}
+	created, err := repo.Tasks().FindByID(context.Background(), result.Task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Type != model.PlatformVideoEdit || created.TaskKind != model.TaskKindVideoEdit || created.AgentID != model.AgentIDVideoEdit {
+		t.Fatalf("created task identity = %q/%q/%q, want video-edit identity", created.Type, created.TaskKind, created.AgentID)
+	}
+	input := created.VideoEditInput.Data()
+	if len(input.SourceAssets) != 1 || input.SourceAssets[0].AssetID != asset.ID || input.SourceAssets[0].FileName != asset.FileName ||
+		input.Brief != "保留关键问答，剪成 60 秒短片" || input.Preferences.QualityTier != "balanced" ||
+		input.Preferences.SubtitleMode != "required" || input.Preferences.Style != "克制快剪" || input.Preferences.MaxDuration != 60 {
+		t.Fatalf("created video-edit input = %#v, want frozen owned upload", input)
+	}
+}
+
+type assistantUploadFinalizationStore struct {
+	*fakeTaskStorage
+	*fakeDirectUploadStore
+}
+
+func (s *assistantUploadFinalizationStore) Name() string { return "oss" }
+func (s *assistantUploadFinalizationStore) UploadURL(ctx context.Context, key, contentType string, expirySeconds int) (string, error) {
+	return s.fakeTaskStorage.UploadURL(ctx, key, contentType, expirySeconds)
+}
+func (s *assistantUploadFinalizationStore) GetURL(key string) string {
+	return s.fakeTaskStorage.GetURL(key)
+}
+func (s *assistantUploadFinalizationStore) Read(ctx context.Context, key string) ([]byte, error) {
+	return s.fakeTaskStorage.Read(ctx, key)
+}
+func (s *assistantUploadFinalizationStore) DownloadURL(ctx context.Context, key string, expirySeconds int) (string, error) {
+	return s.fakeTaskStorage.DownloadURL(ctx, key, expirySeconds)
+}
+func (s *assistantUploadFinalizationStore) Delete(ctx context.Context, key string) error {
+	return s.fakeTaskStorage.Delete(ctx, key)
+}
+func (s *assistantUploadFinalizationStore) StatObject(ctx context.Context, key string) (*storage.ObjectInfo, error) {
+	return s.fakeDirectUploadStore.StatObject(ctx, key)
+}
+func (s *assistantUploadFinalizationStore) PromoteObject(ctx context.Context, sourceKey, finalKey, expectedETag string) (*storage.ObjectInfo, error) {
+	return s.fakeDirectUploadStore.PromoteObject(ctx, sourceKey, finalKey, expectedETag)
+}
+
+func TestAssistantVideoEditCreationFinalizesOwnedUploadSession(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	userID := "user-1"
+	now := time.Now().UTC()
+	sessionID := uuid.NewString()
+	session := &model.UploadSession{
+		ID: sessionID, UserID: userID, Purpose: DirectUploadPurposeVideoEditAsset,
+		StagingKey: "uploads/pending/user-1/" + sessionID + "/interview.mp4", FileName: "interview.mp4",
+		ContentType: "video/mp4", Size: 1024, Status: model.UploadSessionPending, ExpiresAt: now.Add(24 * time.Hour),
+	}
+	if err := repo.UploadSessions().Create(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	finalizer := &fakeDirectUploadStore{objects: map[string]*storage.ObjectInfo{
+		session.StagingKey: {Key: session.StagingKey, Size: session.Size, ContentType: session.ContentType, ETag: "staging-etag"},
+	}, promoteETag: "final-etag"}
+	store := &assistantUploadFinalizationStore{fakeTaskStorage: &fakeTaskStorage{}, fakeDirectUploadStore: finalizer}
+	tasks := NewTaskService(repo, &mockEnqueuer{}, store, nil, "", nil, nil)
+
+	attachments, assets, err := assistantVideoEditCreationAssets(context.Background(), userID, []assistantCreationAsset{{
+		Type: "video", UploadID: sessionID, FileName: "forged-name.mp4", MimeType: "video/mp4", FileSize: 1,
+	}}, tasks, repo)
+	if err != nil {
+		stored, _ := repo.UploadSessions().FindByID(context.Background(), sessionID)
+		t.Fatalf("assistantVideoEditCreationAssets: %v (session=%#v promoted=%#v)", err, stored, finalizer.promoted)
+	}
+	if len(assets) != 1 || assets[0].AssetID != sessionID || assets[0].FileName != "interview.mp4" || assets[0].FileSize != session.Size {
+		t.Fatalf("frozen assets = %#v, want canonical finalized upload metadata", assets)
+	}
+	if len(attachments) != 1 || attachments[0].AssetID != sessionID || attachments[0].URL != "" {
+		t.Fatalf("task attachments = %#v, want Server-owned asset ID without URL", attachments)
+	}
+	if _, err := repo.Assets().FindOwnedByID(context.Background(), sessionID, userID); err != nil {
+		t.Fatalf("finalized upload asset lookup: %v", err)
+	}
+	if len(finalizer.promoted) != 1 {
+		t.Fatalf("object promotions = %#v, want exactly one finalized upload", finalizer.promoted)
 	}
 }
 

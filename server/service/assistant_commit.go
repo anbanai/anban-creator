@@ -264,27 +264,30 @@ func validateAssistantCommitScope(ctx context.Context, repo repository.Repositor
 }
 
 type assistantCreationPlan struct {
-	Goal               string                   `json:"goal"`
-	ContentType        string                   `json:"content_type"`
-	ExpectedResult     string                   `json:"expected_result,omitempty"`
-	Requirements       []string                 `json:"requirements,omitempty"`
-	Constraints        []string                 `json:"constraints,omitempty"`
-	Assets             []assistantCreationAsset `json:"assets,omitempty"`
-	MissingInputs      []string                 `json:"missing_inputs,omitempty"`
-	AgentDecisions     []string                 `json:"agent_decisions,omitempty"`
-	TargetAudience     string                   `json:"target_audience,omitempty"`
-	Angle              string                   `json:"angle,omitempty"`
-	Outline            []string                 `json:"outline,omitempty"`
-	StyleConstraints   string                   `json:"style_constraints,omitempty"`
-	AssetPlan          string                   `json:"asset_plan,omitempty"`
-	AcceptanceCriteria string                   `json:"acceptance_criteria,omitempty"`
-	CostEstimate       string                   `json:"cost_estimate,omitempty"`
-	ExecutionOptions   []string                 `json:"execution_options,omitempty"`
+	Goal                 string                      `json:"goal"`
+	ContentType          string                      `json:"content_type"`
+	ExpectedResult       string                      `json:"expected_result,omitempty"`
+	Requirements         []string                    `json:"requirements,omitempty"`
+	Constraints          []string                    `json:"constraints,omitempty"`
+	Assets               []assistantCreationAsset    `json:"assets,omitempty"`
+	VideoEditBrief       string                      `json:"video_edit_brief,omitempty"`
+	VideoEditPreferences *model.VideoEditPreferences `json:"video_edit_preferences,omitempty"`
+	MissingInputs        []string                    `json:"missing_inputs,omitempty"`
+	AgentDecisions       []string                    `json:"agent_decisions,omitempty"`
+	TargetAudience       string                      `json:"target_audience,omitempty"`
+	Angle                string                      `json:"angle,omitempty"`
+	Outline              []string                    `json:"outline,omitempty"`
+	StyleConstraints     string                      `json:"style_constraints,omitempty"`
+	AssetPlan            string                      `json:"asset_plan,omitempty"`
+	AcceptanceCriteria   string                      `json:"acceptance_criteria,omitempty"`
+	CostEstimate         string                      `json:"cost_estimate,omitempty"`
+	ExecutionOptions     []string                    `json:"execution_options,omitempty"`
 }
 
 type assistantCreationAsset struct {
 	Type       string `json:"type,omitempty"`
 	AssetID    string `json:"asset_id,omitempty"`
+	UploadID   string `json:"upload_id,omitempty"`
 	URL        string `json:"url,omitempty"`
 	TaskFileID string `json:"task_file_id,omitempty"`
 	Text       string `json:"text,omitempty"`
@@ -340,7 +343,19 @@ func decodeAssistantCreationPlan(payload []byte) (assistantCreationPlan, []byte,
 		}
 	}
 	canonical, err := json.Marshal(plan)
-	if err != nil || len(plan.Assets) > 5 || len(canonical) > 24<<10 {
+	assetLimit := 5
+	for _, route := range assistantCreationTypeRoutes {
+		if route.agentID != model.AgentIDVideoEdit {
+			continue
+		}
+		for _, alias := range route.aliases {
+			if strings.EqualFold(strings.TrimSpace(plan.ContentType), alias) {
+				assetLimit = 20
+				break
+			}
+		}
+	}
+	if err != nil || len(plan.Assets) > assetLimit || len(canonical) > 24<<10 {
 		return assistantCreationPlan{}, nil, ErrAssistantCheckpointInvalid
 	}
 	return plan, canonical, nil
@@ -417,11 +432,27 @@ func commitAssistantCreation(ctx context.Context, userID string, checkpoint *mod
 		RequestedTaskType:     taskType,
 		AssistantCheckpointID: checkpoint.ID, AssistantProfileRevision: &checkpoint.BaseProfileRevision, Prompt: prompt, Quantity: 1,
 	}
-	inputAttachments, err := assistantCreationAttachments(ctx, userID, plan.Assets, repo)
-	if err != nil {
-		return AssistantCommitResult{}, err
+	if selected.Agent.Name == model.AgentIDVideoEdit {
+		inputAttachments, assets, assetErr := assistantVideoEditCreationAssets(ctx, userID, plan.Assets, tasks, repo)
+		if assetErr != nil {
+			return AssistantCommitResult{}, assetErr
+		}
+		params.InputAttachments = inputAttachments
+		preferences := model.VideoEditPreferences{}
+		if plan.VideoEditPreferences != nil {
+			preferences = *plan.VideoEditPreferences
+		}
+		params.VideoEditInput = &model.VideoEditInput{
+			Brief: firstNonEmptyAssistant(plan.VideoEditBrief, prompt), SourceAssets: assets,
+			Preferences: preferences,
+		}
+	} else {
+		inputAttachments, attachmentErr := assistantCreationAttachments(ctx, userID, plan.Assets, repo)
+		if attachmentErr != nil {
+			return AssistantCommitResult{}, attachmentErr
+		}
+		params.InputAttachments = inputAttachments
 	}
-	params.InputAttachments = inputAttachments
 	if selected.Agent.Name == model.AgentIDMontage {
 		assets := make([]model.MontageAsset, 0, len(plan.Assets))
 		for _, asset := range plan.Assets {
@@ -471,6 +502,43 @@ func assistantCreationAttachments(ctx context.Context, userID string, assets []a
 	return attachments, nil
 }
 
+func assistantVideoEditCreationAssets(ctx context.Context, userID string, inputs []assistantCreationAsset, tasks *TaskService, repo repository.Repository) ([]model.EntryAttachment, []model.VideoEditAsset, error) {
+	if len(inputs) == 0 || tasks == nil || repo == nil {
+		return nil, nil, fmt.Errorf("%w: video-edit 至少需要一个已上传的视频、音频或图片素材", ErrAssistantCreationAssetUnavailable)
+	}
+	finalStore, _ := tasks.store.(DirectUploadFinalizationStorage)
+	attachments := make([]model.EntryAttachment, 0, len(inputs))
+	assets := make([]model.VideoEditAsset, 0, len(inputs))
+	for i, input := range inputs {
+		var stored *model.Asset
+		assetID := strings.TrimSpace(input.AssetID)
+		uploadID := strings.TrimSpace(input.UploadID)
+		if uploadID != "" {
+			allowed := []string{DirectUploadPurposeVideoEditAsset, DirectUploadPurposeAIEntryAttachment}
+			var err error
+			stored, err = FinalizeUploadSession(ctx, finalStore, repo, FinalizeUploadRequest{SessionID: uploadID, UserID: userID, AllowedPurposes: allowed, Now: tasks.now()})
+			if err != nil {
+				return nil, nil, fmt.Errorf("%w: video-edit 素材 %d 上传尚未完成或不可访问: %v", ErrAssistantCreationAssetUnavailable, i+1, err)
+			}
+		} else if assetID != "" {
+			var err error
+			stored, err = NewReferenceAssetService(repo, nil, nil).RequireOwnedAttachment(ctx, userID, assetID, []string{DirectUploadPurposeAIEntryAttachment, DirectUploadPurposeVideoEditAsset})
+			if err != nil {
+				return nil, nil, fmt.Errorf("%w: video-edit 素材 %d 不可访问", ErrAssistantCreationAssetUnavailable, i+1)
+			}
+		} else {
+			return nil, nil, fmt.Errorf("%w: video-edit 素材必须来自 Anban 上传", ErrAssistantCreationAssetUnavailable)
+		}
+		typ := ClassifyDirectUploadFile(stored.ContentType, strings.ToLower(filepath.Ext(strings.TrimSpace(stored.FileName))))
+		if typ != "video" && typ != "audio" && typ != "image" || strings.TrimSpace(input.Type) != "" && strings.ToLower(strings.TrimSpace(input.Type)) != typ {
+			return nil, nil, fmt.Errorf("%w: video-edit 素材 %d 类型不匹配", ErrAssistantCreationAssetUnavailable, i+1)
+		}
+		attachments = append(attachments, model.EntryAttachment{AssetID: stored.ID, Type: typ, FileName: stored.FileName, ContentType: stored.ContentType, Size: stored.Size})
+		assets = append(assets, model.VideoEditAsset{AssetID: stored.ID, Type: typ, FileName: stored.FileName, MimeType: stored.ContentType, FileSize: stored.Size})
+	}
+	return attachments, assets, nil
+}
+
 func assistantCreationIdentity(project *model.Project, contentType string) (agentpack.Manifest, string, string, error) {
 	requestedType := strings.ToLower(strings.TrimSpace(contentType))
 	var route *assistantCreationTypeRoute
@@ -493,6 +561,9 @@ func assistantCreationIdentity(project *model.Project, contentType string) (agen
 		return agentpack.Manifest{}, "", "", ErrAssistantModeUnavailable
 	}
 	taskKind := model.TaskKindContentGeneration
+	if route.taskKind != "" {
+		taskKind = route.taskKind
+	}
 	if !pack.SupportsTaskKind(taskKind) {
 		if pack.SupportsTaskKind(route.taskType) {
 			taskKind = route.taskType
@@ -508,11 +579,13 @@ type assistantCreationTypeRoute struct {
 	aliases         []string
 	agentID         string
 	taskType        string
+	taskKind        string
 	projectPlatform string
 }
 
 var assistantCreationTypeRoutes = []assistantCreationTypeRoute{
 	{canonicalType: "video", aliases: []string{"video", "montage", "视频", "视频生成"}, agentID: model.AgentIDMontage, taskType: model.PlatformMontage, projectPlatform: model.PlatformMontage},
+	{canonicalType: "video-edit", aliases: []string{"video-edit", "video_edit", "全自动视频剪辑", "自动视频剪辑"}, agentID: model.AgentIDVideoEdit, taskType: model.PlatformVideoEdit, taskKind: model.TaskKindVideoEdit, projectPlatform: model.PlatformVideoEdit},
 	{canonicalType: "seednote", aliases: []string{"seednote", "seednote-note", "种草笔记", "小红书种草笔记"}, agentID: model.AgentIDSeednote, taskType: model.PlatformSeednote, projectPlatform: model.PlatformSeednote},
 	{canonicalType: "wechat-article", aliases: []string{"wechat-article", "wechat_article", "公众号文章", "公众号图文文章"}, agentID: model.AgentIDArticle, taskType: model.TaskTypeWechatArticle, projectPlatform: model.PlatformWechat},
 	{canonicalType: "wechat-picture", aliases: []string{"wechat-picture", "wechat_picture", "公众号图片消息"}, agentID: model.AgentIDWechatPicture, taskType: model.TaskTypeWechatPicture, projectPlatform: model.PlatformWechat},

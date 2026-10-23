@@ -1,0 +1,78 @@
+FROM node:24.22.0-bookworm-slim AS builder
+
+WORKDIR /app/runtime-claude
+COPY runtime-claude/package.json runtime-claude/package-lock.json ./
+RUN npm ci
+COPY runtime-claude/ ./
+RUN npm run build && \
+    grep -Fq 'X-Anban-Agent-Pack-Catalog-Digest' dist/bootstrap.js && \
+    npm prune --omit=dev && test -d node_modules/@anthropic-ai/claude-agent-sdk
+
+FROM node:24.22.0-bookworm-slim
+
+USER root
+RUN set -eux; \
+    installed=0; \
+    for attempt in 1 2 3; do \
+      if apt-get -o Acquire::Retries=5 update && \
+        (dpkg --configure -a || true) && \
+        apt-get -o Acquire::Retries=5 install -y --fix-broken --no-install-recommends \
+        ca-certificates git ffmpeg python3 python3-venv tini; then \
+        installed=1; break; \
+      fi; \
+      echo "apt package installation failed (attempt ${attempt}/3), retrying" >&2; \
+      sleep $((attempt * 5)); \
+    done; \
+    test "$installed" = 1; \
+    getent passwd 1000 >/dev/null || { echo >&2 "Node base must provide UID 1000"; exit 1; }; \
+    getent group 1000 >/dev/null || { echo >&2 "Node base must provide GID 1000"; exit 1; }; \
+    install -d -m 0755 -o 1000 -g 1000 /home/node; \
+    install -d -m 0770 -o 1000 -g 1000 /workspace; \
+    install -d -m 0750 -o 1000 -g 1000 /workspace/.claude; \
+    install -d -m 0700 -o 1000 -g 1000 /run/secrets/anban; \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/video-use
+RUN git init . \
+    && git remote add origin https://github.com/browser-use/video-use.git \
+    && git fetch --depth 1 origin 43cfc566833548093455c9d4a46bd69913b7e552 \
+    && git checkout --detach FETCH_HEAD \
+    && test "$(git rev-parse HEAD)" = "43cfc566833548093455c9d4a46bd69913b7e552" \
+    && printf '%s\n' "43cfc566833548093455c9d4a46bd69913b7e552" > /opt/video-use/.anban-source-revision \
+    && rm -rf .git
+
+ENV HOME=/home/node
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV PYTHONDONTWRITEBYTECODE=1
+RUN set -eux; \
+    python3 -m venv /opt/video-use-venv; \
+    /opt/video-use-venv/bin/pip install --no-cache-dir -e /opt/video-use; \
+    /opt/video-use-venv/bin/python -m compileall -q /opt/video-use/helpers; \
+    for helper in transcribe.py transcribe_batch.py pack_transcripts.py timeline_view.py grade.py render.py; do \
+      /opt/video-use-venv/bin/python "/opt/video-use/helpers/$helper" --help >/dev/null; \
+    done; \
+    command -v ffmpeg; \
+    command -v ffprobe; \
+    ffmpeg -version | head -n 1; \
+    ffprobe -version | head -n 1; \
+    chown -R root:root /opt/video-use /opt/video-use-venv; \
+    chmod -R a=rX /opt/video-use /opt/video-use-venv
+
+COPY --from=builder /app/runtime-claude/node_modules /app/runtime-claude/node_modules
+COPY --from=builder /app/runtime-claude/dist /app/runtime-claude/dist
+COPY harness/ /anbanai/
+COPY deploy/docker/anban-agent-launcher /usr/local/bin/anban
+RUN set -eux; \
+    if [ -n "$(find /anbanai -type l -print -quit)" ]; then echo >&2 "/anbanai must not contain symlinks"; exit 1; fi; \
+    chown -R root:root /anbanai /app/runtime-claude; \
+    chmod -R a=rX /anbanai /app/runtime-claude; \
+    chmod 0755 /usr/local/bin/anban
+
+ENV CLAUDE_PLUGIN_ROOT=/anbanai
+ENV ANBAN_VIDEO_USE_ROOT=/opt/video-use
+ENV PATH="/opt/video-use-venv/bin:${PATH}"
+
+USER 1000:1000
+WORKDIR /workspace
+ENTRYPOINT ["tini", "--", "anban"]
+CMD ["job"]

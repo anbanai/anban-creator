@@ -260,6 +260,31 @@ describe("validateManagedInit", () => {
     }
   });
 
+  test("requires the complete video-edit runtime surface", () => {
+    const requiredSkills = [
+      "anban:project-profile-context",
+      "anban:video-edit",
+      "anban:content-tagging",
+    ];
+    const message = {
+      type: "system" as const,
+      subtype: "init" as const,
+      mcp_servers: [{ name: "anban", status: "connected" as const }],
+      plugins: [{ name: "anban", path: "/anbanai" }],
+      tools: ["mcp__anban__get_project_profile"],
+      skills: requiredSkills,
+    };
+
+    expect(() => validateManagedInit(message, "video-edit")).not.toThrow();
+    expect(() => validateManagedInit({ ...message, tools: [] }, "video-edit")).toThrow("get_project_profile");
+    for (const missing of requiredSkills) {
+      expect(() => validateManagedInit({
+        ...message,
+        skills: message.skills.filter((skill) => skill !== missing),
+      }, "video-edit"), missing).toThrow(missing);
+    }
+  });
+
   test.each(["wechat-article", "seednote", "hypit"])("requires the shared portrait cover skill for %s", (taskType) => {
     const message = {
       type: "system" as const,
@@ -1016,6 +1041,26 @@ describe("buildExecutionEnvironment", () => {
     );
     expect(environment).not.toHaveProperty("CLAUDE_CODE_MAX_OUTPUT_TOKENS");
     expect(environment).not.toHaveProperty("CLAUDE_CODE_DISABLE_THINKING");
+  });
+
+  test("keeps only the task-scoped video-edit key after clearing inherited credentials", () => {
+    const environment = buildExecutionEnvironment(
+      { ELEVENLABS_API_KEY: "host-key", ANTHROPIC_API_KEY: "host-anthropic-key", PATH: "/usr/bin" },
+      {
+        task_type: "video-edit",
+        task_id: "task-1",
+        execution_id: "execution-1",
+        project_id: "project-1",
+        env: { ELEVENLABS_API_KEY: "server-managed-key" },
+        execution_profile: { envs: { ANTHROPIC_MODEL: "runtime-model" } },
+      },
+      "https://server.example.com",
+      "execution-jwt",
+    );
+
+    expect(environment.ELEVENLABS_API_KEY).toBe("server-managed-key");
+    expect(environment).not.toHaveProperty("ANTHROPIC_API_KEY");
+    expect(environment.PATH).toBe("/usr/bin");
   });
 
   test("removes pinned SDK credential, provider routing, and model inputs inherited from the host", () => {

@@ -48,6 +48,7 @@ export const taskTypeLabelCN: Record<string, string> = {
   'whiteboard-animation': '白板动画',
   hypit: '视频复刻',
   'local-life': '素材混剪',
+  'video-edit': '全自动视频剪辑',
 }
 
 // --- Content Types ---
@@ -69,6 +70,7 @@ export const contentTypeLabel: Record<string, string> = {
   'whiteboard-animation': '白板动画',
   hypit: '视频复刻',
   'local-life': '素材混剪',
+  'video-edit': '全自动视频剪辑',
 }
 
 // Pipeline stage → 中文标签。stage 取值来自 server/service/task_progress_stages.go
@@ -171,6 +173,7 @@ export const contentTypeOptions = [
   { value: 'whiteboard-animation', label: '白板动画' },
   { value: 'hypit', label: '视频复刻' },
   { value: 'local-life', label: '素材混剪' },
+  { value: 'video-edit', label: '全自动视频剪辑' },
   { value: 'ecommerce', label: '电商出图' },
 ]
 
@@ -183,6 +186,7 @@ export const platformLabels: Record<string, string> = {
   'whiteboard-animation': '白板动画',
   hypit: '视频复刻',
   'local-life': '素材混剪',
+  'video-edit': '全自动视频剪辑',
 }
 
 export function platformDisplayName(platform: string | null | undefined, fallback = '通用'): string {
@@ -204,6 +208,7 @@ export const platformDefaultRatio: Record<string, string> = {
   'whiteboard-animation': '16:9',
   hypit: '9:16',
   'local-life': '9:16',
+  'video-edit': '9:16',
 }
 
 export const platformRatioLabel: Record<string, string> = {

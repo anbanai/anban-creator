@@ -82,6 +82,17 @@ const fixtures = vi.hoisted(() => {
       delivery_targets: ['final_video'],
     },
   } as Project
+  const videoEditProject = {
+    ...articleProject,
+    id: 'video-edit-project',
+    platform: 'video-edit',
+    agent_ids: ['video-edit'],
+    name: '视频剪辑项目人设',
+    video_edit_defaults: {
+      preferences: { quality_tier: 'balanced', subtitle_mode: 'off', style: '访谈精剪', max_duration_seconds: 75 },
+      delivery_targets: ['final_video', 'edit_decision_list'],
+    },
+  } as Project
   const momentsProject = {
     ...articleProject,
     id: 'moments-project',
@@ -127,7 +138,7 @@ const fixtures = vi.hoisted(() => {
     completed_at: '2026-07-01T00:10:00.000Z',
   } as Task
   const createdTask = { ...sourceTask, id: 'created-task', status: 'pending' } as Task
-  return { articleProject, seednoteProject, momentsProject, ecommerceProject, montageProject, sourceTask, createdTask }
+  return { articleProject, seednoteProject, momentsProject, ecommerceProject, montageProject, videoEditProject, sourceTask, createdTask }
 })
 
 vi.mock('@/lib/api', async () => {
@@ -236,6 +247,7 @@ beforeEach(() => {
     fixtures.momentsProject,
     fixtures.ecommerceProject,
     fixtures.montageProject,
+    fixtures.videoEditProject,
   ])
   vi.mocked(api.templates.list).mockResolvedValue({
     items: [{
@@ -263,6 +275,9 @@ beforeEach(() => {
       { id: 'task.viral-analysis.quality', operation: 'task.viral_analysis', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
       { id: 'task.hypit.effective', operation: 'task.hypit', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 1600, delivery: 'hypit_artifacts_verified' },
       { id: 'task.montage.effective', operation: 'task.montage', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
+      { id: 'task.video_edit.effective', operation: 'task.video_edit', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 1600, delivery: 'video_edit_artifacts_verified' },
+      { id: 'task.video_edit.balanced', operation: 'task.video_edit', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 2000, delivery: 'video_edit_artifacts_verified' },
+      { id: 'task.video_edit.quality', operation: 'task.video_edit', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 6000, delivery: 'video_edit_artifacts_verified' },
     ],
   })
   vi.mocked(api.agentProfiles.list).mockResolvedValue([
@@ -310,6 +325,47 @@ afterEach(() => {
 })
 
 describe('TaskFormDialog', () => {
+  it('requires an uploaded video-edit asset and submits it with frozen project preferences', async () => {
+    uploadToOSSMock.mockResolvedValueOnce({
+      uploadId: 'video-edit-upload',
+      key: 'uploads/pending/interview.mp4',
+      publicUrl: '/api/v1/files/video-edit-upload',
+      contentType: 'video/mp4',
+      size: 120,
+    })
+    renderDialog({ initialProjectId: fixtures.videoEditProject.id, initialType: 'video-edit' })
+
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
+    await within(dialog).findByRole('combobox', { name: '人设：视频剪辑项目人设' })
+    const createButton = within(dialog).getByRole('button', { name: '创建' })
+    expect(createButton).toBeDisabled()
+    expect(within(dialog).getByLabelText('质量档位')).toHaveValue('balanced')
+    expect(within(dialog).getByLabelText('字幕')).toHaveValue('off')
+    fireEvent.change(within(dialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
+      target: { value: '突出嘉宾谈到的三个观点' },
+    })
+    fireEvent.change(within(dialog).getByLabelText('添加参考素材'), {
+      target: { files: [new File(['video'], 'interview.mp4', { type: 'video/mp4' })] },
+    })
+
+    await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'video_edit_asset' })))
+    await waitFor(() => expect(createButton).toBeEnabled())
+    fireEvent.click(createButton)
+
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'video-edit',
+      agent_id: 'video-edit',
+      channel: 'video-edit',
+      task_kind: 'video_edit',
+      video_edit_input: {
+        brief: '突出嘉宾谈到的三个观点',
+        source_assets: [{ type: 'video', url: '/api/v1/files/video-edit-upload', file_name: 'interview.mp4', mime_type: 'video/mp4', file_size: 120 }],
+        preferences: { quality_tier: 'balanced', subtitle_mode: 'off', style: '访谈精剪', max_duration_seconds: 75 },
+        delivery_targets: ['final_video', 'edit_decision_list'],
+      },
+    })))
+  })
+
   it('keeps the task form usable when the optional Agent Pack catalog is unavailable', async () => {
     useAgentPacksMock.mockReturnValueOnce({ data: { items: [] } })
 

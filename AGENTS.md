@@ -112,7 +112,8 @@ business image.
 
 The managed runtime uses an independently tagged image for every Agent Pack:
 `creator-agent-wechat-article`, `creator-agent-wechat-picture`,
-`creator-agent-seednote`, `creator-agent-montage`, and specialist workflow images.
+`creator-agent-seednote`, `creator-agent-montage`,
+`creator-agent-video-edit`, and specialist workflow images.
 Name every runtime variable after its profile, so `ANBAN_AGENT_IMAGE_<PROFILE>`
 and the Kubernetes `${<profile>_agent_image_repo}` substitution stay in a
 one-to-one mapping with `claude.runtime_images.<profile>`.
@@ -132,8 +133,8 @@ project at `/workspace/project`; its profile and credentials are Server-configur
 
 Configure dispatch with `ANBAN_AGENT_EXECUTOR`, one image variable per runtime
 profile such as `ANBAN_AGENT_IMAGE_WECHAT_ARTICLE` and
-`ANBAN_AGENT_IMAGE_WECHAT_PICTURE`, plus `ANBAN_AGENT_IMAGE_HYPIT` and
-`ANBAN_AGENT_EXECUTION_TOKEN_SECRET`. The
+`ANBAN_AGENT_IMAGE_WECHAT_PICTURE`, `ANBAN_AGENT_IMAGE_VIDEO_EDIT`,
+`ANBAN_AGENT_IMAGE_HYPIT`, and `ANBAN_AGENT_EXECUTION_TOKEN_SECRET`. The
 Server never builds a missing runtime image; build or publish all selected
 images before dispatch and prefer immutable digests outside local development.
 The Compose Docker executor requires the Docker daemon socket mounted at

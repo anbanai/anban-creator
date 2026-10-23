@@ -155,7 +155,8 @@ func defaultProjectAgentIDs(platform string) []string {
 	case model.PlatformWechat:
 		return []string{model.AgentIDArticle}
 	case model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce,
-		model.PlatformMontage, model.PlatformWhiteboardAnimation, model.PlatformHypit:
+		model.PlatformMontage, model.PlatformWhiteboardAnimation, model.PlatformHypit,
+		model.PlatformVideoEdit:
 		return []string{platform}
 	default:
 		return nil
@@ -245,7 +246,7 @@ func (h *ProjectHandler) respondProjectUpdateError(c fiber.Ctx, projectID string
 	if errors.Is(err, service.ErrInvalidWechatPlatformConfig) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
-	if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrProjectNameRequired) {
+	if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrProjectVideoEditDefaults) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrProjectNameRequired) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	h.logger.Error().Err(err).Str("project_id", projectID).Msg("update project failed")
@@ -282,6 +283,7 @@ type projectRequest struct {
 	InstructionsSet               bool                             `json:"-"`
 	EcommerceDefaults             *model.EcommerceProjectDefaults  `json:"ecommerce_defaults,omitempty"`
 	MontageDefaults               *model.MontageDefaults           `json:"montage_defaults,omitempty"`
+	VideoEditDefaults             *model.VideoEditDefaults         `json:"video_edit_defaults,omitempty"`
 	HypitDefaults                 *model.HypitDefaults             `json:"hypit_defaults,omitempty"`
 	// Config fields for platform-specific credentials.
 	WechatAppID             string  `json:"wechat_app_id"`
@@ -462,6 +464,10 @@ func (req *projectRequest) toProject() *model.Project {
 	if req.MontageDefaults != nil {
 		p.SetMontageDefaults(*req.MontageDefaults)
 		p.MontageDefaultsSet = true
+	}
+	if req.VideoEditDefaults != nil {
+		p.SetVideoEditDefaults(*req.VideoEditDefaults)
+		p.VideoEditDefaultsSet = true
 	}
 	return p
 }
@@ -684,7 +690,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 
 	created, err := h.service.Create(c.Context(), userID, ch)
 	if err != nil {
-		if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrProjectNameRequired) || errors.Is(err, service.ErrProjectProfileSetup) {
+		if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrProjectVideoEditDefaults) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrProjectNameRequired) || errors.Is(err, service.ErrProjectProfileSetup) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create project failed")
@@ -770,7 +776,7 @@ func (h *ProjectHandler) ensureProfileInitialization(ctx context.Context, userID
 func profileInitializationSupported(platform string) bool {
 	switch strings.TrimSpace(platform) {
 	case model.PlatformWechat, model.PlatformSeednote, model.PlatformMoments,
-		model.PlatformMontage, model.PlatformHypit, model.PlatformWhiteboardAnimation:
+		model.PlatformMontage, model.PlatformVideoEdit, model.PlatformHypit, model.PlatformWhiteboardAnimation:
 		return true
 	default:
 		return false

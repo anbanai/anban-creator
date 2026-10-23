@@ -366,6 +366,7 @@ func main() {
 		MontageToolPolicy:       cfg.Montage.ToolPolicy,
 		MontagePipelineDefaults: cfg.Montage.PipelineDefaults,
 		MontageEnv:              cfg.Montage.Env,
+		VideoEdit:               cfg.VideoEdit,
 		Hypit:                   cfg.Hypit,
 		Registry:                agentProfiles,
 		ProjectMemory:           projectMemoryStore,
@@ -460,6 +461,7 @@ func main() {
 		planSvc.SetBillingWalletService(fixedBilling.Wallet)
 		taskSvc.SetHypitConfig(cfg.Hypit)
 		taskSvc.SetMontageConfig(cfg.Montage)
+		taskSvc.SetVideoEditConfig(cfg.VideoEdit)
 		taskSvc.SetMontageCapabilityService(montageCapabilitySvc)
 		taskSvc.SetLocalLifeCapabilityService(localLifeCapabilitySvc)
 		taskSvc.SetExecutionTimeouts(cfg.Asynq.ContentGenerateTimeout, cfg.Asynq.PersistTimeout)
@@ -886,6 +888,8 @@ func main() {
 		if cfg.Search.Images.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Search.Images.Provider), "doubao") {
 			imageSearchSvc = service.NewImageSearchService(&cfg.Search, service.NewDoubaoGlobalImageSearchProvider(cfg.Search.Providers.Doubao), fixedBilling.Catalog, fixedBilling.Wallet, fixedBilling.Cost, repo.SearchOperations(), log)
 		}
+		agentProjectProfileSvc := service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), cfg.Montage, imageCapabilityResolver, repo)
+		agentProjectProfileSvc.SetVideoEditConfig(cfg.VideoEdit)
 		mcp.SetServices(&mcp.Services{
 			ProjectSvc:             projectSvc,
 			TaskSvc:                taskSvc,
@@ -901,7 +905,7 @@ func main() {
 			TrendSvc:               trendSvc,
 			AgentFeedbackSvc:       agentFeedbackSvc,
 			ContentMetadataSvc:     service.NewContentMetadataService(repo, log, store),
-			AgentProjectProfileSvc: service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), cfg.Montage, imageCapabilityResolver, repo),
+			AgentProjectProfileSvc: agentProjectProfileSvc,
 			ArticleScoreSvc:        service.NewArticleScoreService(),
 			SeednoteExportSvc:      service.NewSeednoteExportService(),
 			ResourceCatalogSvc:     service.NewResourceCatalogService(resources.Manager()),

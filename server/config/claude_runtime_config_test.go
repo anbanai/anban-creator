@@ -44,6 +44,7 @@ claude:
     wechat-picture: creator-agent-wechat-picture:latest
     seednote: creator-agent-seednote:latest
     montage: creator-agent-montage:latest
+    video-edit: creator-agent-video-edit:latest
     moments: creator-agent-moments:latest
     ecommerce: creator-agent-ecommerce:latest
     whiteboard-animation: creator-agent-whiteboard-animation:latest
@@ -69,7 +70,7 @@ func validClaudeConfigForTest() ClaudeConfig {
 		},
 		Executor: "docker", ExecutionTokenSecret: "0123456789abcdef0123456789abcdef",
 		RuntimeImages: RuntimeImages{
-			"wechat-article": "creator-agent-wechat-article:latest", "wechat-picture": "creator-agent-wechat-picture:latest", model.PlatformSeednote: "creator-agent-seednote:latest", model.PlatformMontage: "creator-agent-montage:latest", model.PlatformWhiteboardAnimation: "creator-agent-whiteboard-animation:latest", "moments": "creator-agent-moments:latest", "ecommerce": "creator-agent-ecommerce:latest", model.PlatformHypit: "creator-agent-hypit:latest", "profile-analysis": "creator-agent-profile-analysis:latest", "feedback-analysis": "creator-agent-feedback-analysis:latest",
+			"wechat-article": "creator-agent-wechat-article:latest", "wechat-picture": "creator-agent-wechat-picture:latest", model.PlatformSeednote: "creator-agent-seednote:latest", model.PlatformMontage: "creator-agent-montage:latest", model.PlatformVideoEdit: "creator-agent-video-edit:latest", model.PlatformWhiteboardAnimation: "creator-agent-whiteboard-animation:latest", "moments": "creator-agent-moments:latest", "ecommerce": "creator-agent-ecommerce:latest", model.PlatformHypit: "creator-agent-hypit:latest", "profile-analysis": "creator-agent-profile-analysis:latest", "feedback-analysis": "creator-agent-feedback-analysis:latest",
 		},
 	}
 }

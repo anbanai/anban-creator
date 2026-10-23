@@ -102,6 +102,7 @@ claude:
     wechat-picture: creator-agent-wechat-picture:latest
     seednote: creator-agent-seednote:latest
     montage: creator-agent-montage:latest
+    video-edit: creator-agent-video-edit:latest
     moments: creator-agent-moments:latest
     ecommerce: creator-agent-ecommerce:latest
     hypit: creator-agent-hypit:latest

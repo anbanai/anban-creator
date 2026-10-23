@@ -39,13 +39,18 @@ func TestAgentPackHandlerListsEmbeddedCatalog(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.Code != 0 || len(envelope.Data.Packs) != 15 {
+	if envelope.Code != 0 || len(envelope.Data.Packs) != 16 {
 		t.Fatalf("catalog response = %#v", envelope)
 	}
 	if envelope.Data.Packs[0].ID != "ecommerce" {
 		t.Fatalf("first Pack = %q, want deterministic ecommerce", envelope.Data.Packs[0].ID)
 	}
 	for _, pack := range envelope.Data.Packs {
+		if pack.ID == "video-edit" {
+			if pack.Kind != "managed" || !slices.Equal(pack.Surfaces, []string{"plugin", "task"}) || pack.Channel != "video-edit" || !slices.Equal(pack.Bindings.TaskKinds, []string{"video_edit"}) {
+				t.Fatalf("managed video-edit Pack has an incomplete task contract: %#v", pack)
+			}
+		}
 		if pack.ID == "hypit" {
 			if pack.Kind != "managed" || !slices.Equal(pack.Surfaces, []string{"plugin", "task"}) || pack.Channel != "hypit" || !slices.Equal(pack.Bindings.TaskKinds, []string{"hypit"}) {
 				t.Fatalf("managed video Pack has an incomplete task contract: %#v", pack)

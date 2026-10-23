@@ -706,6 +706,7 @@ func dockerDispatcherTestImages() srvconfig.RuntimeImages {
 		"wechat-picture":                  "registry.example.com/creator-agent-wechat-picture@sha256:picture",
 		model.PlatformSeednote:            "registry.example.com/creator-agent-seednote@sha256:seednote",
 		model.PlatformMontage:             "registry.example.com/creator-agent-montage@sha256:montage",
+		model.PlatformVideoEdit:           "registry.example.com/creator-agent-video-edit@sha256:video-edit",
 		"moments":                         "registry.example.com/creator-agent-moments@sha256:moments",
 		"ecommerce":                       "registry.example.com/creator-agent-ecommerce@sha256:ecommerce",
 		model.PlatformWhiteboardAnimation: "registry.example.com/creator-agent-whiteboard-animation@sha256:whiteboard",

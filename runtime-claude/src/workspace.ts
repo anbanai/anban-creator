@@ -7,6 +7,8 @@ import { cleanBootstrapPath, preflightBootstrapFiles, workspacePath, type Bootst
 
 const MAX_BOOTSTRAP_FILE_BYTES = 64 << 20;
 const MAX_BOOTSTRAP_TOTAL_BYTES = 512 << 20;
+const MAX_VIDEO_EDIT_TOTAL_BYTES = 1 << 30;
+const MAX_VIDEO_EDIT_METADATA_BYTES = 2 << 20;
 
 type BootstrapCommit = {
   kind: "create" | "replace";
@@ -115,7 +117,12 @@ export async function materializeBootstrapFiles(workspace: string, files: Bootst
       const accept = async (chunk: Uint8Array) => {
         size += chunk.byteLength; totalBytes += chunk.byteLength;
         if (taskType === "hypit" && file.path.startsWith("project/assets/")) { mediaBytes += chunk.byteLength; if (mediaBytes > 536870912) throw new Error("Hypit assets exceed total size limit"); }
-        if (size > maxBytes || totalBytes > (taskType === "hypit" ? 2684354560 : MAX_BOOTSTRAP_TOTAL_BYTES)) throw new Error("bootstrap files exceed size limit");
+        if (taskType === "video-edit" && file.path.startsWith(".anban-creator/video-edit-assets/")) {
+          mediaBytes += chunk.byteLength;
+          if (mediaBytes > MAX_VIDEO_EDIT_TOTAL_BYTES) throw new Error("video-edit assets exceed total size limit");
+        }
+        const totalLimit = taskType === "hypit" ? 2684354560 : taskType === "video-edit" ? MAX_VIDEO_EDIT_TOTAL_BYTES + MAX_VIDEO_EDIT_METADATA_BYTES : MAX_BOOTSTRAP_TOTAL_BYTES;
+        if (size > maxBytes || totalBytes > totalLimit) throw new Error("bootstrap files exceed size limit");
         hash.update(chunk); await handle.writeFile(chunk);
       };
       try {

@@ -124,6 +124,30 @@ export const localLifeInputSchema = z.object({
   bgm_asset_id: z.string().max(200).optional(),
 }).optional()
 
+const videoEditAssetSchema = z.object({
+  type: z.enum(['video', 'audio', 'image']),
+  url: z.string().optional(),
+  task_file_id: z.string().optional(),
+  file_name: z.string().optional(),
+  mime_type: z.string().optional(),
+  file_size: z.number().nonnegative().optional(),
+}).refine((asset) => Boolean(asset.url?.trim() || asset.task_file_id?.trim()), '素材缺少上传标识')
+  .refine((asset) => !(asset.url?.trim() && asset.task_file_id?.trim()), '素材不能同时包含 URL 和文件标识')
+
+const videoEditPreferencesSchema = z.object({
+  quality_tier: z.enum(['effective', 'balanced', 'quality']).optional(),
+  subtitle_mode: z.enum(['off', 'required']).optional(),
+  style: z.string().max(2000).optional(),
+  max_duration_seconds: z.number().int().min(0).max(1800).optional(),
+}).optional()
+
+export const videoEditInputSchema = z.object({
+  brief: promptSchema,
+  source_assets: z.array(videoEditAssetSchema).min(1, '请至少上传一个视频、音频或图片素材').max(20),
+  preferences: videoEditPreferencesSchema,
+  delivery_targets: z.array(z.string().min(1).max(100)).max(20).optional(),
+}).optional()
+
 export const loginSchema = z.object({
   email: z.string().min(1, "邮箱不能为空").email("请输入有效的邮箱地址"),
   password: z.string().min(1, "密码不能为空"),
@@ -142,7 +166,7 @@ export type RegisterFormValues = z.infer<typeof registerSchema>
 export const createTaskSchema = z.object({
   project_id: z.string().optional().default(""),
   execution_profile: executionProfileSchema,
-  type: z.enum(["seednote", "wechat-article", "wechat-picture", "moments", "viral_analysis", "profile_analysis", "content_research", "content_validation", "content_script", "ecommerce", "montage", "whiteboard-animation", "hypit", "local-life"]),
+  type: z.enum(["seednote", "wechat-article", "wechat-picture", "moments", "viral_analysis", "profile_analysis", "content_research", "content_validation", "content_script", "ecommerce", "montage", "whiteboard-animation", "hypit", "local-life", "video-edit"]),
   topic: promptSchema.optional(),
   prompt: promptSchema.optional(),
   quantity: z.number().int().min(1).max(5).default(1),
@@ -179,6 +203,7 @@ export const createTaskSchema = z.object({
   hypit_input: hypitInputSchema,
   montage_input: montageInputSchema,
   local_life_input: localLifeInputSchema,
+  video_edit_input: videoEditInputSchema,
 }).superRefine((data, ctx) => {
   if (!data.project_id?.trim()) {
     ctx.addIssue({
@@ -235,6 +260,11 @@ export const createTaskSchema = z.object({
     if (!data.local_life_input?.source_assets?.length) ctx.addIssue({ code: "custom", message: "请至少上传一条视频或图片素材", path: ["local_life_input", "source_assets"] })
   }
 
+  if (data.type === 'video-edit') {
+    if (!data.video_edit_input?.brief?.trim()) ctx.addIssue({ code: 'custom', message: '请填写剪辑要求', path: ['video_edit_input', 'brief'] })
+    if (!data.video_edit_input?.source_assets?.length) ctx.addIssue({ code: 'custom', message: '请至少上传一个视频、音频或图片素材', path: ['video_edit_input', 'source_assets'] })
+  }
+
   if (data.type === "whiteboard-animation") {
     const subtitles = (data.input_attachments ?? []).filter((attachment) => /\.srt$/i.test(attachment.file_name ?? ""))
     if (subtitles.length !== 1 || (subtitles[0]?.type !== 'text' && subtitles[0]?.type !== 'document')) {
@@ -271,8 +301,8 @@ export const planSchema = z.object({
 export type PlanFormValues = z.infer<typeof planSchema>
 
 export const projectSchema = z.object({
-  platform: z.enum(["seednote", "wechat", "moments", "ecommerce", "montage", "whiteboard-animation", "hypit", "local-life"]).or(z.literal('')).optional(),
-  agent_ids: z.array(z.string()).min(1, "至少选择一种人设类型").max(6, "最多选择 6 种人设类型").default(['wechat-article']),
+  platform: z.enum(["seednote", "wechat", "moments", "ecommerce", "montage", "whiteboard-animation", "hypit", "local-life", "video-edit"]).or(z.literal('')).optional(),
+  agent_ids: z.array(z.string()).min(1, "至少选择一种人设类型").max(8, "最多选择 8 种人设类型").default(['wechat-article']),
   name: z.string().trim().min(1, "请输入人设名称").max(100, "名称不能超过 100 个字符"),
   profile_url: z.string().optional(),
   avatar_url: z.string().url("请输入有效的 URL").or(z.literal("")).optional(),
@@ -294,6 +324,15 @@ export const projectSchema = z.object({
     preferences: montagePreferencesSchema,
     asset_guidance: z.string().max(2000).optional(),
     delivery_targets: z.array(z.string()).default([]),
+  }).optional(),
+  video_edit_defaults: z.object({
+    preferences: z.object({
+      quality_tier: z.enum(['effective', 'balanced', 'quality']).optional(),
+      subtitle_mode: z.enum(['off', 'required']).optional(),
+      style: z.string().max(2000).optional(),
+      max_duration_seconds: z.number().int().min(0).max(1800).optional(),
+    }).optional(),
+    delivery_targets: z.array(z.string().min(1).max(100)).max(20).optional(),
   }).optional(),
   reference_image: referenceImageSelectionSchema.nullable().optional(),
   portrait_reference_image: referenceImageSelectionSchema.nullable().optional(),

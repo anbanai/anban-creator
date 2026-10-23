@@ -19,6 +19,7 @@ import { defaultTaskImageRatio } from '@/lib/studio-ux'
 import { Button } from '@/components/common/button'
 import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { LocalLifeCreationPanel } from '@/components/local-life/LocalLifeCreationPanel'
+import { VideoEditCreationPanel } from '@/components/video-edit/VideoEditCreationPanel'
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -224,9 +225,10 @@ export function TaskFormDialog({
   const picturePublishDraft = (watchedAgentInput as Record<string, unknown>).picture_publish_draft !== false
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
   const isMontageTask = watchedType === 'montage' || watchedType === 'hypit'
+  const isVideoEditTask = watchedType === 'video-edit'
   const isLocalLifeTask = watchedType === 'local-life'
   const isViralAnalysisTask = watchedType === 'viral_analysis'
-  const usesImageSettings = !isViralAnalysisTask && watchedType !== 'hypit' && !isLocalLifeTask
+  const usesImageSettings = !isViralAnalysisTask && watchedType !== 'hypit' && !isLocalLifeTask && !isVideoEditTask
   const { items: imageCapabilityOptions, defaultCapability, isLoading: imageCapabilitiesLoading, isError: imageCapabilitiesError } = useImageCapabilities(usesImageSettings)
   const hasIncompatibleSeednoteAttachments = watchedType === 'seednote'
     && attachmentController.attachments.some((attachment) => attachment.type !== 'image')
@@ -441,7 +443,7 @@ export function TaskFormDialog({
   }
 
   function handleSubmit(event?: BaseSyntheticEvent) {
-    if (creationBlocker || hasIncompatibleSeednoteAttachments || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || attachmentController.uploading || attachmentController.hasFailures || portraitUploading || (isMontageTask && (montageUploading || !montageReady))) {
+    if (creationBlocker || hasIncompatibleSeednoteAttachments || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || attachmentController.uploading || attachmentController.hasFailures || portraitUploading || ((isMontageTask || isVideoEditTask) && (montageUploading || !montageReady))) {
       event?.preventDefault()
       return
     }
@@ -622,7 +624,7 @@ export function TaskFormDialog({
     </div>
   ) : (
       <AgentPromptInput
-      value={{ prompt: watchedPrompt, attachments: watchedType === 'hypit' ? [] : attachmentController.attachments }}
+      value={{ prompt: watchedPrompt, attachments: watchedType === 'hypit' || isVideoEditTask ? [] : attachmentController.attachments }}
       onChange={(value) => {
         setFormValue('prompt', value.prompt)
         if (watchedType === 'hypit') {
@@ -634,18 +636,21 @@ export function TaskFormDialog({
         if (watchedType === 'local-life') {
           form.setValue('local_life_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
         }
+        if (isVideoEditTask) {
+          form.setValue('video_edit_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
+        }
       }}
       onSubmit={() => handleSubmit()}
       attachmentController={attachmentController}
       attachmentPolicy={attachmentPolicy}
-      attachmentsEnabled={watchedType !== 'hypit'}
+      attachmentsEnabled={watchedType !== 'hypit' && !isVideoEditTask}
       ariaLabel={watchedType === 'hypit' ? '复刻要求' : undefined}
       submitMode="external"
       placeholder={watchedType === 'hypit' ? '描述希望保留的镜头、节奏及需要替换的内容…' : '描述创作目标、内容要求和素材使用方式...'}
       submitLabel={mode === 'clone' ? '克隆作品' : '创建作品'}
       submitting={isSubmitting}
       disabled={isSubmitting}
-      submitDisabled={Boolean(creationBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || portraitUploading || (isMontageTask && !montageReady)}
+      submitDisabled={Boolean(creationBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || portraitUploading || ((isMontageTask || isVideoEditTask) && !montageReady)}
     />
   )
 
@@ -662,7 +667,7 @@ export function TaskFormDialog({
                 ? '编辑完整配置并创建一份新作品。'
                 : watchedType === 'whiteboard-animation'
                   ? '上传 SRT 字幕，Agent 将按字幕生成白板动画。'
-                : isMontageTask
+                : isMontageTask || isVideoEditTask
                   ? '配置视频目标、来源素材和成片方式。'
                   : '配置内容目标、图片选项和执行方式。'}
             </DialogDescription>
@@ -718,14 +723,14 @@ export function TaskFormDialog({
                     className="mb-4"
                   />
                 ) : null}
-                {!isMontageTask && !isLocalLifeTask ? promptComposer : null}
+                {!isMontageTask && !isLocalLifeTask && !isVideoEditTask ? promptComposer : null}
                 {hasIncompatibleSeednoteAttachments ? (
                   <p role="alert" className="mt-2 text-sm font-medium text-red-500">{SEEDNOTE_ATTACHMENT_BLOCKER}</p>
                 ) : null}
               </div>}
 
               <div className="space-y-4 pt-1">
-                {!isViralAnalysisTask ? <p className="text-xs font-medium uppercase text-muted-foreground">{isMontageTask ? '视频设置' : '图片/高级'}</p> : null}
+                {!isViralAnalysisTask ? <p className="text-xs font-medium uppercase text-muted-foreground">{isMontageTask || isVideoEditTask ? '视频设置' : '图片/高级'}</p> : null}
 
                 {watchedType === 'hypit' ? <HypitCreationPanel form={form} onReadyChange={setMontageReady} onUploadingChange={setMontageUploading} briefField={promptComposer} remix={mode === 'clone' && sourceTask?.status === 'completed'} sourceTaskId={mode === 'clone' ? sourceTask?.id : undefined} /> : isMontageTask ? (
                   <MontageCreationPanel
@@ -737,9 +742,11 @@ export function TaskFormDialog({
                   />
                 ) : isLocalLifeTask ? (
                   <LocalLifeCreationPanel form={form} onReadyChange={setMontageReady} onUploadingChange={setMontageUploading} briefField={promptComposer} />
+                ) : isVideoEditTask ? (
+                  <VideoEditCreationPanel form={form} onReadyChange={setMontageReady} onUploadingChange={setMontageUploading} briefField={promptComposer} />
                 ) : null}
 
-                {!isMontageTask && !isViralAnalysisTask ? (
+                {!isMontageTask && !isVideoEditTask && !isViralAnalysisTask ? (
                   <button
                     type="button"
                     onClick={() => setFormValue('watermark', !watermark)}
@@ -1019,7 +1026,7 @@ export function TaskFormDialog({
               type="submit"
               form="task-create-form"
               loading={isSubmitting}
-              disabled={isSubmitting || Boolean(creationBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || attachmentController.uploading || attachmentController.hasFailures || portraitUploading || (isMontageTask && (montageUploading || !montageReady))}
+              disabled={isSubmitting || Boolean(creationBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || attachmentController.uploading || attachmentController.hasFailures || portraitUploading || ((isMontageTask || isVideoEditTask) && (montageUploading || !montageReady))}
             >
               {submitLabel}
             </Button>

@@ -436,6 +436,7 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		{"moments", "task.moments", "moments_artifacts_verified", 3000},
 		{"ecommerce", "task.ecommerce", "ecommerce_artifacts_verified", 3000},
 		{"montage", "task.montage", "montage_artifacts_verified", 2000},
+		{"video_edit", "task.video_edit", "video_edit_artifacts_verified", 2000},
 		{"local_life", "task.local_life", "local_life_artifacts_verified", 2400},
 		{"whiteboard-animation", "task.whiteboard-animation", "whiteboard_animation_artifacts_verified", 4000},
 		{"hypit", "task.hypit", "hypit_artifacts_verified", 2000},

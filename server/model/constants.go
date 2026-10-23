@@ -46,6 +46,7 @@ const (
 	ScopeMoments   = "moments"
 	ScopeEcommerce = "ecommerce"
 	ScopeMontage   = "montage"
+	ScopeVideoEdit = "video-edit"
 )
 
 // Agent IDs are stable execution identities. An Agent owns exactly one output
@@ -61,6 +62,7 @@ const (
 	AgentIDContentPlanning  = "content-planning"
 	AgentIDWhiteboard       = "whiteboard-animation"
 	AgentIDLocalLife        = "local-life"
+	AgentIDVideoEdit        = "video-edit"
 )
 
 // Channel constants. Keep these values provider-neutral; labels belong to the
@@ -78,6 +80,7 @@ const (
 	ChannelFeedbackAnalysis = "feedback-analysis"
 	ChannelWhiteboard       = "whiteboard-animation"
 	ChannelLocalLife        = "local-life"
+	ChannelVideoEdit        = "video-edit"
 )
 
 // Task kinds are workflow identities within one Agent/channel.
@@ -89,6 +92,7 @@ const (
 	TaskKindContentValidation = "content_validation"
 	TaskKindContentScript     = "content_script"
 	TaskKindFeedbackAnalysis  = "feedback_analysis"
+	TaskKindVideoEdit         = "video_edit"
 )
 
 // Managed task types that are not project platforms (legacy aliases retained
@@ -103,7 +107,7 @@ const (
 
 func IsChannel(value string) bool {
 	switch value {
-	case ChannelContentPlanning, ChannelArticle, ChannelSeednote, ChannelWechatPicture, ChannelHypit, ChannelMoments, ChannelEcommerce, ChannelMontage, ChannelFeedbackAnalysis, ChannelProfileAnalysis, ChannelWhiteboard, ChannelLocalLife:
+	case ChannelContentPlanning, ChannelArticle, ChannelSeednote, ChannelWechatPicture, ChannelHypit, ChannelMoments, ChannelEcommerce, ChannelMontage, ChannelFeedbackAnalysis, ChannelProfileAnalysis, ChannelWhiteboard, ChannelLocalLife, ChannelVideoEdit:
 		return true
 	default:
 		return false
@@ -112,7 +116,7 @@ func IsChannel(value string) bool {
 
 func IsAgentID(value string) bool {
 	switch value {
-	case AgentIDContentPlanning, AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDMontage, AgentIDHypit, AgentIDFeedbackAnalysis, AgentIDProfileAnalysis, AgentIDWhiteboard, AgentIDLocalLife:
+	case AgentIDContentPlanning, AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDMontage, AgentIDHypit, AgentIDFeedbackAnalysis, AgentIDProfileAnalysis, AgentIDWhiteboard, AgentIDLocalLife, AgentIDVideoEdit:
 		return true
 	default:
 		return false
@@ -139,6 +143,8 @@ func AgentChannel(agentID string) (string, bool) {
 		return ChannelWhiteboard, true
 	case AgentIDLocalLife:
 		return ChannelLocalLife, true
+	case AgentIDVideoEdit:
+		return ChannelVideoEdit, true
 	default:
 		return "", false
 	}
@@ -157,6 +163,8 @@ func PlatformForChannel(channel string) string {
 		return PlatformWhiteboardAnimation
 	case ChannelLocalLife:
 		return PlatformLocalLife
+	case ChannelVideoEdit:
+		return PlatformVideoEdit
 	default:
 		return ""
 	}
@@ -188,6 +196,8 @@ func DefaultImageRatioForChannel(channel string) string {
 		return "3:4"
 	case ChannelLocalLife:
 		return "9:16"
+	case ChannelVideoEdit:
+		return "9:16"
 	default:
 		return "3:4"
 	}
@@ -196,7 +206,7 @@ func DefaultImageRatioForChannel(channel string) string {
 func IsTaskKind(value string) bool {
 	switch value {
 	case TaskKindContentResearch, TaskKindContentValidation, TaskKindContentScript, TaskKindContentGeneration, TaskKindViralAnalysis, TaskKindProfileAnalysis,
-		TaskKindFeedbackAnalysis, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit, PlatformLocalLife,
+		TaskKindFeedbackAnalysis, TaskKindVideoEdit, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit, PlatformLocalLife,
 		TaskTypeWechatArticle, TaskTypeWechatPicture:
 		return true
 	default:
@@ -240,6 +250,7 @@ const (
 	PlatformWhiteboardAnimation = "whiteboard-animation"
 	PlatformHypit               = "hypit"
 	PlatformLocalLife           = "local-life"
+	PlatformVideoEdit           = "video-edit"
 )
 
 // IsProjectPlatform reports whether value is an explicitly implemented
@@ -247,7 +258,7 @@ const (
 // identities, but must not create new business identities by themselves.
 func IsProjectPlatform(value string) bool {
 	switch value {
-	case PlatformWechat, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit, PlatformLocalLife:
+	case PlatformWechat, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit, PlatformLocalLife, PlatformVideoEdit:
 		return true
 	default:
 		return false
@@ -277,10 +288,14 @@ func IsLocalLifePlatform(platform string) bool {
 	return platform == PlatformLocalLife
 }
 
+func IsVideoEditPlatform(platform string) bool {
+	return platform == PlatformVideoEdit
+}
+
 // SupportsPortraitCover identifies workflows with an independently selected project portrait cover.
 func SupportsPortraitCover(taskType string) bool {
 	switch taskType {
-	case TaskTypeWechatArticle, TaskTypeWechatPicture, PlatformSeednote, PlatformMontage, PlatformHypit, PlatformLocalLife:
+	case TaskTypeWechatArticle, TaskTypeWechatPicture, PlatformSeednote, PlatformMontage, PlatformHypit, PlatformLocalLife, PlatformVideoEdit:
 		return true
 	default:
 		return false

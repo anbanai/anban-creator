@@ -146,6 +146,27 @@ describe('FilePreviewGallery', () => {
     expect(screen.queryByText(/素材清单/)).not.toBeInTheDocument()
   })
 
+  it('labels video-edit evidence files for the review view', () => {
+    render(
+      <FilePreviewGallery
+        files={[
+          fileWith({ role: 'artifact', delivery_role: 'edit_decision_list', file_name: 'edit-decision-list.json', mime_type: 'application/json' }),
+          fileWith({ id: 'strategy', role: 'artifact', delivery_role: 'edit_strategy', file_name: 'edit-strategy.md', mime_type: 'text/markdown' }),
+          fileWith({ id: 'subtitles', role: 'artifact', delivery_role: 'subtitles', file_name: 'subtitles.srt', mime_type: 'application/x-subrip' }),
+          fileWith({ id: 'tags', role: 'artifact', delivery_role: 'content_tags', file_name: 'content-tags.json', mime_type: 'application/json' }),
+        ]}
+        taskId="task-video-edit"
+        taskType="video-edit"
+        compact
+      />,
+    )
+
+    expect(screen.getByText(/剪辑清单 · edit-decision-list.json/)).toBeInTheDocument()
+    expect(screen.getByText(/剪辑策略 · edit-strategy.md/)).toBeInTheDocument()
+    expect(screen.getByText(/字幕 · subtitles.srt/)).toBeInTheDocument()
+    expect(screen.getByText(/内容标签 · content-tags.json/)).toBeInTheDocument()
+  })
+
   it('streams a deliverable video from an absolute signed preview URL without loading a blob', async () => {
     const videoFile = fileWith({
       id: 'video-1',

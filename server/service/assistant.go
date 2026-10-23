@@ -81,12 +81,13 @@ type AssistantWork struct {
 }
 
 type AssistantProject struct {
-	ID              string          `json:"id"`
-	Name            string          `json:"name"`
-	Platform        string          `json:"platform"`
-	ProfileReady    bool            `json:"profileReady"`
-	ProfileRevision int64           `json:"profileRevision"`
-	Works           []AssistantWork `json:"works"`
+	ID                string                   `json:"id"`
+	Name              string                   `json:"name"`
+	Platform          string                   `json:"platform"`
+	ProfileReady      bool                     `json:"profileReady"`
+	ProfileRevision   int64                    `json:"profileRevision"`
+	VideoEditDefaults *model.VideoEditDefaults `json:"video_edit_defaults,omitempty"`
+	Works             []AssistantWork          `json:"works"`
 }
 
 type AssistantWorkPage struct {
@@ -672,6 +673,10 @@ func (s *InteractiveService) AssistantBootstrap(ctx context.Context, userID stri
 			confirmedProjectIDs = append(confirmedProjectIDs, project.ID)
 		}
 		projectItem := AssistantProject{ID: project.ID, Name: project.Name, Platform: project.Platform, ProfileReady: profileReady, ProfileRevision: profile.Version, Works: []AssistantWork{}}
+		if model.IsVideoEditPlatform(project.Platform) {
+			defaults := project.VideoEditDefaults.Data()
+			projectItem.VideoEditDefaults = &defaults
+		}
 		out.Projects = append(out.Projects, projectItem)
 	}
 	if len(confirmedProjectIDs) > 0 {

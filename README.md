@@ -18,8 +18,9 @@ Anban is a content generation operating system: its Studio, Server, MCP capabili
 
 Managed execution uses a separate image identity for every Agent Pack, including
 `creator-agent-wechat-article`, `creator-agent-wechat-picture`,
-`creator-agent-seednote`, and `creator-agent-montage`. Images share the same
-plugin tree and may reuse a Dockerfile when their system dependencies match.
+`creator-agent-seednote`, `creator-agent-montage`, and
+`creator-agent-video-edit`. Images share the same plugin tree and may reuse a
+Dockerfile when their system dependencies match.
 种草笔记 research flows through the Server's configured research capabilities.
 Their independent build definitions, together with the Server, Studio, and
 sidecar iLink definitions, live in `deploy/docker/` and use the repository root as the
@@ -139,6 +140,7 @@ The shared scheduler configuration is:
 - `ANBAN_AGENT_IMAGE_WECHAT_PICTURE`: the WeChat picture Agent image.
 - `ANBAN_AGENT_IMAGE_SEEDNOTE`: the independent Seednote workflow image; its research uses public sources and configured Server capabilities.
 - `ANBAN_AGENT_IMAGE_MONTAGE`: the OpenMontage, Remotion, and ffmpeg runtime image.
+- `ANBAN_AGENT_IMAGE_VIDEO_EDIT`: the independent video editing image with the pinned `browser-use/video-use` runtime and ffmpeg.
 - `ANBAN_AGENT_EXECUTION_TOKEN_SECRET`: a private value of at least 32 bytes used
   to mint short-lived workload tokens.
 

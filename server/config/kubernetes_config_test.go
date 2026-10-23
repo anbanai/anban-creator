@@ -22,6 +22,7 @@ func baseKubernetesConfigForTest() Config {
 		"wechat-picture":                  "registry.example.com/creator-agent-wechat-picture@sha256:" + strings.Repeat("e", 64),
 		model.PlatformSeednote:            "registry.example.com/creator-agent-seednote@sha256:" + strings.Repeat("b", 64),
 		model.PlatformMontage:             "registry.example.com/creator-agent-montage@sha256:" + strings.Repeat("c", 64),
+		model.PlatformVideoEdit:           "registry.example.com/creator-agent-video-edit@sha256:" + strings.Repeat("g", 64),
 		"moments":                         "registry.example.com/creator-agent-moments@sha256:" + strings.Repeat("d", 64),
 		"ecommerce":                       "registry.example.com/creator-agent-ecommerce@sha256:" + strings.Repeat("f", 64),
 		"profile-analysis":                "registry.example.com/creator-agent-profile-analysis@sha256:" + strings.Repeat("a", 64),
@@ -70,6 +71,7 @@ func TestRuntimeImageForTaskUsesCanonicalProfileMap(t *testing.T) {
 		"ecommerce":                       "creator-agent-ecommerce:latest",
 		model.PlatformSeednote:            "creator-agent-seednote:latest",
 		model.PlatformMontage:             "creator-agent-montage:latest",
+		model.PlatformVideoEdit:           "creator-agent-video-edit:latest",
 		model.PlatformWhiteboardAnimation: "creator-agent-whiteboard-animation:latest",
 		"profile-analysis":                "creator-agent-profile-analysis:latest",
 		"feedback-analysis":               "creator-agent-feedback-analysis:latest",
@@ -86,6 +88,7 @@ func TestRuntimeImageForTaskUsesCanonicalProfileMap(t *testing.T) {
 		{taskType: model.PlatformSeednote, profile: "seednote", image: "creator-agent-seednote:latest"},
 		{taskType: model.PlatformMontage, profile: "montage", image: "creator-agent-montage:latest"},
 		{taskType: model.TaskTypeViralAnalysis, profile: "seednote", image: "creator-agent-seednote:latest"},
+		{taskType: model.PlatformVideoEdit, profile: model.PlatformVideoEdit, image: "creator-agent-video-edit:latest"},
 	} {
 		if got := images.ForTask(test.taskType); got.Profile != test.profile || got.Image != test.image {
 			t.Fatalf("task %s runtime = %#v, want %s/%s", test.taskType, got, test.profile, test.image)

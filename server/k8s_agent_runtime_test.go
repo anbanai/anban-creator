@@ -329,6 +329,7 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		"ANBAN_AGENT_IMAGE_WECHAT_PICTURE":  "${wechat_picture_agent_image_repo}",
 		"ANBAN_AGENT_IMAGE_SEEDNOTE":        "${seednote_agent_image_repo}",
 		"ANBAN_AGENT_IMAGE_MONTAGE":         "${montage_agent_image_repo}",
+		"ANBAN_AGENT_IMAGE_VIDEO_EDIT":      "${video_edit_agent_image_repo}",
 		"ANBAN_AGENT_IMAGE_LOCAL_LIFE":      "${local_life_agent_image_repo}",
 		"ANBAN_DSH_IMAGE":                   "${dsh_image_repo}",
 		"ANBAN_AGENT_SERVICE_ACCOUNT":       "${agent_service_account}",
@@ -347,6 +348,15 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		if got := env[name]; got != want {
 			t.Fatalf("server env %s = %q, want %q", name, got, want)
 		}
+	}
+	var scribeSecretFound bool
+	for _, envVar := range deployment.Spec.Template.Spec.Containers[0].Env {
+		if envVar.Name == "VIDEO_EDIT_ELEVENLABS_API_KEY" && envVar.Value == "" && envVar.ValueFrom != nil && envVar.ValueFrom.SecretKeyRef.Name == "video-edit-elevenlabs" && envVar.ValueFrom.SecretKeyRef.Key == "api-key" {
+			scribeSecretFound = true
+		}
+	}
+	if !scribeSecretFound {
+		t.Fatal("Server deployment must read the Scribe key from video-edit-elevenlabs/api-key")
 	}
 	for _, legacy := range []string{"ANBAN_CLAUDE_EXECUTOR", "ANBAN_ARTICLE_AGENT_IMAGE", "ANBAN_SEEDNOTE_AGENT_IMAGE", "ANBAN_MONTAGE_AGENT_IMAGE"} {
 		if _, ok := env[legacy]; ok {
@@ -422,6 +432,7 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 			`wechat-picture: "${ANBAN_AGENT_IMAGE_WECHAT_PICTURE:-creator-agent-wechat-picture:latest}"`,
 			`seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE:-creator-agent-seednote:latest}"`,
 			`montage: "${ANBAN_AGENT_IMAGE_MONTAGE:-creator-agent-montage:latest}"`,
+			`video-edit: "${ANBAN_AGENT_IMAGE_VIDEO_EDIT:-creator-agent-video-edit:latest}"`,
 			`service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"`,
 			`kubernetes_namespace: "${ANBAN_AGENT_NAMESPACE:-anbanai-prod}"`,
 			`kubernetes_image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET:-acr-secret}"`,
@@ -596,6 +607,7 @@ func ackRenderEnv(manifestPath string) []string {
 		"wechat_picture_agent_image_repo=registry.example.com/creator-picture:release",
 		"seednote_agent_image_repo=registry.example.com/creator-seednote:release",
 		"montage_agent_image_repo=registry.example.com/creator-montage:release",
+		"video_edit_agent_image_repo=registry.example.com/creator-video-edit:release",
 		"moments_agent_image_repo=registry.example.com/creator-moments:release",
 		"ecommerce_agent_image_repo=registry.example.com/creator-ecommerce:release",
 		"profile_analysis_agent_image_repo=registry.example.com/creator-profile-analysis:release",

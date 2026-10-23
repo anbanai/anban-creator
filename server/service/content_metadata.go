@@ -508,7 +508,7 @@ func isKnownContentTaskType(taskType string) bool {
 	switch taskType {
 	case model.TaskTypeWechatArticle, model.TaskTypeWechatPicture, model.PlatformSeednote,
 		model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage,
-		model.PlatformWhiteboardAnimation, model.PlatformHypit:
+		model.PlatformVideoEdit, model.PlatformWhiteboardAnimation, model.PlatformHypit:
 		return true
 	default:
 		return false
@@ -532,7 +532,7 @@ func serverMediaForm(taskType string) string {
 		return "graphic_text"
 	case model.PlatformEcommerce:
 		return "commerce_asset"
-	case model.PlatformMontage, model.PlatformHypit, model.PlatformWhiteboardAnimation:
+	case model.PlatformMontage, model.PlatformVideoEdit, model.PlatformHypit, model.PlatformWhiteboardAnimation:
 		return "video"
 	default:
 		return "article"

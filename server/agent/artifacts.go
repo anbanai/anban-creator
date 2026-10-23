@@ -146,6 +146,21 @@ func validateTaskArtifacts(task *model.Task, files map[string]bool, meaningful i
 		result.Valid = true
 		return result
 	}
+	if task != nil && model.IsVideoEditPlatform(task.Type) {
+		var missing []string
+			for _, name := range []string{"final.mp4", "edit-decision-list.json", "edit-strategy.md", "delivery-manifest.json", "quality-evidence.json", "content-tags.json"} {
+			if !files[name] && !files["output/"+name] {
+				missing = append(missing, name)
+			}
+		}
+		if len(missing) > 0 {
+			result.Missing = missing
+			result.Reason = "video-edit missing required deliverables: " + strings.Join(missing, ", ")
+			return result
+		}
+		result.Valid = true
+		return result
+	}
 	if task != nil && model.IsLocalLifePlatform(task.Type) {
 		if files["failure-state.json"] {
 			result.Missing = []string{"successful local-life batch"}

@@ -38,6 +38,7 @@ import { CreationTypePicker } from '@/components/tasks/CreationTypePicker'
 import { profileLabAgents, projectAgentIDs, supportsProfileLab } from '@/lib/project-capabilities'
 import { getProjectCreationDefaults } from '@/lib/studio-ux'
 import { portraitSummary } from '@/lib/portrait-library'
+import { VideoEditProjectDefaultsPanel } from '@/components/video-edit/VideoEditProjectDefaultsPanel'
 
 const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'ecommerce', 'hypit'])
 
@@ -59,6 +60,7 @@ const PROJECT_FORM_DEFAULTS: ProjectFormValues = {
   reference_image: null,
   portrait_reference_image: null,
   ecommerce_default_selected_modules: {},
+  video_edit_defaults: {},
 }
 
 function projectToForm(project: Project): ProjectFormValues {
@@ -71,10 +73,12 @@ function projectToForm(project: Project): ProjectFormValues {
     visual_style: project.visual_style || '',
     reference_image: project.reference_image ?? null,
     portrait_reference_image: project.portrait_reference_image ?? null,
+    video_edit_defaults: project.video_edit_defaults ?? {},
   }
 }
 
 function primaryProjectPlatform(agentIDs: string[]): ProjectPlatform | '' {
+  if (agentIDs.includes('video-edit')) return 'video-edit'
   if (agentIDs.some((id) => id === 'wechat-article' || id === 'wechat-picture')) return 'wechat'
   if (agentIDs.includes('seednote')) return 'seednote'
   if (agentIDs.includes('montage')) return 'montage'
@@ -391,6 +395,7 @@ export default function ProjectsPage() {
         if (primaryPlatform) payload.platform = primaryPlatform
       }
     }
+    if ((values.agent_ids ?? []).includes('video-edit')) payload.video_edit_defaults = values.video_edit_defaults ?? {}
     if (!editingProject || form.formState.dirtyFields.visual_style) {
       payload.visual_style = values.visual_style?.trim() ?? ''
     }
@@ -544,6 +549,13 @@ export default function ProjectsPage() {
                   <FormMessage />
                 </FormItem>
               )} />
+
+              {selectedAgentIDs.includes('video-edit') && (
+                <VideoEditProjectDefaultsPanel
+                  value={form.watch('video_edit_defaults')}
+                  onChange={(value) => form.setValue('video_edit_defaults', value, { shouldDirty: true, shouldValidate: true })}
+                />
+              )}
 
               {hasWechatPublishing && (
                 <section className="rounded-lg border border-[#07C160]/25 bg-[#07C160]/5 p-4" aria-labelledby="wechat-publishing-title">

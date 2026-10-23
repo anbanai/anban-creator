@@ -48,6 +48,45 @@ function task(overrides: Partial<Task> = {}): Task {
 }
 
 describe('task form mapping', () => {
+  it('builds a video-edit task with project defaults and the dedicated identity', () => {
+    const videoProject = project({
+      platform: 'video-edit' as Project['platform'],
+      agent_ids: ['video-edit'],
+      video_edit_defaults: {
+        preferences: { quality_tier: 'balanced', subtitle_mode: 'required', style: 'documentary' },
+        delivery_targets: ['final_video', 'edit_decision_list'],
+      },
+    } as never)
+    const defaults = createTaskFormDefaults(videoProject)
+    const values = {
+      ...defaults,
+      prompt: '剪成一条访谈短片',
+      video_edit_input: {
+        brief: '剪成一条访谈短片',
+        source_assets: [{ type: 'video', url: '/files/upload-session-1', file_name: 'interview.mp4', mime_type: 'video/mp4' }],
+        preferences: defaults.video_edit_input?.preferences,
+      },
+    } as never
+
+    expect(defaults.type).toBe('video-edit')
+    expect(defaults.video_edit_input?.preferences).toMatchObject({ quality_tier: 'balanced', subtitle_mode: 'required' })
+    expect(taskFormValuesToRequest(values)).toMatchObject({
+      type: 'video-edit', agent_id: 'video-edit', channel: 'video-edit', task_kind: 'video_edit',
+      video_edit_input: { brief: '剪成一条访谈短片', source_assets: [{ type: 'video', url: '/files/upload-session-1' }] },
+    })
+  })
+
+  it('keeps the video-edit brief defined when switching to a video-edit project', () => {
+    const videoProject = project({ platform: 'video-edit' as Project['platform'] })
+    const current = {
+      ...createTaskFormDefaults(videoProject),
+      prompt: undefined,
+      video_edit_input: undefined,
+    } as unknown as TaskFormDefaults
+
+    expect(switchTaskFormDefaults(current, videoProject).video_edit_input?.brief).toBe('')
+  })
+
   it('maps replication defaults and new remix brief without mutating source', () => {
     const defaults = createTaskFormDefaults(project({ platform: 'hypit', hypit_defaults: { preferences: { aspect_ratio: '16:9', language: '中文' } } }))
     expect(defaults.hypit_input?.preferences).toEqual({ aspect_ratio: '16:9', language: '中文' })

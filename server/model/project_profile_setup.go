@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	MaxProjectAgentIDs           = 7
+	MaxProjectAgentIDs           = 8
 	MaxProfileAccountLinks       = 10
 	MaxProfileAccountURLBytes    = 500
 	MaxProfileAccountNameBytes   = 200
@@ -22,7 +22,7 @@ const (
 
 var projectAgentIDs = map[string]struct{}{
 	AgentIDArticle: {}, AgentIDWechatPicture: {}, AgentIDSeednote: {},
-	AgentIDMontage: {}, AgentIDHypit: {}, AgentIDWhiteboard: {}, AgentIDLocalLife: {},
+	AgentIDMontage: {}, AgentIDHypit: {}, AgentIDWhiteboard: {}, AgentIDLocalLife: {}, AgentIDVideoEdit: {},
 }
 
 var profileAccountPlatforms = map[string]struct{}{
@@ -32,7 +32,7 @@ var profileAccountPlatforms = map[string]struct{}{
 
 // ProjectAllowsAgent preserves legacy derived capabilities for rows without an
 // explicit selection. Auxiliary Packs such as profile-analysis are independent
-// of the six selectable creative objects.
+// of the selectable creative objects.
 func ProjectAllowsAgent(project *Project, agentID string) bool {
 	if project == nil || project.AgentIDs == nil {
 		return true
@@ -48,8 +48,8 @@ func ProjectAllowsAgent(project *Project, agentID string) bool {
 	return false
 }
 
-// ValidateProjectAgentIDs accepts any subset of the six project-facing Agent
-// Packs, including an explicitly empty selection.
+// ValidateProjectAgentIDs accepts any subset of the project-facing Agent Packs,
+// including an explicitly empty selection.
 func ValidateProjectAgentIDs(ids []string) error {
 	if len(ids) > MaxProjectAgentIDs {
 		return fmt.Errorf("too many project agent_ids")
@@ -84,6 +84,8 @@ func DefaultProjectAgentIDs(platform string) []string {
 		return []string{AgentIDWhiteboard}
 	case PlatformLocalLife:
 		return []string{AgentIDLocalLife}
+	case PlatformVideoEdit:
+		return []string{AgentIDVideoEdit}
 	default:
 		return nil
 	}

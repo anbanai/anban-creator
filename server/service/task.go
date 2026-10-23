@@ -68,6 +68,7 @@ type TaskService struct {
 	pubsubCancel             context.CancelFunc // stops the listenCancelEvents goroutine
 	cancelFuncs              sync.Map           // taskID → context.CancelFunc
 	montageCfg               srvconfig.MontageConfig
+	videoEditCfg             srvconfig.VideoEditConfig
 	hypitCapabilities        *HypitCapabilityService
 	montageCapabilities      *MontageCapabilityService
 	localLifeCapabilities    *LocalLifeCapabilityService
@@ -138,6 +139,7 @@ func NewTaskService(
 		now:                    time.Now,
 	}
 	svc.montageCfg = defaultMontageServiceConfig()
+	svc.videoEditCfg = defaultVideoEditServiceConfig()
 
 	// Start listening for cross-replica cancel events.
 	if pubsub != nil && pubsub.Available() {
@@ -229,6 +231,14 @@ func (s *TaskService) SetMontageConfig(cfg srvconfig.MontageConfig) {
 	s.montageCapabilities = NewMontageCapabilityService(cfg)
 }
 
+func (s *TaskService) SetVideoEditConfig(cfg srvconfig.VideoEditConfig) {
+	if s == nil {
+		return
+	}
+	cfg.ApplyDefaults()
+	s.videoEditCfg = cfg
+}
+
 func (s *TaskService) SetMontageCapabilityService(capabilities *MontageCapabilityService) {
 	if s != nil {
 		s.montageCapabilities = capabilities
@@ -243,6 +253,12 @@ func (s *TaskService) SetLocalLifeCapabilityService(capabilities *LocalLifeCapab
 
 func defaultMontageServiceConfig() srvconfig.MontageConfig {
 	cfg := srvconfig.MontageConfig{}
+	cfg.ApplyDefaults()
+	return cfg
+}
+
+func defaultVideoEditServiceConfig() srvconfig.VideoEditConfig {
+	cfg := srvconfig.VideoEditConfig{}
 	cfg.ApplyDefaults()
 	return cfg
 }
@@ -354,6 +370,7 @@ func (s *TaskService) StorageProviderName() string {
 
 var (
 	ErrMontageInput                = errors.New("视频生成输入无效")
+	ErrVideoEditInput              = errors.New("全自动视频剪辑输入无效")
 	ErrTaskCreationProjectInactive = errors.New("task creation project is not active")
 	ErrTaskIdentityIncompatible    = errors.New("task identity is invalid or inconsistent")
 )
@@ -488,6 +505,7 @@ type CreateManualParams struct {
 	// MontageInput carries the Montage-specific creation contract.
 	// It is only valid for montage projects.
 	MontageInput   *model.MontageInput
+	VideoEditInput *model.VideoEditInput
 	HypitInput     *model.HypitInput
 	LocalLifeInput *model.LocalLifeInput
 	// MontageSourceTaskID is an internal clone authorization for task-file
@@ -680,6 +698,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		}
 	}
 	isMontageTask := model.IsMontagePlatform(taskType)
+	isVideoEditTask := model.IsVideoEditPlatform(taskType)
 	isLocalLifeTask := model.IsLocalLifePlatform(taskType)
 	if p.LocalLifeInput != nil && !isLocalLifeTask {
 		return nil, fmt.Errorf("local_life_input 仅适用于素材混剪任务")
@@ -755,6 +774,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 	if p.MontageInput != nil && !model.IsMontagePlatform(taskType) {
 		return nil, fmt.Errorf("%w: montage_input 只能用于视频生成任务", ErrMontageInput)
+	}
+	if p.VideoEditInput != nil && !model.IsVideoEditPlatform(taskType) {
+		return nil, fmt.Errorf("%w: video_edit_input 只能用于全自动视频剪辑任务", ErrVideoEditInput)
 	}
 
 	// E-commerce: merge the PROJECT's reusable e-commerce defaults (default
@@ -862,6 +884,34 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		); err != nil {
 			return nil, err
 		}
+	}
+	if isVideoEditTask {
+		quantity = 1
+		if !s.videoEditCfg.Enabled {
+			return nil, fmt.Errorf("%w: video-edit 已停用", ErrVideoEditInput)
+		}
+		if !s.videoEditCfg.DispatchReady() {
+			return nil, fmt.Errorf("%w: ElevenLabs 凭据未配置，video-edit 不可派发", ErrVideoEditInput)
+		}
+		var input *model.VideoEditInput
+		if p.VideoEditInput != nil {
+			copy := *p.VideoEditInput
+			copy.SourceAssets = append([]model.VideoEditAsset(nil), p.VideoEditInput.SourceAssets...)
+			input = &copy
+		}
+		if input == nil {
+			return nil, fmt.Errorf("%w: video_edit_input is required", ErrVideoEditInput)
+		}
+		if !p.PreserveFrozenConfig {
+			input.Normalize(model.ResolveVideoEditDefaults(project.VideoEditDefaults.Data(), s.videoEditCfg.DefaultPolicy))
+		}
+		if err := input.Validate(s.videoEditCfg.MaxAssets, s.videoEditCfg.MaxDurationSeconds); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrVideoEditInput, err)
+		}
+		if err := validateAndFreezeVideoEditAssets(ctx, s.repo, s.StorageProviderName(), p.UserID, input, s.videoEditCfg); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrVideoEditInput, err)
+		}
+		p.VideoEditInput = input
 	}
 	if taskType == model.PlatformEcommerce {
 		// E-commerce creates one deliverable package task. Selected modules
@@ -991,6 +1041,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		}
 		if isMontageTask && p.MontageInput != nil {
 			task.SetMontageInput(*p.MontageInput)
+		}
+		if isVideoEditTask && p.VideoEditInput != nil {
+			task.SetVideoEditInput(*p.VideoEditInput)
 		}
 		if isLocalLifeTask && p.LocalLifeInput != nil {
 			task.SetLocalLifeInput(*p.LocalLifeInput)
@@ -1520,6 +1573,9 @@ func (s *TaskService) CreateFromPlanEntry(ctx context.Context, plan *model.Plan,
 }
 
 func taskTypeForIdentity(agentID, channel, taskKind string) string {
+	if agentID == model.AgentIDVideoEdit && channel == model.ChannelVideoEdit && taskKind == model.TaskKindVideoEdit {
+		return model.PlatformVideoEdit
+	}
 	if taskKind != model.TaskKindContentGeneration {
 		return taskKind
 	}

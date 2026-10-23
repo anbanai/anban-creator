@@ -207,6 +207,22 @@ func TestTaskServiceProfileAnalysisAdmissionIsFreeAndIdempotent(t *testing.T) {
 	}
 }
 
+func TestTaskTypeForIdentityMapsVideoEditInternalKindToPublicType(t *testing.T) {
+	identity := CreateManualParams{AgentID: model.AgentIDVideoEdit, Channel: model.ChannelVideoEdit, TaskKind: model.TaskKindVideoEdit}
+	if got := taskTypeForIdentity(identity.AgentID, identity.Channel, identity.TaskKind); got != model.PlatformVideoEdit {
+		t.Fatalf("taskTypeForIdentity() = %q, want public type %q", got, model.PlatformVideoEdit)
+	}
+
+	task := &model.Task{Type: model.PlatformVideoEdit, AgentID: identity.AgentID, Channel: identity.Channel, TaskKind: identity.TaskKind}
+	if err := validateTaskIdentity(task); err != nil {
+		t.Fatalf("validateTaskIdentity(video-edit): %v", err)
+	}
+	task.Type = model.TaskKindVideoEdit
+	if err := validateTaskIdentity(task); !errors.Is(err, ErrTaskIdentityIncompatible) {
+		t.Fatalf("validateTaskIdentity(internal task kind) = %v, want identity incompatibility", err)
+	}
+}
+
 func TestTaskServiceCreateManualRejectsAgentInputWhenPackHasNoSchema(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.NewString()

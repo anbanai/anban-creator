@@ -160,7 +160,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "1886fee8d7efcb24b82db59561ce41c6a08c35cece3f7c8242d5717f9049909a"
+      "digest": "529b6b76a0622dd8b55a6bfa891c032c89f99290434b6d452759c12d2c7902b7"
     },
     {
       "id": "content-planning",
@@ -1337,7 +1337,7 @@
         "interactive-creation-clarification"
       ],
       "ui": {},
-      "digest": "7fa17de85134e713d105b0ed90638774e57a54f640eb41d99b04cc6ed2fba44e"
+      "digest": "dbf40fc51c430f3a10dd600840cc6da0869dc6c31941a0cd3283f382b8cee3b7"
     },
     {
       "id": "feedback-analysis",
@@ -1889,7 +1889,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "1d23c4f3806150b52c5d85ebeb58cd253b4b676e74afb36cf4976aafe14b72a4"
+      "digest": "40bf379febf5d0adbd6538e6ea9268050a677baaf399e1306862476e0cfb2cae"
     },
     {
       "id": "montage",
@@ -2400,7 +2400,7 @@
     },
     {
       "id": "project-creator",
-      "version": "1.0.6",
+      "version": "1.0.5",
       "kind": "managed",
       "display_name": "画像模式",
       "description": "通过中文对话判断 Anban 项目适配性，选择内容类型并创建或更新六维项目画像。",
@@ -2541,7 +2541,7 @@
       "ui": {
         "renderer": "custom:project-creator"
       },
-      "digest": "ae655f4631283965da80b86b5f747e039df552052b876561e0429949c12e6f17"
+      "digest": "a3ae9e6eeff2714d2ee44b40c5982fc9931a7f4f957b2fd1353902c20e46c040"
     },
     {
       "id": "seednote",
@@ -2801,7 +2801,162 @@
           "funnel_stage"
         ]
       },
-      "digest": "6008eb3b5a2b7b8ef014e009ddaf42cad7cad8658684987108c9885075d368df"
+      "digest": "aa5cedfb6ea871a0aba84ac169eff452abccbe5f3360dde544de1201adbe29ee"
+    },
+    {
+      "id": "video-edit",
+      "channel": "video-edit",
+      "version": "1.0.0",
+      "kind": "managed",
+      "display_name": "全自动视频剪辑",
+      "description": "使用 browser-use/video-use 自动完成转写、剪辑、字幕和渲染，并交付可复核的成片与编辑证据。",
+      "agent": {
+        "name": "video-edit",
+        "skills": [
+          "project-profile-context",
+          "video-edit",
+          "content-tagging"
+        ],
+        "max_turns": 160
+      },
+      "interaction": {},
+      "bindings": {
+        "task_kinds": [
+          "video_edit"
+        ]
+      },
+      "runtime": {
+        "profile": "video-edit",
+        "adapter": "standard",
+        "max_turns": 160
+      },
+      "surfaces": [
+        "plugin",
+        "task"
+      ],
+      "features": [
+        "automatic-video-editing",
+        "source-assets",
+        "subtitles-on-demand"
+      ],
+      "billing_operations": {
+        "video_edit": "task.video_edit"
+      },
+      "artifacts": [
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "edit_decision_list",
+          "path": "output/edit-decision-list.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "edit_strategy",
+          "path": "output/edit-strategy.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "quality_evidence",
+          "path": "output/quality-evidence.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "subtitles",
+          "path": "output/subtitles.srt",
+          "mime_type": "application/x-subrip",
+          "required": false
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "failure_diagnosis",
+          "path": "output/failure-diagnosis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json",
+          "required": false
+        }
+      ],
+      "delivery": [
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "edit_decision_list",
+          "path": "output/edit-decision-list.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "edit_strategy",
+          "path": "output/edit-strategy.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "quality_evidence",
+          "path": "output/quality-evidence.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "subtitles",
+          "path": "output/subtitles.srt",
+          "mime_type": "application/x-subrip"
+        }
+      ],
+      "ui": {
+        "renderer": "custom:video-edit"
+      },
+      "tagging": {
+        "enabled": true,
+        "profile": "generic-content",
+        "required_artifact": "output/content-tags.json",
+        "subject_roles": [
+          "final_video"
+        ],
+        "extensions": [
+          "presentation_device",
+          "funnel_stage"
+        ]
+      },
+      "digest": "8c0c1f118cd6b42b46db6431f5abc4eb3423784c80aa6a3e122833e7b2a22bb2"
     },
     {
       "id": "wechat-article",
@@ -3067,7 +3222,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "51ee338ae3799659af0b08699d209bcde942defd7f50d85957ad2e1076646e77"
+      "digest": "8e59ca5b5768050c4b605edebcffba0935ae1b4176afc0dec849dea5de5b9660"
     },
     {
       "id": "wechat-picture",

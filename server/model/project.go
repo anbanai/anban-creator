@@ -88,6 +88,7 @@ type Project struct {
 	EcommerceDefaults    datatypes.JSONType[EcommerceProjectDefaults] `gorm:"type:json" json:"ecommerce_defaults"`
 	EcommerceDefaultsSet bool                                         `gorm:"-" json:"-"`
 	MontageDefaults      datatypes.JSONType[MontageDefaults]          `gorm:"type:json" json:"montage_defaults"`
+	VideoEditDefaults    datatypes.JSONType[VideoEditDefaults]        `gorm:"type:json" json:"video_edit_defaults"`
 	Profile              datatypes.JSONType[ProjectProfile]           `gorm:"type:json" json:"profile"`
 	// RuntimeChannelConfig is populated by Server-owned connector flows for the
 	// current request. It is never persisted or exposed in project responses.
@@ -95,6 +96,7 @@ type Project struct {
 	HypitDefaults        datatypes.JSONType[HypitDefaults] `gorm:"type:json" json:"hypit_defaults"`
 	HypitDefaultsSet     bool                              `gorm:"-" json:"-"`
 	MontageDefaultsSet   bool                              `gorm:"-" json:"-"`
+	VideoEditDefaultsSet bool                              `gorm:"-" json:"-"`
 	Status               string                            `gorm:"type:varchar(20);default:active" json:"status"` // active, archived
 	DeletingAt           *time.Time                        `gorm:"index" json:"-"`
 	CreatedAt            time.Time                         `json:"created_at"`

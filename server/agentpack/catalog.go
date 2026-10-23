@@ -32,6 +32,7 @@ var supportedChannels = map[string]struct{}{
 	"whiteboard-animation": {},
 	"hypit":                {},
 	"montage":              {},
+	"video-edit":           {},
 	"local-life":           {},
 }
 

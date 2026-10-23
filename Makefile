@@ -9,6 +9,7 @@ WECHAT_ARTICLE_AGENT_IMAGE ?= creator-agent-wechat-article:latest
 WECHAT_PICTURE_AGENT_IMAGE ?= creator-agent-wechat-picture:latest
 SEEDNOTE_AGENT_IMAGE ?= creator-agent-seednote:latest
 MONTAGE_AGENT_IMAGE ?= creator-agent-montage:latest
+VIDEO_EDIT_AGENT_IMAGE ?= creator-agent-video-edit:latest
 MOMENTS_AGENT_IMAGE ?= creator-agent-moments:latest
 ECOMMERCE_AGENT_IMAGE ?= creator-agent-ecommerce:latest
 CONTENT_PLANNING_AGENT_IMAGE ?= creator-agent-content-planning:latest
@@ -22,6 +23,8 @@ HYPIT_SOURCE_REPO ?= https://github.com/hypit-ai/hypit.git
 HYPIT_SOURCE_REF ?= dc2b7a8f31b1ef1443a79ca448548d69e3ceb6a0
 OPENMONTAGE_SOURCE_REPO ?= https://github.com/calesthio/OpenMontage.git
 OPENMONTAGE_SOURCE_REF ?= c8066452325cb57c8fc1ba8c2a71b6e8842e6b65
+VIDEO_USE_SOURCE_REPO ?= https://github.com/browser-use/video-use.git
+VIDEO_USE_SOURCE_REF ?= 43cfc566833548093455c9d4a46bd69913b7e552
 SERVER_IMAGE := anban-creator-server:latest
 SIDECAR_ILINK_IMAGE ?= anban-creator-sidecar-ilink:latest
 SIDECAR_ILINK_REPO ?= https://github.com/lich0821/wcfLink.git
@@ -38,7 +41,7 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
         agent-install agent-test agent-build \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
-        docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image docker-images \
+        docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-video-edit-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image docker-images \
         agent-runtime-release-manifest
 
 .PHONY: docker-runtime-smoke docker-hypit-smoke docker-agent-build-check
@@ -193,7 +196,7 @@ docker-agent-build-check: agent-pack-check
 # start the Compose services. Runtime containers are launched on demand by the
 # Server and are not Compose services; rebuilding the Server here keeps its
 # embedded Agent Pack Catalog aligned with the images just built.
-docker-up: docker-server-image docker-dsh-runtime-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image
+docker-up: docker-server-image docker-dsh-runtime-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-video-edit-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image
 	@DOCKER_GID="$(DOCKER_SOCKET_GID)" docker compose up -d
 
 # Stop infrastructure services
@@ -226,6 +229,15 @@ docker-montage-agent-image: docker-agent-build-check
 		--build-arg OPENMONTAGE_REF="$(OPENMONTAGE_SOURCE_REF)" \
 		-t $(MONTAGE_AGENT_IMAGE) . && \
 		echo "Image build complete: $(MONTAGE_AGENT_IMAGE)"
+
+# Build the dedicated video editor with the pinned browser-use/video-use runtime.
+docker-video-edit-agent-image: docker-agent-build-check
+	@echo "Building $(VIDEO_EDIT_AGENT_IMAGE)..." && \
+	docker build -f deploy/docker/Dockerfile.agent-video-edit \
+		--build-arg VIDEO_USE_REPO="$(VIDEO_USE_SOURCE_REPO)" \
+		--build-arg VIDEO_USE_REF="$(VIDEO_USE_SOURCE_REF)" \
+		-t $(VIDEO_EDIT_AGENT_IMAGE) . && \
+		echo "Image build complete: $(VIDEO_EDIT_AGENT_IMAGE)"
 
 # Build the Moments Agent image.
 docker-moments-agent-image: docker-agent-build-check
@@ -300,7 +312,7 @@ docker-studio-image:
 	echo "Image build complete: $(STUDIO_IMAGE)"
 
 # Build all supported images.
-docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image
+docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-video-edit-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image
 
 # Validate and record one release set for the Server and every managed Agent
 # runtime. Pass image references through the existing
@@ -312,6 +324,7 @@ agent-runtime-release-manifest:
 	AGENT_IMAGE_WECHAT_PICTURE="$(WECHAT_PICTURE_AGENT_IMAGE)" \
 	AGENT_IMAGE_SEEDNOTE="$(SEEDNOTE_AGENT_IMAGE)" \
 	AGENT_IMAGE_MONTAGE="$(MONTAGE_AGENT_IMAGE)" \
+	AGENT_IMAGE_VIDEO_EDIT="$(VIDEO_EDIT_AGENT_IMAGE)" \
 	AGENT_IMAGE_MOMENTS="$(MOMENTS_AGENT_IMAGE)" \
 	AGENT_IMAGE_ECOMMERCE="$(ECOMMERCE_AGENT_IMAGE)" \
 	AGENT_IMAGE_PROFILE_ANALYSIS="$(PROFILE_ANALYSIS_AGENT_IMAGE)" \
@@ -368,6 +381,7 @@ help:
 	@echo "  make docker-agent-image - Build agent image (Claude Code + plugin)"
 	@echo "  make docker-seednote-agent-image - Build independent Seednote workflow image"
 	@echo "  make docker-montage-agent-image - Build Montage agent image with OpenMontage"
+	@echo "  make docker-video-edit-agent-image - Build video-edit Agent with pinned browser-use/video-use"
 	@echo "  make docker-feedback-analysis-agent-image - Build Feedback analysis agent image"
 	@echo "  make docker-whiteboard-animation-agent-image - Build whiteboard-animation runtime image"
 	@echo "  make docker-hypit-agent-image - Build video replication runtime from official source"

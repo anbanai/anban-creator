@@ -23,6 +23,7 @@ var (
 	ErrProjectDeleteConflict             = errors.New("project delete conflict")
 	ErrProjectUpdateConflict             = errors.New("project update conflict")
 	ErrProjectMontageDefaults            = errors.New("视频生成项目默认设置无效")
+	ErrProjectVideoEditDefaults          = errors.New("全自动视频剪辑项目默认设置无效")
 	ErrProjectProfileVersionConflict     = errors.New("project profile version conflict")
 	ErrProjectProfileAnalysisInProgress  = errors.New("project profile analysis is already in progress")
 	ErrProjectProfileResultAlreadyStored = errors.New("project profile result already submitted")
@@ -85,6 +86,22 @@ func validateProjectMontageDefaults(project *model.Project, capabilities *Montag
 	duration := project.MontageDefaults.Data().Preferences.DurationSeconds
 	if duration < 0 || duration > 600 {
 		return fmt.Errorf("%w: 视频生成 duration_seconds 必须在 0 到 600 之间", ErrProjectMontageDefaults)
+	}
+	return nil
+}
+
+func validateProjectVideoEditDefaults(project *model.Project) error {
+	if project == nil || !project.VideoEditDefaultsSet {
+		return nil
+	}
+	if !model.IsVideoEditPlatform(project.Platform) {
+		return fmt.Errorf("%w: video_edit_defaults 只能用于全自动视频剪辑项目", ErrProjectVideoEditDefaults)
+	}
+	defaults := project.VideoEditDefaults.Data()
+	input := model.VideoEditInput{Brief: "project-defaults", SourceAssets: []model.VideoEditAsset{{Type: "video", AssetID: "project-default"}}, Preferences: defaults.Preferences}
+	input.Normalize(defaults)
+	if err := input.Validate(0, 1800); err != nil {
+		return fmt.Errorf("%w: %v", ErrProjectVideoEditDefaults, err)
 	}
 	return nil
 }
@@ -176,6 +193,9 @@ func (s *ProjectService) prepareCreate(userID string, ch *model.Project) error {
 		return err
 	}
 	if err := validateProjectMontageDefaults(ch, s.montageCapabilities); err != nil {
+		return err
+	}
+	if err := validateProjectVideoEditDefaults(ch); err != nil {
 		return err
 	}
 	if ch.Instructions == "" && ch.Positioning != "" {
@@ -1394,6 +1414,16 @@ func (s *ProjectService) applyProjectUpdate(existing, ch *model.Project) error {
 	}
 	if ch.MontageDefaultsSet {
 		existing.MontageDefaults = ch.MontageDefaults
+	}
+	if ch.VideoEditDefaultsSet {
+		existing.VideoEditDefaults = ch.VideoEditDefaults
+	}
+	if model.IsVideoEditPlatform(existing.Platform) || ch.VideoEditDefaultsSet {
+		candidate := *existing
+		candidate.VideoEditDefaultsSet = true
+		if err := validateProjectVideoEditDefaults(&candidate); err != nil {
+			return err
+		}
 	}
 	if model.IsMontagePlatform(existing.Platform) || ch.MontageDefaultsSet {
 		candidate := *existing

@@ -11,6 +11,11 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { DshQuestionComposer, type DshQuestion, type DshQuestionAnswer } from '@/components/dsh-user-questions/DshQuestionComposer'
+import { AssistantVideoEditInputs } from '@/components/video-edit/AssistantVideoEditInputs'
+import { TaskResults } from '@/components/tasks/TaskResults'
+import type { InputAttachment } from '@/types/input-attachment'
+import type { VideoEditPreferences } from '@/types/video-edit'
+import type { Task, TaskFile } from '@/types'
 
 type Message = { id: string; role: 'user' | 'assistant'; text: string }
 type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers'] }
@@ -21,6 +26,12 @@ type PersistedWorkspace = { workspace: AssistantWorkspaceState; lastEventIds: Re
 const WORKSPACE_STORAGE_KEY = 'anban:assistant-workspace'
 
 const MODES: AssistantModeID[] = ['profile', 'creation', 'review']
+const CREATION_TYPES: Record<string, { value: string; label: string }[]> = {
+  wechat: [{ value: 'wechat-article', label: '公众号文章' }, { value: 'wechat-picture', label: '公众号图片消息' }],
+  seednote: [{ value: 'seednote', label: '种草笔记' }],
+  montage: [{ value: 'video', label: '视频生成' }],
+  'video-edit': [{ value: 'video-edit', label: '全自动视频剪辑' }],
+}
 
 function isMode(value: unknown): value is AssistantModeID {
   return value === 'profile' || value === 'creation' || value === 'review'
@@ -96,6 +107,12 @@ export default function AssistantWorkspace() {
   const [projectId, setProjectId] = useState(routeState.projectId ?? persisted?.workspace.project_id ?? '')
   const [contentId, setContentId] = useState(routeState.contentId ?? persisted?.workspace.content_id ?? '')
   const [composer, setComposer] = useState(routeState.initialMessage ?? '')
+  const [creationType, setCreationType] = useState('')
+  const [videoEditAssets, setVideoEditAssets] = useState<InputAttachment[]>([])
+  const [videoEditBrief, setVideoEditBrief] = useState('')
+  const [videoEditPreferences, setVideoEditPreferences] = useState<VideoEditPreferences>({})
+  const [videoEditUploading, setVideoEditUploading] = useState(false)
+  const [videoEditUploadFailed, setVideoEditUploadFailed] = useState(false)
   const [workspace, setWorkspace] = useState<AssistantWorkspaceState | null>(() => routeHasContext ? null : persisted?.workspace ?? null)
   const [messagesByMode, setMessagesByMode] = useState<Record<string, Message[]>>({})
   const [questionsByMode, setQuestionsByMode] = useState<Record<string, QuestionBatch[]>>({})
@@ -122,6 +139,9 @@ export default function AssistantWorkspace() {
   const selectionMode = pendingMode ?? mode
   const selectableProjects = selectionMode === 'profile' ? projects : projects.filter((project) => project.profileReady)
   const selectedProject = selectableProjects.find((project) => project.id === projectId) ?? (selectionMode !== 'profile' && selectableProjects.length === 1 ? selectableProjects[0] : undefined)
+  const creationTypes = CREATION_TYPES[selectedProject?.platform ?? ''] ?? []
+  const selectedCreationType = creationTypes.some((item) => item.value === creationType) ? creationType : creationTypes[0]?.value ?? ''
+  const isVideoEditCreation = mode === 'creation' && selectedCreationType === 'video-edit'
   const worksQuery = useInfiniteQuery({
     queryKey: ['assistant-workspace-works', selectedProject?.id],
     initialPageParam: undefined as { created_at: string; id: string } | undefined,
@@ -132,6 +152,12 @@ export default function AssistantWorkspace() {
   })
   const works = worksQuery.data?.pages.flatMap((page) => page.items) ?? []
   const selectedWork = works.find((work) => work.id === contentId) ?? (selectionMode === 'review' && works.length === 1 ? works[0] : undefined)
+  const reviewVideoQuery = useQuery({
+    queryKey: ['assistant-review-video', selectedWork?.id],
+    queryFn: async () => Promise.all([api.tasks.get(selectedWork!.id), api.tasks.files(selectedWork!.id)]),
+    enabled: mode === 'review' && selectedProject?.platform === 'video-edit' && Boolean(selectedWork),
+    staleTime: 30_000,
+  })
   const activeMessages = messagesByMode[mode] ?? []
   const activeQuestions = (questionsByMode[mode] ?? []).filter((question) => !question.answers)
   const activeDraft = draftByMode[mode]
@@ -200,10 +226,18 @@ export default function AssistantWorkspace() {
   const sendMessage = async (override?: string) => {
     const text = (override ?? composer).trim()
     if (!text || !canSend) return
+    const contextLines = mode === 'creation' && selectedCreationType
+      ? [`创作类型：${selectedCreationType}`, ...(isVideoEditCreation ? [
+          `剪辑要求：${videoEditBrief.trim() || '按本次创作需求自动决定'}`,
+          `剪辑偏好：${JSON.stringify(videoEditPreferences)}`,
+          `已上传素材：${videoEditAssets.map((asset) => asset.file_name).filter(Boolean).join('、') || '待上传'}`,
+        ] : [])]
+      : []
+    const messageText = contextLines.length ? `${text}\n\n${contextLines.join('\n')}` : text
     setSending(true)
     setError(null)
     setComposer('')
-    setMessagesByMode((current) => ({ ...current, [mode]: [...(current[mode] ?? []), { id: `optimistic-${++userMessageCounter.current}`, role: 'user', text }] }))
+    setMessagesByMode((current) => ({ ...current, [mode]: [...(current[mode] ?? []), { id: `optimistic-${++userMessageCounter.current}`, role: 'user', text: messageText }] }))
     try {
       let currentWorkspace = workspace
       if (!currentWorkspace) {
@@ -212,7 +246,7 @@ export default function AssistantWorkspace() {
         workspaceCreateKey.current = null
         setWorkspace(currentWorkspace)
       }
-      await api.assistant.workspaceMessage(currentWorkspace.id, mode, text)
+      await api.assistant.workspaceMessage(currentWorkspace.id, mode, messageText)
     } catch (sendError) {
       setComposer(text)
       setError(sendError instanceof Error ? sendError.message : '消息发送失败')
@@ -281,7 +315,33 @@ export default function AssistantWorkspace() {
       if (mode === 'profile' && tokenValue) {
         result = await api.assistant.workspaceCommit(workspace.id, mode, { confirmation_token: tokenValue, idempotency_key: idempotencyKey })
       } else {
-        const checkpoint = await api.assistant.workspaceCheckpoint(workspace.id, mode, { schema_version: '1.0', payload: activeDraft, summary: `${modeLabel(mode)}草稿`, status: 'ready' })
+        const payload = structuredClone(activeDraft)
+        if (mode === 'creation') {
+          if (!selectedCreationType) {
+            setError('当前画像不支持可用的创作类型')
+            return
+          }
+          const plan = payload.plan && typeof payload.plan === 'object' && !Array.isArray(payload.plan) ? payload.plan as Record<string, unknown> : payload
+          plan.content_type = selectedCreationType
+          if (selectedCreationType === 'video-edit') {
+            const uploadedAssets = videoEditAssets.filter((asset) => asset.upload_id && asset.key)
+            if (videoEditUploading || videoEditUploadFailed || uploadedAssets.length === 0) {
+              setError(videoEditUploading ? '请等待素材上传完成' : '请上传有效的视频、音频或图片素材')
+              return
+            }
+            plan.assets = uploadedAssets.map((asset) => ({
+              type: asset.type,
+              upload_id: asset.upload_id,
+              file_name: asset.file_name,
+              mime_type: asset.content_type,
+              file_size: asset.size,
+            }))
+            plan.video_edit_brief = videoEditBrief.trim()
+            plan.video_edit_preferences = Object.fromEntries(Object.entries(videoEditPreferences).filter(([, value]) => value !== undefined && value !== ''))
+          }
+          if (plan !== payload) payload.plan = plan
+        }
+        const checkpoint = await api.assistant.workspaceCheckpoint(workspace.id, mode, { schema_version: '1.0', payload, summary: `${modeLabel(mode)}草稿`, status: 'ready' })
         result = await api.assistant.workspaceCommit(workspace.id, mode, { checkpoint_id: checkpoint.id, checkpoint_digest: checkpoint.payload_digest, idempotency_key: idempotencyKey })
       }
       const committedProjectID = stringValue(result.project?.id)
@@ -312,6 +372,46 @@ export default function AssistantWorkspace() {
   if (bootstrapQuery.isLoading) return <main className="flex min-h-dvh items-center justify-center text-sm text-muted-foreground"><Loader2 className="mr-2 size-4 animate-spin" />正在加载</main>
 
   const heading = mode === 'profile' ? `开始为「${projectName(selectedProject)}」建立画像` : mode === 'creation' ? `为「${projectName(selectedProject)}」制定新的创作计划` : `复盘「${projectName(selectedProject)}」的作品${selectedWork ? `：${selectedWork.title}` : ''}`
+  const chooseCreationType = (value: string) => {
+    setCreationType(value)
+    if (value !== 'video-edit') {
+      setVideoEditAssets([])
+      setVideoEditBrief('')
+      setVideoEditPreferences({})
+      setVideoEditUploadFailed(false)
+    }
+  }
+  const resetCreationProject = (value: string) => {
+    setProjectId(value)
+    setContentId('')
+    setCreationType('')
+    setVideoEditAssets([])
+    setVideoEditBrief('')
+    setVideoEditPreferences({})
+    setVideoEditUploadFailed(false)
+  }
+  const creationTypeSelector = mode === 'creation' && selectedProject ? (
+    <label className="mx-auto mt-4 block w-full max-w-xl space-y-1.5 text-left text-sm">
+      <span>创作类型</span>
+      <NativeSelect aria-label="创作类型" value={selectedCreationType} onChange={(event) => chooseCreationType(event.target.value)}>
+        {creationTypes.map((item) => <NativeSelectOption key={item.value} value={item.value}>{item.label}</NativeSelectOption>)}
+      </NativeSelect>
+    </label>
+  ) : null
+  const videoEditInputs = isVideoEditCreation && selectedProject ? (
+    <AssistantVideoEditInputs
+      assets={videoEditAssets}
+      brief={videoEditBrief}
+      preferences={videoEditPreferences}
+      defaults={selectedProject.video_edit_defaults}
+      uploading={videoEditUploading}
+      onAssetsChange={setVideoEditAssets}
+      onBriefChange={setVideoEditBrief}
+      onPreferencesChange={setVideoEditPreferences}
+      onUploadingChange={setVideoEditUploading}
+      onFailuresChange={setVideoEditUploadFailed}
+    />
+  ) : null
 
   return (
     <main data-testid="assistant-workspace" className="flex min-h-dvh w-full flex-col bg-background">
@@ -319,12 +419,46 @@ export default function AssistantWorkspace() {
         <div className="flex items-center gap-3"><span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground"><Sparkles className="size-4" /></span><span className="text-sm font-semibold">AI 助手</span>{workspace && <span className="text-xs text-muted-foreground">{modeLabel(mode)}</span>}</div>
       </header>
 
-      {!workspace ? <section className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-5 py-12 text-center"><p className="text-sm font-medium text-primary">Anban AI</p><h1 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{heading}</h1><p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-muted-foreground">选择模式，告诉我你接下来想完成什么。</p><nav className="mx-auto mt-10 flex flex-wrap justify-center gap-1" aria-label="助手模式">{MODES.map((candidate) => { const item = bootstrap?.modes.find((entry) => entry.id === candidate); return <button key={candidate} type="button" aria-pressed={mode === candidate} aria-disabled={!item?.available} onClick={() => void chooseMode(candidate)} className={`rounded-full px-4 py-2 text-sm ${mode === candidate ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'} ${!item?.available ? 'opacity-50' : ''}`}>{modeLabel(candidate)}</button> })}</nav>
-        <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} onProject={(value) => { setProjectId(value); setContentId('') }} onContent={setContentId} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />
-        <Composer value={composer} placeholder={modePlaceholder(mode)} disabled={!canSend} onChange={setComposer} onSend={() => void sendMessage()} />
-      </section> : <section className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col px-4 pb-4 md:px-8"><div className="flex shrink-0 flex-wrap items-center justify-center gap-1 py-4">{MODES.map((candidate) => { const item = bootstrap?.modes.find((entry) => entry.id === candidate); return <button key={candidate} type="button" aria-pressed={mode === candidate} disabled={!item?.available || switching} onClick={() => void chooseMode(candidate)} className={`rounded-full px-4 py-2 text-sm ${mode === candidate ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'} ${!item?.available ? 'opacity-50' : ''}`}>{modeLabel(candidate)}</button> })}</div><WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} disabled={Boolean(workspace && !pendingMode)} onProject={(value) => { setProjectId(value); setContentId('') }} onContent={(value) => { setContentId(value); if (pendingMode && selectedProject) void chooseMode(pendingMode, { projectId: selectedProject.id, contentId: value }) }} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} /><div className="min-h-0 flex-1 overflow-y-auto py-4" aria-live="polite"><Conversation messages={activeMessages} questions={activeQuestions} onAnswer={submitAnswers} />{activeDraft && <div className="mt-6 rounded-xl border border-primary/30 bg-primary/[0.04] p-4"><div className="flex items-center gap-2 text-sm font-medium"><Check className="size-4 text-emerald-600" />{modeLabel(mode)}已整理完成</div><p className="mt-2 text-xs text-muted-foreground">确认后保存当前结构化结果。</p><Button className="mt-4" size="sm" disabled={committing} onClick={() => void commitDraft()}>{committing ? <Loader2 className="size-4 animate-spin" /> : '确认并保存'}</Button></div>}{error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}</div><Composer value={composer} placeholder={activeQuestions.length ? '请先完成上面的回答' : modePlaceholder(mode)} disabled={!canSend || activeQuestions.length > 0} onChange={setComposer} onSend={() => void sendMessage()} /></section>}
+      {!workspace ? (
+        <section className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-5 py-12 text-center">
+          <p className="text-sm font-medium text-primary">Anban AI</p>
+          <h1 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{heading}</h1>
+          <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-muted-foreground">选择模式，告诉我你接下来想完成什么。</p>
+          <nav className="mx-auto mt-10 flex flex-wrap justify-center gap-1" aria-label="助手模式">{MODES.map((candidate) => { const item = bootstrap?.modes.find((entry) => entry.id === candidate); return <button key={candidate} type="button" aria-pressed={mode === candidate} aria-disabled={!item?.available} onClick={() => void chooseMode(candidate)} className={`rounded-full px-4 py-2 text-sm ${mode === candidate ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'} ${!item?.available ? 'opacity-50' : ''}`}>{modeLabel(candidate)}</button> })}</nav>
+          <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} onProject={resetCreationProject} onContent={setContentId} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />
+          {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && (
+            <VideoEditReviewResults query={reviewVideoQuery} />
+          )}
+          {creationTypeSelector}
+          {videoEditInputs}
+          <Composer value={composer} placeholder={modePlaceholder(mode)} disabled={!canSend} onChange={setComposer} onSend={() => void sendMessage()} />
+        </section>
+      ) : (
+        <section className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col px-4 pb-4 md:px-8">
+          <div className="flex shrink-0 flex-wrap items-center justify-center gap-1 py-4">{MODES.map((candidate) => { const item = bootstrap?.modes.find((entry) => entry.id === candidate); return <button key={candidate} type="button" aria-pressed={mode === candidate} disabled={!item?.available || switching} onClick={() => void chooseMode(candidate)} className={`rounded-full px-4 py-2 text-sm ${mode === candidate ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'} ${!item?.available ? 'opacity-50' : ''}`}>{modeLabel(candidate)}</button> })}</div>
+          <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} disabled={Boolean(workspace && !pendingMode)} onProject={resetCreationProject} onContent={(value) => { setContentId(value); if (pendingMode && selectedProject) void chooseMode(pendingMode, { projectId: selectedProject.id, contentId: value }) }} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />
+          {creationTypeSelector}
+          {videoEditInputs}
+          <div className="min-h-0 flex-1 overflow-y-auto py-4" aria-live="polite">
+            {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && (
+              <VideoEditReviewResults query={reviewVideoQuery} />
+            )}
+            <Conversation messages={activeMessages} questions={activeQuestions} onAnswer={submitAnswers} />
+            {activeDraft && <div className="mt-6 rounded-xl border border-primary/30 bg-primary/[0.04] p-4"><div className="flex items-center gap-2 text-sm font-medium"><Check className="size-4 text-emerald-600" />{modeLabel(mode)}已整理完成</div><p className="mt-2 text-xs text-muted-foreground">确认后保存当前结构化结果。</p><Button className="mt-4" size="sm" disabled={committing || (mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0))} onClick={() => void commitDraft()}>{committing ? <Loader2 className="size-4 animate-spin" /> : '确认并保存'}</Button></div>}
+            {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
+          </div>
+          <Composer value={composer} placeholder={activeQuestions.length ? '请先完成上面的回答' : modePlaceholder(mode)} disabled={!canSend || activeQuestions.length > 0} onChange={setComposer} onSend={() => void sendMessage()} />
+        </section>
+      )}
     </main>
   )
+}
+
+function VideoEditReviewResults({ query }: { query: { data?: [Task, TaskFile[]]; isLoading: boolean; isError: boolean } }) {
+  if (query.isLoading) return <p role="status" className="py-4 text-sm text-muted-foreground">正在加载作品产物</p>
+  if (query.isError) return <p role="alert" className="py-4 text-sm text-destructive">作品产物暂时无法加载。</p>
+  if (!query.data) return null
+  return <div className="mb-6"><TaskResults task={query.data[0]} files={query.data[1]} /></div>
 }
 
 function WorkspaceSelectors({ mode, projects, projectId, contentId, works, disabled = false, onProject, onContent, onMore, hasMore }: { mode: AssistantModeID; projects: AssistantProject[]; projectId: string; contentId: string; works: AssistantProject['works']; disabled?: boolean; onProject: (value: string) => void; onContent: (value: string) => void; onMore: () => void; hasMore: boolean }) {

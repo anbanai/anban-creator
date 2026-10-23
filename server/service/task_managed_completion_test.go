@@ -362,6 +362,26 @@ func TestValidateMontageCompletionArtifactsRequiresCanonicalPathCase(t *testing.
 	}
 }
 
+func TestValidateVideoEditCompletionArtifactsRequiresContentTags(t *testing.T) {
+	files := []*model.TaskFile{
+		{State: model.TaskFileStatePending, FilePath: "output/final.mp4", FileSize: 1},
+		{State: model.TaskFileStatePending, FilePath: "output/edit-decision-list.json", FileSize: 1},
+		{State: model.TaskFileStatePending, FilePath: "output/edit-strategy.md", FileSize: 1},
+		{State: model.TaskFileStatePending, FilePath: "output/delivery-manifest.json", FileSize: 1},
+		{State: model.TaskFileStatePending, FilePath: "output/quality-evidence.json", FileSize: 1},
+	}
+
+	validation := validateVideoEditCompletionArtifacts(files)
+	if validation.Valid || !strings.Contains(validation.Reason, "output/content-tags.json") {
+		t.Fatalf("validation = %#v, want missing content tags reported", validation)
+	}
+
+	files = append(files, &model.TaskFile{State: model.TaskFileStatePending, FilePath: "output/content-tags.json", FileSize: 1})
+	if validation = validateVideoEditCompletionArtifacts(files); !validation.Valid {
+		t.Fatalf("validation with content tags = %#v, want valid", validation)
+	}
+}
+
 func TestCompleteCloudExecutionRejectsNestedAgentOnlyResult(t *testing.T) {
 	f := newManagedCompletionFixture(t, model.TaskTypeWechatArticle)
 	result := &agent.ExecutionResult{

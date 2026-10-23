@@ -40,6 +40,54 @@ func validateMontageSourceAssetURLs(input *model.MontageInput) error {
 	return nil
 }
 
+func videoEditSourceAssetURLs(input *model.VideoEditInput) []string {
+	if input == nil {
+		return nil
+	}
+	urls := make([]string, 0, len(input.SourceAssets))
+	for _, asset := range input.SourceAssets {
+		if strings.TrimSpace(asset.URL) != "" {
+			urls = append(urls, asset.URL)
+		}
+	}
+	return urls
+}
+
+func validateVideoEditSourceAssetURLs(input *model.VideoEditInput, store storage.Provider) error {
+	if input == nil {
+		return nil
+	}
+	for _, rawURL := range videoEditSourceAssetURLs(input) {
+		if store == nil || !store.IsOwnedURL(rawURL) {
+			return fmt.Errorf("video_edit_input.source_assets.url must be an Anban-owned upload URL")
+		}
+	}
+	return nil
+}
+
+func freezeVideoEditSourceAssets(input *model.VideoEditInput, finalized map[string]*model.Asset) error {
+	if input == nil {
+		return nil
+	}
+	for i := range input.SourceAssets {
+		assetInput := &input.SourceAssets[i]
+		rawURL := strings.TrimSpace(assetInput.URL)
+		if rawURL == "" {
+			continue
+		}
+		asset := finalized[rawURL]
+		if asset == nil || strings.TrimSpace(asset.ID) == "" {
+			return fmt.Errorf("video_edit_input.source_assets[%d] was not finalized as an owned upload", i)
+		}
+		assetInput.AssetID = asset.ID
+		assetInput.URL = ""
+		assetInput.FileName = asset.FileName
+		assetInput.MimeType = asset.ContentType
+		assetInput.FileSize = asset.Size
+	}
+	return nil
+}
+
 func localLifeSourceAssetURLs(input *model.LocalLifeInput) []string {
 	if input == nil {
 		return nil

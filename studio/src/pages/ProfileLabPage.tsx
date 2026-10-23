@@ -18,6 +18,8 @@ import { parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-cen
 import { profileLabAgents as agents, projectAgentIDs, supportsProfileLab } from '@/lib/project-capabilities'
 import { queryKeys } from '@/lib/query-keys'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { VideoEditProjectDefaultsPanel } from '@/components/video-edit/VideoEditProjectDefaultsPanel'
+import type { VideoEditDefaults } from '@/types'
 
 const dimensions = [
   ['identity', '定位'], ['style', '风格'], ['audience', '受众'],
@@ -64,6 +66,7 @@ function profileStatus(profile?: ProjectProfile | null) {
 }
 
 function primaryPlatform(agentIDs: string[]) {
+  if (agentIDs.includes('video-edit')) return 'video-edit'
   if (agentIDs.some((id) => id === 'wechat-article' || id === 'wechat-picture')) return 'wechat'
   if (agentIDs.includes('seednote')) return 'seednote'
   if (agentIDs.includes('montage')) return 'montage'
@@ -112,6 +115,7 @@ function ProfileLabPage() {
   const [referenceImageDirty, setReferenceImageDirty] = useState(false)
   const [referenceUploading, setReferenceUploading] = useState(false)
   const [selectedAgents, setSelectedAgents] = useState<string[]>([])
+  const [videoEditDefaults, setVideoEditDefaults] = useState<VideoEditDefaults>({})
   const [setup, setSetup] = useState<ProjectProfileSetup>(defaultSetup)
   const [skipAnalysis, setSkipAnalysis] = useState(false)
   const [analyzeOnSave, setAnalyzeOnSave] = useState(true)
@@ -146,6 +150,7 @@ function ProfileLabPage() {
     setReferenceImageDirty(false)
     setReferenceUploading(false)
     setSelectedAgents([])
+    setVideoEditDefaults({})
     setSetup(defaultSetup)
     setSkipAnalysis(false)
     setAnalyzeOnSave(true)
@@ -197,6 +202,7 @@ function ProfileLabPage() {
     setReferenceImage(project.reference_image ?? null)
     setReferenceImageDirty(false)
     setSelectedAgents(projectAgentIDs(project))
+    setVideoEditDefaults(project.video_edit_defaults ?? {})
     setSetup(setupFromProject(project))
     setHydratedProjectID(project.id)
   }, [hydratedProjectID, project])
@@ -392,6 +398,7 @@ function ProfileLabPage() {
       payload.agent_ids = selectedAgents
       payload.platform = primaryPlatform(selectedAgents) as CreateProjectRequest['platform']
     }
+    if (selectedAgents.includes('video-edit')) payload.video_edit_defaults = videoEditDefaults
     if (isEditing) saveProjectMutation.mutate({ id: projectId!, payload, analyze: analyzeOnSave, priorProfile: profile })
     else createMutation.mutate({ payload, viewKey: creationViewKey.current })
   }
@@ -490,6 +497,10 @@ function ProfileLabPage() {
               })}
             </div>
           </section>}
+
+          {currentStep === 0 && selectedAgents.includes('video-edit') && (
+            <VideoEditProjectDefaultsPanel value={videoEditDefaults} onChange={setVideoEditDefaults} />
+          )}
 
           {currentStep === 0 && <section id="project-basics" tabIndex={-1} className="scroll-mt-6 border-b border-border pb-5">
             <div className="mb-4 flex items-baseline justify-between gap-3"><h2 className="text-lg font-semibold">基础信息与账号</h2><span className="text-xs text-muted-foreground">可稍后补充</span></div>

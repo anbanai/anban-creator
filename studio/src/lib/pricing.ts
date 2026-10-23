@@ -7,6 +7,7 @@ export function taskOperation(type: string) {
   if (type === 'wechat' || type === 'wechat-article') return 'task.wechat_article'
   if (type === 'wechat-picture') return 'task.wechat_picture'
   if (type === 'local-life') return 'task.local_life'
+  if (type === 'video-edit') return 'task.video_edit'
   return `task.${type}`
 }
 

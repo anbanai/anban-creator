@@ -1,4 +1,4 @@
-import type { AgentExecutionProfileID, CreateTaskRequest, HypitDefaults, Project, ReferenceImageSelection, Task, TaskType } from '@/types'
+import type { AgentExecutionProfileID, CreateTaskRequest, HypitDefaults, Project, ReferenceImageSelection, Task, TaskType, VideoEditInput } from '@/types'
 import type { CreateTaskFormValues } from '@/lib/schemas'
 import { buildHypitInputForSubmit, initialHypitInput } from '@/lib/hypit-form'
 import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
@@ -29,6 +29,8 @@ function taskIdentity(type: TaskType): { agent_id: string; channel: NonNullable<
       return { agent_id: 'wechat-article', channel: 'wechat-article', task_kind: 'content_generation' }
     case 'local-life':
       return { agent_id: 'local-life', channel: 'local-life', task_kind: 'content_generation' }
+    case 'video-edit':
+      return { agent_id: 'video-edit', channel: 'video-edit', task_kind: 'video_edit' }
     default:
       return { agent_id: type, channel: type, task_kind: type }
   }
@@ -54,6 +56,16 @@ function projectMontageInput(project?: Project | null, brief = ''): TaskFormDefa
 function projectLocalLifeInput(project?: Project | null, brief = ''): TaskFormDefaults['local_life_input'] {
   if (project?.platform !== 'local-life') return undefined
   return initialLocalLifeInput(brief)
+}
+
+function projectVideoEditInput(project?: Project | null, brief = ''): VideoEditInput | undefined {
+  if (project?.platform !== 'video-edit') return undefined
+  return {
+    brief,
+    source_assets: [],
+    preferences: cloneValue(project.video_edit_defaults?.preferences ?? {}),
+    delivery_targets: cloneValue(project.video_edit_defaults?.delivery_targets ?? []),
+  }
 }
 
 export function createTaskFormDefaults(project?: Project | null): TaskFormDefaults {
@@ -87,6 +99,7 @@ export function createTaskFormDefaults(project?: Project | null): TaskFormDefaul
     hypit_input: project?.platform === 'hypit' ? initialHypitInput('', undefined, project.hypit_defaults) : undefined,
     montage_input: projectMontageInput(project),
     local_life_input: projectLocalLifeInput(project),
+    video_edit_input: projectVideoEditInput(project),
   }
 }
 
@@ -123,6 +136,19 @@ export function switchTaskFormDefaults(
         }
       }
     }
+    if (current.type === 'video-edit') {
+      const videoEditDefaults = projectVideoEditInput(project, current.prompt)
+      if (videoEditDefaults) {
+        switched.video_edit_input = {
+          ...videoEditDefaults,
+          ...cloneValue(current.video_edit_input ?? {}),
+          brief: current.video_edit_input?.brief ?? current.prompt ?? '',
+          source_assets: cloneValue(current.video_edit_input?.source_assets ?? []),
+          preferences: { ...videoEditDefaults.preferences, ...cloneValue(current.video_edit_input?.preferences ?? {}) },
+          delivery_targets: cloneValue(current.video_edit_input?.delivery_targets ?? videoEditDefaults.delivery_targets),
+        }
+      }
+    }
 
     return switched
   }
@@ -142,6 +168,7 @@ export function switchTaskFormDefaults(
     hypit_input: project?.platform === 'hypit' ? initialHypitInput(current.prompt, undefined, project.hypit_defaults) : undefined,
     montage_input: projectMontageInput(project, current.prompt),
     local_life_input: projectLocalLifeInput(project, current.prompt),
+    video_edit_input: projectVideoEditInput(project, current.prompt),
   }
 }
 
@@ -208,6 +235,9 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
       : undefined,
     local_life_input: task.local_life_input
       ? cloneValue(initialLocalLifeInput(task.prompt, task.local_life_input))
+      : undefined,
+    video_edit_input: task.video_edit_input
+      ? cloneValue({ ...task.video_edit_input, brief: task.video_edit_input.brief || task.prompt })
       : undefined,
   }
 }
@@ -276,6 +306,13 @@ export function taskFormValuesToRequest(values: TaskFormDefaults, hypitDefaults?
       : {}),
     ...(values.type === 'local-life'
       ? { local_life_input: cloneValue(buildLocalLifeInputForSubmit(values.prompt, values.local_life_input, values.input_attachments)) }
+      : {}),
+    ...(values.type === 'video-edit'
+      ? { video_edit_input: cloneValue({
+          ...(values.video_edit_input ?? { source_assets: [] }),
+          brief: values.video_edit_input?.brief?.trim() || prompt || '',
+          source_assets: cloneValue(values.video_edit_input?.source_assets ?? []),
+        }) }
       : {}),
   }
 }

@@ -1038,6 +1038,7 @@ func TestDockerfileInventoryIsCentralized(t *testing.T) {
 		"deploy/docker/Dockerfile.agent-montage",
 		"deploy/docker/Dockerfile.agent-profile-analysis",
 		"deploy/docker/Dockerfile.agent-seednote",
+		"deploy/docker/Dockerfile.agent-video-edit",
 		"deploy/docker/Dockerfile.agent-wechat-article",
 		"deploy/docker/Dockerfile.agent-wechat-picture",
 		"deploy/docker/Dockerfile.agent-whiteboard-animation",
@@ -1048,6 +1049,31 @@ func TestDockerfileInventoryIsCentralized(t *testing.T) {
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("repository-owned Dockerfile inventory mismatch\nwant: %v\n got: %v", want, got)
+	}
+}
+
+func TestVideoEditDockerfilePinsTheUnmodifiedVideoUseRuntime(t *testing.T) {
+	root := repositoryRoot(t)
+	dockerfile := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.agent-video-edit"))
+	for _, want := range []string{
+		"https://github.com/browser-use/video-use.git",
+		"43cfc566833548093455c9d4a46bd69913b7e552",
+		"/opt/video-use/.anban-source-revision",
+		"python3 -m venv /opt/video-use-venv",
+		"pip install --no-cache-dir -e /opt/video-use",
+		"ffmpeg",
+		"ffprobe",
+		"for helper in transcribe.py transcribe_batch.py pack_transcripts.py timeline_view.py grade.py render.py",
+		"/opt/video-use/helpers/$helper\" --help",
+		"COPY harness/ /anbanai/",
+		"ANBAN_VIDEO_USE_ROOT=/opt/video-use",
+	} {
+		if !strings.Contains(dockerfile, want) {
+			t.Fatalf("video-edit Dockerfile missing pinned runtime contract %q", want)
+		}
+	}
+	if strings.Contains(dockerfile, "openmontage") || strings.Contains(dockerfile, "git apply") {
+		t.Fatal("video-edit Dockerfile must use the unmodified video-use source, without OpenMontage or source patches")
 	}
 }
 
@@ -1210,7 +1236,7 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-ilink",
 		"docker build -f deploy/docker/Dockerfile.studio -t $(STUDIO_IMAGE) .",
 		"docker-image:",
-		"docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image",
+		"docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-video-edit-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image",
 		"docker-dsh-runtime-image:",
 		"docker-wechat-article-agent-image",
 		"make docker-server-image",
@@ -1264,6 +1290,7 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 		"ANBAN_AGENT_IMAGE_WECHAT_PICTURE: \"creator-agent-wechat-picture:latest\"",
 		"ANBAN_AGENT_IMAGE_SEEDNOTE: \"creator-agent-seednote:latest\"",
 		"ANBAN_AGENT_IMAGE_MONTAGE: \"creator-agent-montage:latest\"",
+		"ANBAN_AGENT_IMAGE_VIDEO_EDIT: \"${ANBAN_AGENT_IMAGE_VIDEO_EDIT:-creator-agent-video-edit:latest}\"",
 		"ANBAN_AGENT_IMAGE_MOMENTS: \"creator-agent-moments:latest\"",
 		"ANBAN_AGENT_IMAGE_ECOMMERCE: \"creator-agent-ecommerce:latest\"",
 		"ANBAN_AGENT_DOCKER_NETWORK: \"creator-runtime-network\"",
@@ -1300,6 +1327,7 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 			"wechat-article: \"${ANBAN_AGENT_IMAGE_WECHAT_ARTICLE:-creator-agent-wechat-article:latest}\"",
 			"seednote: \"${ANBAN_AGENT_IMAGE_SEEDNOTE:-creator-agent-seednote:latest}\"",
 			"montage: \"${ANBAN_AGENT_IMAGE_MONTAGE:-creator-agent-montage:latest}\"",
+			"video-edit: \"${ANBAN_AGENT_IMAGE_VIDEO_EDIT:-creator-agent-video-edit:latest}\"",
 			"network: \"${ANBAN_AGENT_DOCKER_NETWORK:-creator-runtime-network}\"",
 			"pids_limit: 512",
 		} {
@@ -1316,7 +1344,7 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 
 	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
 	for _, want := range []string{
-		"docker-up: docker-server-image docker-dsh-runtime-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image",
+		"docker-up: docker-server-image docker-dsh-runtime-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-video-edit-agent-image docker-moments-agent-image docker-ecommerce-agent-image",
 		"DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null || stat -L -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)",
 		"DOCKER_GID=\"$(DOCKER_SOCKET_GID)\" docker compose up -d",
 	} {
@@ -1353,6 +1381,8 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":       "creator-agent-wechat-article:latest",
 			"ANBAN_AGENT_IMAGE_SEEDNOTE":             "creator-agent-seednote:latest",
 			"ANBAN_AGENT_IMAGE_MONTAGE":              "creator-agent-montage:latest",
+			"ANBAN_AGENT_IMAGE_VIDEO_EDIT":           "${ANBAN_AGENT_IMAGE_VIDEO_EDIT:-creator-agent-video-edit:latest}",
+			"VIDEO_EDIT_ELEVENLABS_API_KEY":          "${VIDEO_EDIT_ELEVENLABS_API_KEY:-}",
 			"ANBAN_AGENT_IMAGE_MOMENTS":              "creator-agent-moments:latest",
 			"ANBAN_AGENT_IMAGE_ECOMMERCE":            "creator-agent-ecommerce:latest",
 			"ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS":     "${ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS:-creator-agent-profile-analysis:latest}",
@@ -1413,6 +1443,8 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_AGENT_IMAGE_WECHAT_PICTURE",
 			"ANBAN_AGENT_IMAGE_SEEDNOTE",
 			"ANBAN_AGENT_IMAGE_MONTAGE",
+			"ANBAN_AGENT_IMAGE_VIDEO_EDIT",
+			"VIDEO_EDIT_ELEVENLABS_API_KEY",
 			"ANBAN_AGENT_IMAGE_MOMENTS",
 			"ANBAN_AGENT_IMAGE_ECOMMERCE",
 			"ANBAN_JWT_SECRET_KEY",
@@ -1468,6 +1500,8 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":    "creator-agent-wechat-article:latest",
 			"ANBAN_AGENT_IMAGE_SEEDNOTE":          "creator-agent-seednote:latest",
 			"ANBAN_AGENT_IMAGE_MONTAGE":           "creator-agent-montage:latest",
+			"ANBAN_AGENT_IMAGE_VIDEO_EDIT":        "creator-agent-video-edit:latest",
+			"VIDEO_EDIT_ELEVENLABS_API_KEY":       "test-video-edit-scribe-key",
 			"ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS":  "creator-agent-profile-analysis:latest",
 			"ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS": "creator-agent-feedback-analysis:latest",
 			"ANBAN_JWT_SECRET_KEY":                "0123456789abcdef0123456789abcdef",

@@ -544,6 +544,12 @@ func TestInteractiveCreateDraftRejectsMemoryAppend(t *testing.T) {
 	}
 }
 
+func TestAllowedInteractivePlatformSupportsVideoEdit(t *testing.T) {
+	if !allowedInteractivePlatform(model.PlatformVideoEdit) {
+		t.Fatal("video-edit must be accepted by interactive project creation")
+	}
+}
+
 func TestValidateStageRetainsAllProfileDimensionReasons(t *testing.T) {
 	profile := model.NewProjectProfile()
 	profile.Dimensions.Identity.Content = nil

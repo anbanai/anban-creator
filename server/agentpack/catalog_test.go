@@ -99,6 +99,12 @@ tagging:
 	}
 }
 
+func TestVideoEditIsASupportedAgentChannel(t *testing.T) {
+	if !isSupportedChannel("video-edit") {
+		t.Fatal("video-edit channel is not supported by the Agent Pack catalog")
+	}
+}
+
 func TestLoadCatalogValidatesTaggingContract(t *testing.T) {
 	root := writePackFixture(t, `
 id: wechat-article
@@ -1027,10 +1033,10 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if err != nil {
 		t.Fatalf("LoadCatalog repository Packs: %v", err)
 	}
-	if len(catalog.Packs) != 15 {
-		t.Fatalf("Pack count = %d, want 15", len(catalog.Packs))
+	if len(catalog.Packs) != 16 {
+		t.Fatalf("Pack count = %d, want 16", len(catalog.Packs))
 	}
-	contentPacks := []string{"wechat-article", "seednote", "ecommerce", "moments", "montage", "hypit", "local-life", "wechat-picture", "whiteboard-animation"}
+	contentPacks := []string{"wechat-article", "seednote", "ecommerce", "moments", "montage", "video-edit", "hypit", "local-life", "wechat-picture", "whiteboard-animation"}
 	for _, id := range contentPacks {
 		pack, ok := catalog.Pack(id)
 		if !ok {

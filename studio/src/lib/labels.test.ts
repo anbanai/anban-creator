@@ -93,6 +93,7 @@ describe('video platform labels', () => {
   it.each([
     ['montage', '视频生成'],
     ['hypit', '视频复刻'],
+    ['video-edit', '全自动视频剪辑'],
   ])('uses one name for %s in cards, timelines and type selectors', (type, label) => {
     expect(taskTypeLabelCN[type]).toBe(label)
     expect(contentTypeLabel[type]).toBe(label)
@@ -103,6 +104,7 @@ describe('video platform labels', () => {
   it('resolves every known platform to a display name without leaking raw keys', () => {
     expect(platformDisplayName('montage')).toBe('视频生成')
     expect(platformDisplayName('hypit')).toBe('视频复刻')
+    expect(platformDisplayName('video-edit')).toBe('全自动视频剪辑')
     expect(platformDisplayName('viral_analysis')).toBe('爆文拆解')
     expect(platformDisplayName(undefined)).toBe('通用')
     expect(platformDisplayName('', '上下文')).toBe('上下文')
@@ -114,6 +116,7 @@ describe('video platform labels', () => {
     expect(platformDisplayName('wechat')).toBe('公众号')
     expect(contentTypeDisplayName('montage')).toBe('视频生成')
     expect(contentTypeDisplayName('hypit')).toBe('视频复刻')
+    expect(contentTypeDisplayName('video-edit')).toBe('全自动视频剪辑')
     expect(contentTypeDisplayName('viral_analysis')).toBe('爆文拆解')
     expect(contentTypeDisplayName(null)).toBe('通用')
     expect(contentTypeDisplayName('unknown_type')).toBe('unknown_type')

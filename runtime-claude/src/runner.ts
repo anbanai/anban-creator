@@ -622,10 +622,16 @@ export function buildExecutionEnvironment(
 ): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = data.task_type === "hypit"
     ? Object.fromEntries(Object.entries(processEnvironment).filter(([key]) => HYPIT_INHERITED_ENV_KEYS.has(key)))
-    : { ...processEnvironment, ...(data.env ?? {}) };
+    : { ...processEnvironment };
   for (const key of CLAUDE_ENVIRONMENT_KEYS_TO_UNSET) delete environment[key];
   sanitizeCredentialEnvironment(environment);
-  if (data.task_type === "hypit") { validateHypitEnvironment(data.env ?? {}); Object.assign(environment, data.env); }
+  if (["montage", "hypit", "video-edit"].includes(data.task_type)) {
+    if (data.task_type === "hypit") validateHypitEnvironment(data.env ?? {});
+    for (const [key, value] of Object.entries(data.env ?? {})) {
+      if (/^(?:ANBAN_|ANTHROPIC_|CLAUDE_)/.test(key) || ["PATH", "HOME", "NODE_OPTIONS", "LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH"].includes(key)) continue;
+      environment[key] = value;
+    }
+  }
   const managed: NodeJS.ProcessEnv = {
     ...environment,
     ANBAN_DEFAULT_PROJECT: data.project_id,
@@ -978,6 +984,7 @@ function requiredSkills(taskType: string): string[] {
   if (taskType === "wechat-article") return ["anban:humanizer", "anban:portrait-cover-design"];
   if (taskType === "ecommerce") return ["anban:humanizer"];
   if (taskType === "montage") return ["anban:montage", "anban:portrait-cover-design"];
+  if (taskType === "video-edit") return ["anban:project-profile-context", "anban:video-edit", "anban:content-tagging"];
   if (taskType === "hypit") return ["anban:portrait-cover-design"];
   return [];
 }
@@ -989,6 +996,7 @@ function requiredMCPTools(taskType: string): string[] {
   if (taskType === "seednote") return ["analyze_image", "claim_topic", "finalize_task_title", "generate_image", "get_project_profile", "list_project_titles", "submit_agent_feedback"];
   if (taskType === "viral_analysis") return ["get_project_profile", "list_project_titles", "submit_agent_feedback"];
   if (taskType === "montage") return ["analyze_image", "analyze_video", "generate_image", "get_project_profile", "submit_agent_feedback"];
+  if (taskType === "video-edit") return ["get_project_profile"];
   return [];
 }
 

@@ -1339,6 +1339,113 @@ func TestBuildMontageBootstrapFiles(t *testing.T) {
 	}
 }
 
+func TestRuntimeEnvScopesVideoEditScribeCredential(t *testing.T) {
+	svc := &AgentBootstrapService{cfg: AgentBootstrapConfig{
+		VideoEdit: config.VideoEditConfig{
+			ElevenLabsAPIKey: "server-managed-scribe-key",
+			Env:              map[string]string{"VIDEO_EDIT_OPTION": "enabled"},
+		},
+		MontageEnv: map[string]string{"MONTAGE_PROVIDER_KEY": "montage-only-key"},
+	}}
+	videoEditEnv := svc.runtimeEnv(&model.Task{Type: model.PlatformVideoEdit})
+	if videoEditEnv["ELEVENLABS_API_KEY"] != "server-managed-scribe-key" || videoEditEnv["VIDEO_EDIT_OPTION"] != "enabled" {
+		t.Fatalf("video-edit runtime env = %#v, want only its configured environment", videoEditEnv)
+	}
+	if _, exists := videoEditEnv["MONTAGE_PROVIDER_KEY"]; exists {
+		t.Fatalf("video-edit env contains Montage credential: %#v", videoEditEnv)
+	}
+	for _, taskType := range []string{model.PlatformMontage, model.TaskTypeWechatArticle} {
+		if got := svc.runtimeEnv(&model.Task{Type: taskType}); got["ELEVENLABS_API_KEY"] != "" {
+			t.Fatalf("%s runtime env leaked Scribe credential: %#v", taskType, got)
+		}
+	}
+}
+
+func TestBootstrapMaterializesOnlyOwnedFinalizedVideoEditAssets(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	store := &videoEditBootstrapStore{bootstrapSecurityStore: &bootstrapSecurityStore{signFakeStore: &signFakeStore{}}}
+	asset := &model.Asset{
+		ID: "video-asset", UserID: "user-1", Purpose: DirectUploadPurposeVideoEditAsset,
+		StorageKey: "assets/users/user-1/video-asset/interview.mp4", FileName: "interview.mp4",
+		ContentType: "video/mp4", Size: 128 << 20, ETag: "verified-etag",
+	}
+	if err := repo.Assets().Create(t.Context(), asset); err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{ID: "task-video-edit", UserID: "user-1", Type: model.PlatformVideoEdit}
+	task.SetVideoEditInput(model.VideoEditInput{
+		Brief:        "Cut the strongest moments",
+		SourceAssets: []model.VideoEditAsset{{Type: "video", AssetID: asset.ID, FileName: asset.FileName, MimeType: asset.ContentType, FileSize: asset.Size}},
+		Preferences:  model.VideoEditPreferences{QualityTier: "effective", SubtitleMode: "off"},
+	})
+	svc := &AgentBootstrapService{repo: repo, cfg: AgentBootstrapConfig{
+		Store: store, SignedURLTTL: 60,
+		VideoEdit: config.VideoEditConfig{MaxAssets: 20, MaxAssetBytes: 256 << 20, MaxTotalInputBytes: 1 << 30, MaxDurationSeconds: 1800},
+	}}
+	files, err := svc.buildVideoEditFiles(t.Context(), task, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("buildVideoEditFiles: %v", err)
+	}
+	var materialized model.VideoEditInput
+	var assetFile *BootstrapFile
+	for i := range files {
+		switch files[i].Path {
+		case "video-edit-input.json":
+			if err := json.Unmarshal([]byte(files[i].Text), &materialized); err != nil {
+				t.Fatal(err)
+			}
+		case ".anban-creator/video-edit-assets/attachment_01_interview.mp4":
+			assetFile = &files[i]
+		}
+	}
+	if materialized.SourceAssets[0].WorkspacePath != ".anban-creator/video-edit-assets/attachment_01_interview.mp4" || materialized.SourceAssets[0].AssetID != "" || materialized.SourceAssets[0].URL != "" {
+		t.Fatalf("materialized input asset = %#v", materialized.SourceAssets[0])
+	}
+	if assetFile == nil || assetFile.ExpectedSize != asset.Size || assetFile.MaxBytes != 256<<20 || assetFile.DownloadURL == "" {
+		t.Fatalf("materialized asset file = %#v", assetFile)
+	}
+	if len(store.signedKeys) != 1 || store.signedKeys[0] != asset.StorageKey {
+		t.Fatalf("signed keys = %#v, want only %q", store.signedKeys, asset.StorageKey)
+	}
+}
+
+func TestBootstrapRejectsVideoEditAssetsOverTotalLimitBeforeSigning(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	store := &videoEditBootstrapStore{bootstrapSecurityStore: &bootstrapSecurityStore{signFakeStore: &signFakeStore{}}}
+	assets := make([]model.VideoEditAsset, 5)
+	for i := range assets {
+		id := fmt.Sprintf("video-asset-%d", i)
+		asset := &model.Asset{
+			ID: id, UserID: "user-1", Purpose: DirectUploadPurposeVideoEditAsset,
+			StorageKey: path.Join("assets/users/user-1", id, id+".mp4"), FileName: id + ".mp4",
+			ContentType: "video/mp4", Size: 256 << 20, ETag: "verified-etag",
+		}
+		if err := repo.Assets().Create(t.Context(), asset); err != nil {
+			t.Fatal(err)
+		}
+		assets[i] = model.VideoEditAsset{Type: "video", AssetID: id, FileName: asset.FileName, MimeType: asset.ContentType, FileSize: asset.Size}
+	}
+	task := &model.Task{ID: "task-video-edit", UserID: "user-1", Type: model.PlatformVideoEdit}
+	task.SetVideoEditInput(model.VideoEditInput{
+		Brief: "Cut the strongest moments", SourceAssets: assets,
+		Preferences: model.VideoEditPreferences{QualityTier: "effective", SubtitleMode: "off"},
+	})
+	svc := &AgentBootstrapService{repo: repo, cfg: AgentBootstrapConfig{
+		Store: store, SignedURLTTL: 60,
+		VideoEdit: config.VideoEditConfig{MaxAssets: 20, MaxAssetBytes: 256 << 20, MaxTotalInputBytes: 1 << 30, MaxDurationSeconds: 1800},
+	}}
+	if _, err := svc.buildVideoEditFiles(t.Context(), task, time.Now().Add(time.Hour)); err == nil || !strings.Contains(err.Error(), "exceed 1073741824 bytes in total") {
+		t.Fatalf("buildVideoEditFiles error = %v, want total-size rejection", err)
+	}
+	if len(store.signedKeys) != 0 {
+		t.Fatalf("total-size rejection signed object keys: %#v", store.signedKeys)
+	}
+}
+
+type videoEditBootstrapStore struct{ *bootstrapSecurityStore }
+
+func (*videoEditBootstrapStore) Name() string { return "oss" }
+
 func TestBootstrapMaterializesMontageTaskFileSources(t *testing.T) {
 	repo := openBootstrapTestRepository(t)
 	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{}}

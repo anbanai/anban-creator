@@ -2507,7 +2507,7 @@ func (s *InteractiveService) Answer(ctx context.Context, uid, id, callID string,
 
 func allowedInteractivePlatform(p string) bool {
 	switch p {
-	case model.PlatformWechat, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage, model.PlatformWhiteboardAnimation, model.PlatformHypit:
+	case model.PlatformWechat, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage, model.PlatformVideoEdit, model.PlatformWhiteboardAnimation, model.PlatformHypit:
 		return true
 	}
 	return false

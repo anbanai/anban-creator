@@ -65,8 +65,18 @@ func TestProjectAgentSelectionRejectsDuplicatesAndUnsupportedPacks(t *testing.T)
 			t.Fatalf("accepted unsupported selection %v", ids)
 		}
 	}
-	if err := ValidateProjectAgentIDs([]string{AgentIDArticle, AgentIDWechatPicture, AgentIDSeednote, AgentIDMontage, AgentIDHypit, AgentIDWhiteboard}); err != nil {
+	if err := ValidateProjectAgentIDs([]string{AgentIDArticle, AgentIDWechatPicture, AgentIDSeednote, AgentIDMontage, AgentIDHypit, AgentIDWhiteboard, AgentIDLocalLife, AgentIDVideoEdit}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestVideoEditIsSelectableAndDefaultForItsProjectPlatform(t *testing.T) {
+	if got := DefaultProjectAgentIDs(PlatformVideoEdit); len(got) != 1 || got[0] != AgentIDVideoEdit {
+		t.Fatalf("video-edit project default Agent IDs = %v", got)
+	}
+	project := &Project{AgentIDs: []string{AgentIDArticle}}
+	if ProjectAllowsAgent(project, AgentIDVideoEdit) {
+		t.Fatal("video-edit Agent was allowed when not selected")
 	}
 }
 

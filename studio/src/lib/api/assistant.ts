@@ -1,5 +1,6 @@
 import { http, unwrap } from '@/lib/http-client'
 import type { InteractiveCommitResult, InteractiveSession } from './interactive'
+import type { VideoEditDefaults } from '@/types/video-edit'
 
 const ASSISTANT_COMMAND_TIMEOUT_MS = 15 * 60 * 1000
 
@@ -33,6 +34,7 @@ export interface AssistantProject {
   platform: string
   profileRevision: number
   profileReady: boolean
+  video_edit_defaults?: VideoEditDefaults
   works: AssistantWork[]
 }
 

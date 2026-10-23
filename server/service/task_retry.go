@@ -42,6 +42,7 @@ type CloneTaskOverrides struct {
 	CoverUsePortrait              *bool
 	Ecommerce                     *model.EcommerceConfig
 	MontageInput                  *model.MontageInput
+	VideoEditInput                *model.VideoEditInput
 	HypitInput                    *model.HypitInput
 	LocalLifeInput                *model.LocalLifeInput
 }
@@ -138,6 +139,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 			CoverUsePortrait:              coverUsePortrait,
 			Ecommerce:                     override.Ecommerce,
 			MontageInput:                  override.MontageInput,
+			VideoEditInput:                override.VideoEditInput,
 			HypitInput:                    override.HypitInput,
 			LocalLifeInput:                override.LocalLifeInput,
 			MontageSourceTaskID:           src.ID,
@@ -240,6 +242,13 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 			input.Brief = prompt
 		}
 		params.MontageInput = &input
+	}
+	if model.IsVideoEditPlatform(src.Type) {
+		input := src.VideoEditInput.Data()
+		if cloneParams.Prompt != nil {
+			input.Brief = prompt
+		}
+		params.VideoEditInput = &input
 	}
 	if model.IsLocalLifePlatform(src.Type) {
 		input := src.LocalLifeInput.Data()

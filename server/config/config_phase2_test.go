@@ -57,6 +57,7 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 		"ANBAN_AGENT_IMAGE_WECHAT_PICTURE":       "creator-agent-wechat-picture:latest",
 		"ANBAN_AGENT_IMAGE_SEEDNOTE":             "creator-agent-seednote:latest",
 		"ANBAN_AGENT_IMAGE_MONTAGE":              "creator-agent-montage:latest",
+		"ANBAN_AGENT_IMAGE_VIDEO_EDIT":           "creator-agent-video-edit:latest",
 		"ANBAN_AGENT_IMAGE_MOMENTS":              "creator-agent-moments:latest",
 		"ANBAN_AGENT_IMAGE_ECOMMERCE":            "creator-agent-ecommerce:latest",
 		"ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS":     "creator-agent-profile-analysis:latest",
@@ -77,6 +78,7 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 		"VOLCENGINE_ARK_API_KEY":                 "test-volcengine-api-key",
 		"WANGCAI_OPENAI_BASE_URL":                "https://images.example.com/v1",
 		"WANGCAI_OPENAI_API_KEY":                 "test-openai-api-key",
+		"VIDEO_EDIT_ELEVENLABS_API_KEY":          "test-video-edit-scribe-key",
 	} {
 		t.Setenv(name, value)
 	}
@@ -96,6 +98,12 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 	}
 	if len(cfg.ModelRoutes.ImageGeneration.Capabilities) != 2 || len(cfg.Claude.ExecutionProfiles) != 3 {
 		t.Fatalf("catalog sizes: image_capabilities=%d profiles=%d", len(cfg.ModelRoutes.ImageGeneration.Capabilities), len(cfg.Claude.ExecutionProfiles))
+	}
+	if got := cfg.Claude.RuntimeImages["video-edit"]; got != "creator-agent-video-edit:latest" {
+		t.Fatalf("video-edit runtime image = %q, want creator-agent-video-edit:latest", got)
+	}
+	if !cfg.VideoEdit.DispatchReady() || cfg.VideoEdit.ElevenLabsAPIKey != "test-video-edit-scribe-key" {
+		t.Fatalf("video-edit dispatch configuration did not load server-owned Scribe credential")
 	}
 	professional := cfg.ModelRoutes.ImageGeneration.Capabilities["professional"]
 	if professional.ResponseFormat != "b64_json" {

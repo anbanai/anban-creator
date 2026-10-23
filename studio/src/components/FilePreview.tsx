@@ -135,12 +135,28 @@ const whiteboardRoleLabel: Record<string, string> = {
   failure_diagnosis: '失败诊断',
 }
 
+const videoEditRoleLabel: Record<string, string> = {
+  final_video: '最终视频',
+  edit_decision_list: '剪辑清单',
+  edit_strategy: '剪辑策略',
+  subtitles: '字幕',
+  content_tags: '内容标签',
+  quality_evidence: '质量证据',
+  delivery_manifest: '交付清单',
+  failure_state: '失败状态',
+  failure_diagnosis: '失败诊断',
+  progress_state: '执行进度',
+}
+
 function taskFileRoleLabel(file: TaskFile, taskType?: string) {
   if (taskType === 'montage' || taskType === 'hypit') {
     return montageRoleLabel[file.delivery_role || file.role] ?? ''
   }
   if (taskType === 'whiteboard-animation') {
     return whiteboardRoleLabel[file.delivery_role || file.role] ?? ''
+  }
+  if (taskType === 'video-edit') {
+    return videoEditRoleLabel[file.delivery_role || file.role] ?? ''
   }
   return ''
 }

@@ -9,6 +9,9 @@ import type { JobConfig } from "./config.js";
 const MAX_WORKLOAD_TOKEN_BYTES = 16 << 10;
 const MAX_BOOTSTRAP_RESPONSE_BYTES = 2 << 20;
 const MAX_BOOTSTRAP_FILE_BYTES = 64 << 20;
+const MAX_VIDEO_EDIT_FILE_BYTES = 256 << 20;
+const MAX_VIDEO_EDIT_TOTAL_BYTES = 1 << 30;
+const MAX_VIDEO_EDIT_METADATA_BYTES = 2 << 20;
 const MAX_BOOTSTRAP_FILES = 256;
 const MAX_BOOTSTRAP_TURNS = 1000;
 const MAX_BOOTSTRAP_PROMPT_BYTES = 1 << 20;
@@ -335,8 +338,8 @@ export function validateBootstrapResponse(executionID: string, input: unknown): 
     const expected = `.anban-creator/resume/executions/${executionID}/latest.md`;
     if (data.resume_context_path !== expected) throw new Error("bootstrap resume context path is invalid");
   }
-  if (!["montage", "hypit"].includes(data.task_type) && Object.keys(data.env ?? {}).length > 0) throw new Error("bootstrap environment is only valid for Montage or Hypit tasks");
-  for (const [key, value] of Object.entries(data.env ?? {})) validateEnvironmentEntry(key, value, data.task_type === "hypit" ? "Hypit" : "Montage");
+  if (!["montage", "hypit", "video-edit"].includes(data.task_type) && Object.keys(data.env ?? {}).length > 0) throw new Error("bootstrap environment is only valid for Montage, Hypit, or video-edit tasks");
+  for (const [key, value] of Object.entries(data.env ?? {})) validateEnvironmentEntry(key, value, data.task_type === "hypit" ? "Hypit" : data.task_type === "video-edit" ? "video-edit" : "Montage");
   if (data.task_type === "hypit") validateHypitEnvironment(data.env ?? {});
   preflightBootstrapFiles(data.files ?? [], data.task_type);
   return data;
@@ -546,6 +549,8 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: string[]): boolean
 export function preflightBootstrapFiles(files: BootstrapFile[], taskType?: string): BootstrapFile[] {
   if (files.length > MAX_BOOTSTRAP_FILES) throw new Error("bootstrap file count exceeds limit");
   const seen = new Map<string, string>();
+  let videoEditExpectedBytes = 0;
+  let videoEditExpectedMediaBytes = 0;
   for (const file of files) {
     if (!isRecord(file) || !hasOnlyKeys(file, [
       "path", "text", "download_url", "mode", "expected_size", "max_bytes", "replace_existing",
@@ -568,11 +573,22 @@ export function preflightBootstrapFiles(files: BootstrapFile[], taskType?: strin
       throw new Error(`bootstrap file ${relative} cannot replace existing workspace content`);
     }
     const hypitLimit = relative === ".anban-creator/project.zip" ? 2147483648 : relative.startsWith("project/assets/") ? 268435456 : MAX_BOOTSTRAP_FILE_BYTES;
+    const videoEditAsset = taskType === "video-edit" && relative.startsWith(".anban-creator/video-edit-assets/");
+    if (videoEditAsset && (!remote || file.expected_size === undefined || file.expected_size <= 0)) throw new Error(`video-edit source ${relative} requires a remote source and expected size`);
     const maxBytes = file.max_bytes ?? MAX_BOOTSTRAP_FILE_BYTES;
+    const fileLimit = taskType === "hypit" ? hypitLimit : videoEditAsset ? MAX_VIDEO_EDIT_FILE_BYTES : MAX_BOOTSTRAP_FILE_BYTES;
     if (taskType === "hypit" && remote && (relative === ".anban-creator/project.zip" || relative.startsWith("project/assets/")) && (!file.content_sha256 || file.expected_size === undefined)) throw new Error("Hypit input requires hash and expected size");
-    if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > (taskType === "hypit" ? hypitLimit : MAX_BOOTSTRAP_FILE_BYTES) || (file.expected_size !== undefined && (!Number.isInteger(file.expected_size) || file.expected_size < 0 || file.expected_size > maxBytes))) throw new Error(`bootstrap file ${relative} has invalid size limits`);
+    if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > fileLimit || (file.expected_size !== undefined && (!Number.isInteger(file.expected_size) || file.expected_size < 0 || file.expected_size > maxBytes))) throw new Error(`bootstrap file ${relative} has invalid size limits`);
     if (!Number.isInteger(file.mode) || ![0o600, 0o644].includes(file.mode)) throw new Error(`unsafe bootstrap file mode ${file.mode}`);
     if (inline && Buffer.byteLength(file.text ?? "") > maxBytes) throw new Error(`bootstrap file ${relative} exceeds size limit`);
+    if (taskType === "video-edit") {
+      const knownSize = file.expected_size ?? (inline ? Buffer.byteLength(file.text ?? "") : 0);
+      videoEditExpectedBytes += knownSize;
+      if (videoEditAsset) videoEditExpectedMediaBytes += knownSize;
+      if (videoEditExpectedMediaBytes > MAX_VIDEO_EDIT_TOTAL_BYTES || videoEditExpectedBytes > MAX_VIDEO_EDIT_TOTAL_BYTES + MAX_VIDEO_EDIT_METADATA_BYTES) {
+        throw new Error("video-edit bootstrap files exceed total size limit");
+      }
+    }
     if (remote) validateBootstrapDownloadURL(file.download_url!);
   }
   for (const [key, relative] of seen) {

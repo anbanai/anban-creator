@@ -1,7 +1,7 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AssistantWorkspace from './AssistantWorkspace'
 import { createTestQueryClient } from '@/test/test-utils'
 
@@ -12,11 +12,23 @@ const mocks = vi.hoisted(() => ({
   workspaceMessage: vi.fn(),
   switchWorkspaceMode: vi.fn(),
   workspaceCommit: vi.fn(),
+  workspaceCheckpoint: vi.fn(),
+  taskGet: vi.fn(),
+  taskFiles: vi.fn(),
 }))
+
+const uploadToOSSMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
-  return { ...actual, api: { ...actual.api, assistant: { ...actual.api.assistant, ...mocks } } }
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      assistant: { ...actual.api.assistant, ...mocks },
+      tasks: { ...actual.api.tasks, get: mocks.taskGet, files: mocks.taskFiles },
+    },
+  }
 })
 
 vi.mock('@/lib/interactive-events', () => ({
@@ -25,6 +37,11 @@ vi.mock('@/lib/interactive-events', () => ({
     yield { event: 'draft.ready', id: 'event-2', data: JSON.stringify({ session_id: 'session-1', draft: { confirmation_token: 'token-1', ready: true } }) }
   })(),
 }))
+
+vi.mock('@/lib/direct-upload', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/direct-upload')>('@/lib/direct-upload')
+  return { ...actual, uploadToOSS: uploadToOSSMock }
+})
 
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ token: 'token-1' }) }))
 
@@ -39,6 +56,10 @@ function renderPage() {
 }
 
 describe('AssistantWorkspace', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     sessionStorage.clear()
@@ -55,6 +76,13 @@ describe('AssistantWorkspace', () => {
     mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'profile', session_id: 'session-1', sessions: { profile: 'session-1' }, runtime_status: 'starting', expires_at: '' })
     mocks.workspaceMessage.mockResolvedValue(undefined)
     mocks.workspaceCommit.mockResolvedValue({ mode_id: 'profile', status: 'committed', project: { id: 'project-new', name: '新画像', platform: 'wechat' } })
+    mocks.workspaceCheckpoint.mockResolvedValue({ id: 'checkpoint-1', payload_digest: 'digest-1' })
+    mocks.taskGet.mockResolvedValue({ id: 'video-task-1', type: 'video-edit', prompt: '剪辑访谈', status: 'completed', project_id: 'video-project', execution_profile: 'effective', billing_price_credits: 1600, created_at: '' })
+    mocks.taskFiles.mockResolvedValue([
+      { id: 'final-video', task_id: 'video-task-1', state: 'delivered', role: 'final_video', delivery_role: 'final_video', file_name: 'final.mp4', mime_type: 'video/mp4', file_size: 1024, url: '', preview_url: 'https://assets.example/final.mp4', created_at: '', is_deliverable: true },
+      { id: 'edit-list', task_id: 'video-task-1', state: 'delivered', role: 'artifact', delivery_role: 'edit_decision_list', file_name: 'edit-decision-list.json', mime_type: 'application/json', file_size: 10, url: '', created_at: '', is_deliverable: true },
+      { id: 'strategy', task_id: 'video-task-1', state: 'delivered', role: 'artifact', delivery_role: 'edit_strategy', file_name: 'edit-strategy.md', mime_type: 'text/markdown', file_size: 10, url: '', created_at: '', is_deliverable: true },
+    ])
   })
 
   it('keeps the empty and active states on the root route', async () => {
@@ -142,5 +170,69 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(screen.getByRole('combobox', { name: '选择作品' })).toBeEnabled())
     fireEvent.change(screen.getByRole('combobox', { name: '选择作品' }), { target: { value: 'work-1' } })
     await waitFor(() => expect(mocks.switchWorkspaceMode).toHaveBeenCalledWith('workspace-1', 'review', { project_id: 'project-1', content_id: 'work-1' }))
+  })
+
+  it('previews the selected video-edit work and exposes its delivered edit artifacts in review mode', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'profile',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划', available: true },
+        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: true },
+      ],
+      projects: [{ id: 'video-project', name: '视频项目', platform: 'video-edit', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    mocks.works.mockResolvedValue({ items: [{ id: 'video-task-1', title: '访谈成片', type: 'video-edit', createdAt: '2026-10-22T00:00:00Z' }], has_more: false })
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '复盘模式' }))
+
+    expect(await screen.findByRole('heading', { name: '你的作品' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '查看作品' })).toBeInTheDocument()
+    expect(screen.getByText(/剪辑清单 · edit-decision-list\.json/)).toBeInTheDocument()
+    expect(screen.getByText(/剪辑策略 · edit-strategy\.md/)).toBeInTheDocument()
+    await waitFor(() => {
+      expect(mocks.taskGet).toHaveBeenCalledWith('video-task-1')
+      expect(mocks.taskFiles).toHaveBeenCalledWith('video-task-1')
+    })
+  })
+
+  it('freezes selected video-edit type, uploaded assets, brief, and preferences into the creation checkpoint', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'creation',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划', available: true },
+        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: true },
+      ],
+      projects: [{ id: 'video-project', name: '视频项目', platform: 'video-edit', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'video-project', runtime_status: 'starting', expires_at: '' })
+    uploadToOSSMock.mockResolvedValue({ uploadSessionId: 'upload-session-1', uploadId: 'upload-session-1', key: 'staging/video.mp4', previewUrl: '/preview.mp4', publicUrl: '/video.mp4', contentType: 'video/mp4', size: 42 })
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:assistant-video')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '创作模式' }))
+    fireEvent.change(await screen.findByRole('combobox', { name: '创作类型' }), { target: { value: 'video-edit' } })
+    fireEvent.change(screen.getByRole('textbox', { name: '剪辑要求' }), { target: { value: '剪成 30 秒访谈短片' } })
+    fireEvent.change(screen.getByRole('combobox', { name: '质量档位' }), { target: { value: 'quality' } })
+    fireEvent.change(screen.getByRole('combobox', { name: '字幕' }), { target: { value: 'required' } })
+    fireEvent.change(screen.getByLabelText('添加参考素材'), { target: { files: [new File(['video'], 'interview.mp4', { type: 'video/mp4' })] } })
+    await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'video_edit_asset' })))
+    await screen.findByText('interview.mp4')
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '自动剪辑我的访谈素材' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', expect.stringContaining('自动剪辑我的访谈素材')))
+    fireEvent.click(await screen.findByRole('button', { name: '确认并保存' }))
+
+    await waitFor(() => expect(mocks.workspaceCheckpoint).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
+      payload: expect.objectContaining({
+        content_type: 'video-edit',
+        assets: [{ type: 'video', upload_id: 'upload-session-1', file_name: 'interview.mp4', mime_type: 'video/mp4', file_size: 42 }],
+        video_edit_preferences: { quality_tier: 'quality', subtitle_mode: 'required' },
+        video_edit_brief: '剪成 30 秒访谈短片',
+      }),
+    })))
   })
 })

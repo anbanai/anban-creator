@@ -206,6 +206,7 @@ type createTaskRequest struct {
 	SellingPoints   string                `json:"selling_points,omitempty"`
 	Language        string                `json:"language,omitempty"`
 	MontageInput    *model.MontageInput   `json:"montage_input,omitempty"`
+	VideoEditInput  *model.VideoEditInput `json:"video_edit_input,omitempty"`
 	HypitInput      *model.HypitInput     `json:"hypit_input,omitempty"`
 	LocalLifeInput  *model.LocalLifeInput `json:"local_life_input,omitempty"`
 }
@@ -235,6 +236,7 @@ type cloneTaskRequest struct {
 	SellingPoints             string                           `json:"selling_points,omitempty"`
 	Language                  string                           `json:"language,omitempty"`
 	MontageInput              *model.MontageInput              `json:"montage_input,omitempty"`
+	VideoEditInput            *model.VideoEditInput            `json:"video_edit_input,omitempty"`
 	HypitInput                *model.HypitInput                `json:"hypit_input,omitempty"`
 	LocalLifeInput            *model.LocalLifeInput            `json:"local_life_input,omitempty"`
 }
@@ -601,6 +603,9 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 	if err := validateMontageSourceAssetURLs(req.MontageInput); err != nil {
 		return nil, Error(c, fiber.StatusBadRequest, err.Error())
 	}
+	if err := validateVideoEditSourceAssetURLs(req.VideoEditInput, h.service.Storage()); err != nil {
+		return nil, Error(c, fiber.StatusBadRequest, err.Error())
+	}
 	if err := validateLocalLifeSourceAssetURLs(req.LocalLifeInput); err != nil {
 		return nil, Error(c, fiber.StatusBadRequest, err.Error())
 	}
@@ -663,6 +668,16 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 			}
 			rewriteFinalizedMontageAssetURLs(req.MontageInput, rewrites)
 		}
+		if requestedChannel == model.ChannelVideoEdit {
+			var finalizedAssets map[string]*model.Asset
+			_, finalizedAssets, err = service.FinalizeUploadSessionURLAssets(c.Context(), finalStore, h.repo, userID, service.DirectUploadPurposeVideoEditAsset, videoEditSourceAssetURLs(req.VideoEditInput), time.Now(), ownedURLChecks...)
+			if err != nil {
+				return nil, respondUploadSessionFinalizeError(c, h.logger, err)
+			}
+			if err := freezeVideoEditSourceAssets(req.VideoEditInput, finalizedAssets); err != nil {
+				return nil, Error(c, fiber.StatusBadRequest, err.Error())
+			}
+		}
 		if requestedChannel == model.ChannelLocalLife {
 			rewrites, err = finalizeUploadSessionURLs(c.Context(), finalizationStore, h.repo, userID, service.DirectUploadPurposeMontageAsset, localLifeSourceAssetURLs(req.LocalLifeInput))
 			if err != nil {
@@ -715,6 +730,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 			CoverUsePortrait:              req.CoverUsePortrait,
 			Ecommerce:                     ecommerceCfg,
 			MontageInput:                  req.MontageInput,
+			VideoEditInput:                req.VideoEditInput,
 			HypitInput:                    req.HypitInput,
 			LocalLifeInput:                req.LocalLifeInput,
 		},
@@ -744,7 +760,7 @@ func (h *TaskHandler) respondTaskCreationServiceError(c fiber.Ctx, userID string
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	h.logger.Error().Err(err).Str("user_id", userID).Msg(logMessage)
-	if errors.Is(err, service.ErrMontageInput) || errors.Is(err, service.ErrHypitInput) {
+	if errors.Is(err, service.ErrMontageInput) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrVideoEditInput) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
@@ -1128,6 +1144,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			SellingPoints:             req.SellingPoints,
 			Language:                  req.Language,
 			MontageInput:              req.MontageInput,
+			VideoEditInput:            req.VideoEditInput,
 			HypitInput:                req.HypitInput,
 			LocalLifeInput:            req.LocalLifeInput,
 		}
@@ -1159,6 +1176,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			CoverUsePortrait:              req.CoverUsePortrait,
 			Ecommerce:                     prepared.params.Ecommerce,
 			MontageInput:                  prepared.params.MontageInput,
+			VideoEditInput:                prepared.params.VideoEditInput,
 			HypitInput:                    prepared.params.HypitInput,
 			LocalLifeInput:                prepared.params.LocalLifeInput,
 		}})

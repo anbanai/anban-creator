@@ -29,6 +29,7 @@ type AgentProjectProfileService struct {
 	tasks             *TaskService
 	resources         *resources.ResourceManager
 	montage           config.MontageConfig
+	videoEdit         config.VideoEditConfig
 	imageCapabilities *ImageCapabilityResolver
 	repo              repository.Repository
 }
@@ -39,6 +40,14 @@ func NewAgentProjectProfileService(projects *ProjectService, tasks *TaskService,
 		repo = repos[0]
 	}
 	return &AgentProjectProfileService{projects: projects, tasks: tasks, resources: manager, montage: montage, imageCapabilities: imageCapabilities, repo: repo}
+}
+
+func (s *AgentProjectProfileService) SetVideoEditConfig(cfg config.VideoEditConfig) {
+	if s == nil {
+		return
+	}
+	cfg.ApplyDefaults()
+	s.videoEdit = cfg
 }
 
 func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectProfileRequest) (*AgentProjectProfile, error) {
@@ -127,7 +136,8 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 	if task != nil && strings.TrimSpace(task.ImageRatio) != "" {
 		effectiveImageRatio = strings.TrimSpace(task.ImageRatio)
 	}
-	if s.imageCapabilities == nil {
+	videoEditOutput := model.IsVideoEditPlatform(outputType)
+	if s.imageCapabilities == nil && !videoEditOutput {
 		return nil, errors.New("image capability resolver not available")
 	}
 	imageCapabilityKey := ""
@@ -137,9 +147,13 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 			return nil, ErrTaskImageCapabilityMissing
 		}
 	}
-	imageCapability, err := s.imageCapabilities.ResolvePublicImageCapability(ctx, req.UserID, imageCapabilityKey)
-	if err != nil {
-		return nil, fmt.Errorf("resolve image capability: %w", err)
+	imageCapabilityKeyResolved := ""
+	if !videoEditOutput {
+		resolved, err := s.imageCapabilities.ResolvePublicImageCapability(ctx, req.UserID, imageCapabilityKey)
+		if err != nil {
+			return nil, fmt.Errorf("resolve image capability: %w", err)
+		}
+		imageCapabilityKeyResolved = resolved.Key
 	}
 	profile := AgentProjectProfile{
 		"name": project.Name, "positioning": project.Instructions,
@@ -171,7 +185,7 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		"keywords": project.Keywords, "visual_style": style.VisualStyle,
 		"creative_constraints": style.VisualStyle, "visual_style_label": "图片视觉",
 		"image_ratio": effectiveImageRatio, "uses_project_snapshot": usesProjectSnapshot,
-		"image_capability_key": imageCapability.Key,
+		"image_capability_key": imageCapabilityKeyResolved,
 		"allowed_image_ratios": model.SupportedImageRatios(resourcePlatform),
 		"sources": map[string]any{
 			"visual_style": style.VisualStyleSource,
@@ -251,6 +265,8 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		profile["ecommerce"] = ecommerce
 	case model.PlatformMontage:
 		profile["montage"] = s.montageProfile(project, task)
+	case model.PlatformVideoEdit:
+		profile["video_edit"] = s.videoEditProfile(project, task)
 	}
 
 	if s.resources != nil {
@@ -269,6 +285,44 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		}
 	}
 	return &profile, nil
+}
+
+func (s *AgentProjectProfileService) videoEditProfile(project *model.Project, task *model.Task) map[string]any {
+	defaults := model.VideoEditDefaults{}
+	if project != nil {
+		defaults = project.VideoEditDefaults.Data()
+	}
+	input := model.VideoEditInput{}
+	if task != nil && model.IsVideoEditPlatform(task.Type) {
+		input = task.VideoEditInput.Data()
+	}
+	return map[string]any{
+		"defaults":       defaults,
+		"input":          input,
+		"default_policy": s.videoEdit.DefaultPolicy,
+		"limits": map[string]any{
+			"max_duration_seconds":  s.videoEdit.MaxDurationSeconds,
+			"max_assets":            s.videoEdit.MaxAssets,
+			"max_asset_bytes":       s.videoEdit.MaxAssetBytes,
+			"max_total_input_bytes": s.videoEdit.MaxTotalInputBytes,
+			"timeout_minutes":       s.videoEdit.TimeoutMinutes,
+		},
+		"env":                  s.videoEdit.RedactedEnv(),
+		"upstream_revision":    "43cfc566833548093455c9d4a46bd69913b7e552",
+		"workspace_input_file": "video-edit-input.json",
+		"policy_file":          "video-edit-policy.json",
+		"project_root":         "/workspace",
+		"required_artifacts": []string{
+			"output/final.mp4",
+			"output/edit-decision-list.json",
+			"output/edit-strategy.md",
+			"output/delivery-manifest.json",
+			"output/quality-evidence.json",
+			"output/content-tags.json",
+		},
+		"optional_artifacts": []string{"output/subtitles.srt", "output/failure-state.json", "output/failure-diagnosis.md", "output/progress-state.json"},
+		"runtime_contract":   "Use browser-use/video-use at the pinned Server-provided commit in the standard /workspace adapter. Execute autonomously, never request interactive edit approval, and never invoke OpenMontage.",
+	}
 }
 
 func (s *AgentProjectProfileService) feedbackStrategyProfile(ctx context.Context, project *model.Project, task *model.Task) (map[string]any, error) {

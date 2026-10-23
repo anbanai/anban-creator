@@ -69,6 +69,36 @@ func validateMontageCompletionArtifacts(files []*model.TaskFile) agent.ArtifactV
 	return agent.ArtifactValidation{Valid: true, MeaningfulFileCount: meaningful}
 }
 
+func validateVideoEditCompletionArtifacts(files []*model.TaskFile) agent.ArtifactValidation {
+	required := []string{"output/final.mp4", "output/edit-decision-list.json", "output/edit-strategy.md", "output/delivery-manifest.json", "output/quality-evidence.json", "output/content-tags.json"}
+	present := make(map[string]bool, len(required))
+	meaningful := 0
+	for _, file := range files {
+		if file == nil || file.FileSize <= 0 || (file.State != model.TaskFileStatePending && file.State != model.TaskFileStateDelivered) {
+			continue
+		}
+		path := filepath.ToSlash(strings.TrimSpace(file.FilePath))
+		if !present[path] {
+			for _, want := range required {
+				if path == want {
+					present[path] = true
+					meaningful++
+				}
+			}
+		}
+	}
+	var missing []string
+	for _, want := range required {
+		if !present[want] {
+			missing = append(missing, want)
+		}
+	}
+	if len(missing) > 0 {
+		return agent.ArtifactValidation{MeaningfulFileCount: meaningful, Missing: missing, Reason: "video-edit missing required deliverables: " + strings.Join(missing, ", ")}
+	}
+	return agent.ArtifactValidation{Valid: true, MeaningfulFileCount: meaningful}
+}
+
 // HandleExecutionFromPayload loads a queued task and starts its durable managed
 // execution through the configured runtime dispatcher.
 func (s *TaskService) HandleExecutionFromPayload(ctx context.Context, taskID, _ string) error {

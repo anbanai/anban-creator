@@ -30,7 +30,7 @@ const DETAIL_LABELS: Record<string, string> = {
 const CONTENT_TYPES: Record<string, string> = {
   article: '文章', wechat_article: '公众号文章', 'wechat-article': '公众号文章',
   seednote: '种草笔记', picture: '图文', wechat_picture: '公众号图文',
-  montage: '视频剪辑', short_video: '短视频', live_slice: '直播切片',
+  montage: '视频剪辑', 'video-edit': '全自动视频剪辑', video_edit: '全自动视频剪辑', short_video: '短视频', live_slice: '直播切片',
 }
 
 function isRecord(value: unknown): value is DraftFields {

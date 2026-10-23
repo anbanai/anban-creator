@@ -95,6 +95,7 @@ type AgentBootstrapConfig struct {
 	MontagePipelineDefaults map[string]map[string]any
 	Hypit                   srvconfig.HypitConfig
 	MontageEnv              map[string]string
+	VideoEdit               srvconfig.VideoEditConfig
 	Registry                *AgentProfileRegistry
 	ProjectMemory           ProjectMemoryReader
 }
@@ -510,6 +511,11 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, err
 	}
 	files = append(files, hypitFiles...)
+	videoEditFiles, err := s.buildVideoEditFiles(ctx, task, credentialDeadline)
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, videoEditFiles...)
 	recoveryFiles, err := s.buildPublicationRecoveryFiles(ctx, execution, task, credentialDeadline)
 	if err != nil {
 		return nil, err
@@ -625,7 +631,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		},
 		MaxTurns: serveragent.DefaultMaxTurns(execution.AgentPackID, s.cfg.MaxTurns), AgentFlag: "anban:" + pack.Agent.Name,
 		AgentMemoryDirectory: ".claude/agent-memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath,
-		Env: s.montageEnv(task), Files: files, ArtifactTransport: ArtifactTransport{Mode: s.artifactTransportMode()},
+		Env: s.runtimeEnv(task), Files: files, ArtifactTransport: ArtifactTransport{Mode: s.artifactTransportMode()},
 		recoveryImages: recoveryImages,
 	}, nil
 }
@@ -811,6 +817,22 @@ func (s *AgentBootstrapService) montageEnv(task *model.Task) map[string]string {
 	return env
 }
 
+func (s *AgentBootstrapService) runtimeEnv(task *model.Task) map[string]string {
+	if task != nil && model.IsVideoEditPlatform(task.Type) {
+		env := make(map[string]string, len(s.cfg.VideoEdit.Env)+1)
+		for key, value := range s.cfg.VideoEdit.Env {
+			if strings.TrimSpace(value) != "" {
+				env[key] = value
+			}
+		}
+		if key := strings.TrimSpace(s.cfg.VideoEdit.ElevenLabsAPIKey); key != "" {
+			env["ELEVENLABS_API_KEY"] = key
+		}
+		return env
+	}
+	return s.montageEnv(task)
+}
+
 func (s *AgentBootstrapService) buildMontageFiles(ctx context.Context, task *model.Task, credentialDeadline time.Time) ([]BootstrapFile, error) {
 	if task == nil || !model.IsMontagePlatform(task.Type) {
 		return nil, nil
@@ -839,6 +861,113 @@ func (s *AgentBootstrapService) buildMontageFiles(ctx context.Context, task *mod
 		files = append(files, BootstrapFile{Path: value.path, Text: string(raw), Mode: 0644})
 	}
 	return files, nil
+}
+
+func (s *AgentBootstrapService) buildVideoEditFiles(ctx context.Context, task *model.Task, credentialDeadline time.Time) ([]BootstrapFile, error) {
+	if task == nil || !model.IsVideoEditPlatform(task.Type) {
+		return nil, nil
+	}
+	input := task.VideoEditInput.Data()
+	if err := input.Validate(s.cfg.VideoEdit.MaxAssets, s.cfg.VideoEdit.MaxDurationSeconds); err != nil {
+		return nil, fmt.Errorf("%w: validate frozen video-edit input: %v", ErrAgentBootstrapConflict, err)
+	}
+	if s.repo == nil || s.cfg.Store == nil {
+		return nil, fmt.Errorf("%w: video-edit source material storage is unavailable", ErrAgentBootstrapUnavailable)
+	}
+	maxAssetBytes := s.cfg.VideoEdit.MaxAssetBytes
+	if maxAssetBytes <= 0 {
+		maxAssetBytes = 256 << 20
+	}
+	maxTotalInputBytes := s.cfg.VideoEdit.MaxTotalInputBytes
+	if maxTotalInputBytes <= 0 {
+		maxTotalInputBytes = 1 << 30
+	}
+	files := make([]BootstrapFile, 0, len(input.SourceAssets)+2)
+	totalInputBytes := int64(0)
+	assets := make([]*model.Asset, len(input.SourceAssets))
+	for i := range input.SourceAssets {
+		asset := &input.SourceAssets[i]
+		assetID := strings.TrimSpace(asset.AssetID)
+		stored, err := s.repo.Assets().FindOwnedByID(ctx, assetID, task.UserID)
+		if err != nil || stored == nil {
+			return nil, fmt.Errorf("%w: video-edit source asset %q is unavailable", ErrAgentBootstrapConflict, assetID)
+		}
+		if err := validateVideoEditSourceAssetMaterializable(stored, task.UserID, s.cfg.Store.Name(), asset, maxAssetBytes); err != nil {
+			return nil, fmt.Errorf("%w: video-edit source asset %q %v", ErrAgentBootstrapConflict, assetID, err)
+		}
+		if stored.Size > maxTotalInputBytes-totalInputBytes {
+			return nil, fmt.Errorf("%w: video-edit source assets exceed %d bytes in total", ErrAgentBootstrapConflict, maxTotalInputBytes)
+		}
+		totalInputBytes += stored.Size
+		assets[i] = stored
+	}
+	for i := range input.SourceAssets {
+		asset := &input.SourceAssets[i]
+		stored := assets[i]
+		signed, err := s.signedBootstrapObjectKey(ctx, stored.StorageKey, credentialDeadline)
+		if err != nil {
+			return nil, fmt.Errorf("sign video-edit source asset %q: %w", stored.ID, err)
+		}
+		name := serveragent.InputAttachmentFilename(i+1, model.EntryAttachment{FileName: stored.FileName, ContentType: stored.ContentType, Key: stored.StorageKey})
+		rel := path.Join(".anban-creator/video-edit-assets", name)
+		files = append(files, BootstrapFile{Path: rel, DownloadURL: signed, Mode: 0644, ExpectedSize: stored.Size, MaxBytes: maxAssetBytes})
+		asset.AssetID = ""
+		asset.WorkspacePath = rel
+		asset.FileName = stored.FileName
+		asset.MimeType = stored.ContentType
+		asset.FileSize = stored.Size
+	}
+	raw, err := json.MarshalIndent(input, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal video-edit input: %w", err)
+	}
+	files = append(files, BootstrapFile{Path: "video-edit-input.json", Text: string(raw), Mode: 0644})
+	policy := map[string]any{
+		"quality_tier":  input.Preferences.QualityTier,
+		"subtitle_mode": input.Preferences.SubtitleMode,
+		"upstream":      "browser-use/video-use@43cfc566833548093455c9d4a46bd69913b7e552",
+		"automatic":     true,
+		"output_dir":    "output",
+	}
+	policyRaw, err := json.MarshalIndent(policy, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal video-edit policy: %w", err)
+	}
+	files = append(files, BootstrapFile{Path: "video-edit-policy.json", Text: string(policyRaw), Mode: 0644})
+	return files, nil
+}
+
+func validateVideoEditSourceAssetMaterializable(asset *model.Asset, userID, expectedStorageProvider string, input *model.VideoEditAsset, maxBytes int64) error {
+	if asset == nil || input == nil {
+		return errors.New("is unavailable")
+	}
+	userID = strings.TrimSpace(userID)
+	expectedStorageProvider = strings.TrimSpace(expectedStorageProvider)
+	if userID == "" || asset.UserID != userID {
+		return errors.New("is not owned by the task user")
+	}
+	if expectedStorageProvider != "oss" || (asset.Purpose != DirectUploadPurposeVideoEditAsset && asset.Purpose != DirectUploadPurposeAIEntryAttachment) {
+		return errors.New("does not use the finalized video-edit upload storage")
+	}
+	if asset.ID == "" || asset.FileName == "" || asset.FileName == "." || asset.FileName == "/" || path.Base(asset.FileName) != asset.FileName ||
+		asset.StorageKey != path.Join("assets/users", userID, asset.ID, asset.FileName) || path.Clean(asset.StorageKey) != asset.StorageKey {
+		return errors.New("has no canonical finalized storage object")
+	}
+	if maxBytes <= 0 {
+		maxBytes = 256 << 20
+	}
+	if asset.Size <= 0 || asset.Size > maxBytes || strings.TrimSpace(asset.ETag) == "" {
+		return fmt.Errorf("must have valid integrity metadata and be between 1 and %d bytes", maxBytes)
+	}
+	if !montageSourceTaskFileTypeMatches(input.Type, asset.ContentType) {
+		return fmt.Errorf("does not match asset type %q", input.Type)
+	}
+	if input.FileName != "" && input.FileName != asset.FileName ||
+		input.MimeType != "" && normalizeDirectUploadContentType(input.MimeType) != normalizeDirectUploadContentType(asset.ContentType) ||
+		input.FileSize > 0 && input.FileSize != asset.Size {
+		return errors.New("metadata does not match the finalized asset")
+	}
+	return nil
 }
 
 func (s *AgentBootstrapService) buildLocalLifeFiles(ctx context.Context, task *model.Task, credentialDeadline time.Time) ([]BootstrapFile, error) {
