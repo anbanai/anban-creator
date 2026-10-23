@@ -16,6 +16,32 @@ func TestConfigRejectsLegacyTopLevelImagePresets(t *testing.T) {
 	}
 }
 
+func TestArticleResourceModeDefaultsToLegacyAndValidatesConfiguredMode(t *testing.T) {
+	cfg, err := loadClaudeConfigYAML(t, validClaudeConfigYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ArticleResources.LifecycleMode != "legacy" {
+		t.Fatalf("article_resources.lifecycle_mode = %q, want legacy", cfg.ArticleResources.LifecycleMode)
+	}
+
+	for _, mode := range []string{"compatibility", "native"} {
+		body := strings.Replace(validClaudeConfigYAML, "database:\n", "article_resources:\n  lifecycle_mode: "+mode+"\ndatabase:\n", 1)
+		cfg, err := loadClaudeConfigYAML(t, body)
+		if err != nil {
+			t.Fatalf("load mode %q: %v", mode, err)
+		}
+		if cfg.ArticleResources.LifecycleMode != mode {
+			t.Fatalf("configured lifecycle mode = %q, want %q", cfg.ArticleResources.LifecycleMode, mode)
+		}
+	}
+
+	body := strings.Replace(validClaudeConfigYAML, "database:\n", "article_resources:\n  lifecycle_mode: preview\ndatabase:\n", 1)
+	if _, err := loadClaudeConfigYAML(t, body); err == nil || !strings.Contains(err.Error(), "article_resources.lifecycle_mode") {
+		t.Fatalf("invalid lifecycle mode error = %v, want article_resources.lifecycle_mode", err)
+	}
+}
+
 func TestClaudeConfigRejectsExecutionProfileEnvDefaults(t *testing.T) {
 	body := strings.Replace(
 		validClaudeConfigYAML,

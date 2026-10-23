@@ -1,4 +1,24 @@
 name: quote
+schema_version: "1.0"
+lifecycle: legacy
+canonical_example:
+  text: "模块不是为了让页面更满，而是为了让读者更快找到判断、证据和下一步。"
+  source: "内容设计原则"
+  label: "核心观点"
+provenance:
+  source: md2wechat-skill
+  version: 3.8.0
+  reference: internal/assets/builtin/layout/evidence/quote.yaml
+  imported_at: "2026-10-23"
+anban_contract:
+  lifecycle: compatibility
+  version: anban.layout.v1
+  required:
+    - {name: text, description: 引用正文}
+  optional:
+    - {name: label, description: 引用标签}
+    - {name: source, description: 引用来源}
+    - {name: role, description: 来源身份}
 category: memorability
 serves: [attention, memorability]
 description: 精选引用卡片，用于突出展示金句、核心观点或权威引用

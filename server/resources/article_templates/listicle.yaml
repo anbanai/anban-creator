@@ -19,7 +19,7 @@ image_count:
   max: 8
 section_image_size: full-width
 modules:
-  preferred: [steps, metrics, callout, summary]
+  preferred: [steps, metrics, callout, summary, comparison-table]
   forbidden: [quote]
 pairs_well_with: [steps, metrics]
 composition_guidance:

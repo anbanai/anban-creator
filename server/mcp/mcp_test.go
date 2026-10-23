@@ -339,6 +339,19 @@ func TestMCPHandlerExecutionTokenEnforcesToolCallScope(t *testing.T) {
 	}
 }
 
+func TestInspectArticleExecutionScopeAllowsOptionalTaskID(t *testing.T) {
+	if err := validateExecutionToolScope("inspect_article", map[string]any{
+		"project_id": "project-1",
+	}, "project-1", "task-1", "execution-1"); err != nil {
+		t.Fatalf("inspect_article without optional task_id rejected: %v", err)
+	}
+	if err := validateExecutionToolScope("inspect_article", map[string]any{
+		"project_id": "project-1", "task_id": "task-2",
+	}, "project-1", "task-1", "execution-1"); err == nil {
+		t.Fatal("inspect_article accepted task_id from another task")
+	}
+}
+
 func TestMCPHandlerCurrentExecutionTokenReachesEachFixedSKUServiceExactlyOnce(t *testing.T) {
 	const (
 		userID      = "user-1"

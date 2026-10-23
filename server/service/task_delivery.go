@@ -30,6 +30,7 @@ import (
 	"golang.org/x/net/html"
 
 	"github.com/anbanai/anban-creator/server/agentpack"
+	"github.com/anbanai/anban-creator/server/app/articlecheck"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/storage"
 	"gorm.io/gorm"
@@ -375,6 +376,9 @@ func (s *TaskService) validateStoredDeliveryHTML(ctx context.Context, file *mode
 	}
 	if err := validateWechatHTMLFragment(file.FilePath, data); err != nil {
 		return err
+	}
+	if findings := articlecheck.ValidateHTMLFragment(string(data), nil); len(findings) > 0 {
+		return fmt.Errorf("%w: %s shared HTML checks failed: %s", ErrTaskDeliveryObjectInvalid, file.FilePath, strings.Join(findings, ", "))
 	}
 	document, err := html.Parse(bytes.NewReader(data))
 	if err != nil {

@@ -1,4 +1,28 @@
 name: comparison-table
+schema_version: "1.0"
+lifecycle: legacy
+canonical_example:
+  title: "两种方案对比"
+  left_title: "方案 A"
+  left_items: "部署快 | 上手成本低"
+  right_title: "方案 B"
+  right_items: "扩展性强 | 维护成本更高"
+provenance:
+  source: md2wechat-skill
+  version: 3.8.0
+  reference: internal/assets/builtin/layout/sprint4/comparison-table.yaml
+  imported_at: "2026-10-23"
+anban_contract:
+  lifecycle: compatibility
+  version: anban.layout.v1
+  required:
+    - {name: title, description: 对比标题}
+    - {name: left_title, description: 左侧列标题}
+    - {name: left_items, description: 左侧对比项，使用 | 分隔}
+    - {name: right_title, description: 右侧列标题}
+    - {name: right_items, description: 右侧对比项，使用 | 分隔}
+  optional:
+    - {name: conclusion, description: 对比结论}
 category: readability
 serves: [readability, attention]
 description: 方案对比表格，用于并排展示不同方案的优缺点或特性差异

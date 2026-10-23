@@ -477,6 +477,7 @@ var executionToolScopes = map[string]executionToolScope{
 	"claim_topic":             {RequireProjectID: true, RequireTaskID: true},
 	"convert_markdown":        {RequireProjectID: true, RequireTaskID: true},
 	"render_template":         {RequireProjectID: true, RequireTaskID: true},
+	"inspect_article":         {RequireProjectID: true},
 
 	// Task-scoped reads and mutations must name the exact current task.
 	"get_task":                       {RequireTaskID: true},

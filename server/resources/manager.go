@@ -19,6 +19,14 @@ type ResourceManager struct {
 	rawContent       map[Category]map[string][]byte
 }
 
+type LifecycleMode string
+
+const (
+	LifecycleModeLegacy        LifecycleMode = "legacy"
+	LifecycleModeCompatibility LifecycleMode = "compatibility"
+	LifecycleModeNative        LifecycleMode = "native"
+)
+
 var globalManager *ResourceManager
 
 func init() {
@@ -139,6 +147,29 @@ func (rm *ResourceManager) ListByPlatform(category Category, platform string) []
 	return make([]ResourceEntry, 0)
 }
 
+// ListBySelectionMode filters resources according to the explicitly enabled
+// compatibility surface. An empty mode preserves the legacy-only default.
+func (rm *ResourceManager) ListBySelectionMode(category Category, platform string, mode LifecycleMode) ([]ResourceEntry, error) {
+	if mode == "" {
+		mode = LifecycleModeLegacy
+	}
+	if !validLifecycleMode(mode) {
+		return nil, fmt.Errorf("unsupported lifecycle mode %q", mode)
+	}
+	items := rm.ListByPlatform(category, platform)
+	filtered := make([]ResourceEntry, 0, len(items))
+	for _, item := range items {
+		if LifecycleAllowed(item.Lifecycle, mode) {
+			if item.ModuleContract != nil && LifecycleAllowed(item.ModuleContract.Lifecycle, mode) {
+				item.ModuleContractVersion = item.ModuleContract.Version
+				item.ModuleContractLifecycle = item.ModuleContract.Lifecycle
+			}
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered, nil
+}
+
 func (rm *ResourceManager) loadThemes() error {
 	entries, err := fs.ReadDir(ThemesFS, "themes")
 	if err != nil {
@@ -172,6 +203,7 @@ func (rm *ResourceManager) loadThemes() error {
 			Name:        raw.Name,
 			Category:    CategoryTheme,
 			Description: raw.Description,
+			Lifecycle:   LifecycleLegacy,
 			Mood:        raw.StyleInfo.Mood,
 			BestFor:     raw.StyleInfo.BestFor,
 			Colors:      raw.Colors,
@@ -230,6 +262,7 @@ func (rm *ResourceManager) loadWriters() error {
 			Name:               raw.Name,
 			Category:           CategoryWriter,
 			Description:        raw.Description,
+			Lifecycle:          LifecycleLegacy,
 			DisplayName:        raw.Name,
 			EnglishName:        raw.EnglishName,
 			CategoryCn:         raw.Category,
@@ -274,15 +307,22 @@ func (rm *ResourceManager) loadLayouts() error {
 			return err
 		}
 		var raw struct {
-			Name           string      `yaml:"name"`
-			Category       string      `yaml:"category"`
-			Serves         []string    `yaml:"serves"`
-			Description    string      `yaml:"description"`
-			WhenToUse      string      `yaml:"when_to_use"`
-			MarkdownSyntax string      `yaml:"markdown_syntax"`
-			BodyFormat     string      `yaml:"body_format"`
-			Fields         *FieldsSpec `yaml:"fields"`
-			Rows           *RowsSpec   `yaml:"rows"`
+			Name             string             `yaml:"name"`
+			Category         string             `yaml:"category"`
+			Serves           []string           `yaml:"serves"`
+			Description      string             `yaml:"description"`
+			WhenToUse        string             `yaml:"when_to_use"`
+			MarkdownSyntax   string             `yaml:"markdown_syntax"`
+			BodyFormat       string             `yaml:"body_format"`
+			Fields           *FieldsSpec        `yaml:"fields"`
+			Rows             *RowsSpec          `yaml:"rows"`
+			SchemaVersion    string             `yaml:"schema_version"`
+			Lifecycle        string             `yaml:"lifecycle"`
+			WhenNotToUse     string             `yaml:"when_not_to_use"`
+			PairsWellWith    []string           `yaml:"pairs_well_with"`
+			CanonicalExample map[string]string  `yaml:"canonical_example"`
+			Provenance       ResourceProvenance `yaml:"provenance"`
+			ModuleContract   *ModuleContract    `yaml:"anban_contract"`
 		}
 		if err := yaml.Unmarshal(data, &raw); err != nil {
 			return fmt.Errorf("unmarshal layout %s: %w", e.Name(), err)
@@ -290,17 +330,35 @@ func (rm *ResourceManager) loadLayouts() error {
 		if raw.Name == "" {
 			return fmt.Errorf("layout %s missing name", e.Name())
 		}
+		lifecycle, err := normalizeLifecycle(raw.Lifecycle)
+		if err != nil {
+			return fmt.Errorf("layout %s: %w", e.Name(), err)
+		}
+		if raw.ModuleContract != nil {
+			contractLifecycle, err := normalizeLifecycle(string(raw.ModuleContract.Lifecycle))
+			if err != nil {
+				return fmt.Errorf("layout %s contract: %w", e.Name(), err)
+			}
+			raw.ModuleContract.Lifecycle = contractLifecycle
+		}
 		entry := &ResourceEntry{
-			Name:           raw.Name,
-			Category:       CategoryLayout,
-			Description:    raw.Description,
-			LayoutCategory: raw.Category,
-			Serves:         raw.Serves,
-			WhenToUse:      raw.WhenToUse,
-			MarkdownSyntax: raw.MarkdownSyntax,
-			BodyFormat:     raw.BodyFormat,
-			Fields:         raw.Fields,
-			Rows:           raw.Rows,
+			Name:             raw.Name,
+			Category:         CategoryLayout,
+			Description:      raw.Description,
+			LayoutCategory:   raw.Category,
+			Serves:           raw.Serves,
+			WhenToUse:        raw.WhenToUse,
+			MarkdownSyntax:   raw.MarkdownSyntax,
+			BodyFormat:       raw.BodyFormat,
+			Fields:           raw.Fields,
+			Rows:             raw.Rows,
+			SchemaVersion:    raw.SchemaVersion,
+			Lifecycle:        lifecycle,
+			WhenNotToUse:     raw.WhenNotToUse,
+			PairsWellWith:    raw.PairsWellWith,
+			CanonicalExample: raw.CanonicalExample,
+			Provenance:       raw.Provenance,
+			ModuleContract:   raw.ModuleContract,
 		}
 		rm.layouts[raw.Name] = entry
 		rm.rawContent[CategoryLayout][raw.Name] = data
@@ -330,8 +388,15 @@ func (rm *ResourceManager) loadArticleTemplates() error {
 			ImageCount   map[string]int `yaml:"image_count"`
 			Modules      struct {
 				Preferred []string `yaml:"preferred"`
+				Forbidden []string `yaml:"forbidden"`
 			} `yaml:"modules"`
-			CompositionGuidance []string `yaml:"composition_guidance"`
+			CompositionGuidance []string           `yaml:"composition_guidance"`
+			SchemaVersion       string             `yaml:"schema_version"`
+			Lifecycle           string             `yaml:"lifecycle"`
+			WhenNotToUse        string             `yaml:"when_not_to_use"`
+			PairsWellWith       []string           `yaml:"pairs_well_with"`
+			CanonicalExample    map[string]string  `yaml:"canonical_example"`
+			Provenance          ResourceProvenance `yaml:"provenance"`
 		}
 		if err := yaml.Unmarshal(data, &raw); err != nil {
 			return fmt.Errorf("unmarshal article template %s: %w", e.Name(), err)
@@ -348,6 +413,10 @@ func (rm *ResourceManager) loadArticleTemplates() error {
 		if len(raw.Modules.Preferred) == 0 || len(raw.CompositionGuidance) == 0 {
 			return fmt.Errorf("article template %s missing module/composition guidance", raw.Name)
 		}
+		lifecycle, err := normalizeLifecycle(raw.Lifecycle)
+		if err != nil {
+			return fmt.Errorf("article template %s: %w", e.Name(), err)
+		}
 		entry := &ResourceEntry{
 			Name:                 raw.Name,
 			Category:             CategoryArticleTemplate,
@@ -358,7 +427,14 @@ func (rm *ResourceManager) loadArticleTemplates() error {
 			TemplateRhythm:       raw.Rhythm,
 			TemplateImageCount:   raw.ImageCount,
 			TemplateModules:      raw.Modules.Preferred,
+			TemplateForbidden:    raw.Modules.Forbidden,
 			CompositionGuidance:  raw.CompositionGuidance,
+			SchemaVersion:        raw.SchemaVersion,
+			Lifecycle:            lifecycle,
+			WhenNotToUse:         raw.WhenNotToUse,
+			PairsWellWith:        raw.PairsWellWith,
+			CanonicalExample:     raw.CanonicalExample,
+			Provenance:           raw.Provenance,
 		}
 		rm.articleTemplates[raw.Name] = entry
 		rm.rawContent[CategoryArticleTemplate][raw.Name] = data

@@ -42,6 +42,7 @@ var reviewedMCPHandlerCapabilities = map[string]string{
 	"feedbackContextHandler":                  "svcs.TaskSvc.Repository",
 	"generateImageHandler":                    "svcs.TaskImageSvc.Generate",
 	"getResourceHandler":                      "svcs.ResourceCatalogSvc.Query",
+	"inspectArticleHandler":                   "svcs.ContentRenderSvc.InspectArticle",
 	"listDraftsHandler":                       "svcs.PublishingSvc.ListDrafts",
 	"listPublishedHandler":                    "svcs.PublishingSvc.ListPublished",
 	"listResourcesHandler":                    "svcs.ResourceCatalogSvc.Query",

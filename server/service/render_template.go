@@ -10,6 +10,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/anbanai/anban-creator/server/app/articlecheck"
 	"github.com/anbanai/anban-creator/server/app/converter"
 	"github.com/anbanai/anban-creator/server/resources"
 )
@@ -33,10 +34,11 @@ type LayoutPlanSlot struct {
 
 // LayoutPlan is the structured rendering plan passed to RenderTemplate.
 type LayoutPlan struct {
-	ArticleType  string           `json:"article_type"`
-	TemplateName string           `json:"template_name"`
-	Slots        []LayoutPlanSlot `json:"slots"`
-	Footer       *LayoutPlanSlot  `json:"footer,omitempty"`
+	ArticleType     string           `json:"article_type"`
+	TemplateName    string           `json:"template_name"`
+	ContractVersion string           `json:"contract_version,omitempty"`
+	Slots           []LayoutPlanSlot `json:"slots"`
+	Footer          *LayoutPlanSlot  `json:"footer,omitempty"`
 }
 
 // RenderedSlotAudit records what the renderer actually rendered for each planned slot.
@@ -94,8 +96,16 @@ func ParseLayoutPlan(raw any) (*LayoutPlan, error) {
 			return nil, fmt.Errorf("slot[%d].slot_id %q is not a recognized slot (want one of hero/section_opener/inline_detail/footer)", i, slot.SlotID)
 		}
 	}
-	if plan.Footer != nil && plan.Footer.SlotID != "" && !validSlotIDs[plan.Footer.SlotID] {
-		return nil, fmt.Errorf("footer.slot_id %q is not a recognized slot", plan.Footer.SlotID)
+	if plan.Footer != nil {
+		// The public MCP footer shorthand omits slot_id/section_index. Normalize
+		// it before rendering so the footer module is not silently dropped by the
+		// slot dispatcher, while still rejecting an explicitly misclassified slot.
+		if plan.Footer.SlotID == "" {
+			plan.Footer.SlotID = "footer"
+			plan.Footer.SectionIndex = -1
+		} else if plan.Footer.SlotID != "footer" {
+			return nil, fmt.Errorf("footer.slot_id %q must be footer", plan.Footer.SlotID)
+		}
 	}
 	return &plan, nil
 }
@@ -128,6 +138,26 @@ func (s *ContentRenderService) RenderTemplate(
 	if layoutPlan == nil {
 		return nil, fmt.Errorf("layout_plan is required")
 	}
+	if layoutPlan.ContractVersion != "" && layoutPlan.ContractVersion != "anban.layout.v1" {
+		return nil, fmt.Errorf("unsupported layout contract_version %q", layoutPlan.ContractVersion)
+	}
+	if layoutPlan.ContractVersion != "" && s.articleResourceMode == resources.LifecycleModeLegacy {
+		return nil, fmt.Errorf("article resource lifecycle mode %q does not allow layout contract %q", s.articleResourceMode, layoutPlan.ContractVersion)
+	}
+	var preflightModules []articlecheck.ModuleUsage
+	if layoutPlan.ContractVersion != "" {
+		preflightModules = articleModuleUsages(layoutPlan, s.articleResourceMode)
+	}
+	preflight := articlecheck.Inspect(articlecheck.Request{
+		Target:     "source",
+		Markdown:   markdown,
+		Template:   layoutPlan.TemplateName,
+		Modules:    preflightModules,
+		ImageSlots: articleImageSlotUsages(layoutPlan),
+	})
+	if len(preflight.Readiness.Blockers) > 0 {
+		return nil, fmt.Errorf("article layout validation failed: %s", strings.Join(preflight.Readiness.Blockers, ", "))
+	}
 
 	ch, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
@@ -146,7 +176,7 @@ func (s *ContentRenderService) RenderTemplate(
 	// Deterministically fold slot images and layout modules into the markdown at
 	// their planned positions, then render the whole document with the structured
 	// theme.
-	augmented, err := applySlotsAndModulesToMarkdown(markdown, layoutPlan)
+	augmented, err := applySlotsAndModulesToMarkdown(markdown, layoutPlan, s.articleResourceMode)
 	if err != nil {
 		return nil, err
 	}
@@ -160,6 +190,9 @@ func (s *ContentRenderService) RenderTemplate(
 
 	// Slot images are final — render their placeholders as real <img> tags.
 	html := renderImagesAsRealTags(convResult.HTML, convResult.Images, layoutPlan)
+	if issues := articlecheck.ValidateHTMLFragment(html, collectArticleImageURLs(markdown, layoutPlan)); len(issues) > 0 {
+		return nil, fmt.Errorf("article rendered HTML validation failed: %s", strings.Join(issues, ", "))
+	}
 
 	slotsRendered := auditRenderedSlots(html, auditableSlots(layoutPlan))
 
@@ -176,6 +209,73 @@ func (s *ContentRenderService) RenderTemplate(
 		SlotsRendered: slotsRendered,
 		Theme:         theme,
 	}, nil
+}
+
+func articleModuleUsages(plan *LayoutPlan, mode resources.LifecycleMode) []articlecheck.ModuleUsage {
+	if plan == nil {
+		return nil
+	}
+	slots := append([]LayoutPlanSlot(nil), plan.Slots...)
+	if plan.Footer != nil {
+		slots = append(slots, *plan.Footer)
+	}
+	modules := make([]articlecheck.ModuleUsage, 0, len(slots))
+	for _, slot := range slots {
+		if slot.Module == nil || strings.TrimSpace(*slot.Module) == "" {
+			continue
+		}
+		name := strings.TrimSpace(*slot.Module)
+		if len(slot.ModuleVars) == 0 && strings.TrimSpace(slot.ImageURL) != "" && plan.ContractVersion == "" {
+			continue
+		}
+		entry := resources.Manager().Get(resources.CategoryLayout, name)
+		usage := articlecheck.ModuleUsage{Name: name, Known: entry != nil, ContractKnown: entry != nil, Values: slot.ModuleVars}
+		if entry == nil {
+			modules = append(modules, usage)
+			continue
+		}
+		fields := entry.Fields
+		if plan.ContractVersion != "" {
+			contract := entry.ModuleContract
+			usage.ContractKnown = contract != nil && contract.Version == plan.ContractVersion && resources.LifecycleAllowed(contract.Lifecycle, mode)
+			if contract != nil {
+				fields = &resources.FieldsSpec{Required: contract.Required, Optional: contract.Optional}
+				usage.VariantField = contract.VariantField
+				usage.DefaultVariant = contract.DefaultVariant
+				usage.Variants = make(map[string]articlecheck.VariantUsage, len(contract.Variants))
+				for variant, spec := range contract.Variants {
+					usage.Variants[variant] = articlecheck.VariantUsage{Required: spec.Required, RequiredAny: spec.RequiredAny}
+				}
+			}
+		}
+		if fields != nil {
+			if plan.ContractVersion != "" {
+				for _, field := range append(append([]resources.FieldSpec(nil), fields.Required...), fields.Optional...) {
+					usage.Allowed = append(usage.Allowed, field.Name)
+				}
+			}
+			for _, field := range fields.Required {
+				usage.Required = append(usage.Required, field.Name)
+			}
+			if plan.ContractVersion != "" {
+				usage.Enums = make(map[string][]string)
+				if usage.VariantField != "" {
+					for _, field := range append(append([]resources.FieldSpec(nil), fields.Required...), fields.Optional...) {
+						if field.Name == usage.VariantField && len(field.Enum) > 0 {
+							usage.Enums[field.Name] = field.Enum
+						}
+					}
+				}
+				for _, field := range append(append([]resources.FieldSpec(nil), fields.Required...), fields.Optional...) {
+					if len(field.Enum) > 0 {
+						usage.Enums[field.Name] = field.Enum
+					}
+				}
+			}
+		}
+		modules = append(modules, usage)
+	}
+	return modules
 }
 
 // ---------------------------------------------------------------------------
@@ -255,7 +355,7 @@ func applySlotsToMarkdown(markdown string, plan *LayoutPlan) string {
 	return b.String()
 }
 
-func applySlotsAndModulesToMarkdown(markdown string, plan *LayoutPlan) (string, error) {
+func applySlotsAndModulesToMarkdown(markdown string, plan *LayoutPlan, mode resources.LifecycleMode) (string, error) {
 	existing := collectInlineImageURLs(markdown)
 	slots := make([]LayoutPlanSlot, 0, len(plan.Slots))
 	for _, slot := range plan.Slots {
@@ -272,7 +372,7 @@ func applySlotsAndModulesToMarkdown(markdown string, plan *LayoutPlan) (string, 
 	var footer []string
 
 	for _, slot := range slots {
-		block, err := slotMarkdownBlock(slot, existing)
+		block, err := slotMarkdownBlock(slot, existing, plan.ContractVersion, mode)
 		if err != nil {
 			return "", err
 		}
@@ -299,7 +399,7 @@ func applySlotsAndModulesToMarkdown(markdown string, plan *LayoutPlan) (string, 
 		b.WriteString("\n\n")
 	}
 	for i, section := range sections {
-		b.WriteString(renderSectionWithModuleBlocks(section, openers[i], inlines[i], existing))
+		b.WriteString(renderSectionWithModuleBlocks(section, openers[i], inlines[i], existing, plan.ContractVersion, mode))
 		b.WriteString("\n")
 	}
 	if len(footer) > 0 {
@@ -310,7 +410,7 @@ func applySlotsAndModulesToMarkdown(markdown string, plan *LayoutPlan) (string, 
 	return b.String(), nil
 }
 
-func renderSectionWithModuleBlocks(section string, openerBlocks []string, inlines []LayoutPlanSlot, existing map[string]bool) string {
+func renderSectionWithModuleBlocks(section string, openerBlocks []string, inlines []LayoutPlanSlot, existing map[string]bool, contractVersion string, mode resources.LifecycleMode) string {
 	head := ""
 	body := section
 	if strings.HasPrefix(section, "## ") {
@@ -329,11 +429,11 @@ func renderSectionWithModuleBlocks(section string, openerBlocks []string, inline
 		b.WriteString(block)
 		b.WriteString("\n\n")
 	}
-	b.WriteString(insertInlineBlocks(body, inlines, existing))
+	b.WriteString(insertInlineBlocks(body, inlines, existing, contractVersion, mode))
 	return b.String()
 }
 
-func insertInlineBlocks(body string, inlines []LayoutPlanSlot, existing map[string]bool) string {
+func insertInlineBlocks(body string, inlines []LayoutPlanSlot, existing map[string]bool, contractVersion string, mode resources.LifecycleMode) string {
 	if len(inlines) == 0 || strings.TrimSpace(body) == "" {
 		return body
 	}
@@ -343,7 +443,7 @@ func insertInlineBlocks(body string, inlines []LayoutPlanSlot, existing map[stri
 	paras := splitParagraphs(body)
 	byPara := map[int][]string{}
 	for _, in := range sorted {
-		block, err := slotMarkdownBlock(in, existing)
+		block, err := slotMarkdownBlock(in, existing, contractVersion, mode)
 		if err != nil || block == "" {
 			continue
 		}
@@ -370,9 +470,9 @@ func insertInlineBlocks(body string, inlines []LayoutPlanSlot, existing map[stri
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 
-func slotMarkdownBlock(slot LayoutPlanSlot, existing map[string]bool) (string, error) {
+func slotMarkdownBlock(slot LayoutPlanSlot, existing map[string]bool, contractVersion string, mode resources.LifecycleMode) (string, error) {
 	parts := []string{}
-	if mod, err := renderLayoutModuleMarkdown(slot); err != nil {
+	if mod, err := renderLayoutModuleMarkdown(slot, contractVersion, mode); err != nil {
 		return "", err
 	} else if mod != "" {
 		parts = append(parts, mod)
@@ -383,7 +483,7 @@ func slotMarkdownBlock(slot LayoutPlanSlot, existing map[string]bool) (string, e
 	return strings.Join(parts, "\n\n"), nil
 }
 
-func renderLayoutModuleMarkdown(slot LayoutPlanSlot) (string, error) {
+func renderLayoutModuleMarkdown(slot LayoutPlanSlot, contractVersion string, mode resources.LifecycleMode) (string, error) {
 	if slot.Module == nil || strings.TrimSpace(*slot.Module) == "" {
 		return "", nil
 	}
@@ -394,6 +494,36 @@ func renderLayoutModuleMarkdown(slot LayoutPlanSlot) (string, error) {
 	entry := resources.Manager().Get(resources.CategoryLayout, name)
 	if entry == nil {
 		return "", fmt.Errorf("module %s not found", name)
+	}
+	if contractVersion != "" {
+		contract := entry.ModuleContract
+		if contract == nil || contract.Version != contractVersion {
+			return "", fmt.Errorf("module %s has no %s contract", name, contractVersion)
+		}
+		if !resources.LifecycleAllowed(contract.Lifecycle, mode) {
+			return "", fmt.Errorf("article resource lifecycle mode %q does not allow module %s contract %s (%s)", mode, name, contractVersion, contract.Lifecycle)
+		}
+		for field, value := range slot.ModuleVars {
+			if len([]rune(value)) > 2000 {
+				return "", fmt.Errorf("module %s field %s exceeds 2000 characters", name, field)
+			}
+		}
+		switch name {
+		case "quote":
+			return renderQuoteModule(slot.ModuleVars), nil
+		case "callout":
+			return renderCalloutModule(slot.ModuleVars)
+		case "steps":
+			return renderStepsModule(slot.ModuleVars)
+		case "checklist":
+			return renderChecklistModule(slot.ModuleVars)
+		case "summary":
+			return renderSummaryModule(slot.ModuleVars)
+		case "comparison-table":
+			return renderComparisonTableModule(slot.ModuleVars)
+		default:
+			return "", fmt.Errorf("module %s has no %s renderer", name, contractVersion)
+		}
 	}
 	for _, field := range requiredFields(entry) {
 		if strings.TrimSpace(slot.ModuleVars[field.Name]) == "" {
@@ -465,6 +595,212 @@ func renderHeroModule(vars map[string]string) string {
 		fmt.Fprintf(&b, "*%s*\n\n---", cta)
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func renderCalloutModule(vars map[string]string) (string, error) {
+	typeName := strings.ToLower(strings.TrimSpace(vars["type"]))
+	if typeName == "" {
+		typeName = "info"
+	}
+	switch typeName {
+	case "info", "tip", "warning", "success", "danger":
+	default:
+		return "", fmt.Errorf("module callout has invalid type %q", typeName)
+	}
+	var b strings.Builder
+	if title := strings.TrimSpace(vars["title"]); title != "" {
+		fmt.Fprintf(&b, "**%s**\n\n", title)
+	}
+	fmt.Fprintf(&b, "> [!%s]\n", typeName)
+	for _, line := range strings.Split(strings.TrimSpace(vars["body"]), "\n") {
+		fmt.Fprintf(&b, "> %s\n", strings.TrimSpace(line))
+	}
+	return strings.TrimSpace(b.String()), nil
+}
+
+func renderStepsModule(vars map[string]string) (string, error) {
+	rows, err := parseModuleRows(vars["steps"], 3, "steps")
+	if err != nil {
+		return "", err
+	}
+	if len(rows) > 8 {
+		return "", fmt.Errorf("module steps supports at most 8 rows")
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "### %s\n\n", strings.TrimSpace(vars["title"]))
+	for _, row := range rows {
+		fmt.Fprintf(&b, "#### %s %s\n\n%s\n\n", row[0], row[1], row[2])
+	}
+	return strings.TrimSpace(b.String()), nil
+}
+
+func renderChecklistModule(vars map[string]string) (string, error) {
+	rows, err := parseModuleRows(vars["items"], 2, "checklist")
+	if err != nil {
+		return "", err
+	}
+	if len(rows) > 10 {
+		return "", fmt.Errorf("module checklist supports at most 10 rows")
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "### %s\n\n", strings.TrimSpace(vars["title"]))
+	for _, row := range rows {
+		status := strings.ToLower(row[0])
+		switch status {
+		case "done":
+			fmt.Fprintf(&b, "- [x] **%s**", row[1])
+		case "pending":
+			fmt.Fprintf(&b, "- [ ] **%s**", row[1])
+		case "warn":
+			fmt.Fprintf(&b, "- [ ] **提醒：%s**", row[1])
+		default:
+			return "", fmt.Errorf("module checklist has invalid status %q", row[0])
+		}
+		if len(row) > 2 && strings.TrimSpace(row[2]) != "" {
+			fmt.Fprintf(&b, "：%s", strings.TrimSpace(row[2]))
+		}
+		b.WriteString("\n")
+	}
+	return strings.TrimSpace(b.String()), nil
+}
+
+func renderSummaryModule(vars map[string]string) (string, error) {
+	variant := strings.TrimSpace(vars["variant"])
+	if variant == "" {
+		variant = "one-line"
+	}
+	title := strings.TrimSpace(vars["title"])
+	var b strings.Builder
+	if title != "" {
+		fmt.Fprintf(&b, "### %s\n\n", title)
+	}
+	switch variant {
+	case "one-line":
+		label := strings.TrimSpace(vars["label"])
+		if label != "" {
+			fmt.Fprintf(&b, "**%s**\n\n", label)
+		}
+		fmt.Fprintf(&b, "**%s**\n", strings.TrimSpace(vars["highlight"]))
+	case "three", "save":
+		items := splitModuleList(vars["items"])
+		if len(items) == 0 {
+			return "", fmt.Errorf("module summary %s requires at least one item", variant)
+		}
+		if variant == "three" && len(items) != 3 {
+			return "", fmt.Errorf("module summary three requires exactly 3 items")
+		}
+		if len(items) > 5 {
+			return "", fmt.Errorf("module summary %s supports at most 5 items", variant)
+		}
+		for _, item := range items {
+			if variant == "save" {
+				fmt.Fprintf(&b, "- [ ] %s\n", item)
+			} else {
+				fmt.Fprintf(&b, "- %s\n", item)
+			}
+		}
+	case "decision":
+		if fit := strings.TrimSpace(vars["fit"]); fit != "" {
+			fmt.Fprintf(&b, "**适合：** %s\n\n", fit)
+		}
+		if notFit := strings.TrimSpace(vars["not_fit"]); notFit != "" {
+			fmt.Fprintf(&b, "**不适合：** %s\n\n", notFit)
+		}
+		if recommendation := strings.TrimSpace(vars["recommendation"]); recommendation != "" {
+			fmt.Fprintf(&b, "**建议：** %s\n", recommendation)
+		}
+	default:
+		return "", fmt.Errorf("module summary has invalid variant %q", variant)
+	}
+	if note := strings.TrimSpace(vars["note"]); note != "" {
+		fmt.Fprintf(&b, "\n*%s*\n", note)
+	}
+	return strings.TrimSpace(b.String()), nil
+}
+
+func renderComparisonTableModule(vars map[string]string) (string, error) {
+	left, right := splitModuleList(vars["left_items"]), splitModuleList(vars["right_items"])
+	if len(left) == 0 || len(right) == 0 {
+		return "", fmt.Errorf("module comparison-table requires non-empty left_items and right_items")
+	}
+	if len(left) != len(right) {
+		return "", fmt.Errorf("module comparison-table requires the same number of rows per side")
+	}
+	if len(left) > 5 || len(right) > 5 {
+		return "", fmt.Errorf("module comparison-table supports at most 5 rows per side")
+	}
+	rows := max(len(left), len(right))
+	var b strings.Builder
+	fmt.Fprintf(&b, "### %s\n\n| %s | %s |\n| --- | --- |\n", vars["title"], escapeMarkdownTableCell(vars["left_title"]), escapeMarkdownTableCell(vars["right_title"]))
+	for i := 0; i < rows; i++ {
+		leftCell, rightCell := "不适用", "不适用"
+		if i < len(left) {
+			leftCell = left[i]
+		}
+		if i < len(right) {
+			rightCell = right[i]
+		}
+		fmt.Fprintf(&b, "| %s | %s |\n", escapeMarkdownTableCell(leftCell), escapeMarkdownTableCell(rightCell))
+	}
+	if conclusion := strings.TrimSpace(vars["conclusion"]); conclusion != "" {
+		fmt.Fprintf(&b, "\n**结论：** %s\n", conclusion)
+	}
+	return strings.TrimSpace(b.String()), nil
+}
+
+func parseModuleRows(value string, minColumns int, module string) ([][]string, error) {
+	lines := strings.Split(strings.TrimSpace(value), "\n")
+	rows := make([][]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "|")
+		if len(parts) < minColumns {
+			return nil, fmt.Errorf("module %s row must contain at least %d pipe-separated columns", module, minColumns)
+		}
+		maxColumns := minColumns
+		if module == "checklist" {
+			maxColumns = 3
+		}
+		if len(parts) > maxColumns {
+			return nil, fmt.Errorf("module %s row supports at most %d pipe-separated columns", module, maxColumns)
+		}
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
+		}
+		for i := 0; i < minColumns; i++ {
+			if parts[i] == "" {
+				return nil, fmt.Errorf("module %s row has an empty required column", module)
+			}
+		}
+		rows = append(rows, parts)
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("module %s requires at least one row", module)
+	}
+	return rows, nil
+}
+
+func splitModuleList(value string) []string {
+	var values []string
+	if strings.Contains(value, "\n") {
+		values = strings.Split(value, "\n")
+	} else {
+		values = strings.Split(value, "|")
+	}
+	items := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			items = append(items, value)
+		}
+	}
+	return items
+}
+
+func escapeMarkdownTableCell(value string) string {
+	return strings.ReplaceAll(strings.TrimSpace(value), "|", "\\|")
 }
 
 func renderGenericModule(name string, vars map[string]string, entry *resources.ResourceEntry) string {

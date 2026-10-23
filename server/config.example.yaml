@@ -23,6 +23,11 @@ rate_limit:
     requests: ${ANBAN_RATE_LIMIT_ADMIN_REQUESTS:-10}
     window: ${ANBAN_RATE_LIMIT_ADMIN_WINDOW:-1m}
 
+# Article resource rollout ceiling. Keep legacy until compatibility resources
+# pass canary review; MCP requests cannot exceed this setting.
+article_resources:
+  lifecycle_mode: legacy
+
 logging:
   level: info
 

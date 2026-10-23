@@ -300,7 +300,6 @@ func TestContentWritingSkillContracts_RenderTemplateMainPath(t *testing.T) {
 				"Markdown 转微信 HTML：调用 `convert_markdown` MCP 工具",
 				"排版模块使用标准 Markdown 语法，由 `convert_markdown` 工具中的 LLM 自动渲染",
 				"保存为 `output/05-article.html`。",
-				"inspect_article",
 			} {
 				if strings.Contains(text, stale) {
 					t.Fatalf("%s still contains stale content-writing render path %q", path, stale)
@@ -330,8 +329,10 @@ func TestArticleSkillContracts_WechatPreflightLivesInSkills(t *testing.T) {
 					t.Fatalf("%s missing skill-owned preflight term %q", path, term)
 				}
 			}
-			if strings.Contains(text, "inspect_article") {
-				t.Fatalf("%s must not delegate article preflight to inspect_article", path)
+			for _, term := range []string{"inspect_article", `target="source"`, `target="rendered"`, "semantic"} {
+				if !strings.Contains(strings.ToLower(text), strings.ToLower(term)) {
+					t.Fatalf("%s missing deterministic/semantic review boundary %q", path, term)
+				}
 			}
 		})
 	}
@@ -812,6 +813,13 @@ func TestArticleManagedRuntimeFailsClosedOnProjectResolutionAndMCPCalls(t *testi
 				t.Fatalf("%s missing managed Article resolution term %q", path, required)
 			}
 		}
+		if strings.Contains(path, filepath.Join("agents", "wechat-article")) {
+			for _, required := range []string{"list_resources", "get_resource", "inspect_article"} {
+				if !strings.Contains(normalizedBody, required) {
+					t.Fatalf("%s missing managed Article capability %q", path, required)
+				}
+			}
+		}
 
 		for _, forbidden := range []string{
 			"向用户展示所有可选项目",
@@ -830,22 +838,46 @@ func TestArticleManagedRuntimeFailsClosedOnProjectResolutionAndMCPCalls(t *testi
 	}
 }
 
-func TestArticleSkillContracts_InspectArticleMCPRemoved(t *testing.T) {
+func TestArticleSkillContracts_InspectArticleMCPWorkflow(t *testing.T) {
 	root := articleContractRepoRoot(t)
-	for _, path := range []string{
-		filepath.Join(root, "server", "service", "inspect_article.go"),
-		filepath.Join(root, "server", "service", "inspect_article_test.go"),
-	} {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Fatalf("%s must be removed with inspect_article service preflight", path)
-		}
+	servicePath := filepath.Join(root, "server", "service", "article_inspect.go")
+	if _, err := os.Stat(servicePath); err != nil {
+		t.Fatalf("inspect_article service missing: %v", err)
 	}
 	for _, path := range []string{
 		filepath.Join(root, "server", "mcp", "content_render_tools.go"),
 	} {
 		text := readArticleContractFile(t, path)
-		if strings.Contains(text, `"inspect_article"`) {
-			t.Fatalf("%s must not register or expect inspect_article", path)
+		if !strings.Contains(text, `Name:        "inspect_article"`) || !strings.Contains(text, "inspectArticleHandler") {
+			t.Fatalf("%s must register the read-only inspect_article capability", path)
+		}
+	}
+
+	paths := []string{
+		filepath.Join(root, "harness", "packs", "wechat-article", "agent.claude.md"),
+		filepath.Join(root, "harness", "packs", "wechat-article", "agent.codex.toml"),
+		filepath.Join(root, "harness", "packs", "wechat-article", "agent.dsh.yml"),
+	}
+	for _, path := range paths {
+		text := readArticleContractFile(t, path)
+		if !strings.Contains(text, "forbidden_modules") || !strings.Contains(text, "未被模板禁用") {
+			t.Fatalf("%s must exclude template-forbidden modules during resource discovery", path)
+		}
+		sequence := []string{
+			`list_resources(category="article_templates", platform="wechat")`,
+			"get_resource(category=\"article_templates\"",
+			"inspect_article(target=\"source\")",
+			"render_template(",
+			"inspect_article(target=\"rendered\")",
+			"inspect_article(target=\"delivery\")",
+		}
+		cursor := 0
+		for _, marker := range sequence {
+			index := strings.Index(text[cursor:], marker)
+			if index < 0 {
+				t.Fatalf("%s is missing or misorders Article rendering step %q", path, marker)
+			}
+			cursor += index + len(marker)
 		}
 	}
 }
@@ -883,6 +915,14 @@ func TestArticleSkillsDeclareSkillOwnedGenerationAndServerDiscoveryTools(t *test
 			"get_project_profile",
 			"list_resources(category=\"writers\")",
 			"get_resource(category=\"writers\"",
+			`list_resources(category="article_templates", platform="wechat")`,
+			`list_resources(category="layouts", platform="wechat")`,
+			"forbidden_modules",
+			"module_contract.lifecycle",
+			"anban.layout.v1",
+			`inspect_article(target="source")`,
+			`inspect_article(target="rendered")`,
+			`inspect_article(target="delivery")`,
 			"render_template",
 			"convert_markdown",
 			"output/03-article.md",

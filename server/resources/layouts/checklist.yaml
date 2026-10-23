@@ -1,4 +1,23 @@
 name: checklist
+schema_version: "1.0"
+lifecycle: legacy
+canonical_example:
+  title: "发布前检查"
+  items: |-
+    done | 结构先搭好 | 先把目录和结论摆出来
+    pending | 数据再补齐 | 把关键数字放进正文
+    warn | 单独检查链接 | 避免出现断链
+provenance:
+  source: md2wechat-skill
+  version: 3.8.0
+  reference: internal/assets/builtin/layout/conversion/checklist.yaml
+  imported_at: "2026-10-23"
+anban_contract:
+  lifecycle: compatibility
+  version: anban.layout.v1
+  required:
+    - {name: title, description: 清单标题}
+    - {name: items, description: 每行使用状态 | 标题 | 说明}
 category: conversion
 serves: [readability, conversion]
 description: 检查清单模块，用于展示可勾选的任务列表或验证项目

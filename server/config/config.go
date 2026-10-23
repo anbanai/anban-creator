@@ -27,6 +27,7 @@ type Config struct {
 	Onboarding         OnboardingConfig                `yaml:"onboarding"`
 	RateLimit          RateLimitConfig                 `yaml:"rate_limit"`
 	Server             ServerConfig                    `yaml:"server"`
+	ArticleResources   ArticleResourcesConfig          `yaml:"article_resources"`
 	Logging            LoggingConfig                   `yaml:"logging"`
 	Database           DatabaseConfig                  `yaml:"database"`
 	Redis              RedisConfig                     `yaml:"redis"`
@@ -124,6 +125,27 @@ func (c RateLimitConfig) Validate() error {
 		}
 	}
 	return nil
+}
+
+type ArticleResourcesConfig struct {
+	LifecycleMode string `yaml:"lifecycle_mode"`
+}
+
+func (c *ArticleResourcesConfig) UnmarshalYAML(value *yaml.Node) error {
+	if err := validateYAMLMappingFields(value, "article_resources", map[string]bool{"lifecycle_mode": true}); err != nil {
+		return err
+	}
+	type plain ArticleResourcesConfig
+	return value.Decode((*plain)(c))
+}
+
+func (c ArticleResourcesConfig) Validate() error {
+	switch strings.TrimSpace(c.LifecycleMode) {
+	case "legacy", "compatibility", "native":
+		return nil
+	default:
+		return fmt.Errorf("article_resources.lifecycle_mode must be legacy, compatibility, or native")
+	}
 }
 
 // DshConfig owns the independent DSH interactive runtime configuration.
@@ -1446,34 +1468,35 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		}
 	}
 	known := map[string]bool{
-		"server":          true,
-		"rate_limit":      true,
-		"logging":         true,
-		"database":        true,
-		"redis":           true,
-		"jwt":             true,
-		"wechat":          true,
-		"storage":         true,
-		"mcp":             true,
-		"montage":         true,
-		"video_edit":      true,
-		"local_life":      true,
-		"hypit":           true,
-		"model_providers": true,
-		"model_routes":    true,
-		"billing_runtime": true,
-		"claude":          true,
-		"cors":            true,
-		"asynq":           true,
-		"email":           true,
-		"invitation":      true,
-		"seednote":        true,
-		"worldtree":       true,
-		"ilink":           true,
-		"trends":          true,
-		"search":          true,
-		"dsh":             true,
-		"onboarding":      true,
+		"server":            true,
+		"rate_limit":        true,
+		"article_resources": true,
+		"logging":           true,
+		"database":          true,
+		"redis":             true,
+		"jwt":               true,
+		"wechat":            true,
+		"storage":           true,
+		"mcp":               true,
+		"montage":           true,
+		"video_edit":        true,
+		"local_life":        true,
+		"hypit":             true,
+		"model_providers":   true,
+		"model_routes":      true,
+		"billing_runtime":   true,
+		"claude":            true,
+		"cors":              true,
+		"asynq":             true,
+		"email":             true,
+		"invitation":        true,
+		"seednote":          true,
+		"worldtree":         true,
+		"ilink":             true,
+		"trends":            true,
+		"search":            true,
+		"dsh":               true,
+		"onboarding":        true,
 	}
 	for key := range top {
 		if !known[key] {
@@ -1558,6 +1581,9 @@ func (c *Config) applyDefaults() {
 	applyRateLimitTierDefaults(&c.RateLimit.SendCode, 5, 10*time.Minute)
 	applyRateLimitTierDefaults(&c.RateLimit.Agent, 300, time.Minute)
 	applyRateLimitTierDefaults(&c.RateLimit.Admin, 10, time.Minute)
+	if strings.TrimSpace(c.ArticleResources.LifecycleMode) == "" {
+		c.ArticleResources.LifecycleMode = "legacy"
+	}
 	c.Search.Web.Provider = strings.ToLower(strings.TrimSpace(c.Search.Web.Provider))
 	c.Search.Fetch.Provider = strings.ToLower(strings.TrimSpace(c.Search.Fetch.Provider))
 	if c.Search.Providers.Doubao.CustomEndpoint == "" {
@@ -2250,6 +2276,9 @@ func (c *Config) Validate() error {
 	}
 	var errs []string
 	if err := c.RateLimit.Validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if err := c.ArticleResources.Validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
 	if raw := strings.TrimSpace(c.Server.PublicBaseURL); raw != "" {
