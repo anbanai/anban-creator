@@ -47,3 +47,37 @@ func TestTokenPlayerProfilesUseMoonshotCosts(t *testing.T) {
 		}
 	}
 }
+
+func TestTokenPlayerDeepseekFlashProfileUsesConfiguredCostAlias(t *testing.T) {
+	bundle, err := billing.LoadBundle("../billing")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	profile := configuredAgentProfile("tokenplayer_anthropic", "low cost", "https://tokenplayer.cn", "test-token", "deepseek-flash[1m]", "deepseek-v4.1-flash")
+	profile.Envs["ANTHROPIC_DEFAULT_OPUS_MODEL"] = "deepseek-flash[1m]"
+	profile.Envs["ANTHROPIC_DEFAULT_FABLE_MODEL"] = "deepseek-flash"
+	profile.Envs["ANTHROPIC_DEFAULT_SONNET_MODEL"] = "deepseek-flash[1m]"
+	profile.Envs["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = "deepseek-flash"
+	profile.Envs["CLAUDE_CODE_SUBAGENT_MODEL"] = "deepseek-flash"
+	profile.ModelUsageAliases["deepseek-flash"] = "deepseek-v4.1-flash"
+
+	registry, err := NewAgentProfileRegistryFromConfig(map[string]srvconfig.ClaudeExecutionProfileConfig{"effective": profile}, bundle.Costs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := registry.ResolveForTier("effective", model.TierFree)
+	if err != nil {
+		t.Fatalf("effective profile unavailable: %v", err)
+	}
+
+	cost, err := NewProviderCostCalculator(bundle.Costs).TokenCost("tokenplayer_anthropic/"+resolved.ModelUsageAliases["deepseek-flash[1m]"], TokenUsage{
+		Input: 1_000_000, CacheRead: 1_000_000, CacheCreation: 1_000_000, Output: 1_000_000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cost.ModelID != "tokenplayer_anthropic/deepseek-v4.1-flash" || cost.MicroCNY != 4_052_160 {
+		t.Fatalf("cost = %d for %q, want 4052160 for tokenplayer_anthropic/deepseek-v4.1-flash", cost.MicroCNY, cost.ModelID)
+	}
+}
