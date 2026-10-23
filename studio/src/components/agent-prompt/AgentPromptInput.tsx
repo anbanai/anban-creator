@@ -15,7 +15,7 @@ import {
   FileIcon,
   FilePenLineIcon,
   LoaderCircleIcon,
-  PlusIcon,
+  PaperclipIcon,
   RotateCcwIcon,
   XIcon,
   type LucideIcon,
@@ -524,7 +524,7 @@ export function AgentPromptInput({
                       />
                     }
                   >
-                    <PlusIcon />
+                    <PaperclipIcon />
                   </TooltipTrigger>
                   <TooltipContent>添加附件</TooltipContent>
                 </Tooltip>
@@ -532,7 +532,7 @@ export function AgentPromptInput({
             )}
             {leadingTools}
 
-            <div data-slot="agent-prompt-actions" className="ml-auto flex min-w-0 items-center gap-1.5">
+            <div data-slot="agent-prompt-actions" data-align="inline-end" className="ml-auto flex min-w-0 items-center gap-1.5">
               {status}
               {trailingTools}
               {submitMode === 'inline' ? (
@@ -572,9 +572,11 @@ export function AgentPromptInput({
           finalFocus={previewTriggerRef}
         />
 
-        <div role="alert" aria-live="polite" aria-atomic="true" className="sr-only">
-          {rejectionStatus || orderStatus}
-        </div>
+        {(rejectionStatus || orderStatus) ? (
+          <div role="alert" aria-live="polite" aria-atomic="true" className="sr-only">
+            {rejectionStatus || orderStatus}
+          </div>
+        ) : null}
         {submitErrorStatus ? (
           <div role="alert" aria-live="assertive" aria-atomic="true" className="sr-only">
             {submitErrorStatus}
