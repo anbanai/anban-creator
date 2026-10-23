@@ -65,21 +65,21 @@ export function AssistantVideoEditInputs({
           <label className="space-y-1.5 text-sm">
             <span>质量档位</span>
             <NativeSelect aria-label="质量档位" value={preferences.quality_tier ?? ''} onChange={(event) => setPreference('quality_tier', (event.target.value || undefined) as VideoEditPreferences['quality_tier'])}>
-              <NativeSelectOption value="">使用画像默认值{defaultPreferences?.quality_tier ? `（${defaultPreferences.quality_tier}）` : ''}</NativeSelectOption>
+              <NativeSelectOption value="">使用人设默认值{defaultPreferences?.quality_tier ? `（${defaultPreferences.quality_tier}）` : ''}</NativeSelectOption>
               <NativeSelectOption value="effective">高效</NativeSelectOption><NativeSelectOption value="balanced">平衡</NativeSelectOption><NativeSelectOption value="quality">高质量</NativeSelectOption>
             </NativeSelect>
           </label>
           <label className="space-y-1.5 text-sm">
             <span>字幕</span>
             <NativeSelect aria-label="字幕" value={preferences.subtitle_mode ?? ''} onChange={(event) => setPreference('subtitle_mode', (event.target.value || undefined) as VideoEditPreferences['subtitle_mode'])}>
-              <NativeSelectOption value="">使用画像默认值{defaultPreferences?.subtitle_mode ? `（${defaultPreferences.subtitle_mode}）` : ''}</NativeSelectOption>
+              <NativeSelectOption value="">使用人设默认值{defaultPreferences?.subtitle_mode ? `（${defaultPreferences.subtitle_mode}）` : ''}</NativeSelectOption>
               <NativeSelectOption value="off">关闭</NativeSelectOption><NativeSelectOption value="required">生成字幕</NativeSelectOption>
             </NativeSelect>
             <span className="block text-xs text-muted-foreground">生成字幕需要服务端配置转写凭据。</span>
           </label>
           <label className="space-y-1.5 text-sm">
             <span>目标时长（秒）</span>
-            <Input aria-label="目标时长（秒）" type="number" min={1} max={1800} value={preferences.max_duration_seconds ?? ''} onChange={(event) => setPreference('max_duration_seconds', event.target.value ? Number(event.target.value) : undefined)} placeholder="使用画像默认值或不限制" />
+            <Input aria-label="目标时长（秒）" type="number" min={1} max={1800} value={preferences.max_duration_seconds ?? ''} onChange={(event) => setPreference('max_duration_seconds', event.target.value ? Number(event.target.value) : undefined)} placeholder="使用人设默认值或不限制" />
           </label>
         </div>
         <label className="block space-y-1.5 text-sm">

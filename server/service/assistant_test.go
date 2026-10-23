@@ -112,7 +112,7 @@ func TestAssistantBootstrapReturnsAllModesAndServerDefaults(t *testing.T) {
 		if len(bootstrap.Modes) != 3 || bootstrap.DefaultModeID != AssistantModeProfile {
 			t.Fatalf("bootstrap modes/default = %d/%q, want 3/profile", len(bootstrap.Modes), bootstrap.DefaultModeID)
 		}
-		if bootstrap.Modes[0].DisplayName != "画像模式" || !bootstrap.Modes[0].Available {
+		if bootstrap.Modes[0].DisplayName != "人设模式" || !bootstrap.Modes[0].Available {
 			t.Fatalf("profile mode = %#v", bootstrap.Modes[0])
 		}
 		if bootstrap.Modes[1].Available || bootstrap.Modes[1].DisabledReason == "" || bootstrap.Modes[2].Available || bootstrap.Modes[2].DisabledReason == "" {

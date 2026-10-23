@@ -12,7 +12,7 @@ import {
 describe('navigation IA', () => {
   it('defines the MVP navigation in approved order', () => {
     expect(mvpNavItems.map((item) => item.label)).toEqual([
-      'AI助手',
+      '首页',
       '人设',
       '作品',
       '排期',

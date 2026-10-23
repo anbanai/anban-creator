@@ -54,6 +54,7 @@ export interface InteractiveDraft {
 export interface InteractiveCommitResult {
   project?: { id?: string; [key: string]: unknown }
   profile?: Record<string, unknown>
+  task?: { id?: string; project_id?: string; status?: string; [key: string]: unknown }
 }
 
 export const interactiveApi = {

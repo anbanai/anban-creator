@@ -22,7 +22,7 @@ export interface NavItem {
 }
 
 export const mvpNavItems: NavItem[] = [
-  { to: '/', label: 'AI助手', icon: Sparkles, end: true },
+  { to: '/', label: '首页', icon: Sparkles, end: true },
   { to: '/projects', label: '人设', icon: UserRound },
   { to: '/tasks', label: '作品', icon: ListChecks },
   { to: '/plans', label: '排期', icon: CalendarRange },

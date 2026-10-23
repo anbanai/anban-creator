@@ -34,6 +34,12 @@ export interface AssistantProject {
   platform: string
   profileRevision: number
   profileReady: boolean
+  avatar_url?: string
+  description?: string
+  portrait_reference_image?: {
+    download_url?: string
+    preview_url?: string
+  } | null
   video_edit_defaults?: VideoEditDefaults
   works: AssistantWork[]
 }
