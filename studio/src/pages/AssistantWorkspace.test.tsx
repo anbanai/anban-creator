@@ -55,6 +55,12 @@ function renderPage() {
   return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/']}><AssistantWorkspace /><LocationProbe /></MemoryRouter></QueryClientProvider>)
 }
 
+async function clickMode(mode: string) {
+  const button = await screen.findByRole('button', { name: mode })
+  await waitFor(() => expect(button).toBeEnabled())
+  fireEvent.click(button)
+}
+
 describe('AssistantWorkspace', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -85,6 +91,99 @@ describe('AssistantWorkspace', () => {
     ])
   })
 
+  it('allows drafting while bootstrap is pending and enables sending when it is ready', async () => {
+    let resolveBootstrap!: (value: Awaited<ReturnType<typeof mocks.bootstrap>>) => void
+    mocks.bootstrap.mockReturnValue(new Promise((resolve) => { resolveBootstrap = resolve }))
+    renderPage()
+
+    const composer = screen.getByRole('textbox', { name: '发送消息' })
+    expect(composer).toBeEnabled()
+    fireEvent.change(composer, { target: { value: '先写下需求' } })
+    expect(composer).toHaveValue('先写下需求')
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+
+    resolveBootstrap({
+      defaultModeId: 'profile',
+      modes: [{ id: 'profile', displayName: '画像模式', description: '建立画像', available: true }],
+      projects: [],
+    })
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled())
+    expect(composer).toHaveValue('先写下需求')
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'profile' }, expect.any(String)))
+  })
+
+  it('retries bootstrap after an initial failure and enables sending when it recovers', async () => {
+    mocks.bootstrap.mockRejectedValueOnce(new Error('temporary failure'))
+    renderPage()
+
+    const composer = screen.getByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '失败时保留这条需求' } })
+    expect(await screen.findByRole('alert')).toHaveTextContent('AI 助手暂时无法加载')
+    expect(composer).toHaveValue('失败时保留这条需求')
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+
+    mocks.bootstrap.mockResolvedValueOnce({
+      defaultModeId: 'profile',
+      modes: [{ id: 'profile', displayName: '画像模式', description: '建立画像', available: true }],
+      projects: [],
+    })
+    fireEvent.click(screen.getByRole('button', { name: '重试加载' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled())
+    expect(composer).toHaveValue('失败时保留这条需求')
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'profile' }, expect.any(String)))
+  })
+
+  it('shows the selected mode description below the mode controls', async () => {
+    renderPage()
+    expect(await screen.findByText('建立画像')).toBeInTheDocument()
+    await clickMode('创作模式')
+    expect(await screen.findByText('制定计划')).toBeInTheDocument()
+  })
+
+  it('keeps project and creation selectors at the same stable width', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'profile',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划', available: true },
+        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: true },
+      ],
+      projects: [{ id: 'project-1', name: '寻茗好茶', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    renderPage()
+
+    const projectSelect = await screen.findByRole('combobox', { name: '选择画像' })
+    fireEvent.change(projectSelect, { target: { value: 'project-1' } })
+    await clickMode('创作模式')
+    const creationSelect = await screen.findByRole('combobox', { name: '创作类型' })
+
+    expect(projectSelect.parentElement).toHaveClass('w-full')
+    expect(creationSelect.parentElement).toHaveClass('w-full')
+    expect(projectSelect.parentElement?.parentElement).toHaveClass('max-w-xs')
+    expect(creationSelect.parentElement?.parentElement).toHaveClass('max-w-xs')
+  })
+
+  it('uses the product label 公众号贴图 for the WeChat picture creation type', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'profile',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划', available: true },
+        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: true },
+      ],
+      projects: [{ id: 'project-1', name: '寻茗好茶', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    renderPage()
+    fireEvent.change(await screen.findByRole('combobox', { name: '选择画像' }), { target: { value: 'project-1' } })
+    await clickMode('创作模式')
+
+    expect(await screen.findByRole('option', { name: '公众号贴图' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: '公众号图片消息' })).not.toBeInTheDocument()
+  })
+
   it('keeps the empty and active states on the root route', async () => {
     renderPage()
     expect(await screen.findByRole('heading', { name: /开始为「新人设」建立画像/ })).toBeInTheDocument()
@@ -99,7 +198,7 @@ describe('AssistantWorkspace', () => {
 
   it('switches the active mode through the workspace API body', async () => {
     renderPage()
-    fireEvent.click(await screen.findByRole('button', { name: '创作模式' }))
+    await clickMode('创作模式')
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
     // Creation is unavailable without a confirmed project, so the page stays
     // in one place and does not invent a query-driven navigation state.
@@ -207,7 +306,7 @@ describe('AssistantWorkspace', () => {
     mocks.works.mockResolvedValue({ items: [{ id: 'video-task-1', title: '访谈成片', type: 'video-edit', createdAt: '2026-10-22T00:00:00Z' }], has_more: false })
     renderPage()
 
-    fireEvent.click(await screen.findByRole('button', { name: '复盘模式' }))
+    await clickMode('复盘模式')
 
     expect(await screen.findByRole('heading', { name: '你的作品' })).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: '查看作品' })).toBeInTheDocument()
@@ -235,7 +334,7 @@ describe('AssistantWorkspace', () => {
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
     renderPage()
 
-    fireEvent.click(await screen.findByRole('button', { name: '创作模式' }))
+    await clickMode('创作模式')
     fireEvent.change(await screen.findByRole('combobox', { name: '创作类型' }), { target: { value: 'video-edit' } })
     fireEvent.change(screen.getByRole('textbox', { name: '剪辑要求' }), { target: { value: '剪成 30 秒访谈短片' } })
     fireEvent.change(screen.getByRole('combobox', { name: '质量档位' }), { target: { value: 'quality' } })
