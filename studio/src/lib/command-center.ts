@@ -94,6 +94,10 @@ function byNextRunAt(a: Plan, b: Plan) {
   return new Date(a.next_run_at).getTime() - new Date(b.next_run_at).getTime()
 }
 
+export function createTaskPageHref(projectId: string) {
+  return `/tasks/new?${new URLSearchParams({ project_id: projectId })}`
+}
+
 export function createTaskHref({
   type,
   projectId,

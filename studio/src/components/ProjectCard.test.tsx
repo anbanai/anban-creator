@@ -238,7 +238,7 @@ describe('ProjectCard', () => {
     )
 
     expect(screen.queryByRole('button', { name: '归档人设：公众号人设' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '恢复人设：公众号人设' }))
+    fireEvent.click(screen.getByRole('button', { name: '取消归档人设：公众号人设' }))
     expect(onRestore).toHaveBeenCalledWith('project-1')
   })
 

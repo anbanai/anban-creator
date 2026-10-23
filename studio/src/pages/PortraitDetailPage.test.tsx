@@ -54,3 +54,9 @@ describe('portrait detail', () => {
     expect(api.projects.updateProfileDimension).not.toHaveBeenCalled()
   })
 })
+
+it('keeps creation and filtered work-list destinations distinct', async () => {
+  page()
+  expect(await screen.findByRole('link', { name: '用此画像创作' })).toHaveAttribute('href', '/tasks/new?project_id=owner')
+  expect(screen.getByRole('link', { name: '查看此人设的作品' })).toHaveAttribute('href', '/tasks?project_id=owner')
+})

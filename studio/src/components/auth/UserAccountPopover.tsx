@@ -1,3 +1,4 @@
+import { BuildVersion } from '@/components/BuildVersion'
 import { useTheme } from 'next-themes'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
@@ -144,6 +145,11 @@ export default function UserAccountPopover({ collapsed }: { collapsed?: boolean 
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>关于 Anban</DropdownMenuLabel>
+          <div className="px-1.5 pb-2 text-muted-foreground"><BuildVersion /></div>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           variant="destructive"

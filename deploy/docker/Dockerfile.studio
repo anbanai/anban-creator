@@ -31,6 +31,9 @@ RUN bun install --frozen-lockfile
 COPY studio/ .
 ARG VITE_API_BASE_URL=/api/v1
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+ARG STUDIO_COMMIT_SHA
+ENV STUDIO_COMMIT_SHA=${STUDIO_COMMIT_SHA}
+ENV STUDIO_REQUIRE_BUILD_COMMIT=1
 RUN bun run build
 
 # Stage 2: serve the static bundle with nginx.

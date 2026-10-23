@@ -2,6 +2,7 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
+import { resolveBuildCommit } from './build-version.ts'
 
 export function manualChunks(id: string) {
   const normalizedId = id.replace(/\\/g, '/')
@@ -157,8 +158,14 @@ function agentGuideRoutes(): Plugin {
   }
 }
 
-export default defineConfig({
-  plugins: [agentGuideRoutes(), react(), tailwindcss()],
+export default defineConfig(({ command }) => {
+  const commit = resolveBuildCommit(import.meta.dirname, command === 'build')
+  return {
+  define: { __APP_COMMIT_SHA__: JSON.stringify(commit) },
+  plugins: [agentGuideRoutes(), react(), tailwindcss(), {
+    name: 'studio-build-version',
+    generateBundle() { this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ commit, shortCommit: commit === 'unknown' ? null : commit.slice(0, 7) }) }) },
+  }],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -184,4 +191,5 @@ export default defineConfig({
       },
     },
   },
+}
 })
