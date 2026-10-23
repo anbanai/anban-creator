@@ -417,6 +417,22 @@ func TestAssistantWorkspaceCreationIsIdempotentAndBindsSessionToWorkspace(t *tes
 	}
 }
 
+func TestFindAssistantWorkspaceDistinguishesExpiryFromMissing(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	now := time.Now().UTC()
+	workspace := &model.AssistantWorkspace{ID: uuid.NewString(), UserID: "user-1", ModeID: AssistantModeProfile, ExpiresAt: now.Add(-time.Minute), CreatedAt: now.Add(-time.Hour), UpdatedAt: now}
+	if err := repo.AssistantWorkspaces().Create(context.Background(), workspace); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewInteractiveService(repo)
+	if _, err := svc.findAssistantWorkspace(context.Background(), "user-1", workspace.ID); !errors.Is(err, ErrAssistantWorkspaceExpired) {
+		t.Fatalf("findAssistantWorkspace() error = %v, want ErrAssistantWorkspaceExpired", err)
+	}
+	if _, err := svc.findAssistantWorkspace(context.Background(), "user-1", "missing"); !errors.Is(err, ErrAssistantWorkspaceNotFound) {
+		t.Fatalf("findAssistantWorkspace() missing error = %v, want ErrAssistantWorkspaceNotFound", err)
+	}
+}
+
 func TestAssistantWorkspaceIdempotencyRetryRecoversOrphanedWorkspace(t *testing.T) {
 	repo := newAssistantTestRepo(t)
 	svc := newAssistantWorkspaceTestService(repo)
@@ -1012,7 +1028,7 @@ func TestAssistantCreationCommitCreatesVideoEditTaskFromOwnedUpload(t *testing.T
 	// materialized only from finalized Server-owned object storage.
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	tasks := newTestTaskService(repo, &mockEnqueuer{}, &fakeTaskStorage{name: "oss"}, &logger, "", nil, nil)
-	tasks.SetVideoEditConfig(serverconfig.VideoEditConfig{ElevenLabsAPIKey: "server-managed-key"})
+	tasks.SetVideoEditConfig(serverconfig.VideoEditConfig{ElevenLabsAPIKey: "server-managed-key", TimeoutMinutes: 42})
 	checkpoint := &model.AssistantCheckpoint{
 		ID: uuid.NewString(), UserID: userID, ModeID: AssistantModeCreation, ProjectID: project.ID,
 		BaseProfileRevision: 1, Status: model.AssistantCheckpointReady, ExpiresAt: time.Now().Add(time.Hour),
@@ -1031,6 +1047,9 @@ func TestAssistantCreationCommitCreatesVideoEditTaskFromOwnedUpload(t *testing.T
 	}
 	if created.Type != model.PlatformVideoEdit || created.TaskKind != model.TaskKindVideoEdit || created.AgentID != model.AgentIDVideoEdit {
 		t.Fatalf("created task identity = %q/%q/%q, want video-edit identity", created.Type, created.TaskKind, created.AgentID)
+	}
+	if created.VideoEditTimeoutMinutes != 42 {
+		t.Fatalf("frozen video-edit timeout = %d minutes, want 42", created.VideoEditTimeoutMinutes)
 	}
 	input := created.VideoEditInput.Data()
 	if len(input.SourceAssets) != 1 || input.SourceAssets[0].AssetID != asset.ID || input.SourceAssets[0].FileName != asset.FileName ||

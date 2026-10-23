@@ -88,7 +88,7 @@ export interface AssistantCheckpoint extends AssistantCheckpointRequest {
 }
 
 export type AssistantCommitRequest = { idempotency_key: string } & (
-  | { confirmation_token: string }
+  | { confirmation_token: string; video_edit_defaults?: VideoEditDefaults }
   | { checkpoint_id: string; checkpoint_digest: string }
 )
 

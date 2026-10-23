@@ -161,8 +161,12 @@ func (d *DockerDispatcher) Prepare(ctx context.Context, execution *model.TaskExe
 
 	issuedAt := d.now().UTC()
 	tokenLifetime := spec.Timeout
-	if tokenLifetime > dockerWorkloadTokenMaxAge {
-		tokenLifetime = dockerWorkloadTokenMaxAge
+	maxTokenLifetime := dockerWorkloadTokenMaxAge
+	if model.IsVideoEditPlatform(task.Type) {
+		maxTokenLifetime = auth.MaximumExecutionTokenLifetime
+	}
+	if tokenLifetime > maxTokenLifetime {
+		tokenLifetime = maxTokenLifetime
 	}
 	rawToken, err := d.tokens.IssueAt(auth.WorkloadClaims{
 		RuntimeScope:      identity.Scope,

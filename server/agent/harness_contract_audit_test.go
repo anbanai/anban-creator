@@ -51,8 +51,8 @@ func TestHarnessAutonomyAndFailureContracts(t *testing.T) {
 	checks := map[string][]string{
 		"harness/packs/wechat-article/agent.claude.md":  {"readiness.status", "blocked", "output/draft.json"},
 		"harness/packs/wechat-article/agent.codex.toml": {"readiness.status", "blocked", "output/draft.json"},
-		"harness/packs/wechat-picture/agent.claude.md":  {"output/publish-package.json", "schema_version", "readiness.status", "\"content\"", "image_paths"},
-		"harness/packs/wechat-picture/agent.codex.toml": {"output/publish-package.json", "schema_version", "readiness.status", "\"content\"", "image_paths"},
+		"harness/packs/wechat-picture/agent.claude.md":  {"output/publish-package.json", "schema_version", "readiness.status", "\"content\"", "image_paths", "1000 个 Unicode 字符", "三道复核闸门", "5–8 个", "format-and-tags.md"},
+		"harness/packs/wechat-picture/agent.codex.toml": {"output/publish-package.json", "schema_version", "readiness.status", "\"content\"", "image_paths", "1000 个 Unicode 字符", "三道复核闸门", "5–8 个", "format-and-tags.md"},
 		"harness/packs/moments/agent.codex.toml":        {"不得询问", "结构化失败"},
 		"harness/packs/seednote/agent.claude.md":        {"viral_analysis", "quality_status=failed", "generate_image"},
 		"harness/packs/seednote/agent.codex.toml":       {"viral_analysis", "quality_status=failed", "generate_image"},
@@ -88,6 +88,20 @@ func TestProjectCreatorProfileRefreshPreservesScopeAndDirectionSemantics(t *test
 	for _, term := range []string{"soft topic/format preferences", "not an indefinite filter", "Never invent a fixed number of pieces"} {
 		if !strings.Contains(profile, term) {
 			t.Fatalf("project profile direction contract missing %q", term)
+		}
+	}
+	for _, contract := range []struct {
+		path  string
+		terms []string
+	}{
+		{path: "harness/skills/article-research/SKILL.md", terms: []string{"ranking", "first-batch", "scope"}},
+		{path: "harness/skills/seednote-research/SKILL.md", terms: []string{"候选排序", "首批", "范围"}},
+	} {
+		body := strings.ToLower(readArticleContractFile(t, filepath.Join(root, contract.path)))
+		for _, term := range contract.terms {
+			if !strings.Contains(body, term) {
+				t.Fatalf("%s direction contract missing %q", contract.path, term)
+			}
 		}
 	}
 }

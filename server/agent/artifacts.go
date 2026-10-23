@@ -148,7 +148,7 @@ func validateTaskArtifacts(task *model.Task, files map[string]bool, meaningful i
 	}
 	if task != nil && model.IsVideoEditPlatform(task.Type) {
 		var missing []string
-			for _, name := range []string{"final.mp4", "edit-decision-list.json", "edit-strategy.md", "delivery-manifest.json", "quality-evidence.json", "content-tags.json"} {
+		for _, name := range []string{"final.mp4", "edit-decision-list.json", "edit-strategy.md", "delivery-manifest.json", "quality-evidence.json", "content-tags.json"} {
 			if !files[name] && !files["output/"+name] {
 				missing = append(missing, name)
 			}

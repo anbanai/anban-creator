@@ -15,7 +15,7 @@ const articlePack: AgentPack = {
   id: "wechat-article",
   version: "1.0.0",
   digest: "a".repeat(64),
-  agent: { name: "wechat-article" },
+  agent: { name: "wechat-article", max_turns: 77 },
   bindings: { task_types: ["wechat-article"] },
   runtime: { profile: "wechat", adapter: "standard" },
   artifacts: [{ role: "analysis", path: "output/topic-analysis.md", required: true }],
@@ -24,7 +24,7 @@ const articlePack: AgentPack = {
 const viralAnalysisPack: AgentPack = {
   ...articlePack,
   id: "seednote",
-  agent: { name: "seednote" },
+  agent: { name: "seednote", max_turns: 20 },
   bindings: { task_types: ["seednote", "viral_analysis"] },
   runtime: { profile: "seednote", adapter: "standard" },
   artifacts: [
@@ -49,7 +49,6 @@ const validBootstrap = () => ({
   runtime_profile: "wechat",
   runtime_adapter: "standard",
   project_id: "project-1",
-  max_turns: 10,
   agent_flag: "anban:wechat-article",
   prompt: "write",
   artifact_transport: { mode: "stream" },
@@ -342,6 +341,14 @@ describe("validateManagedInit", () => {
 });
 
 describe("buildQueryOptions", () => {
+  test("takes the execution turn limit from the selected Agent Pack Agent", () => {
+    const options = runner.buildQueryOptions({
+      ...validBootstrap(),
+      resolved_agent_pack: { ...articlePack, agent: { name: "wechat-article", max_turns: 77 } },
+    }, "/workspace");
+    expect(options.maxTurns).toBe(77);
+  });
+
   test("enables the bounded read-only worker policy only for Article and Seednote task types", () => {
     const article = runner.buildQueryOptions(validBootstrap(), "/workspace");
     const seednote = runner.buildQueryOptions({

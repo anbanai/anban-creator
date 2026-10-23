@@ -2642,13 +2642,51 @@ func (s *InteractiveService) stage(ctx context.Context, sess *InteractiveSession
 }
 
 type InteractiveCommitRequest struct {
-	ConfirmationToken string `json:"confirmation_token"`
-	IdempotencyKey    string `json:"idempotency_key"`
-	MemoryAppend      string `json:"memory_append,omitempty"`
+	ConfirmationToken string                   `json:"confirmation_token"`
+	IdempotencyKey    string                   `json:"idempotency_key"`
+	MemoryAppend      string                   `json:"memory_append,omitempty"`
+	VideoEditDefaults *model.VideoEditDefaults `json:"video_edit_defaults,omitempty"`
 }
 type InteractiveCommitResult struct {
 	Project *model.Project       `json:"project"`
 	Profile model.ProjectProfile `json:"profile"`
+}
+
+func preserveOmittedProfileDimensions(current, staged model.ProjectProfileDimensions) model.ProjectProfileDimensions {
+	if profileDimensionOmitted(staged.Identity) {
+		staged.Identity = current.Identity
+	}
+	if profileDimensionOmitted(staged.Style) {
+		staged.Style = current.Style
+	}
+	if profileDimensionOmitted(staged.Audience) {
+		staged.Audience = current.Audience
+	}
+	if profileDimensionOmitted(staged.Platforms) {
+		staged.Platforms = current.Platforms
+	}
+	if profileDimensionOmitted(staged.Preferences) {
+		staged.Preferences = current.Preferences
+	}
+	if profileDimensionOmitted(staged.Memory) {
+		staged.Memory = current.Memory
+	}
+	return staged
+}
+
+func profileDimensionOmitted(dimension model.ProfileDimension) bool {
+	return len(dimension.Content) == 0 && len(dimension.Sources) == 0 && len(dimension.Evidence) == 0 && len(dimension.MissingFields) == 0
+}
+
+func interactiveCommitRequestHash(tokenHash string, defaults *model.VideoEditDefaults) string {
+	if defaults == nil {
+		return confirmationHash(tokenHash)
+	}
+	payload, _ := json.Marshal(struct {
+		ConfirmationHash  string                  `json:"confirmation_hash"`
+		VideoEditDefaults model.VideoEditDefaults `json:"video_edit_defaults"`
+	}{ConfirmationHash: tokenHash, VideoEditDefaults: *defaults})
+	return confirmationHash(string(payload))
 }
 
 func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req InteractiveCommitRequest) (InteractiveCommitResult, error) {
@@ -2659,11 +2697,9 @@ func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req 
 		return InteractiveCommitResult{}, ErrInteractivePersistence
 	}
 	tokenHash := confirmationHash(req.ConfirmationToken)
-	// The confirmation token is generated for one staged draft. The browser
-	// must not be able to alter the staged memory change by sending a second
-	// copy in the commit request, so the request fingerprint is independent of
-	// any legacy client-provided memory_append field.
-	requestHash := confirmationHash(tokenHash)
+	// Video-edit defaults are submitted with profile confirmation, so bind them
+	// to the durable receipt while ignoring the legacy memory_append field.
+	requestHash := interactiveCommitRequestHash(tokenHash, req.VideoEditDefaults)
 	// Durable receipts are checked before the process-local session. This is
 	// what makes an idempotent replay work after a lease expiry or restart.
 	if receipt, err := s.repo.InteractiveCommitReceipts().FindByUserAndKey(ctx, userID, req.IdempotencyKey); err == nil {
@@ -2746,12 +2782,21 @@ func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req 
 			if p.UserID != userID {
 				return ErrInteractiveSessionOwner
 			}
+			if req.VideoEditDefaults != nil {
+				candidate := *p
+				candidate.SetVideoEditDefaults(*req.VideoEditDefaults)
+				candidate.VideoEditDefaultsSet = true
+				if err := validateProjectVideoEditDefaults(&candidate); err != nil {
+					return err
+				}
+				p.SetVideoEditDefaults(*req.VideoEditDefaults)
+			}
 			current := projectProfileFor(p)
 			if current.Version != profileVersion {
 				return ErrProjectProfileVersionConflict
 			}
 			profile = current
-			profile.Dimensions = draft.Profile.Dimensions
+			profile.Dimensions = preserveOmittedProfileDimensions(current.Dimensions, draft.Profile.Dimensions)
 			profile.AnalysisLimits = draft.Profile.AnalysisLimits
 			profile.FollowUpQuestions = draft.Profile.FollowUpQuestions
 			if assistantProfileCommit {
@@ -2796,6 +2841,10 @@ func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req 
 				Platform: draft.Project.Platform, Name: draft.Project.Name,
 				Instructions: draft.Project.Instructions, Keywords: draft.Project.Keywords,
 				VisualStyle: draft.Project.VisualStyle, Profile: datatypes.NewJSONType(profile),
+			}
+			if req.VideoEditDefaults != nil {
+				p.SetVideoEditDefaults(*req.VideoEditDefaults)
+				p.VideoEditDefaultsSet = true
 			}
 			// Reuse the regular project creation validation/defaults while keeping
 			// the write on this transaction. Image-analysis side effects are not

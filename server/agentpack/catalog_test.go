@@ -48,7 +48,6 @@ bindings:
 runtime:
   profile: wechat
   adapter: standard
-  max_turns: 40
 surfaces: [task, plan]
 billing_operations:
   demo-task: task.demo
@@ -124,7 +123,6 @@ bindings:
 runtime:
   profile: wechat
   adapter: standard
-  max_turns: 40
 surfaces: [task]
 billing_operations:
   demo-task: task.demo
@@ -1186,7 +1184,6 @@ interaction:
 runtime:
   profile: project-creator
   adapter: standard
-  max_turns: 120
 surfaces: [plugin]
 `
 	tests := []struct {
@@ -1653,7 +1650,6 @@ bindings:
 runtime:
   profile: wechat
   adapter: standard
-  max_turns: 40
 surfaces: [task, plan]
 billing_operations:
   demo-task: task.demo

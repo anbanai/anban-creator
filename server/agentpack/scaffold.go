@@ -56,7 +56,7 @@ func Scaffold(pluginRoot string, options ScaffoldOptions) error {
 		if taskKind == "" {
 			taskKind = options.TaskType
 		}
-		manifest += fmt.Sprintf("channel: %s\nbindings:\n  task_kinds: [%s]\nruntime:\n  profile: %s\n  adapter: %s\n  max_turns: 40\nsurfaces: [plugin]\n", options.Channel, taskKind, options.RuntimeProfile, options.Adapter)
+		manifest += fmt.Sprintf("channel: %s\nbindings:\n  task_kinds: [%s]\nruntime:\n  profile: %s\n  adapter: %s\nsurfaces: [plugin]\n", options.Channel, taskKind, options.RuntimeProfile, options.Adapter)
 	} else {
 		manifest += "bindings: {}\nruntime: {}\nsurfaces: [plugin]\n"
 	}

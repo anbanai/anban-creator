@@ -167,6 +167,27 @@ describe('FilePreviewGallery', () => {
     expect(screen.getByText(/内容标签 · content-tags.json/)).toBeInTheDocument()
   })
 
+  it('previews SubRip subtitle files as text', async () => {
+    vi.mocked(api.tasks.previewFileBlob).mockResolvedValue(new Blob([
+      '1\n00:00:00,000 --> 00:00:02,000\nA subtitle line.\n',
+    ], { type: 'application/x-subrip' }))
+    const subtitles = fileWith({
+      id: 'subtitles',
+      role: 'artifact',
+      delivery_role: 'subtitles',
+      file_name: 'subtitles.srt',
+      mime_type: 'application/x-subrip',
+      url: '',
+      preview_url: '/api/v1/tasks/task-1/files/subtitles/preview',
+    })
+
+    render(<FilePreviewGallery files={[subtitles]} taskId="task-1" taskType="video-edit" />)
+    fireEvent.click(screen.getByRole('button', { name: /预览.*subtitles.srt/ }))
+
+    expect(await screen.findByText(/A subtitle line\./)).toBeVisible()
+    expect(api.tasks.previewFileBlob).toHaveBeenCalledWith('task-1', 'subtitles')
+  })
+
   it('streams a deliverable video from an absolute signed preview URL without loading a blob', async () => {
     const videoFile = fileWith({
       id: 'video-1',

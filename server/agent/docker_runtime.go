@@ -61,6 +61,9 @@ func buildDockerRuntimeSpec(cfg dockerRuntimeConfig, execution *model.TaskExecut
 		}
 		cfg.TimeoutSec = int(task.HypitTimeout().Seconds())
 	}
+	if execution != nil && execution.ActiveDeadlineSeconds > 0 {
+		cfg.TimeoutSec = int(execution.ActiveDeadlineSeconds)
+	}
 	pidsLimit := cfg.PidsLimit
 	memoryBytes := cfg.MemoryMB * 1024 * 1024
 	networkName := strings.TrimSpace(cfg.Network)

@@ -510,6 +510,35 @@ func TestRuntimeReconcilerActiveDeadlineTimesOutNeverBootstrappedWorkload(t *tes
 	}
 }
 
+func TestRuntimeReconcilerUsesFrozenExecutionDeadline(t *testing.T) {
+	now := time.Now()
+	base := &model.TaskExecution{
+		ID: "video-edit-deadline", Status: model.TaskExecutionRunning,
+		CreatedAt: now.Add(-65 * time.Minute), ActiveDeadlineSeconds: int64((90 * time.Minute).Seconds()),
+		RuntimeScope: "test", RuntimeWorkload: "runtime-video-edit-deadline", RuntimeInstanceID: "instance-video-edit-deadline",
+	}
+	dispatcher := &reconcileTestDispatcher{
+		states: map[string]*RuntimeExecutionState{base.ID: {Phase: RuntimePhaseRunning}}, errs: map[string]error{},
+	}
+	service := &reconcileTestService{executions: []*model.TaskExecution{base}}
+	reconciler := NewRuntimeReconciler(dispatcher, service, RuntimeReconcilerConfig{ActiveDeadline: time.Hour}, zerolog.Nop())
+	reconciler.now = func() time.Time { return now }
+	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(service.failures) != 0 {
+		t.Fatalf("execution failed before its frozen deadline: %#v", service.failures)
+	}
+
+	base.CreatedAt = now.Add(-91 * time.Minute)
+	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(service.failures) != 1 || service.failures[0].status != model.TaskExecutionTimedOut {
+		t.Fatalf("failures = %#v, want timeout after the frozen 90-minute deadline", service.failures)
+	}
+}
+
 func TestRuntimeReconcilerActiveDeadlineRecoversIdentityBeforeExactDeleteWithoutActivation(t *testing.T) {
 	now := time.Now()
 	execution := &model.TaskExecution{

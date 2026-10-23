@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/datatypes"
 )
@@ -66,6 +67,13 @@ func (t *Task) SetVideoEditInput(input VideoEditInput) {
 
 func (p *Project) SetVideoEditDefaults(defaults VideoEditDefaults) {
 	p.VideoEditDefaults = datatypes.NewJSONType(defaults)
+}
+
+func (t *Task) VideoEditTimeout() time.Duration {
+	if t != nil && t.VideoEditTimeoutMinutes > 0 {
+		return time.Duration(t.VideoEditTimeoutMinutes) * time.Minute
+	}
+	return 90 * time.Minute
 }
 
 func (input *VideoEditInput) Normalize(defaults VideoEditDefaults) {

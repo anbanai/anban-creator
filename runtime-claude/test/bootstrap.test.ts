@@ -55,7 +55,6 @@ const validResponse = (): BootstrapResponse => {
         "kimi-k3[1m]": { provider: "moonshot", model: "kimi-k3" },
       },
     },
-    max_turns: 10,
     agent_flag: "anban:wechat-article",
     agent_memory_directory: ".claude/agent-memory",
     artifact_transport: { mode: "stream" },
@@ -119,7 +118,7 @@ describe("validateBootstrapResponse", () => {
       };
       const catalogPath = new URL("../../harness/agent-pack-catalog.json", import.meta.url).pathname;
       await expect(bootstrap(config, "workload-token", undefined, catalogPath)).rejects.toThrow("HTTP 503");
-      expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("6");
+      expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("7");
       expect(request?.headers.get("X-Anban-Agent-Pack-Catalog-Digest")).toBe((await readAgentPackCatalogWithDigest(catalogPath)).digest);
       expect(request?.body).toBeNull();
     } finally {
@@ -173,7 +172,7 @@ describe("validateBootstrapResponse", () => {
     Object.assign(response, { [field]: frozen });
     const catalog: AgentPackCatalog = { packs: [{
       id: "wechat-article", version: "1.0.0", digest: "a".repeat(64),
-      agent: { name: "wechat-article" }, bindings: { task_types: ["wechat-article"] },
+      agent: { name: "wechat-article", max_turns: 60 }, bindings: { task_types: ["wechat-article"] },
       runtime: { profile: "wechat-article", adapter: "standard" },
       artifacts: [{ role: "final", path: "output/final.md", required: true }],
     }] };
@@ -222,7 +221,7 @@ describe("validateBootstrapResponse", () => {
     const response = validateBootstrapResponse("execution-1", validResponse());
     const basePack = {
       id: "wechat-article", version: "1.0.0", digest: "a".repeat(64),
-      agent: { name: "wechat-article" }, bindings: { task_types: ["wechat-article"] },
+      agent: { name: "wechat-article", max_turns: 60 }, bindings: { task_types: ["wechat-article"] },
       runtime: { profile: "wechat", adapter: "standard" },
     };
     const invalidArtifacts = [
@@ -266,7 +265,7 @@ describe("validateBootstrapResponse", () => {
     ];
     const pack = {
       id: "seednote", version: "1.0.0", digest: "a".repeat(64),
-      agent: { name: "seednote" }, bindings: { task_types: ["seednote", "viral_analysis"] },
+      agent: { name: "seednote", max_turns: 20 }, bindings: { task_types: ["seednote", "viral_analysis"] },
       runtime: { profile: "seednote", adapter: "standard" },
       artifacts: defaultArtifacts,
       artifacts_by_task_type: { viral_analysis: viralArtifacts },
@@ -285,7 +284,7 @@ describe("validateBootstrapResponse", () => {
   test("shared artifact resolution selects overrides and falls back to an isolated default", () => {
     const pack = {
       id: "seednote", version: "1.0.0", digest: "a".repeat(64),
-      agent: { name: "seednote" }, bindings: { task_types: ["seednote", "viral_analysis"] },
+      agent: { name: "seednote", max_turns: 20 }, bindings: { task_types: ["seednote", "viral_analysis"] },
       runtime: { profile: "seednote", adapter: "standard" },
       artifacts: [
         { role: "content", path: "output/content.md", required: true },
@@ -309,7 +308,7 @@ describe("validateBootstrapResponse", () => {
     const response = validateBootstrapResponse("execution-1", validResponse());
     const basePack = {
       id: "wechat-article", version: "1.0.0", digest: "a".repeat(64),
-      agent: { name: "wechat-article" }, bindings: { task_types: ["wechat-article"] },
+      agent: { name: "wechat-article", max_turns: 60 }, bindings: { task_types: ["wechat-article"] },
       runtime: { profile: "wechat", adapter: "standard" },
       artifacts: [{ role: "final", path: "output/final.md", required: true }],
     };

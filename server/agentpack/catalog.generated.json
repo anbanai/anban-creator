@@ -2,7 +2,7 @@
   "packs": [
     {
       "id": "ecommerce",
-      "version": "2.0.3",
+      "version": "2.0.5",
       "kind": "plugin",
       "display_name": "电商素材",
       "description": "基于产品图片生成完整电商文案和视觉素材包。",
@@ -15,13 +15,12 @@
           "ecommerce-visual-design",
           "ecommerce-platform-specs"
         ],
-        "max_turns": 120
+        "max_turns": 240
       },
       "bindings": {},
       "runtime": {
         "profile": "ecommerce",
-        "adapter": "standard",
-        "max_turns": 90
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -160,7 +159,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "529b6b76a0622dd8b55a6bfa891c032c89f99290434b6d452759c12d2c7902b7"
+      "digest": "e3c4bd1224dd47e6960ea78669cfd97e8d2552bfeea0c0507e0401ad65cda86c"
     },
     {
       "id": "content-planning",
@@ -185,8 +184,7 @@
       },
       "runtime": {
         "profile": "content-planning",
-        "adapter": "standard",
-        "max_turns": 80
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -1299,7 +1297,7 @@
       "ui": {
         "renderer": "custom:content-planning"
       },
-      "digest": "64bd22496a0f9ad7f6f03830c7b58b711cf472beaa9ac9ab30525fd0380c8b98"
+      "digest": "ac0ad5c21147b1a37b211c75c26d1252b8b2efba900ffdec92f4bf97f3e2f97e"
     },
     {
       "id": "creation-planner",
@@ -1327,8 +1325,7 @@
       "bindings": {},
       "runtime": {
         "profile": "creation-planner",
-        "adapter": "standard",
-        "max_turns": 80
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin"
@@ -1337,7 +1334,7 @@
         "interactive-creation-clarification"
       ],
       "ui": {},
-      "digest": "dbf40fc51c430f3a10dd600840cc6da0869dc6c31941a0cd3283f382b8cee3b7"
+      "digest": "0e317e5b7a7561554405e6d79542da812fbe603f82ea9135d096fa0c07c67dde"
     },
     {
       "id": "feedback-analysis",
@@ -1365,8 +1362,7 @@
       },
       "runtime": {
         "profile": "feedback-analysis",
-        "adapter": "standard",
-        "max_turns": 40
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -1419,12 +1415,12 @@
         }
       ],
       "ui": {},
-      "digest": "a80be6a909654867f5864f7a5903998d2393da781e90658f4ae11a05fcf93926"
+      "digest": "897f2ba8e88b8de251b8769b1f12f7d7b74fae1d26047951d060ffc31077b208"
     },
     {
       "id": "hypit",
       "channel": "hypit",
-      "version": "0.3.2",
+      "version": "0.3.3",
       "kind": "managed",
       "display_name": "视频复刻",
       "description": "根据参考视频和替换要求生成成片，保留完整工程用于再次改编。",
@@ -1435,7 +1431,7 @@
           "portrait-cover-design",
           "content-reuse"
         ],
-        "max_turns": 180
+        "max_turns": 400
       },
       "bindings": {
         "task_kinds": [
@@ -1444,8 +1440,7 @@
       },
       "runtime": {
         "profile": "hypit",
-        "adapter": "standard",
-        "max_turns": 180
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -1631,7 +1626,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "4d2f7ff1b3ea048f4d89c7ae52688420a1424d1b7c641eb46e2a8276dfc53892"
+      "digest": "c6d4d0e4b6b1b06a3b2f09dd2a485b7be0b82e38e1e7e995a02f32d57ae109d9"
     },
     {
       "id": "local-life",
@@ -1656,8 +1651,7 @@
       },
       "runtime": {
         "profile": "local-life",
-        "adapter": "standard",
-        "max_turns": 120
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -1780,11 +1774,11 @@
           "funnel_stage"
         ]
       },
-      "digest": "50e56cb4a58e85b5f508d063a4c9bf49d70d752cda391a1b1f837b245369176f"
+      "digest": "41c62ad1d99cc0d0e5fafab4fbd17aec166f1b04c172efe5f8a537eb8a510bbc"
     },
     {
       "id": "moments",
-      "version": "2.0.3",
+      "version": "2.0.4",
       "kind": "plugin",
       "display_name": "朋友圈素材包",
       "description": "从素材拆解到朋友圈正文、质量复盘和交付的创作流程。",
@@ -1794,13 +1788,12 @@
           "moments",
           "humanizer"
         ],
-        "max_turns": 20
+        "max_turns": 60
       },
       "bindings": {},
       "runtime": {
         "profile": "moments",
-        "adapter": "standard",
-        "max_turns": 25
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -1889,12 +1882,12 @@
           "funnel_stage"
         ]
       },
-      "digest": "40bf379febf5d0adbd6538e6ea9268050a677baaf399e1306862476e0cfb2cae"
+      "digest": "f2d0697e832e24a56ce8c144590733bf1e090330f362f5c0b89d264fd8bb64c1"
     },
     {
       "id": "montage",
       "channel": "montage",
-      "version": "2.0.6",
+      "version": "2.0.7",
       "kind": "managed",
       "display_name": "视频生成",
       "description": "从素材和业务输入生成最终视频与交付清单。",
@@ -1906,7 +1899,7 @@
           "portrait-cover-design",
           "content-reuse"
         ],
-        "max_turns": 180
+        "max_turns": 400
       },
       "bindings": {
         "task_kinds": [
@@ -1915,8 +1908,7 @@
       },
       "runtime": {
         "profile": "montage",
-        "adapter": "openmontage",
-        "max_turns": 40
+        "adapter": "openmontage"
       },
       "surfaces": [
         "plugin",
@@ -2048,7 +2040,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "d024b0e23f3052f9a701b93cad50fc059b79e06643ce8aeba3253abf81582073"
+      "digest": "cbc4ef8ae6ae11331c1e32f6ef00182969e2f1f35a1b231a586ab934d872056f"
     },
     {
       "id": "postmortem-review",
@@ -2076,8 +2068,7 @@
       "bindings": {},
       "runtime": {
         "profile": "postmortem-review",
-        "adapter": "standard",
-        "max_turns": 80
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin"
@@ -2086,7 +2077,7 @@
         "interactive-postmortem-review"
       ],
       "ui": {},
-      "digest": "b4f10f5f955ca9b46b37ea0fd66854c992cc4f311e28b740dfc06c95f4f13049"
+      "digest": "cfde65a8a15b81e0d6e4ec2bf781d552436e1d5e19d3042355c1f6fd313a706d"
     },
     {
       "id": "profile-analysis",
@@ -2109,8 +2100,7 @@
       },
       "runtime": {
         "profile": "profile-analysis",
-        "adapter": "standard",
-        "max_turns": 40
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -2396,11 +2386,11 @@
       "ui": {
         "renderer": "custom:profile-analysis"
       },
-      "digest": "171f914cbc842ba143e3de6f0b72e3d4c1bfc95a492690961edbf174833dcdea"
+      "digest": "7e99a3e4ac85f92a40e1a02b5663cb569776f68ca50e8b06b9c90489c98e5686"
     },
     {
       "id": "project-creator",
-      "version": "1.0.5",
+      "version": "1.0.6",
       "kind": "managed",
       "display_name": "画像模式",
       "description": "通过中文对话判断 Anban 项目适配性，选择内容类型并创建或更新六维项目画像。",
@@ -2425,8 +2415,7 @@
       "bindings": {},
       "runtime": {
         "profile": "project-creator",
-        "adapter": "standard",
-        "max_turns": 120
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin"
@@ -2541,13 +2530,13 @@
       "ui": {
         "renderer": "custom:project-creator"
       },
-      "digest": "a3ae9e6eeff2714d2ee44b40c5982fc9931a7f4f957b2fd1353902c20e46c040"
+      "digest": "6d8515cafdcaf324d94bf324c9a65d9004920a6474b6877e5dd7d465be34ddb2"
     },
     {
       "id": "seednote",
       "channel": "seednote",
       "plan_task_kind": "content_generation",
-      "version": "2.0.7",
+      "version": "2.0.9",
       "kind": "managed",
       "display_name": "种草笔记",
       "description": "支持原创、复刻和爆款分析的种草笔记图文创作流程。",
@@ -2567,7 +2556,7 @@
           "content-tagging",
           "content-reuse"
         ],
-        "max_turns": 20
+        "max_turns": 240
       },
       "bindings": {
         "task_kinds": [
@@ -2577,8 +2566,7 @@
       },
       "runtime": {
         "profile": "seednote",
-        "adapter": "standard",
-        "max_turns": 20
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -2801,7 +2789,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "aa5cedfb6ea871a0aba84ac169eff452abccbe5f3360dde544de1201adbe29ee"
+      "digest": "06ea6da600b7cd0941e769c4164ae8d1466cb9485ee7e2ec3ee512ea143333ca"
     },
     {
       "id": "video-edit",
@@ -2827,8 +2815,7 @@
       },
       "runtime": {
         "profile": "video-edit",
-        "adapter": "standard",
-        "max_turns": 160
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -2956,13 +2943,13 @@
           "funnel_stage"
         ]
       },
-      "digest": "8c0c1f118cd6b42b46db6431f5abc4eb3423784c80aa6a3e122833e7b2a22bb2"
+      "digest": "72bc16067496811a332bbb1694990872fe9a2f8741dbb7ce7221f0d0f2fba242"
     },
     {
       "id": "wechat-article",
       "channel": "wechat-article",
       "plan_task_kind": "content_generation",
-      "version": "2.0.9",
+      "version": "2.0.10",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到文章交付物的完整创作流程。",
@@ -2985,7 +2972,7 @@
           "article-publishing",
           "content-reuse"
         ],
-        "max_turns": 300
+        "max_turns": 180
       },
       "bindings": {
         "task_kinds": [
@@ -2994,8 +2981,7 @@
       },
       "runtime": {
         "profile": "wechat-article",
-        "adapter": "standard",
-        "max_turns": 60
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -3222,13 +3208,13 @@
           "funnel_stage"
         ]
       },
-      "digest": "8e59ca5b5768050c4b605edebcffba0935ae1b4176afc0dec849dea5de5b9660"
+      "digest": "20d99cac48e0499d28105270b0c4fd6ebb34b1f6be3a779b1d43d74306a9b3d6"
     },
     {
       "id": "wechat-picture",
       "channel": "wechat-picture",
       "plan_task_kind": "content_generation",
-      "version": "1.0.5",
+      "version": "1.0.7",
       "kind": "managed",
       "display_name": "微信公众号贴图",
       "description": "研究选题、编排图片消息并生成公众号 newspic 草稿交付包。",
@@ -3248,8 +3234,7 @@
       },
       "runtime": {
         "profile": "wechat-picture",
-        "adapter": "standard",
-        "max_turns": 60
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -3401,12 +3386,12 @@
           "funnel_stage"
         ]
       },
-      "digest": "2e24c806a061e31b4af46d98da9db85d15c2306ec4e75d967aa4adca7600adae"
+      "digest": "4e1fb0cab633e3c42f38639ed7049757c2278ca4afab9c5983e3878e5cc4816e"
     },
     {
       "id": "whiteboard-animation",
       "channel": "whiteboard-animation",
-      "version": "2.0.4",
+      "version": "2.0.5",
       "kind": "managed",
       "display_name": "白板动画",
       "description": "根据 SRT 字幕生成分镜、白板手绘场景和最终动画视频。",
@@ -3416,7 +3401,7 @@
           "whiteboard-animation",
           "content-reuse"
         ],
-        "max_turns": 120
+        "max_turns": 240
       },
       "interaction": {},
       "bindings": {
@@ -3426,8 +3411,7 @@
       },
       "runtime": {
         "profile": "whiteboard-animation",
-        "adapter": "standard",
-        "max_turns": 120
+        "adapter": "standard"
       },
       "surfaces": [
         "plugin",
@@ -3580,7 +3564,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "8c758d454277ce1f20e4dd31e40adaeaa5b14ddc9771f3e9e8c028f637cd5655"
+      "digest": "705af8ca7ab9d3bf82f03c7c81cf9fbccc1d4e735c6795cb824de948ed04d174"
     }
   ]
 }

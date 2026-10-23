@@ -371,14 +371,52 @@ func TestValidateVideoEditCompletionArtifactsRequiresContentTags(t *testing.T) {
 		{State: model.TaskFileStatePending, FilePath: "output/quality-evidence.json", FileSize: 1},
 	}
 
-	validation := validateVideoEditCompletionArtifacts(files)
+	validation := validateVideoEditCompletionArtifacts(&model.Task{Type: model.PlatformVideoEdit}, files)
 	if validation.Valid || !strings.Contains(validation.Reason, "output/content-tags.json") {
 		t.Fatalf("validation = %#v, want missing content tags reported", validation)
 	}
 
 	files = append(files, &model.TaskFile{State: model.TaskFileStatePending, FilePath: "output/content-tags.json", FileSize: 1})
-	if validation = validateVideoEditCompletionArtifacts(files); !validation.Valid {
+	if validation = validateVideoEditCompletionArtifacts(&model.Task{Type: model.PlatformVideoEdit}, files); !validation.Valid {
 		t.Fatalf("validation with content tags = %#v, want valid", validation)
+	}
+}
+
+func TestValidateVideoEditCompletionArtifactsRequiresRequestedSubtitles(t *testing.T) {
+	task := &model.Task{Type: model.PlatformVideoEdit}
+	task.SetVideoEditInput(model.VideoEditInput{Preferences: model.VideoEditPreferences{SubtitleMode: "required"}})
+	files := videoEditCompletionTestFiles()
+
+	validation := validateVideoEditCompletionArtifacts(task, files)
+	if validation.Valid || !strings.Contains(validation.Error(), "output/subtitles.srt") {
+		t.Fatalf("validation = %#v, want requested subtitles reported missing", validation)
+	}
+
+	files = append(files, &model.TaskFile{State: model.TaskFileStatePending, FilePath: "output/subtitles.srt", FileSize: 1})
+	if validation = validateVideoEditCompletionArtifacts(task, files); !validation.Valid {
+		t.Fatalf("validation with requested subtitles = %#v, want valid", validation)
+	}
+}
+
+func TestValidateVideoEditCompletionArtifactsRejectsFailureState(t *testing.T) {
+	files := append(videoEditCompletionTestFiles(), &model.TaskFile{
+		State: model.TaskFileStatePending, FilePath: "output/failure-state.json", FileSize: 1,
+	})
+
+	validation := validateVideoEditCompletionArtifacts(&model.Task{Type: model.PlatformVideoEdit}, files)
+	if validation.Valid || !strings.Contains(validation.Reason, "failure-state.json") {
+		t.Fatalf("validation = %#v, want recoverable failure marker rejected", validation)
+	}
+}
+
+func videoEditCompletionTestFiles() []*model.TaskFile {
+	return []*model.TaskFile{
+		{State: model.TaskFileStatePending, FilePath: "output/final.mp4", FileSize: 1},
+		{State: model.TaskFileStatePending, FilePath: "output/edit-decision-list.json", FileSize: 1},
+		{State: model.TaskFileStatePending, FilePath: "output/edit-strategy.md", FileSize: 1},
+		{State: model.TaskFileStatePending, FilePath: "output/delivery-manifest.json", FileSize: 1},
+		{State: model.TaskFileStatePending, FilePath: "output/quality-evidence.json", FileSize: 1},
+		{State: model.TaskFileStatePending, FilePath: "output/content-tags.json", FileSize: 1},
 	}
 }
 

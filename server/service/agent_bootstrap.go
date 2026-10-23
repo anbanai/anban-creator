@@ -73,7 +73,6 @@ type AgentBootstrapResponse struct {
 	ProjectID              string              `json:"project_id"`
 	Prompt                 string              `json:"prompt"`
 	ExecutionProfile       AgentRuntimeProfile `json:"execution_profile"`
-	MaxTurns               int                 `json:"max_turns"`
 	AgentFlag              string              `json:"agent_flag"`
 	AgentMemoryDirectory   string              `json:"agent_memory_directory"`
 	ResumeSessionID        string              `json:"resume_session_id,omitempty"`
@@ -85,7 +84,6 @@ type AgentBootstrapResponse struct {
 }
 
 type AgentBootstrapConfig struct {
-	MaxTurns                map[string]int
 	TokenTTL                time.Duration
 	ActiveDeadline          time.Duration
 	SignedURLTTL            int
@@ -318,6 +316,15 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	tokenTTL := s.cfg.TokenTTL
 	if task != nil && model.IsHypitPlatform(task.Type) {
 		required := time.Duration(readHypitSnapshot(task).Limits.TimeoutMinutes) * time.Minute
+		if tokenTTL < required {
+			tokenTTL = required
+		}
+	}
+	if task != nil && model.IsVideoEditPlatform(task.Type) {
+		required := task.VideoEditTimeout()
+		if execution != nil && execution.ActiveDeadlineSeconds > 0 {
+			required = time.Duration(execution.ActiveDeadlineSeconds) * time.Second
+		}
 		if tokenTTL < required {
 			tokenTTL = required
 		}
@@ -629,7 +636,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 			DisplayName: executionProfile.DisplayName, ProfileFingerprint: task.AgentProfileFingerprint,
 			Envs: model.CloneClaudeProfileEnvs(runtimeEnv), ModelUsageAliases: aliases,
 		},
-		MaxTurns: serveragent.DefaultMaxTurns(execution.AgentPackID, s.cfg.MaxTurns), AgentFlag: "anban:" + pack.Agent.Name,
+		AgentFlag:            "anban:" + pack.Agent.Name,
 		AgentMemoryDirectory: ".claude/agent-memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath,
 		Env: s.runtimeEnv(task), Files: files, ArtifactTransport: ArtifactTransport{Mode: s.artifactTransportMode()},
 		recoveryImages: recoveryImages,

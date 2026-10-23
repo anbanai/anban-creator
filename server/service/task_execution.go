@@ -69,15 +69,27 @@ func validateMontageCompletionArtifacts(files []*model.TaskFile) agent.ArtifactV
 	return agent.ArtifactValidation{Valid: true, MeaningfulFileCount: meaningful}
 }
 
-func validateVideoEditCompletionArtifacts(files []*model.TaskFile) agent.ArtifactValidation {
+func validateVideoEditCompletionArtifacts(task *model.Task, files []*model.TaskFile) agent.ArtifactValidation {
 	required := []string{"output/final.mp4", "output/edit-decision-list.json", "output/edit-strategy.md", "output/delivery-manifest.json", "output/quality-evidence.json", "output/content-tags.json"}
+	if task != nil && task.VideoEditInput.Data().Preferences.SubtitleMode == "required" {
+		required = append(required, "output/subtitles.srt")
+	}
 	present := make(map[string]bool, len(required))
 	meaningful := 0
 	for _, file := range files {
-		if file == nil || file.FileSize <= 0 || (file.State != model.TaskFileStatePending && file.State != model.TaskFileStateDelivered) {
+		if file == nil {
 			continue
 		}
 		path := filepath.ToSlash(strings.TrimSpace(file.FilePath))
+		if path == "output/failure-state.json" || path == "failure-state.json" {
+			return agent.ArtifactValidation{
+				Missing: []string{"successful video-edit completion"},
+				Reason:  "video-edit reported a recoverable failure; inspect failure-state.json",
+			}
+		}
+		if file.FileSize <= 0 || (file.State != model.TaskFileStatePending && file.State != model.TaskFileStateDelivered) {
+			continue
+		}
 		if !present[path] {
 			for _, want := range required {
 				if path == want {

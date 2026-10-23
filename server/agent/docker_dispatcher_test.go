@@ -36,8 +36,16 @@ func TestDockerDispatcherPreparesThenActivatesContainer(t *testing.T) {
 	tokens := dockerDispatcherTestTokens(t)
 	dispatcher := newDockerDispatcherForTest(t, engine, tokens)
 	execution := dockerDispatcherTestExecution()
+	execution.ActiveDeadlineSeconds = int64((90 * time.Minute).Seconds())
+	execution.RuntimeProfile = model.PlatformVideoEdit
+	execution.RuntimeImage = dockerDispatcherTestImages()[model.PlatformVideoEdit]
+	task := dockerDispatcherTestTask()
+	task.Type = model.PlatformVideoEdit
+	videoEditImage := dockerDispatcherTestImage()
+	videoEditImage.RepoDigests = append(videoEditImage.RepoDigests, execution.RuntimeImage)
+	engine.images[execution.RuntimeImage] = videoEditImage
 
-	identity, err := dispatcher.Prepare(context.Background(), execution, dockerDispatcherTestTask())
+	identity, err := dispatcher.Prepare(context.Background(), execution, task)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +96,7 @@ func TestDockerDispatcherPreparesThenActivatesContainer(t *testing.T) {
 		claims.UserID != "docker-user-1" || claims.ProjectID != "docker-project-1" || claims.TaskID != "docker-task-1" || claims.ExecutionID != "docker-execution-1" {
 		t.Fatalf("workload claims = %#v", claims)
 	}
-	if claims.ExpiresAt == nil || claims.IssuedAt == nil || claims.ExpiresAt.Time.Sub(claims.IssuedAt.Time) > time.Hour {
+	if claims.ExpiresAt == nil || claims.IssuedAt == nil || claims.ExpiresAt.Time.Sub(claims.IssuedAt.Time) != 90*time.Minute {
 		t.Fatalf("workload token lifetime = %#v", claims.RegisteredClaims)
 	}
 	if !engine.allDispatchCallsHadDeadline {

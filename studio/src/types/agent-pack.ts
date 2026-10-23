@@ -32,7 +32,7 @@ export interface AgentPack {
   agent: {
     name: string
     skills?: string[]
-    max_turns?: number
+    max_turns: number
   }
 	bindings: {
 		task_kinds?: string[]
@@ -40,7 +40,6 @@ export interface AgentPack {
   runtime: {
     profile?: string
     adapter?: 'standard' | 'openmontage'
-    max_turns?: number
   }
   surfaces: AgentPackSurface[]
   features?: string[]

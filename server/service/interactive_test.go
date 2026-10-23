@@ -574,6 +574,24 @@ func TestValidateStageRetainsAllProfileDimensionReasons(t *testing.T) {
 	}
 }
 
+func TestPreserveOmittedProfileDimensionsDuringTargetedRefresh(t *testing.T) {
+	current := model.NewProjectProfile().Dimensions
+	current.Identity.Content = map[string]any{"business": "茶礼盒"}
+	current.Identity.Sources = []string{"[用户确认]"}
+	current.Audience.Content = map[string]any{"buyer": "送礼人群"}
+	current.Preferences.Content = map[string]any{"direction": "节日礼赠"}
+
+	staged := model.NewProjectProfile().Dimensions
+	staged.Style.Content = map[string]any{"tone": "简洁"}
+	merged := preserveOmittedProfileDimensions(current, staged)
+	if !reflect.DeepEqual(merged.Identity, current.Identity) || !reflect.DeepEqual(merged.Audience, current.Audience) || !reflect.DeepEqual(merged.Preferences, current.Preferences) {
+		t.Fatalf("omitted confirmed dimensions were not preserved: %#v", merged)
+	}
+	if !reflect.DeepEqual(merged.Style, staged.Style) {
+		t.Fatalf("targeted dimension changed: got %#v, want %#v", merged.Style, staged.Style)
+	}
+}
+
 func TestInteractiveProgressRejectsFieldsInStableOrder(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		var progress InteractiveProgress
@@ -1689,6 +1707,134 @@ func TestAssistantProfileCommitConfirmsNewProfile(t *testing.T) {
 	}
 	if !result.Profile.IsConfirmed() || result.Profile.ApplicationSource != model.ProfileApplicationSourceUserConfirmation {
 		t.Fatalf("Assistant profile = %#v, want confirmed user profile", result.Profile)
+	}
+}
+
+func TestAssistantProfileCommitPersistsVideoEditDefaultsAndBindsIdempotency(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "assistant-video-edit-profile.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Project{}, &model.ProjectProfileRevision{}, &model.ProjectProfileState{}, &model.InteractiveCommitReceipt{}, &model.AssistantCheckpoint{}, &model.AssistantSession{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	sess := newInteractiveTestSession()
+	sess.ModeID = AssistantModeProfile
+	svc := newInteractiveTestService(sess)
+	svc.repo = repo
+	if err := svc.StageDraftForSession(sess.ID, InteractiveStageInput{
+		Project: InteractiveProject{Name: "Video profile", Platform: model.PlatformVideoEdit},
+		Profile: model.NewProjectProfile(), Progress: InteractiveProgress{
+			"identity": "collected", "style": "collected", "audience": "collected",
+			"platforms": "collected", "preferences": "collected", "memory": "collected",
+		}, Ready: true,
+	}); err != nil {
+		t.Fatalf("StageDraftForSession() error = %v", err)
+	}
+	history, _, closeEvents, err := svc.Events(sess.UserID, sess.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeEvents()
+	var token string
+	for _, event := range history {
+		if event.Type == "draft.ready" {
+			if draft, ok := event.Data.(InteractiveDraft); ok {
+				token = draft.ConfirmationToken
+			}
+		}
+	}
+	if token == "" {
+		t.Fatal("ready draft did not issue a confirmation token")
+	}
+	defaults := model.VideoEditDefaults{
+		Preferences:     model.VideoEditPreferences{QualityTier: "quality", SubtitleMode: "off", MaxDuration: 45},
+		DeliveryTargets: []string{"portrait-short"},
+	}
+	req := AssistantCommitRequest{ConfirmationToken: token, IdempotencyKey: "assistant-video-edit-profile-commit", VideoEditDefaults: &defaults}
+	result, err := svc.CommitAssistant(context.Background(), sess.UserID, sess.ID, req, nil, repo)
+	if err != nil {
+		t.Fatalf("CommitAssistant() error = %v", err)
+	}
+	if got := result.Project.VideoEditDefaults.Data(); !reflect.DeepEqual(got, defaults) {
+		t.Fatalf("video-edit defaults = %#v, want %#v", got, defaults)
+	}
+	replay, err := svc.CommitAssistant(context.Background(), sess.UserID, sess.ID, req, nil, repo)
+	if err != nil || replay.Project == nil || replay.Project.ID != result.Project.ID {
+		t.Fatalf("same-request receipt replay = %#v, %v", replay, err)
+	}
+	changed := defaults
+	changed.Preferences.QualityTier = "balanced"
+	req.VideoEditDefaults = &changed
+	if _, err := svc.CommitAssistant(context.Background(), sess.UserID, sess.ID, req, nil, repo); !errors.Is(err, ErrInteractiveIdempotency) {
+		t.Fatalf("CommitAssistant() with changed defaults error = %v, want ErrInteractiveIdempotency", err)
+	}
+}
+
+func TestAssistantProfileCommitUpdatesExistingVideoEditDefaults(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "assistant-video-edit-existing-profile.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Project{}, &model.ProjectProfileRevision{}, &model.ProjectProfileState{}, &model.InteractiveCommitReceipt{}, &model.AssistantCheckpoint{}, &model.AssistantSession{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	project := &model.Project{
+		ID: "existing-video-edit-profile", UserID: "user-1", Platform: model.PlatformVideoEdit,
+		Name: "Existing video profile", Profile: datatypes.NewJSONType(model.NewProjectProfile()),
+	}
+	if err := repo.Projects().Create(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	sess := newInteractiveTestSession()
+	sess.ModeID = AssistantModeProfile
+	sess.ProjectID = project.ID
+	sess.ProfileVersion = model.NewProjectProfile().Version
+	svc := newInteractiveTestService(sess)
+	svc.repo = repo
+	if err := svc.StageDraftForSession(sess.ID, InteractiveStageInput{
+		Project: InteractiveProject{Name: project.Name, Platform: model.PlatformVideoEdit},
+		Profile: model.NewProjectProfile(), Progress: InteractiveProgress{
+			"identity": "collected", "style": "collected", "audience": "collected",
+			"platforms": "collected", "preferences": "collected", "memory": "collected",
+		}, Ready: true,
+	}); err != nil {
+		t.Fatalf("StageDraftForSession() error = %v", err)
+	}
+	history, _, closeEvents, err := svc.Events(sess.UserID, sess.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeEvents()
+	var token string
+	for _, event := range history {
+		if event.Type == "draft.ready" {
+			if draft, ok := event.Data.(InteractiveDraft); ok {
+				token = draft.ConfirmationToken
+			}
+		}
+	}
+	if token == "" {
+		t.Fatal("ready draft did not issue a confirmation token")
+	}
+	defaults := model.VideoEditDefaults{Preferences: model.VideoEditPreferences{QualityTier: "balanced", SubtitleMode: "required"}}
+	result, err := svc.CommitAssistant(context.Background(), sess.UserID, sess.ID, AssistantCommitRequest{
+		ConfirmationToken: token, IdempotencyKey: "assistant-video-edit-existing-profile-commit", VideoEditDefaults: &defaults,
+	}, nil, repo)
+	if err != nil {
+		t.Fatalf("CommitAssistant() error = %v", err)
+	}
+	persisted, err := repo.Projects().FindByID(context.Background(), project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := persisted.VideoEditDefaults.Data(); !reflect.DeepEqual(got, defaults) {
+		t.Fatalf("persisted video-edit defaults = %#v, want %#v", got, defaults)
+	}
+	if result.Project == nil || result.Project.ID != project.ID {
+		t.Fatalf("CommitAssistant() project = %#v, want existing project %q", result.Project, project.ID)
 	}
 }
 

@@ -38,3 +38,21 @@ func TestHypitWorkloadHonorsFrozenTimeout(t *testing.T) {
 		t.Fatalf("Docker timeout=%v", runtime.Timeout)
 	}
 }
+
+func TestVideoEditWorkloadsHonorExecutionDeadline(t *testing.T) {
+	task := testTask()
+	task.Type = model.PlatformVideoEdit
+	execution := testExecution()
+	execution.ActiveDeadlineSeconds = int64((90 * time.Minute).Seconds())
+
+	job := buildKubernetesJob(testJobConfig(), execution, task)
+	if got := *job.Spec.ActiveDeadlineSeconds; got != 90*60 {
+		t.Fatalf("Kubernetes deadline = %d seconds, want %d", got, 90*60)
+	}
+
+	cfg := dockerRuntimeConfig{DockerConfig: dockerDispatcherTestConfig()}
+	runtime := buildDockerRuntimeSpec(cfg, execution, task)
+	if runtime.Timeout != 90*time.Minute {
+		t.Fatalf("Docker timeout = %v, want 90m", runtime.Timeout)
+	}
+}

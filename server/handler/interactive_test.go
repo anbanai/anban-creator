@@ -58,6 +58,8 @@ func TestInteractiveErrorIncludesStableConflictCode(t *testing.T) {
 		{name: "mode unavailable", err: service.ErrAssistantModeUnavailable, want: "assistant_mode_unavailable"},
 		{name: "checkpoint conflict", err: service.ErrAssistantCheckpointConflict, want: "assistant_checkpoint_conflict"},
 		{name: "event gap", err: service.ErrInteractiveEventGap, want: "interactive_event_gap"},
+		{name: "workspace busy", err: service.ErrAssistantWorkspaceBusy, want: "assistant_workspace_busy"},
+		{name: "workspace mode mismatch", err: service.ErrAssistantWorkspaceModeMismatch, want: "assistant_workspace_mode_mismatch"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -78,6 +80,25 @@ func TestInteractiveErrorIncludesStableConflictCode(t *testing.T) {
 				t.Fatalf("status/error_code = %d/%q, want %d/%q", resp.StatusCode, body.ErrorCode, fiber.StatusConflict, test.want)
 			}
 		})
+	}
+}
+
+func TestInteractiveWorkspaceExpiredErrorIncludesStableCode(t *testing.T) {
+	app := fiber.New()
+	app.Post("/", func(c fiber.Ctx) error { return interactiveError(c, service.ErrAssistantWorkspaceExpired) })
+	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		ErrorCode string `json:"error_code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusGone || body.ErrorCode != "assistant_workspace_expired" {
+		t.Fatalf("status/error_code = %d/%q, want %d/%q", resp.StatusCode, body.ErrorCode, fiber.StatusGone, "assistant_workspace_expired")
 	}
 }
 

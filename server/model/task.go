@@ -246,28 +246,29 @@ type Task struct {
 	// tasks (selected deliverable modules, product photos, target platform, selling
 	// points, and language). Zero value for non-ecommerce
 	// tasks. Read by the agent via get_project_profile(task_id, scope="ecommerce").
-	Ecommerce            datatypes.JSONType[EcommerceConfig]   `gorm:"type:json" json:"ecommerce"`
-	InputAttachments     datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
-	HypitRuntimeSnapshot datatypes.JSON                        `gorm:"type:json" json:"-"`
-	HypitInput           datatypes.JSONType[HypitInput]        `gorm:"type:json" json:"hypit_input"`
-	MontageInput         datatypes.JSONType[MontageInput]      `gorm:"type:json" json:"montage_input"`
-	VideoEditInput       datatypes.JSONType[VideoEditInput]    `gorm:"type:json" json:"video_edit_input"`
-	LocalLifeInput       datatypes.JSONType[LocalLifeInput]    `gorm:"type:json" json:"local_life_input"`
-	AgentInput           datatypes.JSONType[map[string]any]    `gorm:"type:json" json:"agent_input"`
-	ProgressLog          string                                `gorm:"type:longtext" json:"progress_log,omitempty"`
-	Lifecycle            datatypes.JSONType[TaskLifecycle]     `gorm:"type:json" json:"lifecycle"`
-	Result               *string                               `gorm:"type:json" json:"-"`
-	Outcome              *TaskOutcome                          `gorm:"type:json;serializer:json" json:"outcome,omitempty"`
-	TerminalModelUsage   datatypes.JSONType[[]ModelTokenUsage] `gorm:"type:json" json:"-"`
-	CostStatus           string                                `gorm:"type:varchar(20);default:'';index" json:"-"`
-	BillingQuoteID       string                                `gorm:"type:char(36);index" json:"billing_quote_id,omitempty"`
-	BillingCatalogID     string                                `gorm:"type:varchar(128);index" json:"billing_catalog_id,omitempty"`
-	BillingSKUID         string                                `gorm:"type:varchar(128);index" json:"billing_sku_id,omitempty"`
-	BillingPricingTier   string                                `gorm:"type:varchar(20);index" json:"billing_pricing_tier,omitempty"`
-	BillingChargeID      *string                               `gorm:"type:char(36);uniqueIndex" json:"billing_charge_id,omitempty"`
-	BillingPriceCredits  int64                                 `gorm:"not null;default:0" json:"billing_price_credits"`
-	ExecutionProfile     string                                `gorm:"type:varchar(40);not null;index:idx_tasks_execution_profile" json:"execution_profile"`
-	AgentProfileSnapshot AgentProfileSnapshot                  `gorm:"type:json;serializer:json;not null" json:"agent_profile_snapshot"`
+	Ecommerce               datatypes.JSONType[EcommerceConfig]   `gorm:"type:json" json:"ecommerce"`
+	InputAttachments        datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
+	HypitRuntimeSnapshot    datatypes.JSON                        `gorm:"type:json" json:"-"`
+	HypitInput              datatypes.JSONType[HypitInput]        `gorm:"type:json" json:"hypit_input"`
+	MontageInput            datatypes.JSONType[MontageInput]      `gorm:"type:json" json:"montage_input"`
+	VideoEditInput          datatypes.JSONType[VideoEditInput]    `gorm:"type:json" json:"video_edit_input"`
+	VideoEditTimeoutMinutes int                                   `gorm:"not null;default:0" json:"-"`
+	LocalLifeInput          datatypes.JSONType[LocalLifeInput]    `gorm:"type:json" json:"local_life_input"`
+	AgentInput              datatypes.JSONType[map[string]any]    `gorm:"type:json" json:"agent_input"`
+	ProgressLog             string                                `gorm:"type:longtext" json:"progress_log,omitempty"`
+	Lifecycle               datatypes.JSONType[TaskLifecycle]     `gorm:"type:json" json:"lifecycle"`
+	Result                  *string                               `gorm:"type:json" json:"-"`
+	Outcome                 *TaskOutcome                          `gorm:"type:json;serializer:json" json:"outcome,omitempty"`
+	TerminalModelUsage      datatypes.JSONType[[]ModelTokenUsage] `gorm:"type:json" json:"-"`
+	CostStatus              string                                `gorm:"type:varchar(20);default:'';index" json:"-"`
+	BillingQuoteID          string                                `gorm:"type:char(36);index" json:"billing_quote_id,omitempty"`
+	BillingCatalogID        string                                `gorm:"type:varchar(128);index" json:"billing_catalog_id,omitempty"`
+	BillingSKUID            string                                `gorm:"type:varchar(128);index" json:"billing_sku_id,omitempty"`
+	BillingPricingTier      string                                `gorm:"type:varchar(20);index" json:"billing_pricing_tier,omitempty"`
+	BillingChargeID         *string                               `gorm:"type:char(36);uniqueIndex" json:"billing_charge_id,omitempty"`
+	BillingPriceCredits     int64                                 `gorm:"not null;default:0" json:"billing_price_credits"`
+	ExecutionProfile        string                                `gorm:"type:varchar(40);not null;index:idx_tasks_execution_profile" json:"execution_profile"`
+	AgentProfileSnapshot    AgentProfileSnapshot                  `gorm:"type:json;serializer:json;not null" json:"agent_profile_snapshot"`
 
 	AgentProfileFingerprint string `gorm:"type:char(64);not null;index" json:"agent_profile_fingerprint"`
 

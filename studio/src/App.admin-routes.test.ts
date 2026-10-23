@@ -17,7 +17,11 @@ describe('administrator routes', () => {
 		expect(source).toContain("initialMessage: params.get('initial_message') || params.get('initialMessage') || undefined")
 	})
 
-  it.each(['projects/new/interview', 'projects/create'])(
+  it('opens the lightweight interview without a runtime session', () => {
+    expect(routeDefinition('projects/new/interview')).toContain('<LazyPage component={PortraitOnboardingPage} />')
+  })
+
+  it.each(['projects/create'])(
     'merges /%s into the Assistant profile home without starting a session',
     (path) => {
       expect(routeDefinition(path)).toContain('<Navigate to="/" replace state={{ modeId: \'profile\' }} />')

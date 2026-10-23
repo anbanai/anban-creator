@@ -46,6 +46,9 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 	if task != nil && model.IsHypitPlatform(task.Type) {
 		activeDeadline = int64(task.HypitTimeout().Seconds())
 	}
+	if execution != nil && execution.ActiveDeadlineSeconds > 0 {
+		activeDeadline = execution.ActiveDeadlineSeconds
+	}
 	ttl := cfg.TTLSecondsAfterFinished
 	suspend := true
 	automountToken := false

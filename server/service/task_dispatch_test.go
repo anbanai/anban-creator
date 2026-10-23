@@ -990,6 +990,34 @@ func TestCreateCurrentExecutionPersistsRuntimeImage(t *testing.T) {
 	}
 }
 
+func TestCreateCurrentExecutionFreezesVideoEditDeadline(t *testing.T) {
+	svc, repo, _, dispatcher, task := setupDispatchTest(t)
+	task.Type = model.PlatformVideoEdit
+	task.AgentID = model.AgentIDVideoEdit
+	task.Channel = model.ChannelVideoEdit
+	task.TaskKind = model.TaskKindVideoEdit
+	task.VideoEditTimeoutMinutes = 42
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: model.PlatformVideoEdit, Image: "registry/video-edit@sha256:test"}
+	if err := repo.Tasks().Update(t.Context(), task); err != nil {
+		t.Fatal(err)
+	}
+
+	execution, created, err := svc.createCurrentExecution(t.Context(), task)
+	if err != nil || !created {
+		t.Fatalf("createCurrentExecution = %#v, created=%v, err=%v", execution, created, err)
+	}
+	if execution.ActiveDeadlineSeconds != 42*60 {
+		t.Fatalf("execution active deadline = %d seconds, want %d", execution.ActiveDeadlineSeconds, 42*60)
+	}
+	stored, err := repo.TaskExecutions().FindByID(t.Context(), execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ActiveDeadlineSeconds != 42*60 {
+		t.Fatalf("persisted execution active deadline = %d seconds, want %d", stored.ActiveDeadlineSeconds, 42*60)
+	}
+}
+
 func TestCreateCurrentExecutionRejectsMissingRuntimeDispatcher(t *testing.T) {
 	svc, _, _, _, task := setupDispatchTest(t)
 	svc.SetRuntimeDispatcher(nil)

@@ -569,6 +569,9 @@ func (c VideoEditConfig) Validate() error {
 	if c.TimeoutMinutes < 0 {
 		return fmt.Errorf("video_edit.timeout_minutes must be positive")
 	}
+	if c.TimeoutMinutes > int(auth.MaximumExecutionTokenLifetime/time.Minute) {
+		return fmt.Errorf("video_edit.timeout_minutes must not exceed execution token lifetime %s", auth.MaximumExecutionTokenLifetime)
+	}
 	policy := c.DefaultPolicy
 	policyInput := model.VideoEditInput{Brief: "server-defaults", SourceAssets: []model.VideoEditAsset{{Type: "video", AssetID: "server-default"}}, Preferences: policy.Preferences}
 	policyInput.Normalize(policy)
@@ -902,7 +905,6 @@ type ClaudeConfig struct {
 	Docker                            DockerConfig                            `yaml:"docker"`           // Docker executor settings (used when executor=docker)
 	Kubernetes                        KubernetesConfig                        `yaml:"kubernetes"`       // Kubernetes executor settings (used when executor=kubernetes)
 	ProjectMemory                     ProjectMemoryConfig                     `yaml:"project_memory"`   // Shared filesystem-backed Claude project memory.
-	MaxTurns                          map[string]int                          `yaml:"max_turns"`        // Per-task-type max turns, e.g. {"article": 60, "seednote": 100}
 	TaskLogDir                        string                                  `yaml:"task_log_dir"`     // Directory for per-task agent execution logs. Empty = disabled.
 	AgentServerURL                    string                                  `yaml:"agent_server_url"` // Override server URL for agent MCP connections (e.g. k8s service URL). To env-control, write ${ANBAN_CLAUDE_AGENT_SERVER_URL} in config.yaml.
 }
@@ -918,7 +920,7 @@ func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 	known := map[string]bool{
 		"profiles": true, "executor": true, "runtime_images": true, "runtime_diagnostic_retention_seconds": true,
 		"execution_token_secret": true, "plugin_dir": true,
-		"sandbox": true, "docker": true, "kubernetes": true, "project_memory": true, "max_turns": true,
+		"sandbox": true, "docker": true, "kubernetes": true, "project_memory": true,
 		"task_log_dir": true, "agent_server_url": true,
 	}
 	if value.Kind != yaml.MappingNode {
@@ -1263,9 +1265,9 @@ type AsynqConfig struct {
 	// ContentGenerateTimeout bounds the whole content:generate task (research →
 	// images → HTML → draft). It is set as the asynq task Timeout and as the
 	// Redis-down fallback goroutine deadline. Must comfortably exceed the
-	// realistic pipeline wall-clock time so the agent reaches 100% delivery
+	// realistic pipeline wall-clock time so the Agent reaches 100% delivery
 	// before the asynq ctx expires. Default 60m (the article pipeline
-	// with vision-verified images can run ~35-40m when max_turns.article is high.
+	// with vision-verified images can run ~35-40m with a high Agent turn budget.
 	ContentGenerateTimeout time.Duration `yaml:"content_generate_timeout"` // default 60m
 
 	// PersistTimeout bounds the post-execution DB writes (result, workspace
@@ -1743,8 +1745,6 @@ func (c *Config) applyDefaults() {
 		c.Ilink.AssistantName = "Anban 微信助手"
 	}
 
-	// Agent Packs own default turn budgets. Claude.MaxTurns contains only
-	// explicit operator overrides and is intentionally left sparse.
 	if c.Claude.Docker.Network == "" {
 		c.Claude.Docker.Network = "creator-runtime-network"
 	}
@@ -1769,7 +1769,7 @@ func (c *Config) applyDefaults() {
 	if c.Claude.Docker.TimeoutSec == 0 && !c.Claude.Docker.timeoutSecSet {
 		// Default 3600s (60m) to stay >= asynq.content_generate_timeout (60m).
 		// The container must outlive the task deadline, otherwise it is killed
-		// before the agent finishes (silent partial failure).
+		// before the Agent finishes (silent partial failure).
 		c.Claude.Docker.TimeoutSec = 3600
 	}
 	if c.Claude.Kubernetes.Namespace == "" {

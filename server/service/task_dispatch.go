@@ -444,6 +444,9 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 		execution.RuntimeImage = runtime.Image
 		execution.Target = target
 		execution.Status = model.TaskExecutionCreated
+		if model.IsVideoEditPlatform(dispatchTask.Type) {
+			execution.ActiveDeadlineSeconds = int64(dispatchTask.VideoEditTimeout().Seconds())
+		}
 		if err := txRepo.TaskExecutions().Create(ctx, execution); err != nil {
 			return fmt.Errorf("create task execution: %w", err)
 		}

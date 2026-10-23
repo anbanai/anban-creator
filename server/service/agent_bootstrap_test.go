@@ -811,7 +811,7 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 	}
 	tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
 	store := &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}
-	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{MaxTurns: map[string]int{model.PlatformSeednote: 12}, TokenTTL: 10 * time.Minute, ActiveDeadline: 5 * time.Minute, Store: store, Registry: registry}, zerolog.Nop())
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{TokenTTL: 10 * time.Minute, ActiveDeadline: 5 * time.Minute, Store: store, Registry: registry}, zerolog.Nop())
 	identity := &serveragent.WorkloadIdentity{Target: "docker", RuntimeIdentity: model.RuntimeIdentity{Scope: "docker", Workload: "exec-1", InstanceID: "container-id"}, ExecutionID: executionID, TaskID: taskID, ProjectID: projectID, UserID: userID, Deadline: time.Now().Add(4 * time.Minute)}
 	first, err := svc.Bootstrap(ctx, identity)
 	if err != nil {
@@ -829,8 +829,11 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 		t.Fatalf("bootstrap must expose only native agent memory directory; got agent=%v auto=%v", wire["agent_memory_directory"], wire["auto_memory_directory"])
 	}
 	resumeContextPath, _ := serveragent.ExecutionResumeContextPath(executionID)
-	if first.ExecutionToken == "" || first.ExecutionID != executionID || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AgentMemoryDirectory != ".claude/agent-memory" || first.ResumeSessionID != resumeSessionID || first.ResumeContextPath != resumeContextPath || first.MaxTurns != 12 {
+	if first.ExecutionToken == "" || first.ExecutionID != executionID || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AgentMemoryDirectory != ".claude/agent-memory" || first.ResumeSessionID != resumeSessionID || first.ResumeContextPath != resumeContextPath {
 		t.Fatalf("response = %#v", first)
+	}
+	if _, exists := wire["max_turns"]; exists {
+		t.Fatalf("bootstrap must not send a server-controlled max_turns field: %v", wire["max_turns"])
 	}
 	if first.AgentPackID != "seednote" || first.AgentPackVersion != profiledExecution.AgentPackVersion || first.AgentPackVersion == "" || first.AgentPackDigest != profiledExecution.AgentPackDigest || len(first.AgentPackDigest) != 64 || first.AgentPackCatalogDigest != agentpack.CatalogDigest() || first.RuntimeAdapter != "standard" || first.RuntimeProfile != "seednote" {
 		t.Fatalf("response Agent Pack identity = %#v", first)
@@ -1406,6 +1409,50 @@ func TestBootstrapMaterializesOnlyOwnedFinalizedVideoEditAssets(t *testing.T) {
 	}
 	if len(store.signedKeys) != 1 || store.signedKeys[0] != asset.StorageKey {
 		t.Fatalf("signed keys = %#v, want only %q", store.signedKeys, asset.StorageKey)
+	}
+}
+
+func TestVideoEditBootstrapCredentialCoversFrozenExecutionDeadline(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	asset := &model.Asset{
+		ID: "video-edit-deadline-asset", UserID: "user-video-edit", Purpose: DirectUploadPurposeVideoEditAsset,
+		StorageKey: "assets/users/user-video-edit/video-edit-deadline-asset/input.mp4", FileName: "input.mp4",
+		ContentType: "video/mp4", Size: 1024, ETag: "verified-etag",
+	}
+	if err := repo.Assets().Create(t.Context(), asset); err != nil {
+		t.Fatal(err)
+	}
+	store := &videoEditBootstrapStore{bootstrapSecurityStore: &bootstrapSecurityStore{signFakeStore: &signFakeStore{}}}
+	now := time.Now().UTC().Truncate(time.Second)
+	task := &model.Task{
+		ID: "task-video-edit-deadline", UserID: asset.UserID, ProjectID: "project-video-edit-deadline", Type: model.PlatformVideoEdit,
+		VideoEditTimeoutMinutes: 90,
+	}
+	task.SetVideoEditInput(model.VideoEditInput{
+		Brief: "edit interview", SourceAssets: []model.VideoEditAsset{{Type: "video", AssetID: asset.ID, FileName: asset.FileName, MimeType: asset.ContentType, FileSize: asset.Size}},
+		Preferences: model.VideoEditPreferences{QualityTier: "effective", SubtitleMode: "off"},
+	})
+	execution := &model.TaskExecution{ID: "execution-video-edit-deadline", ActiveDeadlineSeconds: int64((90 * time.Minute).Seconds())}
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{
+		TokenTTL: time.Hour, ActiveDeadline: time.Hour, Store: store,
+		VideoEdit: config.VideoEditConfig{MaxAssets: 20, MaxAssetBytes: 256 << 20, MaxTotalInputBytes: 1 << 30, MaxDurationSeconds: 1800},
+	}, zerolog.Nop())
+	svc.now = func() time.Time { return now }
+	deadline := now.Add(90 * time.Minute)
+	response, err := buildBootstrapTestResponse(t, svc, t.Context(), execution, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, deadline)
+	if err != nil {
+		t.Fatalf("buildResponse: %v", err)
+	}
+	claims, err := tokens.Validate(response.ExecutionToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.ExpiresAt == nil || !claims.ExpiresAt.Time.Equal(deadline) {
+		t.Fatalf("video-edit credential deadline = %v, want frozen workload deadline %v", claims.ExpiresAt, deadline)
 	}
 }
 

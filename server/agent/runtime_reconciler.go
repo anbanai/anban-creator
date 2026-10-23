@@ -132,7 +132,11 @@ func (r *RuntimeReconciler) reconcileOne(ctx context.Context, execution *model.T
 		cleanupErr := r.cleanupExecution(ctx, execution)
 		return errors.Join(finalizeErr, cleanupErr)
 	}
-	if r.config.ActiveDeadline > 0 && !execution.CreatedAt.IsZero() && now.Sub(execution.CreatedAt) >= r.config.ActiveDeadline {
+	activeDeadline := r.config.ActiveDeadline
+	if execution.ActiveDeadlineSeconds > 0 {
+		activeDeadline = time.Duration(execution.ActiveDeadlineSeconds) * time.Second
+	}
+	if activeDeadline > 0 && !execution.CreatedAt.IsZero() && now.Sub(execution.CreatedAt) >= activeDeadline {
 		return r.fail(ctx, execution, model.TaskExecutionTimedOut, "deadline_exceeded", "", "Runtime execution active deadline exceeded", nil)
 	}
 	if execution.Status == model.TaskExecutionCreated || execution.Status == model.TaskExecutionDispatching {

@@ -20,10 +20,11 @@ import (
 const assistantReviewTrigger = "assistant_review"
 
 type AssistantCommitRequest struct {
-	ConfirmationToken string `json:"confirmation_token,omitempty"`
-	CheckpointDigest  string `json:"checkpoint_digest,omitempty"`
-	CheckpointID      string `json:"checkpoint_id,omitempty"`
-	IdempotencyKey    string `json:"idempotency_key"`
+	ConfirmationToken string                   `json:"confirmation_token,omitempty"`
+	CheckpointDigest  string                   `json:"checkpoint_digest,omitempty"`
+	CheckpointID      string                   `json:"checkpoint_id,omitempty"`
+	IdempotencyKey    string                   `json:"idempotency_key"`
+	VideoEditDefaults *model.VideoEditDefaults `json:"video_edit_defaults,omitempty"`
 }
 
 type AssistantTaskResult struct {
@@ -63,7 +64,7 @@ func (s *InteractiveService) CommitAssistant(ctx context.Context, userID, sessio
 		if sessionErr == nil {
 			workspaceID = sess.WorkspaceID
 		}
-		result, err := s.Commit(ctx, userID, sessionID, InteractiveCommitRequest{ConfirmationToken: req.ConfirmationToken, IdempotencyKey: key})
+		result, err := s.Commit(ctx, userID, sessionID, InteractiveCommitRequest{ConfirmationToken: req.ConfirmationToken, IdempotencyKey: key, VideoEditDefaults: req.VideoEditDefaults})
 		if err != nil {
 			return AssistantCommitResult{}, err
 		}
@@ -73,6 +74,9 @@ func (s *InteractiveService) CommitAssistant(ctx context.Context, userID, sessio
 			}
 		}
 		return AssistantCommitResult{ModeID: AssistantModeProfile, Status: "committed", Project: result.Project, Profile: &result.Profile}, nil
+	}
+	if req.VideoEditDefaults != nil {
+		return AssistantCommitResult{}, ErrInteractiveDraftInvalid
 	}
 	if sessionErr != nil && req.CheckpointID == "" {
 		return AssistantCommitResult{}, sessionErr

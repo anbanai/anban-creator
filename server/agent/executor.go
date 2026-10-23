@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/anbanai/anban-creator/server/agentpack"
 	appconfig "github.com/anbanai/anban-creator/server/app/config"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
@@ -176,29 +175,11 @@ func articleImageMode(withCover, withContent bool) string {
 	}
 }
 
-// DefaultMaxTurns returns the max turns for a given task type from the config map.
-// Falls back to 40 if the task type is not configured.
-func DefaultMaxTurns(taskType string, maxTurns map[string]int) int {
-	if v, ok := maxTurns[taskType]; ok && v > 0 {
-		return v
-	}
-	if pack, ok := agentpack.Default().ForTaskType(taskType); ok {
-		if v, ok := maxTurns[pack.ID]; ok && v > 0 {
-			return v
-		}
-		if pack.Runtime.MaxTurns > 0 {
-			return pack.Runtime.MaxTurns
-		}
-	}
-	return 40
-}
-
 // ExecutionOptions configures a single agent execution.
 type ExecutionOptions struct {
 	Task           *model.Task
 	Project        *model.Project
 	ReferenceAsset *model.Asset
-	MaxTurns       int
 	OnProgress     func(taskID string, message string) // callback for SSE
 	HeartbeatFunc  func(taskID string)                 // periodic heartbeat for stuck-task detection
 	LogWriter      *TaskLogWriter                      // optional per-task log file writer; nil = no log file
@@ -299,7 +280,7 @@ type ExecutionResult struct {
 	Model                       string                   `json:"model,omitempty"` // Claude Code agent model (from claude.models.default)
 	ArtifactUploadFailures      []ArtifactUploadFailure  `json:"artifact_upload_failures,omitempty"`
 	ArtifactFinalizationFailure *ArtifactTransferFailure `json:"artifact_finalization_failure,omitempty"`
-	ProviderRecovery            *ProviderRecovery         `json:"provider_recovery,omitempty"`
+	ProviderRecovery            *ProviderRecovery        `json:"provider_recovery,omitempty"`
 }
 
 func writeMontageInputJSON(workDir string, task *model.Task) error {

@@ -1044,6 +1044,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		}
 		if isVideoEditTask && p.VideoEditInput != nil {
 			task.SetVideoEditInput(*p.VideoEditInput)
+			task.VideoEditTimeoutMinutes = s.videoEditCfg.TimeoutMinutes
 		}
 		if isLocalLifeTask && p.LocalLifeInput != nil {
 			task.SetLocalLifeInput(*p.LocalLifeInput)

@@ -49,6 +49,13 @@ func TestVideoEditConfigRejectsLimitsAboveRuntimeContract(t *testing.T) {
 	}
 }
 
+func TestVideoEditConfigRejectsTimeoutBeyondExecutionCredentialLifetime(t *testing.T) {
+	cfg := VideoEditConfig{Enabled: true, TimeoutMinutes: 121}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "execution token lifetime") {
+		t.Fatalf("VideoEditConfig.Validate() error = %v, want execution token lifetime rejection", err)
+	}
+}
+
 func TestVideoEditConfigLoadsSnakeCaseDefaultPolicy(t *testing.T) {
 	body := validClaudeConfigYAML + `
 video_edit:

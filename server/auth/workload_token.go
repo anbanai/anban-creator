@@ -13,7 +13,7 @@ import (
 const (
 	workloadTokenIssuer     = "anban-workload-dispatcher"
 	workloadTokenAudience   = "anban-server-workload-bootstrap"
-	maximumWorkloadLifetime = time.Hour
+	maximumWorkloadLifetime = MaximumExecutionTokenLifetime
 )
 
 // WorkloadClaims bind a bootstrap credential to one provider-owned runtime.

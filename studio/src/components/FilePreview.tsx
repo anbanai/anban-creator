@@ -35,7 +35,7 @@ function isTextPreviewFile(file: TaskFile): boolean {
     !file.mime_type?.startsWith('image/')
     && !isVideoFile(file)
     && file.mime_type !== 'text/html'
-    && (file.mime_type?.startsWith('text/') || /\.(md|txt|json|yaml|yml|csv|log)$/i.test(file.file_name)),
+    && (file.mime_type?.startsWith('text/') || /\.(md|txt|json|yaml|yml|csv|log|srt)$/i.test(file.file_name)),
   )
 }
 
@@ -77,7 +77,7 @@ function filePreviewTone(file: TaskFile) {
 function filePreviewIcon(file: TaskFile) {
   if (isVideoFile(file)) return Video
   if (file.mime_type === 'text/html' || isMarkdownFile(file.file_name) || /\.(json|ya?ml)$/i.test(file.file_name)) return FileCode
-  if (file.mime_type?.startsWith('text/')) return FileText
+  if (file.mime_type?.startsWith('text/') || /\.srt$/i.test(file.file_name)) return FileText
   return File
 }
 

@@ -343,7 +343,7 @@ export function buildQueryOptions(
   return {
     abortController: controller,
     cwd,
-    maxTurns: data.max_turns,
+    maxTurns: pack.agent.max_turns,
     agent: data.agent_flag,
     systemPrompt: { type: "preset", preset: "claude_code" },
     resume: data.resume_session_id,

@@ -320,7 +320,7 @@ export default function ProjectsPage() {
   }
 
   function openCreator() {
-    navigate('/', { state: { modeId: 'profile' } })
+    navigate('/portraits/new')
   }
 
   function openProfileCreator(project: Project) {

@@ -94,10 +94,10 @@ try {
       const data = {
         execution_token: "fixture-execution-token", execution_id: "fixture-execution", task_type: taskType, project_id: "fixture-project",
         agent_pack_id: taskType, agent_pack_version: "1.0.0", agent_pack_digest: "a".repeat(64), agent_pack_catalog_digest: "a".repeat(64),
-        runtime_profile: taskType, runtime_adapter: adapter, agent_flag: `anban:${taskType}`, max_turns: 3,
+        runtime_profile: taskType, runtime_adapter: adapter, agent_flag: `anban:${taskType}`,
         prompt: "Exercise project memory.", artifact_transport: { mode: "stream" }, agent_memory_directory: ".claude/agent-memory",
         resolved_agent_pack: {
-          id: taskType, version: "1.0.0", digest: "a".repeat(64), agent: { name: taskType },
+          id: taskType, version: "1.0.0", digest: "a".repeat(64), agent: { name: taskType, max_turns: 3 },
           bindings: { task_types: [taskType] }, runtime: { profile: taskType, adapter }, artifacts: [],
         },
         execution_profile: {
