@@ -181,6 +181,10 @@ export default function AssistantWorkspace() {
   const activeDraft = draftByMode[mode]
   const activeMode = bootstrap?.modes.find((candidate) => candidate.id === mode)
   const isRuntimeUnavailable = activeMode?.disabledReason === '助手运行环境暂不可用，请稍后重试'
+  const modePrerequisiteBlocked = Boolean(activeMode && !activeMode.available && activeMode.disabledReason && !isRuntimeUnavailable)
+  const composerPlaceholder = modePrerequisiteBlocked
+    ? mode === 'creation' ? '先完成画像初始化后即可输入消息' : '先完成当前模式所需条件后即可输入消息'
+    : modePlaceholder(mode)
   const modePrerequisiteAction = mode === 'review' && selectableProjects.length > 0
     ? { mode: 'creation' as const, label: '去创作模式' }
     : { mode: 'profile' as const, label: '去建立画像' }
@@ -525,7 +529,7 @@ export default function AssistantWorkspace() {
           )}
           {creationTypeSelector}
           {videoEditInputs}
-          <Composer value={composer} placeholder={modePlaceholder(mode)} inputDisabled={sending || switching} sendDisabled={!canSend} onChange={setComposer} onSend={() => void sendMessage()} />
+          <Composer value={composer} placeholder={composerPlaceholder} inputDisabled={sending || switching || modePrerequisiteBlocked} sendDisabled={!canSend} onChange={setComposer} onSend={() => void sendMessage()} />
         </section>
       ) : (
         <section className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col px-4 pb-3 md:px-8">

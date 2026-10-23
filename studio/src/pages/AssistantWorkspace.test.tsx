@@ -159,6 +159,8 @@ describe('AssistantWorkspace', () => {
     expect(await screen.findByText('先完成画像初始化，之后即可澄清创作需求')).toHaveAttribute('role', 'status')
     expect(screen.getByRole('button', { name: '去建立画像' })).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: '选择画像' })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveAttribute('placeholder', '先完成画像初始化后即可输入消息')
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
 
     fireEvent.click(screen.getByRole('button', { name: '去建立画像' }))
