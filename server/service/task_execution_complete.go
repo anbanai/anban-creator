@@ -36,6 +36,10 @@ var ErrFinalizationLeaseLost = errors.New("task execution finalization lease los
 var ErrCloudPublishingAmbiguous = errors.New("cloud draft publication outcome is ambiguous and requires reconciliation")
 var pictureContentImagePathPattern = regexp.MustCompile(`^image_\d+\.png$`)
 var articleLayoutPlanPattern = regexp.MustCompile("(?s)```json\\s*(\\{.*?\\})\\s*```")
+var picturePublicationHTMLPattern = regexp.MustCompile(`(?is)<[^>]+>`)
+var picturePublicationMarkdownPattern = regexp.MustCompile("(?m)^\\s{0,3}(#{1,6}\\s|[-+]\\s|>|[-*_](?:\\s*[-*_]){2,}\\s*$)|[*_`~\\[\\]]")
+var picturePublicationMarkdownTablePattern = regexp.MustCompile(`(?m)^\s*\|.*\|\s*$|^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$`)
+var picturePublicationTagPattern = regexp.MustCompile(`^#[\p{L}\p{N}_-]+$`)
 
 func taskUsesChannel(task *model.Task, channel string) bool {
 	if task == nil {
@@ -1169,6 +1173,44 @@ func validPicturePublicationPackage(pkg *picturePublicationPackage) bool {
 	}
 }
 
+func normalizePicturePublicationText(value string) string {
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	return strings.TrimSpace(value)
+}
+
+func validPicturePublicationCopy(title, content string) bool {
+	title = normalizePicturePublicationText(title)
+	content = normalizePicturePublicationText(content)
+	if title == "" || utf8.RuneCountInString(title) > 20 || content == "" || utf8.RuneCountInString(content) > 1000 {
+		return false
+	}
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 {
+		return false
+	}
+	finalLine := strings.TrimSpace(lines[len(lines)-1])
+	fields := strings.Fields(finalLine)
+	if len(fields) < 5 || len(fields) > 8 || strings.Join(fields, " ") != finalLine {
+		return false
+	}
+	seen := make(map[string]struct{}, len(fields))
+	for _, field := range fields {
+		if !picturePublicationTagPattern.MatchString(field) {
+			return false
+		}
+		if _, exists := seen[field]; exists {
+			return false
+		}
+		seen[field] = struct{}{}
+	}
+	body := strings.Join(lines[:len(lines)-1], "\n")
+	if picturePublicationHTMLPattern.MatchString(content) || picturePublicationMarkdownPattern.MatchString(body) || picturePublicationMarkdownTablePattern.MatchString(body) {
+		return false
+	}
+	return true
+}
+
 func validPicturePublicationPath(value string) bool {
 	return value != "" &&
 		strings.HasPrefix(value, "output/") &&
@@ -1245,6 +1287,11 @@ func (s *TaskService) finalizePicturePublication(ctx context.Context, task *mode
 	}
 	if pkg.Status != "ready" {
 		return block("semantic_review_blocked", "review_content")
+	}
+	pkg.Title = normalizePicturePublicationText(pkg.Title)
+	pkg.Content = normalizePicturePublicationText(pkg.Content)
+	if !validPicturePublicationCopy(pkg.Title, pkg.Content) {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "publication_package_invalid", false, "review_content"), nil
 	}
 	files, err := s.repo.TaskFiles().FindByExecutionID(ctx, execution.ID)
 	if err != nil {
