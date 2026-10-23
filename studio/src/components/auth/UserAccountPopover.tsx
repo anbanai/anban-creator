@@ -147,7 +147,7 @@ export default function UserAccountPopover({ collapsed }: { collapsed?: boolean 
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuLabel>关于案板</DropdownMenuLabel>
+          <DropdownMenuLabel>关于 Anban</DropdownMenuLabel>
           <div className="px-1.5 pb-2 text-muted-foreground"><BuildVersion /></div>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
