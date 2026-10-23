@@ -82,7 +82,7 @@ func TestFinalizePicturePublicationUsesCanonicalServerPackageSchema(t *testing.T
 		},
 		{
 			name:       "nested readiness and content shape is accepted",
-			body:       `{"schema_version":"1.0","status":"ready","source":"wechat-picture-agent","data_at":"2026-10-06T00:00:00Z","missing":[],"title":"图片消息","digest":"摘要","content":"图下注释","cover_path":"output/cover.png","image_paths":[],"readiness":{"status":"ready"}}`,
+			body:       `{"schema_version":"1.0","status":"ready","source":"wechat-picture-agent","data_at":"2026-10-06T00:00:00Z","missing":[],"title":"图片消息","digest":"摘要","content":"这是一段说明。\n\n#主题标签 #场景标签 #细分主题 #使用场景 #长尾意图","cover_path":"output/cover.png","image_paths":[],"readiness":{"status":"ready"}}`,
 			wantStatus: model.TaskExecutionDraftDeliveryBlocked,
 			wantCode:   "publication_service_unavailable",
 		},
@@ -157,6 +157,53 @@ func TestFinalizePicturePublicationUsesCanonicalServerPackageSchema(t *testing.T
 	}
 }
 
+func TestFinalizePicturePublicationRejectsInvalidCopyBeforePublishing(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content string
+		title   string
+	}{
+		{name: "title over unicode limit", title: strings.Repeat("图", 21), content: validPictureCaption()},
+		{name: "caption over unicode limit", title: "图片消息", content: strings.Repeat("图", 994) + "\n\n#标签一 #标签二 #标签三 #标签四 #标签五"},
+		{name: "missing tags", title: "图片消息", content: "这是纯文本说明。"},
+		{name: "too few tags", title: "图片消息", content: "这是纯文本说明。\n\n#标签一 #标签二 #标签三 #标签四"},
+		{name: "too many tags", title: "图片消息", content: "这是纯文本说明。\n\n#标签一 #标签二 #标签三 #标签四 #标签五 #标签六 #标签七 #标签八 #标签九"},
+		{name: "duplicate tags", title: "图片消息", content: "这是纯文本说明。\n\n#标签一 #标签二 #标签三 #标签四 #标签五 #标签一"},
+		{name: "tag punctuation", title: "图片消息", content: "这是纯文本说明。\n\n#标签一, #标签二 #标签三 #标签四 #标签五"},
+		{name: "tab separated tags", title: "图片消息", content: "这是纯文本说明。\n\n#标签一\t#标签二\t#标签三\t#标签四\t#标签五"},
+		{name: "markdown content", title: "图片消息", content: "**这是说明**\n\n#标签一 #标签二 #标签三 #标签四 #标签五"},
+		{name: "markdown bullet", title: "图片消息", content: "- 这是说明\n\n#标签一 #标签二 #标签三 #标签四 #标签五"},
+		{name: "html content", title: "图片消息", content: "<p>这是说明</p>\n\n#标签一 #标签二 #标签三 #标签四 #标签五"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			svc, repo, task, execution := setupCloudCompletionTest(t, false)
+			task.Type = model.TaskTypeWechatPicture
+			task.Channel = model.ChannelWechatPicture
+			api := &fakeWechatPublicationAPI{draftListResponse: &appwechat.DraftBatchGetResponse{}, addResponse: &appwechat.DraftAddResponse{MediaID: "must-not-publish"}}
+			logger := zerolog.New(io.Discard)
+			svc.SetWechatPublicationService(NewWechatPublicationService(repo, func(*model.Project) (WechatPublicationAPI, error) { return api, nil }, &logger))
+			addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/publish-package.json", "application/json", canonicalPicturePublicationPackage(t, "ready", "ready", nil, map[string]any{"title": tc.title, "content": tc.content}))
+
+			status, evidence, err := svc.finalizePicturePublication(ctx, task, execution)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result publicationDeliveryResult
+			if err := json.Unmarshal(evidence, &result); err != nil {
+				t.Fatal(err)
+			}
+			if status != model.TaskExecutionDraftDeliveryFailed || result.Code != "publication_package_invalid" || result.Attempted || api.addCalls != 0 {
+				t.Fatalf("status=%q code=%q attempted=%t add_calls=%d", status, result.Code, result.Attempted, api.addCalls)
+			}
+		})
+	}
+}
+
+func validPictureCaption() string {
+	return "这是一段便于阅读的纯文本说明。\n\n#主题标签 #场景标签 #细分主题 #使用场景 #长尾意图"
+}
+
 func canonicalPicturePublicationPackage(t *testing.T, status, readiness string, missing []string, extra map[string]any) []byte {
 	t.Helper()
 	if missing == nil {
@@ -170,7 +217,7 @@ func canonicalPicturePublicationPackage(t *testing.T, status, readiness string, 
 		"missing":        missing,
 		"title":          "图片消息",
 		"digest":         "摘要",
-		"content":        "图下注释",
+		"content":        validPictureCaption(),
 		"cover_path":     "output/cover.png",
 		"image_paths":    []string{},
 		"readiness":      map[string]string{"status": readiness},
@@ -373,7 +420,7 @@ func TestFinalizePicturePublicationDeliversCanonicalPackageToWechat(t *testing.T
 		t.Fatalf("WeChat newspic calls=%d requests=%#v", api.addCalls, api.addRequests)
 	}
 	article := api.addRequests[0].Articles[0]
-	if article.ArticleType != "newspic" || article.Title != "图片消息" || article.Content != "图下注释" || article.ImageInfo == nil || len(article.ImageInfo.ImageList) != 1 || article.ImageInfo.ImageList[0].ImageMediaID != "image-media-1" {
+	if article.ArticleType != "newspic" || article.Title != "图片消息" || article.Content != validPictureCaption() || article.ImageInfo == nil || len(article.ImageInfo.ImageList) != 1 || article.ImageInfo.ImageList[0].ImageMediaID != "image-media-1" {
 		t.Fatalf("newspic request=%#v", article)
 	}
 }
