@@ -348,53 +348,6 @@ func TestTaskTypeToAgentViralAnalysisIsAnExplicitRoute(t *testing.T) {
 	}
 }
 
-func TestDefaultMaxTurns(t *testing.T) {
-	maxTurns := map[string]int{
-		"wechat-article": 100,
-		"seednote":       60,
-	}
-	tests := []struct {
-		taskType string
-		want     int
-	}{
-		{model.TaskTypeWechatArticle, 100},
-		{model.ScopeSeednote, 60},
-		{model.TaskTypeViralAnalysis, 60},
-		{"unknown", 40},
-		{model.PlatformMontage, 40},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.taskType, func(t *testing.T) {
-			got := DefaultMaxTurns(tt.taskType, maxTurns)
-			if got != tt.want {
-				t.Errorf("DefaultMaxTurns(%q) = %d, want %d", tt.taskType, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestDefaultMaxTurnsUsesManagedRuntimeBudget(t *testing.T) {
-	tests := []struct {
-		taskType string
-		want     int
-	}{
-		{model.TaskTypeWechatArticle, 60},
-		{model.PlatformSeednote, 20},
-		{model.TaskTypeViralAnalysis, 20},
-		{model.PlatformMoments, 25},
-		{model.PlatformEcommerce, 90},
-		{model.PlatformMontage, 40},
-	}
-	for _, tt := range tests {
-		t.Run(tt.taskType, func(t *testing.T) {
-			if got := DefaultMaxTurns(tt.taskType, nil); got != tt.want {
-				t.Fatalf("DefaultMaxTurns(%q, nil) = %d, want %d", tt.taskType, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestMarshalResultJSON(t *testing.T) {
 	r := &ExecutionResult{
 		Success: true,

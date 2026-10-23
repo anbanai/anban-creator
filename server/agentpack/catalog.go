@@ -251,9 +251,6 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 		if strings.TrimSpace(manifest.Runtime.Profile) == "" {
 			return fmt.Errorf("managed Pack requires runtime.profile")
 		}
-		if manifest.Runtime.MaxTurns <= 0 {
-			return fmt.Errorf("managed Pack requires positive runtime.max_turns")
-		}
 		if manifest.Runtime.Adapter != AdapterStandard && manifest.Runtime.Adapter != AdapterOpenMontage {
 			return fmt.Errorf("unsupported runtime adapter %q", manifest.Runtime.Adapter)
 		}

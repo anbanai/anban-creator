@@ -20,7 +20,7 @@ const pack: AgentPack = {
   id: "wechat-article",
   version: "1.0.0",
   digest: "a".repeat(64),
-  agent: { name: "wechat-article" },
+  agent: { name: "wechat-article", max_turns: 60 },
   bindings: { task_types: ["wechat-article"] },
   runtime: { profile: "wechat", adapter: "standard" },
   artifacts: [
@@ -33,7 +33,7 @@ const pack: AgentPack = {
 const viralAnalysisPack: AgentPack = {
   ...pack,
   id: "seednote",
-  agent: { name: "seednote" },
+  agent: { name: "seednote", max_turns: 20 },
   bindings: { task_types: ["seednote", "viral_analysis"] },
   runtime: { profile: "seednote", adapter: "standard" },
   artifacts: [
@@ -45,7 +45,7 @@ const viralAnalysisPack: AgentPack = {
 const picturePack: AgentPack = {
   ...pack,
   id: "wechat-picture",
-  agent: { name: "wechat-picture" },
+  agent: { name: "wechat-picture", max_turns: 60 },
   bindings: { task_types: ["wechat-picture"] },
   runtime: { profile: "wechat-picture", adapter: "standard" },
   artifacts: [

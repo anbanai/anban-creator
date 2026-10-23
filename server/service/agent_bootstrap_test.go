@@ -811,7 +811,7 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 	}
 	tokens, _ := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
 	store := &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}
-	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{MaxTurns: map[string]int{model.PlatformSeednote: 12}, TokenTTL: 10 * time.Minute, ActiveDeadline: 5 * time.Minute, Store: store, Registry: registry}, zerolog.Nop())
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{TokenTTL: 10 * time.Minute, ActiveDeadline: 5 * time.Minute, Store: store, Registry: registry}, zerolog.Nop())
 	identity := &serveragent.WorkloadIdentity{Target: "docker", RuntimeIdentity: model.RuntimeIdentity{Scope: "docker", Workload: "exec-1", InstanceID: "container-id"}, ExecutionID: executionID, TaskID: taskID, ProjectID: projectID, UserID: userID, Deadline: time.Now().Add(4 * time.Minute)}
 	first, err := svc.Bootstrap(ctx, identity)
 	if err != nil {
@@ -829,8 +829,11 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 		t.Fatalf("bootstrap must expose only native agent memory directory; got agent=%v auto=%v", wire["agent_memory_directory"], wire["auto_memory_directory"])
 	}
 	resumeContextPath, _ := serveragent.ExecutionResumeContextPath(executionID)
-	if first.ExecutionToken == "" || first.ExecutionID != executionID || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AgentMemoryDirectory != ".claude/agent-memory" || first.ResumeSessionID != resumeSessionID || first.ResumeContextPath != resumeContextPath || first.MaxTurns != 12 {
+	if first.ExecutionToken == "" || first.ExecutionID != executionID || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AgentMemoryDirectory != ".claude/agent-memory" || first.ResumeSessionID != resumeSessionID || first.ResumeContextPath != resumeContextPath {
 		t.Fatalf("response = %#v", first)
+	}
+	if _, exists := wire["max_turns"]; exists {
+		t.Fatalf("bootstrap must not send a server-controlled max_turns field: %v", wire["max_turns"])
 	}
 	if first.AgentPackID != "seednote" || first.AgentPackVersion != profiledExecution.AgentPackVersion || first.AgentPackVersion == "" || first.AgentPackDigest != profiledExecution.AgentPackDigest || len(first.AgentPackDigest) != 64 || first.AgentPackCatalogDigest != agentpack.CatalogDigest() || first.RuntimeAdapter != "standard" || first.RuntimeProfile != "seednote" {
 		t.Fatalf("response Agent Pack identity = %#v", first)

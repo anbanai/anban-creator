@@ -17,12 +17,12 @@ const MAX_MODEL_USAGE_ALIASES = 128;
 const MAX_CLAUDE_ENV_VALUE_BYTES = 16 << 10;
 const MAX_CLAUDE_ENV_TOTAL_BYTES = 32 << 10;
 const DEFAULT_AGENT_PACK_CATALOG_PATH = "/anbanai/agent-pack-catalog.json";
-export const AGENT_RUNTIME_CONTRACT_VERSION = 6;
+export const AGENT_RUNTIME_CONTRACT_VERSION = 7;
 
 const BOOTSTRAP_RESPONSE_KEYS = [
   "execution_token", "execution_id", "task_id", "task_type", "agent_id", "channel", "task_kind", "project_id", "prompt",
   "agent_pack_id", "agent_pack_version", "agent_pack_digest", "agent_pack_catalog_digest", "runtime_profile", "runtime_adapter",
-  "execution_profile", "max_turns", "agent_flag", "agent_memory_directory",
+  "execution_profile", "agent_flag", "agent_memory_directory",
   "resume_session_id", "resume_context_path", "env", "files", "artifact_transport",
 ];
 
@@ -128,7 +128,6 @@ export interface BootstrapResponse {
   project_id: string;
   prompt: string;
   execution_profile: ExecutionProfile;
-  max_turns: number;
   agent_flag: string;
   agent_memory_directory?: string;
   resume_session_id?: string;
@@ -149,10 +148,10 @@ export interface AgentPack {
   id: string;
   version: string;
   digest: string;
-  agent: { name: string };
+  agent: { name: string; max_turns: number };
   bindings: { task_kinds?: string[]; task_types?: string[] };
   interaction?: { user_questions?: boolean };
-  runtime: { profile?: string; adapter?: string; max_turns?: number };
+  runtime: { profile?: string; adapter?: string };
   artifacts?: AgentPackArtifact[];
   artifacts_by_task_type?: Record<string, AgentPackArtifact[]>;
 }
@@ -323,7 +322,6 @@ export function validateBootstrapResponse(executionID: string, input: unknown): 
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.runtime_profile) || (data.runtime_adapter !== "standard" && data.runtime_adapter !== "openmontage")) throw new Error("bootstrap runtime identity is invalid");
   if (data.artifact_transport?.mode !== "direct" && data.artifact_transport?.mode !== "stream") throw new Error("bootstrap artifact transport is invalid");
   if (!cleanString(data.prompt) || Buffer.byteLength(data.prompt) > MAX_BOOTSTRAP_PROMPT_BYTES) throw new Error("bootstrap prompt is invalid");
-  if (!Number.isInteger(data.max_turns) || data.max_turns < 1 || data.max_turns > MAX_BOOTSTRAP_TURNS) throw new Error("bootstrap max turns is invalid");
   if (!/^anban:[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.agent_flag)) {
     throw new Error(`bootstrap agent flag is invalid (received ${JSON.stringify(data.agent_flag)})`);
   }
@@ -344,6 +342,11 @@ export function validateBootstrapResponse(executionID: string, input: unknown): 
 
 export function validateAgentPackCatalog(data: BootstrapResponse, catalog: AgentPackCatalog): AgentPackCatalog["packs"][number] {
   validateAgentPackCatalogShape(catalog);
+  for (const pack of catalog.packs) {
+    if (!Number.isInteger(pack.agent?.max_turns) || pack.agent.max_turns < 1 || pack.agent.max_turns > MAX_BOOTSTRAP_TURNS) {
+      throw new Error(`Agent Pack ${pack.id} has invalid agent.max_turns`);
+    }
+  }
   const matches = catalog.packs.filter((pack) => {
     const kinds = pack.bindings?.task_kinds ?? pack.bindings?.task_types;
     return Array.isArray(kinds) && kinds.includes(data.task_kind);
