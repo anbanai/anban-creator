@@ -11,7 +11,7 @@ const CREATION_FIELDS = [
 ] as const
 
 const REVIEW_FIELDS = [
-  ['summary', '复盘摘要'], ['dimension_recommendations', '六维画像改进建议'],
+  ['summary', '复盘摘要'], ['dimension_recommendations', '六维人设改进建议'],
   ['evidence', '支持证据'], ['confidence', '结论可信度'], ['limitations', '局限与待验证事项'],
 ] as const
 

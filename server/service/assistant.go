@@ -663,9 +663,9 @@ func (s *InteractiveService) AssistantBootstrap(ctx context.Context, userID stri
 	}
 	out := &AssistantBootstrap{
 		Modes: []AssistantMode{
-			{ID: AssistantModeProfile, DisplayName: "画像模式", Description: "建立或更新一个画像", Available: true},
+			{ID: AssistantModeProfile, DisplayName: "人设模式", Description: "建立或更新一个人设", Available: true},
 			{ID: AssistantModeCreation, DisplayName: "创作模式", Description: "围绕本次目标澄清需求，确认后创建作品任务"},
-			{ID: AssistantModeReview, DisplayName: "复盘模式", Description: "分析已有作品并形成画像改进建议"},
+			{ID: AssistantModeReview, DisplayName: "复盘模式", Description: "分析已有作品并形成改进建议"},
 		},
 		Projects: make([]AssistantProject, 0, len(projects)),
 	}
@@ -688,7 +688,7 @@ func (s *InteractiveService) AssistantBootstrap(ctx context.Context, userID stri
 		out.Modes[1].Available = true
 	} else {
 		out.DefaultModeID = AssistantModeProfile
-		out.Modes[1].DisabledReason = "先完成画像初始化，之后即可澄清创作需求"
+		out.Modes[1].DisabledReason = "先完成人设初始化，之后即可澄清创作需求"
 	}
 	hasCompletedWork, err := s.repo.Tasks().HasCompletedWorkInProjects(ctx, userID, confirmedProjectIDs)
 	if err != nil {
@@ -698,7 +698,7 @@ func (s *InteractiveService) AssistantBootstrap(ctx context.Context, userID stri
 		out.Modes[2].Available = true
 	} else {
 		if len(confirmedProjectIDs) == 0 {
-			out.Modes[2].DisabledReason = "先完成画像初始化并完成一件作品，之后即可复盘"
+			out.Modes[2].DisabledReason = "先完成人设初始化并完成一件作品，之后即可复盘"
 		} else {
 			out.Modes[2].DisabledReason = "先通过创作模式创建并完成一件作品"
 		}
