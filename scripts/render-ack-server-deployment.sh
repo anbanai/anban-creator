@@ -78,6 +78,7 @@ if [[ -f "$manifest_path" ]]; then
   wechat_picture_agent_image_repo=${wechat_picture_agent_image_repo:-$(jq -r '.images["wechat-picture"] // empty' "$manifest_path")}
   seednote_agent_image_repo=${seednote_agent_image_repo:-$(jq -r '.images.seednote // empty' "$manifest_path")}
   montage_agent_image_repo=${montage_agent_image_repo:-$(jq -r '.images.montage // empty' "$manifest_path")}
+  video_edit_agent_image_repo=${video_edit_agent_image_repo:-$(jq -r '.images["video-edit"] // empty' "$manifest_path")}
   moments_agent_image_repo=${moments_agent_image_repo:-$(jq -r '.images.moments // empty' "$manifest_path")}
   ecommerce_agent_image_repo=${ecommerce_agent_image_repo:-$(jq -r '.images.ecommerce // empty' "$manifest_path")}
   content_planning_agent_image_repo=${content_planning_agent_image_repo:-$(jq -r '.images["content-planning"] // empty' "$manifest_path")}
@@ -103,7 +104,7 @@ export image_repo
 export namespace
 export agent_service_account
 export wechat_article_agent_image_repo wechat_picture_agent_image_repo
-export seednote_agent_image_repo montage_agent_image_repo moments_agent_image_repo
+export seednote_agent_image_repo montage_agent_image_repo video_edit_agent_image_repo moments_agent_image_repo
 export ecommerce_agent_image_repo profile_analysis_agent_image_repo
 export feedback_analysis_agent_image_repo whiteboard_animation_agent_image_repo
 export content_planning_agent_image_repo=${content_planning_agent_image_repo:-}

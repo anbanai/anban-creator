@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -504,6 +506,62 @@ func TestACKRenderIncludesTokenReviewRBAC(t *testing.T) {
 			t.Fatalf("combined ACK release document %d is not valid YAML: %v", index+1, err)
 		}
 	}
+}
+
+func TestACKRenderLoadsVideoEditImageFromReleaseManifest(t *testing.T) {
+	if _, err := exec.LookPath("envsubst"); err != nil {
+		t.Skipf("envsubst is required by the ACK renderer: %v", err)
+	}
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skipf("jq is required by the ACK renderer: %v", err)
+	}
+	catalog, err := os.ReadFile(filepath.Join("agentpack", "catalog.generated.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(catalog)
+	const videoEditImage = "registry.example.com/creator-video-edit-from-manifest:release"
+	manifest := filepath.Join(t.TempDir(), "agent-runtime-manifest.json")
+	manifestBody := `{"schema_version":1,"catalog_digest":"` + hex.EncodeToString(digest[:]) + `","images":{"video-edit":"` + videoEditImage + `"}}`
+	if err := os.WriteFile(manifest, []byte(manifestBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	env := ackRenderEnv(manifest)
+	for index, value := range env {
+		if strings.HasPrefix(value, "video_edit_agent_image_repo=") {
+			env[index] = "video_edit_agent_image_repo="
+		}
+	}
+	output := filepath.Join(t.TempDir(), "server-release.yaml")
+	cmd := exec.Command("bash", filepath.Join("..", "scripts", "render-ack-server-deployment.sh"), "--output", output)
+	cmdEnv := make([]string, 0, len(os.Environ())+len(env))
+	for _, value := range os.Environ() {
+		if !strings.HasPrefix(value, "video_edit_agent_image_repo=") {
+			cmdEnv = append(cmdEnv, value)
+		}
+	}
+	cmd.Env = append(cmdEnv, env...)
+	if outputBytes, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("render ACK release with video-edit image in manifest: %v\n%s", err, outputBytes)
+	}
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, document := range splitKubernetesYAMLDocuments(string(raw)) {
+		var deployment deploymentDoc
+		if err := yaml.Unmarshal([]byte(document), &deployment); err != nil {
+			t.Fatalf("parse rendered ACK release document: %v", err)
+		}
+		if deployment.Kind == "Deployment" {
+			if got := deploymentEnvMap(t, deployment)["ANBAN_AGENT_IMAGE_VIDEO_EDIT"]; got != videoEditImage {
+				t.Fatalf("rendered ANBAN_AGENT_IMAGE_VIDEO_EDIT = %q, want manifest image %q", got, videoEditImage)
+			}
+			return
+		}
+	}
+	t.Fatal("rendered ACK release does not contain the Server Deployment")
 }
 
 func TestACKRenderRejectsStaleCatalogManifest(t *testing.T) {

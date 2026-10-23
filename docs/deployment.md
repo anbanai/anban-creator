@@ -126,9 +126,22 @@ kubectl apply -f /tmp/server-release.yaml
 ```
 
 The release manifest must include the separate DSH runtime image under
-`images.dsh`. Generate it with `DSH_RUNTIME_IMAGE=... make
-agent-runtime-release-manifest`; the ACK renderer maps that entry to the
-`dsh_image_repo` template variable and injects it as `ANBAN_DSH_IMAGE`.
+`images.dsh` and the video editor under `images["video-edit"]`. Set
+`DSH_RUNTIME_IMAGE=...` and `VIDEO_EDIT_AGENT_IMAGE=...` when running
+`make agent-runtime-release-manifest`; Make passes the editor image as
+`AGENT_IMAGE_VIDEO_EDIT`. The ACK renderer maps the manifest entry to
+`video_edit_agent_image_repo`, which becomes `ANBAN_AGENT_IMAGE_VIDEO_EDIT` in
+the Server Deployment. This is the runtime image setting consumed by
+`claude.runtime_images.video-edit`.
+
+Local/Compose deployments provide `ANBAN_AGENT_IMAGE_VIDEO_EDIT` and
+`VIDEO_EDIT_ELEVENLABS_API_KEY` through `.env`. Kubernetes reads the Scribe key
+from the optional `video-edit-elevenlabs` Secret's `api-key` entry; create that
+Secret in the Server namespace before dispatching video-edit tasks. The Server
+requires the credential even when a task uses the default subtitle mode.
+`server/config.example.yaml` maps the key to
+`video_edit.elevenlabs_api_key`, and the Server keeps the credential scoped to
+video-edit executions.
 
 只有在发布流水线已经单独 apply `deploy/k8s/ack-agent-runtime.yaml` 时，
 才使用 `--server-only`。Server 与 Agent 镜像仍必须从同一提交构建并更新
