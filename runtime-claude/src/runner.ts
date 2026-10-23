@@ -6,7 +6,7 @@ import { query, type HookCallback, type HookJSONOutput, type ModelUsage, type Op
 import { validateFinalArtifacts, type ArtifactValidationResult } from "./artifact-validator.js";
 import { CLAUDE_PROFILE_ENV_KEYS, type AgentPack, type BootstrapResponse, type ResolvedBootstrapResponse } from "./bootstrap.js";
 import { collectGeneratedImageDescriptors, materializeGeneratedImage } from "./downloads.js";
-import { ProgressEmitter, type ProgressDiagnostic } from "./progress.js";
+import { BestEffortProgressReporter, ProgressEmitter, type ProgressDiagnostic } from "./progress.js";
 import type { ExecutionResult, Reporter } from "./reporter.js";
 import { appendResumeContextToPrompt } from "./resume.js";
 import { agentMemoryPath, prepareProjectMemory, ProjectMemoryError } from "./project-memory.js";
@@ -151,8 +151,56 @@ const CLAUDE_ENVIRONMENT_KEYS_TO_UNSET = new Set([
 const MANAGED_ALLOWED_TOOLS = [
   "Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill",
   "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput", "TaskStop", "TodoWrite",
-  "WebSearch", "WebFetch", "NotebookEdit", "mcp__anban__*",
+  "WebSearch", "WebFetch", "NotebookEdit",
 ];
+const MANAGED_ALLOWED_MCP_TOOLS: Record<string, ReadonlySet<string>> = {
+  "wechat-article": new Set([
+    "get_project_profile", "list_project_titles", "finalize_task_title", "list_drafts", "list_published_articles",
+    "render_template", "convert_markdown", "get_content_reuse_context", "list_trends", "search_web", "fetch_web_page",
+    "search_images", "list_search_receipts", "list_resources", "get_resource", "generate_image", "analyze_image",
+    "upload_image", "download_image", "compress_image", "crop_image", "set_task_progress_plan", "update_task_progress",
+    "submit_agent_feedback", "submit_completion_metadata",
+  ]),
+  "wechat-picture": new Set([
+    "get_project_profile", "list_project_titles", "finalize_task_title", "list_trends", "search_web", "fetch_web_page",
+    "search_images", "list_search_receipts", "list_resources", "get_resource", "generate_image", "analyze_image",
+    "upload_image", "download_image", "compress_image", "crop_image", "set_task_progress_plan", "update_task_progress",
+    "submit_agent_feedback", "submit_completion_metadata",
+  ]),
+  seednote: new Set([
+    "get_project_profile", "list_project_titles", "finalize_task_title", "claim_topic", "list_topics", "list_trends",
+    "search_web", "fetch_web_page", "search_images", "list_search_receipts", "list_resources", "get_resource",
+    "generate_image", "analyze_image", "upload_image", "download_image", "compress_image", "crop_image", "export_seednote",
+    "set_task_progress_plan", "update_task_progress", "submit_agent_feedback", "submit_completion_metadata",
+  ]),
+  viral_analysis: new Set([
+    "get_project_profile", "list_project_titles", "list_trends", "search_web", "fetch_web_page", "search_images",
+    "list_search_receipts", "list_resources", "get_resource", "submit_agent_feedback", "submit_completion_metadata",
+  ]),
+  profile_analysis: new Set(["get_project_profile", "submit_profile_result", "submit_completion_metadata"]),
+  feedback_analysis: new Set(["get_feedback_context", "submit_agent_feedback", "submit_completion_metadata"]),
+  ecommerce: new Set([
+    "get_project_profile", "list_project_titles", "generate_image", "analyze_image", "upload_image", "download_image",
+    "compress_image", "crop_image", "list_resources", "get_resource", "search_images", "submit_agent_feedback",
+    "set_task_progress_plan", "update_task_progress", "submit_completion_metadata",
+  ]),
+  moments: new Set([
+    "get_project_profile", "generate_image", "analyze_image", "upload_image", "download_image", "compress_image", "crop_image",
+    "list_resources", "get_resource", "search_images", "submit_agent_feedback", "set_task_progress_plan", "update_task_progress",
+    "submit_completion_metadata",
+  ]),
+  montage: new Set([
+    "get_project_profile", "analyze_image", "analyze_video", "generate_image", "upload_image", "submit_agent_feedback",
+    "set_task_progress_plan", "update_task_progress", "submit_completion_metadata",
+  ]),
+  hypit: new Set([
+    "get_project_profile", "analyze_image", "generate_image", "upload_image", "submit_agent_feedback", "set_task_progress_plan",
+    "update_task_progress", "submit_completion_metadata",
+  ]),
+  "video-edit": new Set([
+    "get_project_profile", "get_content_reuse_context", "set_task_progress_plan", "update_task_progress", "submit_completion_metadata",
+  ]),
+};
 const MANAGED_PARALLEL_TASK_TYPES = new Set(["wechat-article", "wechat-picture", "seednote", "viral_analysis"]);
 const MANAGED_READONLY_WORKER = "managed-readonly-worker";
 const MANAGED_READONLY_WORKER_TOOLS = ["Read", "Glob", "Grep"];
@@ -216,6 +264,7 @@ export async function runClaude(workspace: string, data: ResolvedBootstrapRespon
   const controller = new AbortController();
   signal.addEventListener("abort", () => controller.abort(), { once: true });
   const options = buildQueryOptions(data, workspace, serverURL, token, reporter, controller);
+  const bestEffortProgress = new BestEffortProgressReporter(reporter);
   const cwd = options.cwd!;
   let logText = "";
   let initValidated = false;
@@ -224,7 +273,7 @@ export async function runClaude(workspace: string, data: ResolvedBootstrapRespon
   try {
     await prepareProjectMemory(workspace, data);
     for await (const message of query({ prompt: buildManagedPrompt(data), options })) {
-      const consumed = await consumeMessage(message, reporter, logText, toolCalls, toolUseDiagnostics, cwd, serverURL, token, controller.signal, data.task_type, data.execution_profile.model_usage_aliases);
+      const consumed = await consumeMessage(message, bestEffortProgress, logText, toolCalls, toolUseDiagnostics, cwd, serverURL, token, controller.signal, data.task_type, data.execution_profile.model_usage_aliases);
       logText = consumed.logText;
       if (message.type === "system" && message.subtype === "init") {
         validateManagedInit(message, data.task_type);
@@ -308,8 +357,9 @@ export function buildQueryOptions(
     ...(data.resolved_agent_pack.artifacts ?? []).filter(a => !["output/project.json", "output/project.zip", "output/quality-report.json"].includes(a.path)),
     { role: "semantic_report", path: "output/semantic-report.json", required: true },
   ] } : data.resolved_agent_pack;
+  const bestEffortProgress = new BestEffortProgressReporter(reporter);
   const diagnostic: ProgressDiagnostic = (message) => {
-    void reporter.progress(`progress hook: ${message}`, controller.signal).catch(() => {});
+    void bestEffortProgress.report(`progress hook: ${message}`, controller.signal);
   };
   const emitter = new ProgressEmitter(reporter, diagnostic);
   const managedParallelWorkers = managedParallelWorkersEnabled(data.task_type);
@@ -348,8 +398,6 @@ export function buildQueryOptions(
     systemPrompt: { type: "preset", preset: "claude_code" },
     resume: data.resume_session_id,
     permissionMode: "default",
-    allowedTools: managedParallelWorkers ? [...MANAGED_ALLOWED_TOOLS, "Agent"] : MANAGED_ALLOWED_TOOLS,
-    disallowedTools: managedParallelWorkers ? ["ScheduleWakeup", "AskUserQuestion"] : ["Agent", "ScheduleWakeup", "AskUserQuestion"],
     agents: managedParallelWorkers ? {
       [MANAGED_READONLY_WORKER]: {
         description: "Read-only research support for the managed main agent.",
@@ -361,7 +409,13 @@ export function buildQueryOptions(
         skills: MANAGED_READONLY_WORKER_SKILLS[data.task_type],
       },
     } : undefined,
-    canUseTool: async (toolName) => ({ behavior: "deny", message: `tool ${JSON.stringify(toolName)} is outside the managed Agent SDK allowlist` }),
+    canUseTool: async (toolName, input) => {
+      if (isManagedToolAllowed(data.task_type, toolName, input)) return { behavior: "allow" };
+      return {
+        behavior: "deny",
+        message: `tool ${JSON.stringify(toolName)} is outside the managed Agent SDK allowlist for task type ${JSON.stringify(data.task_type)}`,
+      };
+    },
     plugins: [{ type: "local", path: pluginRoot, skipMcpDiscovery: true }],
     mcpServers: { anban: { type: "http", url: `${serverURL}/mcp`, headers: { Authorization: `Bearer ${token}` }, timeout: 900000 } },
     strictMcpConfig: true,
@@ -376,7 +430,7 @@ export function buildQueryOptions(
     includePartialMessages: false,
     stderr: (line) => {
       const logLine = runnerLogLine(line);
-      if (logLine) void reporter.progress(logLine);
+      if (logLine) void bestEffortProgress.report(logLine);
     },
     hooks,
   };
@@ -662,13 +716,13 @@ export function validateManagedInit(message: Pick<SDKSystemMessage, "type" | "su
   for (const required of requiredSkills(taskType)) if (!skills.has(required)) throw new Error(`managed plugin readiness failed: skill ${required} is not loaded`);
 }
 
-async function consumeMessage(message: SDKMessage, reporter: RunnerReporter, logText: string, toolCalls: Map<string, TrackedToolCall>, toolUseDiagnostics: ToolUseDiagnostics, cwd: string, serverURL: string, token: string, signal: AbortSignal, _taskType: string, aliases: BootstrapResponse["execution_profile"]["model_usage_aliases"]): Promise<{ logText: string; terminal?: ExecutionResult }> {
+async function consumeMessage(message: SDKMessage, progress: Pick<BestEffortProgressReporter, "report">, logText: string, toolCalls: Map<string, TrackedToolCall>, toolUseDiagnostics: ToolUseDiagnostics, cwd: string, serverURL: string, token: string, signal: AbortSignal, _taskType: string, aliases: BootstrapResponse["execution_profile"]["model_usage_aliases"]): Promise<{ logText: string; terminal?: ExecutionResult }> {
   if (message.type === "assistant") {
     recordAssistantToolUses(message.message.content, toolUseDiagnostics);
     for (const block of message.message.content) {
       if (block.type === "text" && block.text.trim()) {
         logText = logText ? `${logText}\n${block.text.trim()}` : block.text.trim();
-        void reporter.progress(block.text.trim());
+        void progress.report(block.text.trim());
       }
       if (block.type === "tool_use") {
         toolCalls.set(block.id, { name: block.name, input: block.input as Record<string, unknown> });
@@ -680,6 +734,16 @@ async function consumeMessage(message: SDKMessage, reporter: RunnerReporter, log
     return { logText, terminal: terminalExecutionResult(message, cwd, logText, aliases, toolUseDiagnostics) };
   }
   return { logText };
+}
+
+function isManagedToolAllowed(taskType: string, toolName: string, input: unknown): boolean {
+  if (MANAGED_ALLOWED_TOOLS.includes(toolName)) return true;
+  if (toolName.startsWith("mcp__anban__")) {
+    const allowedMCPTools = MANAGED_ALLOWED_MCP_TOOLS[taskType];
+    return allowedMCPTools?.has(toolName.slice("mcp__anban__".length)) ?? false;
+  }
+  if (toolName !== "Agent" || !managedParallelWorkersEnabled(taskType) || !isRecord(input)) return false;
+  return input.subagent_type === MANAGED_READONLY_WORKER;
 }
 
 export function recordAssistantToolUses(content: ReadonlyArray<{ type: string; name?: string }>, diagnostics: ToolUseDiagnostics): void {

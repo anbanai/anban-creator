@@ -360,8 +360,8 @@ describe("buildQueryOptions", () => {
 
     for (const options of [article, seednote, viral]) {
       expect(options.agent).toMatch(/^anban:(wechat-article|seednote)$/);
-      expect(options.allowedTools).toContain("Agent");
-      expect(options.disallowedTools).not.toContain("Agent");
+      expect(options.allowedTools).toBeUndefined();
+      expect(options.disallowedTools).toBeUndefined();
       const worker = options.agents?.["managed-readonly-worker"];
       expect(worker).toMatchObject({ model: "inherit", maxTurns: 12, background: false });
     }
@@ -380,8 +380,8 @@ describe("buildQueryOptions", () => {
 
     const ineligible = runner.buildQueryOptions({ ...validBootstrap(), task_type: "montage" }, "/workspace");
     expect(ineligible.agents).toBeUndefined();
-    expect(ineligible.allowedTools).not.toContain("Agent");
-    expect(ineligible.disallowedTools).toContain("Agent");
+    expect(ineligible.allowedTools).toBeUndefined();
+    expect(ineligible.disallowedTools).toBeUndefined();
   });
 
   test("adds the managed foreground worker contract only to eligible prompts", () => {
@@ -520,17 +520,34 @@ describe("buildQueryOptions", () => {
     } finally { await rm(workspace, { recursive: true, force: true }); }
   });
 
-  test("keeps the managed tool allowlist fail-closed", async () => {
+  test("checks every managed tool against the task-aware callback allowlist", async () => {
     const options = runner.buildQueryOptions(validBootstrap(), "/workspace");
 
     expect(options.permissionMode).toBe("default");
     expect(options.allowDangerouslySkipPermissions).toBeUndefined();
-    expect(options.allowedTools).toEqual(expect.arrayContaining(["Read", "Write", "Bash", "WebFetch", "mcp__anban__*"]));
-    expect(options.disallowedTools).toEqual(["ScheduleWakeup", "AskUserQuestion"]);
+    expect(options.allowedTools).toBeUndefined();
+    expect(options.disallowedTools).toBeUndefined();
+    const permissionOptions = { signal: new AbortController().signal, toolUseID: "tool-1", requestId: "request-1" };
+    expect(await options.canUseTool?.("Read", {}, permissionOptions)).toEqual({ behavior: "allow" });
+    expect(await options.canUseTool?.("mcp__anban__generate_image", {}, permissionOptions)).toEqual({ behavior: "allow" });
+    expect(await options.canUseTool?.("mcp__anban__get_project_profile", {}, permissionOptions)).toEqual({ behavior: "allow" });
+    expect(await options.canUseTool?.("mcp__anban__stage_project_creator_draft", {}, permissionOptions)).toMatchObject({ behavior: "deny" });
+    expect(await options.canUseTool?.("mcp__anban__submit_profile_result", {}, permissionOptions)).toMatchObject({ behavior: "deny" });
+    const articleOptions = runner.buildQueryOptions({ ...validBootstrap(), task_type: "wechat-article" }, "/workspace");
+    expect(await articleOptions.canUseTool?.("mcp__anban__submit_profile_result", {}, permissionOptions)).toMatchObject({ behavior: "deny" });
+    expect(await articleOptions.canUseTool?.("mcp__anban__render_template", {}, permissionOptions)).toEqual({ behavior: "allow" });
+    expect(await options.canUseTool?.("mcp__anban__future_tool", {}, permissionOptions)).toMatchObject({ behavior: "deny" });
+    expect(await options.canUseTool?.("Agent", { subagent_type: "managed-readonly-worker" }, permissionOptions)).toEqual({ behavior: "allow" });
+    expect(await options.canUseTool?.("Agent", { subagent_type: "other" }, permissionOptions)).toMatchObject({ behavior: "deny" });
+    expect(await options.canUseTool?.("ScheduleWakeup", {}, permissionOptions)).toMatchObject({ behavior: "deny" });
+    expect(await options.canUseTool?.("AskUserQuestion", {}, permissionOptions)).toMatchObject({ behavior: "deny" });
     expect(await options.canUseTool?.("UnknownTool", {}, { signal: new AbortController().signal, toolUseID: "tool-1", requestId: "request-1" })).toEqual({
       behavior: "deny",
-      message: 'tool "UnknownTool" is outside the managed Agent SDK allowlist',
+      message: 'tool "UnknownTool" is outside the managed Agent SDK allowlist for task type "wechat-article"',
     });
+
+    const ineligible = runner.buildQueryOptions({ ...validBootstrap(), task_type: "montage" }, "/workspace");
+    expect(await ineligible.canUseTool?.("Agent", { subagent_type: "managed-readonly-worker" }, permissionOptions)).toMatchObject({ behavior: "deny" });
   });
 
   test("enforces the MCP boundary and composes the Seednote stop gate for both Seednote task types", async () => {

@@ -22,6 +22,24 @@ describe("retryRequest", () => {
     }
   });
 
+  test("retains only an allowlisted code from a nested fetch cause chain", async () => {
+    const error = await retryRequest("progress", async () => {
+      throw Object.assign(new TypeError("fetch failed"), {
+        cause: { cause: { code: "EAI_AGAIN" }, message: "temporary DNS failure" },
+      });
+    }, { signal: new AbortController().signal, maxAttempts: 4 }, dependencies)
+      .catch((caught) => caught as TypedTransportError);
+
+    expect(error.failure).toEqual({
+      operation: "progress",
+      code: "network_unavailable",
+      attempts: 4,
+      retryable: true,
+    });
+    expect(error.networkCode).toBe("EAI_AGAIN");
+    expect(JSON.stringify(error.failure)).not.toContain("temporary DNS failure");
+  });
+
   test("does not retry deterministic client responses", async () => {
     for (const status of [400, 401, 403, 409]) {
       let attempts = 0;

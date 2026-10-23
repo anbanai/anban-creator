@@ -1,4 +1,5 @@
 import type { StageProgressEvent } from "./reporter.js";
+import { asTransferFailure, TypedTransportError } from "./transport.js";
 
 export type ProgressEvent = { stage: string; state: "active" | "complete"; description?: string };
 
@@ -11,6 +12,41 @@ export interface StageProgressReporter {
 }
 
 export type ProgressDiagnostic = (message: string) => void;
+
+export interface BestEffortProgressSink {
+  progress(message: string, signal?: AbortSignal): Promise<void>;
+}
+
+export class BestEffortProgressReporter {
+  private consecutiveFailures = 0;
+
+  constructor(
+    private readonly reporter: BestEffortProgressSink,
+    private readonly diagnostic: ProgressDiagnostic = (message) => console.error(message),
+  ) {}
+
+  async report(message: string, signal?: AbortSignal): Promise<void> {
+    try {
+      await this.reporter.progress(message, signal);
+      this.consecutiveFailures = 0;
+    } catch (error) {
+      this.consecutiveFailures += 1;
+      if (this.consecutiveFailures === 1 || this.consecutiveFailures % 5 === 0) {
+        const failure = asTransferFailure("progress", error);
+        const fields = [
+          "best-effort progress delivery failed",
+          `operation=${failure.operation}`,
+          `code=${failure.code}`,
+          `attempts=${failure.attempts}`,
+          `consecutive_failures=${this.consecutiveFailures}`,
+        ];
+        const networkCode = error instanceof TypedTransportError ? error.networkCode : undefined;
+        if (networkCode) fields.push(`network_code=${networkCode}`);
+        this.diagnostic(fields.join(" "));
+      }
+    }
+  }
+}
 
 export class ProgressEmitter {
   private lastEmittedKey?: string;

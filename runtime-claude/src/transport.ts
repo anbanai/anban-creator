@@ -19,12 +19,13 @@ export class TypedTransportError extends Error {
     public readonly failure: TransferFailure,
     readonly retryAfterMs?: number,
     public readonly serverCode?: string,
+    public readonly networkCode?: string,
   ) {
     super(`${failure.operation} failed: ${serverCode ?? failure.code}`);
   }
 
   withAttempts(attempts: number): TypedTransportError {
-    return new TypedTransportError({ ...this.failure, attempts }, this.retryAfterMs, this.serverCode);
+    return new TypedTransportError({ ...this.failure, attempts }, this.retryAfterMs, this.serverCode, this.networkCode);
   }
 }
 
@@ -109,22 +110,32 @@ function normalizeError(operation: TransferOperation, error: unknown, timedOut: 
   if (cancelled) return failure(operation, "cancelled", 1, false);
   if (timedOut) return failure(operation, "network_timeout", 1, true);
   const code = networkCode(error);
-  if (code === "ECONNRESET" || code === "EPIPE") return failure(operation, "connection_reset", 1, true);
-  if (["ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT"].includes(code ?? "")) return failure(operation, "network_timeout", 1, true);
-  if (["EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH", "ECONNREFUSED"].includes(code ?? "") || error instanceof TypeError) return failure(operation, "network_unavailable", 1, true);
+  if (code === "ECONNRESET" || code === "EPIPE") return failure(operation, "connection_reset", 1, true, undefined, undefined, code);
+  if (["ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT"].includes(code ?? "")) return failure(operation, "network_timeout", 1, true, undefined, undefined, code);
+  if (["EAI_AGAIN", "ENOTFOUND", "ENETUNREACH", "EHOSTUNREACH", "ECONNREFUSED"].includes(code ?? "") || error instanceof TypeError) return failure(operation, "network_unavailable", 1, true, undefined, undefined, code);
   return failure(operation, "protocol_error", 1, false);
 }
 
 function networkCode(error: unknown): string | undefined {
-  if (!error || typeof error !== "object") return undefined;
-  const value = error as { code?: unknown; cause?: { code?: unknown } };
-  const code = value.code ?? value.cause?.code;
-  return typeof code === "string" ? code : undefined;
+  let current: unknown = error;
+  const seen = new Set<object>();
+  for (let depth = 0; depth < 8 && current && typeof current === "object" && !seen.has(current); depth += 1) {
+    seen.add(current);
+    const value = current as { code?: unknown; cause?: unknown };
+    if (typeof value.code === "string" && ALLOWED_NETWORK_CODES.has(value.code)) return value.code;
+    current = value.cause;
+  }
+  return undefined;
 }
 
-function failure(operation: TransferOperation, code: TransferErrorCode, attempts: number, retryable: boolean, httpStatus?: number, requestID?: string): TypedTransportError {
-  return new TypedTransportError({ operation, code, attempts, retryable, ...(httpStatus ? { http_status: httpStatus } : {}), ...(requestID ? { request_id: requestID } : {}) });
+function failure(operation: TransferOperation, code: TransferErrorCode, attempts: number, retryable: boolean, httpStatus?: number, requestID?: string, networkCode?: string): TypedTransportError {
+  return new TypedTransportError({ operation, code, attempts, retryable, ...(httpStatus ? { http_status: httpStatus } : {}), ...(requestID ? { request_id: requestID } : {}) }, undefined, undefined, networkCode);
 }
+
+const ALLOWED_NETWORK_CODES = new Set([
+  "ECONNRESET", "EPIPE", "ETIMEDOUT", "EAI_AGAIN", "ENOTFOUND", "ENETUNREACH", "EHOSTUNREACH", "ECONNREFUSED",
+  "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT",
+]);
 
 function abortCode(signal: AbortSignal): "deadline_exceeded" | "cancelled" {
   return signal.reason instanceof Error && signal.reason.message.toLowerCase().includes("deadline") ? "deadline_exceeded" : "cancelled";

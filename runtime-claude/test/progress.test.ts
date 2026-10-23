@@ -1,7 +1,8 @@
 import { describe, expect, mock, test } from "bun:test";
 
-import { ProgressEmitter } from "../src/progress.js";
-import type { StageProgressEvent } from "../src/reporter.js";
+import { BestEffortProgressReporter, ProgressEmitter } from "../src/progress.js";
+import { Reporter, type StageProgressEvent } from "../src/reporter.js";
+import { TypedTransportError } from "../src/transport.js";
 
 describe("ProgressEmitter", () => {
   test("forwards an agent-declared stage without a title or percentage", async () => {
@@ -102,5 +103,63 @@ describe("ProgressEmitter", () => {
     expect(await emitter.handle({ stage: "source_review", state: "complete" })).toEqual({ emitted: true });
     expect(calls).toEqual([{ stage: "source_review", state: "complete", description: undefined }]);
     expect(diagnostics.join("\n")).toContain("server unavailable");
+  });
+});
+
+describe("BestEffortProgressReporter", () => {
+  test("contains exhausted telemetry failures and rate-limits diagnostics", async () => {
+    let attempts = 0;
+    let reports = 0;
+    const diagnostics: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      attempts += 1;
+      throw Object.assign(new TypeError("fetch failed"), { cause: { code: "EAI_AGAIN" } });
+    };
+    try {
+      const sender = new BestEffortProgressReporter({
+        progress: async (message, signal) => {
+          reports += 1;
+          if (reports === 1) {
+            await new Reporter({ serverURL: "https://creator.example.test", executionID: "execution-1" }, "token", "task-1").progress(message, signal);
+            return;
+          }
+          throw new TypedTransportError({ operation: "progress", code: "network_unavailable", attempts: 4, retryable: true }, undefined, undefined, "EAI_AGAIN");
+        },
+      }, (message) => diagnostics.push(message));
+
+      await sender.report("agent output");
+
+      expect(attempts).toBe(4);
+      expect(diagnostics).toEqual([
+        "best-effort progress delivery failed operation=progress code=network_unavailable attempts=4 consecutive_failures=1 network_code=EAI_AGAIN",
+      ]);
+      expect(diagnostics.join(" ")).not.toContain("token");
+      for (let index = 0; index < 4; index += 1) await sender.report("agent output");
+      expect(attempts).toBe(4);
+      expect(diagnostics).toHaveLength(2);
+      expect(diagnostics[1]).toContain("consecutive_failures=5");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("resets the consecutive-failure counter after a successful report", async () => {
+    let fail = true;
+    const diagnostics: string[] = [];
+    const sender = new BestEffortProgressReporter({
+      progress: async () => {
+        if (fail) throw new Error("offline");
+      },
+    }, (message) => diagnostics.push(message));
+
+    await sender.report("first");
+    fail = false;
+    await sender.report("recovered");
+    fail = true;
+    await sender.report("failed again");
+
+    expect(diagnostics).toHaveLength(2);
+    expect(diagnostics.every((message) => message.includes("attempts=1"))).toBe(true);
   });
 });
