@@ -139,6 +139,48 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'profile' }, expect.any(String)))
   })
 
+  it('explains unavailable creation mode and offers a direct path to profile setup', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'profile',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划', available: false, disabledReason: '先完成画像初始化，之后即可澄清创作需求' },
+        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: false, disabledReason: '先完成画像初始化并完成一件作品，之后即可复盘' },
+      ],
+      projects: [],
+    })
+    renderPage()
+
+    await screen.findByText('建立或更新一个画像')
+    const creationMode = await screen.findByRole('button', { name: '创作模式' })
+    expect(creationMode).toBeEnabled()
+    fireEvent.click(creationMode)
+
+    expect(await screen.findByText('先完成画像初始化，之后即可澄清创作需求')).toHaveAttribute('role', 'status')
+    expect(screen.getByRole('button', { name: '去建立画像' })).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '选择画像' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '去建立画像' }))
+    expect(screen.getByRole('button', { name: '画像模式' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByText('先完成画像初始化，之后即可澄清创作需求')).not.toBeInTheDocument()
+  })
+
+  it('keeps modes disabled when the assistant runtime is unavailable', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'profile',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立画像', available: false, disabledReason: '助手运行环境暂不可用，请稍后重试' },
+        { id: 'creation', displayName: '创作模式', description: '制定计划', available: false, disabledReason: '助手运行环境暂不可用，请稍后重试' },
+        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: false, disabledReason: '助手运行环境暂不可用，请稍后重试' },
+      ],
+      projects: [],
+    })
+    renderPage()
+
+    expect(await screen.findByRole('button', { name: '创作模式' })).toBeDisabled()
+  })
+
   it('prevents duplicate commands from two immediate sends', async () => {
     let resolveMessage!: () => void
     mocks.workspaceMessage.mockReturnValue(new Promise<void>((resolve) => { resolveMessage = resolve }))

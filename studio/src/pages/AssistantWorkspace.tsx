@@ -180,6 +180,10 @@ export default function AssistantWorkspace() {
   const activeQuestions = (questionsByMode[mode] ?? []).filter((question) => !question.answers)
   const activeDraft = draftByMode[mode]
   const activeMode = bootstrap?.modes.find((candidate) => candidate.id === mode)
+  const isRuntimeUnavailable = activeMode?.disabledReason === '助手运行环境暂不可用，请稍后重试'
+  const modePrerequisiteAction = mode === 'review' && selectableProjects.length > 0
+    ? { mode: 'creation' as const, label: '去创作模式' }
+    : { mode: 'profile' as const, label: '去建立画像' }
   const draftProject = activeDraft?.project && typeof activeDraft.project === 'object' && !Array.isArray(activeDraft.project)
     ? activeDraft.project as Record<string, unknown>
     : undefined
@@ -311,8 +315,12 @@ export default function AssistantWorkspace() {
   const chooseMode = async (nextMode: AssistantModeID, context?: { projectId?: string; contentId?: string }) => {
     if (nextMode === mode && !pendingMode || switching) return
     const candidate = bootstrap?.modes.find((item) => item.id === nextMode)
-    if (!candidate?.available) {
-      setError(candidate?.disabledReason ?? '当前模式不可用')
+    if (!candidate) {
+      setError('当前模式暂时无法加载，请稍后重试')
+      return
+    }
+    if (!candidate.available && candidate.disabledReason === '助手运行环境暂不可用，请稍后重试') {
+      setError(candidate.disabledReason)
       return
     }
     setError(null)
@@ -487,6 +495,12 @@ export default function AssistantWorkspace() {
       onFailuresChange={setVideoEditUploadFailed}
     />
   ) : null
+  const selectModePrerequisiteAction = () => {
+    setError(null)
+    setMode(modePrerequisiteAction.mode)
+    setPendingMode(null)
+    setContentId('')
+  }
 
   return (
     <main data-testid="assistant-workspace" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
@@ -498,11 +512,12 @@ export default function AssistantWorkspace() {
         <section className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-5 py-12 text-center">
           <p className="text-sm font-medium text-primary">Anban AI</p>
           <h1 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{heading}</h1>
-          <nav className="mx-auto mt-10 flex flex-wrap justify-center gap-1" aria-label="助手模式">{MODES.map((candidate) => { const item = bootstrap?.modes.find((entry) => entry.id === candidate); return <button key={candidate} type="button" aria-pressed={mode === candidate} disabled={bootstrapQuery.isLoading || !item?.available} aria-disabled={!item?.available} onClick={() => void chooseMode(candidate)} className={`rounded-full px-4 py-2 text-sm ${mode === candidate ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'} ${!item?.available ? 'opacity-50' : ''}`}>{modeLabel(candidate)}</button> })}</nav>
+          <nav className="mx-auto mt-10 flex flex-wrap justify-center gap-1" aria-label="助手模式">{MODES.map((candidate) => { const item = bootstrap?.modes.find((entry) => entry.id === candidate); const blockedByRuntime = item?.disabledReason === '助手运行环境暂不可用，请稍后重试'; return <button key={candidate} type="button" aria-pressed={mode === candidate} disabled={bootstrapQuery.isLoading || blockedByRuntime} aria-disabled={blockedByRuntime} onClick={() => void chooseMode(candidate)} className={`rounded-full px-4 py-2 text-sm ${mode === candidate ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'} ${blockedByRuntime ? 'opacity-50' : ''}`}>{modeLabel(candidate)}</button> })}</nav>
           <p className="mx-auto mt-2 min-h-6 max-w-xl text-sm leading-6 text-muted-foreground" aria-live="polite">{activeMode?.description ?? (bootstrapQuery.isLoading ? '正在准备创作空间…' : '')}</p>
+          {!activeMode?.available && activeMode?.disabledReason && !isRuntimeUnavailable && <div className="mx-auto mt-3 flex w-full max-w-xl flex-col items-center gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3 sm:flex-row sm:justify-between"><p role="status" className="text-left text-sm leading-6 text-muted-foreground">{activeMode.disabledReason}</p><Button type="button" variant="outline" size="sm" className="shrink-0" onClick={selectModePrerequisiteAction}>{modePrerequisiteAction.label}</Button></div>}
           {bootstrapQuery.isError && <div className="mt-3 flex flex-wrap items-center justify-center gap-3"><p role="alert" className="text-sm text-destructive">AI 助手暂时无法加载，请稍后重试。</p><Button type="button" variant="outline" size="sm" disabled={bootstrapQuery.isFetching} onClick={() => void bootstrapQuery.refetch()}>{bootstrapQuery.isFetching ? <Loader2 className="size-4 animate-spin" /> : '重试加载'}</Button></div>}
           {bootstrapQuery.isLoading && <p role="status" className="sr-only">正在加载创作模式</p>}
-          <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} onProject={resetCreationProject} onContent={setContentId} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />
+          {(mode === 'profile' || selectedProject || activeMode?.available) && <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} onProject={resetCreationProject} onContent={setContentId} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />}
           {isVideoEditProfile && <VideoEditProjectDefaultsPanel value={videoEditDefaults} onChange={setVideoEditDefaults} />}
           {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
           {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && (
