@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -24,6 +25,68 @@ func openFeedbackJobTestRepo(t *testing.T) (repository.Repository, *gorm.DB) {
 		t.Fatal(err)
 	}
 	return repository.New(db), db
+}
+
+func TestFeedbackJobPersistsOptionalFrozenContextAsNull(t *testing.T) {
+	repo, db := openFeedbackJobTestRepo(t)
+	job := &model.FeedbackJob{
+		ID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1", Platform: model.PlatformWechat,
+		AccountID: "wechat:wx-1", Operation: "publish_analytics", Cadence: FeedbackCadenceWeekly,
+		PeriodStart: "2026-09-01", PeriodEnd: "2026-09-07", Fingerprint: "optional-context-fingerprint",
+		Status: model.FeedbackJobQueued,
+	}
+	if _, err := repo.FeedbackLoop().CreateJob(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	var raw sql.NullString
+	if err := db.Raw("SELECT frozen_context_json FROM feedback_jobs WHERE id = ?", job.ID).Scan(&raw).Error; err != nil {
+		t.Fatal(err)
+	}
+	if raw.Valid {
+		t.Fatalf("empty frozen context stored as %q, want SQL NULL", raw.String)
+	}
+
+	job.Status = model.FeedbackJobFailed
+	if err := repo.FeedbackLoop().UpdateJob(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Raw("SELECT frozen_context_json FROM feedback_jobs WHERE id = ?", job.ID).Scan(&raw).Error; err != nil {
+		t.Fatal(err)
+	}
+	if raw.Valid {
+		t.Fatalf("empty frozen context after update stored as %q, want SQL NULL", raw.String)
+	}
+}
+
+func TestFeedbackJobPersistsFrozenContextJSON(t *testing.T) {
+	repo, db := openFeedbackJobTestRepo(t)
+	job := &model.FeedbackJob{
+		ID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1", Platform: model.PlatformWechat,
+		AccountID: "wechat:wx-1", Operation: "content_postmortem", Cadence: FeedbackCadenceWeekly,
+		PeriodStart: "2026-09-01", PeriodEnd: "2026-09-07", FrozenContextJSON: `{"schema_version":"1.0"}`,
+		Fingerprint: "present-context-fingerprint", Status: model.FeedbackJobQueued,
+	}
+	if _, err := repo.FeedbackLoop().CreateJob(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	if err := db.Raw("SELECT frozen_context_json FROM feedback_jobs WHERE id = ?", job.ID).Scan(&raw).Error; err != nil {
+		t.Fatal(err)
+	}
+	if raw != string(job.FrozenContextJSON) {
+		t.Fatalf("frozen context = %q, want %q", raw, job.FrozenContextJSON)
+	}
+
+	job.Status = model.FeedbackJobSucceeded
+	if err := repo.FeedbackLoop().UpdateJob(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Raw("SELECT frozen_context_json FROM feedback_jobs WHERE id = ?", job.ID).Scan(&raw).Error; err != nil {
+		t.Fatal(err)
+	}
+	if raw != string(job.FrozenContextJSON) {
+		t.Fatalf("frozen context after update = %q, want %q", raw, job.FrozenContextJSON)
+	}
 }
 
 func TestMarkManagedFeedbackFailureReconcilesTerminalTaskFailure(t *testing.T) {
