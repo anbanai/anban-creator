@@ -957,7 +957,7 @@ export default function AssistantWorkspace() {
       <main data-testid="assistant-workspace" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
       {!workspace ? (
         <section className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col px-4 pb-3 md:px-8">
-          <div data-testid="assistant-conversation" className="assistant-scroll min-h-0 flex-1 overflow-y-auto py-5 md:py-8">
+          <div data-testid="assistant-conversation" className="assistant-scroll min-h-0 flex flex-1 flex-col overflow-y-auto pb-1 pt-5 md:pb-2 md:pt-8">
             <HomeStage project={selectedProject} hasReadyPersona={readyProjects.length > 0} />
             {personaRail}
             {routeHasContext && mode === 'review' && <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} onProject={resetCreationProject} onContent={setContentId} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />}
@@ -969,7 +969,7 @@ export default function AssistantWorkspace() {
             {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && <VideoEditReviewResults query={reviewVideoQuery} />}
             {videoEditInputs}
           </div>
-          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} status={missingContextInstruction} leadingTools={enterPersonaModeControl} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <Composer fadeAbove={false} value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} status={missingContextInstruction} leadingTools={enterPersonaModeControl} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       ) : (
         <section className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col px-4 pb-3 md:px-8">
@@ -1011,7 +1011,8 @@ function platformMeta(platform: string) {
 function HomeStage({ project, hasReadyPersona }: { project?: AssistantProject; hasReadyPersona: boolean }) {
   const imageURL = personaImageURL(project)
   const meta = platformMeta(project?.platform ?? '')
-  return <section aria-label="当前人设" className="mx-auto flex w-full max-w-xl translate-y-2 items-center justify-center gap-4 px-2 py-7 text-left sm:gap-6 sm:py-8">
+  return <section aria-label="当前人设" className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-end px-2 pb-8 pt-6 text-left md:pb-10">
+    <div className="flex shrink-0 items-center justify-center gap-4 sm:gap-6">
     <div className="relative flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-muted/60 shadow-sm sm:size-28">
       {imageURL ? <SignedImage src={imageURL} alt={`${project?.name ?? '当前人设'}形象`} className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-10 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-12 text-muted-foreground" />}
     </div>
@@ -1020,6 +1021,7 @@ function HomeStage({ project, hasReadyPersona }: { project?: AssistantProject; h
       <h1 className="mt-2 text-xl font-semibold tracking-tight sm:text-2xl">{project?.name ?? '神秘人'}</h1>
       <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{project?.description || (hasReadyPersona ? '选择一个人设，开始你的下一次创作。' : '为了创建更好的作品，需要先创建您的人设')}</p>
       {project && <span className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><meta.Icon aria-hidden="true" className="size-3.5" />{meta.label}</span>}
+    </div>
     </div>
   </section>
 }
@@ -1032,36 +1034,56 @@ function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWo
   onViewWorks: (projectId: string) => void
   onEditProfile: (projectId: string) => void
 }) {
-  return <section aria-label="首页人设选择" className="mx-auto mt-1 w-full max-w-5xl pb-1">
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [hasContentBelow, setHasContentBelow] = useState(false)
+
+  useEffect(() => {
+    const element = scrollRef.current
+    if (!element) return
+
+    const updateOverflow = () => setHasContentBelow(element.scrollHeight - element.scrollTop > element.clientHeight + 1)
+    updateOverflow()
+    element.addEventListener('scroll', updateOverflow, { passive: true })
+    window.addEventListener('resize', updateOverflow)
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateOverflow)
+    observer?.observe(element)
+    return () => {
+      observer?.disconnect()
+      element.removeEventListener('scroll', updateOverflow)
+      window.removeEventListener('resize', updateOverflow)
+    }
+  }, [projects.length])
+
+  return <section aria-label="首页人设选择" className="mx-auto mt-auto w-full max-w-5xl shrink-0 pb-1">
     <div className="mb-3 flex items-center justify-between px-1">
       <p className="text-sm font-medium">选择人设</p>
       <span className="text-xs text-muted-foreground">{projects.length ? `${projects.length} 个可用人设` : '还没有可用人设'}</span>
     </div>
     <div className="relative">
-      <div className="assistant-scroll persona-card-scroll grid h-[15rem] grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] auto-rows-[5.25rem] gap-2 overflow-y-auto pr-1" data-testid="persona-card-scroll" tabIndex={0}>
-        <button type="button" aria-label="创建新人设" onClick={onCreate} className={`group flex h-full min-w-0 flex-col justify-between rounded-xl border border-dashed px-2.5 py-2 text-left transition-colors hover:border-primary/60 hover:bg-primary/[0.04] ${selectedProjectId === '' ? 'border-primary bg-primary/[0.05]' : 'border-border'}`}>
-          <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary"><Plus className="size-4" /></span>
-          <span><span className="block truncate text-sm font-semibold">创建新人设</span><span className="mt-0.5 block truncate text-xs leading-4 text-muted-foreground">聊一聊你的定位与风格</span></span>
+      <div ref={scrollRef} className="assistant-scroll persona-card-scroll grid min-h-[5.25rem] max-h-[14.125rem] grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] auto-rows-[5.25rem] gap-2 overflow-y-auto pr-1" data-testid="persona-card-scroll" tabIndex={0}>
+        <button type="button" aria-label="创建新人设" onClick={onCreate} className={`group flex h-full min-w-0 items-center gap-2 rounded-xl border border-dashed px-2.5 py-2 text-left transition-colors hover:border-primary/60 hover:bg-primary/[0.04] ${selectedProjectId === '' ? 'border-primary bg-primary/[0.05]' : 'border-border'}`}>
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Plus className="size-4" /></span>
+          <span className="min-w-0"><span className="block truncate text-sm font-semibold">创建新人设</span><span className="mt-0.5 block truncate text-xs leading-4 text-muted-foreground">聊一聊你的定位与风格</span></span>
         </button>
         {projects.map((project) => {
           const meta = platformMeta(project.platform)
           const imageURL = personaImageURL(project)
           const selected = selectedProjectId === project.id
           return <article key={project.id} className={`group relative flex h-full min-w-0 flex-col rounded-xl border bg-card p-2 transition-shadow ${selected ? 'border-primary shadow-sm ring-1 ring-primary/25' : 'border-border hover:shadow-sm'}`}>
-            <button type="button" aria-label={`选择人设：${project.name}`} aria-pressed={selected} onClick={() => onSelect(project.id)} className="flex w-full items-start gap-2 text-left">
+            <button type="button" aria-label={`选择人设：${project.name}`} aria-pressed={selected} onClick={() => onSelect(project.id)} className="flex w-full shrink-0 items-start gap-2 text-left">
               <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
                 {imageURL ? <SignedImage src={imageURL} alt="" className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-5 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-5 text-muted-foreground" />}
               </div>
-              <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{project.name}</span><span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"><meta.Icon aria-hidden="true" className="size-3" />{meta.label}</span><span className="mt-1 line-clamp-1 text-xs leading-4 text-muted-foreground">{project.description || '已准备好开始创作'}</span></span>
+              <span className="min-w-0 flex-1"><span className="flex items-center gap-1 text-sm font-semibold"><span className="truncate">{project.name}</span><meta.Icon aria-label={meta.label} className="size-3 shrink-0 text-muted-foreground" /></span><span className="block truncate text-xs leading-4 text-muted-foreground">{project.description || '已准备好开始创作'}</span></span>
             </button>
-            <div className="mt-auto flex items-center justify-end gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+            <div className="mt-auto flex shrink-0 items-center justify-end gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
               <Button type="button" variant="ghost" size="sm" aria-label={`查看作品：${project.name}`} onClick={() => onViewWorks(project.id)} className="h-7 px-1.5 text-[11px]">查看作品</Button>
               <Button type="button" variant="ghost" size="sm" aria-label={`调整人设：${project.name}`} onClick={() => onEditProfile(project.id)} className="h-7 px-1.5 text-[11px]">调整人设</Button>
             </div>
           </article>
         })}
       </div>
-      <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-background via-background/80 to-transparent" />
+      {hasContentBelow && <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-background via-background/80 to-transparent" />}
     </div>
   </section>
 }
@@ -1111,11 +1133,12 @@ function WorkspaceSelectors({ mode, projects, projectId, contentId, works, disab
   return <div className="mx-auto mt-6 flex w-full max-w-xs flex-col items-stretch gap-3"><NativeSelect className="w-full" aria-label="选择人设" value={projectId} disabled={disabled} onChange={(event) => onProject(event.target.value)}><NativeSelectOption value="">{mode === 'profile' ? '新建人设' : '选择人设'}</NativeSelectOption>{projects.map((project) => <NativeSelectOption key={project.id} value={project.id}>{project.name}</NativeSelectOption>)}</NativeSelect>{mode === 'review' && <NativeSelect className="w-full" aria-label="选择作品" value={contentId} disabled={disabled} onChange={(event) => onContent(event.target.value)}><NativeSelectOption value="">选择作品</NativeSelectOption>{works.map((work) => <NativeSelectOption key={work.id} value={work.id}>{work.title}</NativeSelectOption>)}</NativeSelect>}{mode === 'review' && hasMore && <Button type="button" variant="ghost" size="sm" className="self-end" aria-label="加载更多作品" disabled={disabled} onClick={onMore}><ChevronDown className="size-4" />加载更多作品</Button>}</div>
 }
 
-function Composer({ value, attachments, attachmentController, attachmentsEnabled = true, contextBar, placeholder, inputDisabled, sendDisabled, status, leadingTools, trailingTools, onChange, onAttachmentsChange, onSend }: {
+function Composer({ value, attachments, attachmentController, attachmentsEnabled = true, fadeAbove = true, contextBar, placeholder, inputDisabled, sendDisabled, status, leadingTools, trailingTools, onChange, onAttachmentsChange, onSend }: {
   value: string
   attachments: PromptAttachment[]
   attachmentController: ReturnType<typeof usePromptAttachments>
   attachmentsEnabled?: boolean
+  fadeAbove?: boolean
   contextBar?: ReactNode
   placeholder: string
   inputDisabled: boolean
@@ -1127,7 +1150,7 @@ function Composer({ value, attachments, attachmentController, attachmentsEnabled
   onAttachmentsChange: (attachments: PromptAttachment[]) => void
   onSend: () => void
 }) {
-  return <div data-slot="input-group" className="relative shrink-0 pt-2 before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-gradient-to-b before:from-transparent before:via-background/75 before:to-background">
+  return <div data-slot="input-group" className={`relative shrink-0 pt-2 ${fadeAbove ? 'before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-gradient-to-b before:from-transparent before:via-background/75 before:to-background' : ''}`}>
     {status && <p role="status" className="pb-2 text-xs text-muted-foreground">{status}</p>}
     <AgentPromptInput
       value={{ prompt: value, attachments }}
