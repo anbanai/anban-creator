@@ -165,6 +165,8 @@ export default function AssistantWorkspace() {
   const [lastEventIds, setLastEventIds] = useState<Record<string, string | undefined>>(persisted?.lastEventIds ?? {})
   const streamAbort = useRef<AbortController | null>(null)
   const userMessageCounter = useRef(0)
+  const lastSubmittedMessage = useRef('')
+  const workspaceResetVersion = useRef(0)
   const workspaceCreateKey = useRef<string | null>(null)
   const sendInFlight = useRef(false)
   const imageRatioContextKey = useRef<string | null>(null)
@@ -259,12 +261,14 @@ export default function AssistantWorkspace() {
   const isVideoEditProfile = mode === 'profile' && profilePlatform === 'video-edit'
   const canSend = Boolean(composer.trim()) && Boolean(activeMode?.available) && (mode === 'profile' || Boolean(selectedProject)) && (mode !== 'review' || Boolean(selectedWork)) && !sending && !responding && !committing && !composerBlocked
 
-  const resetExpiredWorkspace = () => {
+  const resetExpiredWorkspace = (preservedComposer?: string) => {
+    workspaceResetVersion.current += 1
     setWorkspace(null)
     setConversationPhase('setup')
     setLastEventIds({})
     setResponding(false)
     setError(null)
+    if (preservedComposer !== undefined) setComposer(preservedComposer)
     setMessagesByMode((current) => ({ ...current, [mode]: [] }))
     setQuestionsByMode((current) => ({ ...current, [mode]: [] }))
     setDraftByMode((current) => ({ ...current, [mode]: null }))
@@ -339,8 +343,17 @@ export default function AssistantWorkspace() {
         for await (const event of stream) {
           if (event.id) setLastEventIds((current) => ({ ...current, [mode]: event.id }))
           const data = parseEventData(event)
+          if (event.event === 'session.expired' || event.event === 'expired') {
+            const preservedComposer = lastSubmittedMessage.current || undefined
+            lastSubmittedMessage.current = ''
+            resetExpiredWorkspace(preservedComposer)
+            continue
+          }
           if (event.event === 'turn.start') setResponding(true)
-          if (event.event === 'turn.end' || event.event === 'question.opened' || event.event === 'session.error') setResponding(false)
+          if (event.event === 'turn.end' || event.event === 'question.opened' || event.event === 'session.error') {
+            setResponding(false)
+            lastSubmittedMessage.current = ''
+          }
           if (event.event === 'session.status' && ['idle', 'waiting_answer', 'runtime_failed'].includes(String(data.status))) setResponding(false)
           const eventMode = isMode(data.mode_id) ? data.mode_id : mode
           const eventSession = stringValue(data.session_id)
@@ -399,6 +412,7 @@ export default function AssistantWorkspace() {
     const text = (override ?? composer).trim()
     if (!text || !canSend || sendInFlight.current) return
     sendInFlight.current = true
+    const resetVersion = workspaceResetVersion.current
     const submittedAttachments = attachmentController.toInputAttachments()
     const contextLines = mode === 'creation' && selectedCreationType
       ? [`创作类型：${selectedCreationType}`, ...(isVideoEditCreation ? [
@@ -414,6 +428,7 @@ export default function AssistantWorkspace() {
     const optimisticID = `optimistic-${++userMessageCounter.current}`
     setSending(true)
     setError(null)
+    lastSubmittedMessage.current = text
     setComposer('')
     setMessagesByMode((current) => ({ ...current, [mode]: [...(current[mode] ?? []), { id: optimisticID, role: 'user', text: messageText }] }))
     let createdWorkspace: AssistantWorkspaceState | null = null
@@ -426,7 +441,7 @@ export default function AssistantWorkspace() {
         createdWorkspace = currentWorkspace
       }
       await api.assistant.workspaceMessage(currentWorkspace.id, mode, messageText)
-      if (!workspace) {
+      if (!workspace && workspaceResetVersion.current === resetVersion) {
         const acceptedWorkspace: AssistantWorkspaceState = {
           ...currentWorkspace,
           mode_id: mode,

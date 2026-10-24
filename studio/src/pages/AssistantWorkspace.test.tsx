@@ -43,9 +43,12 @@ vi.mock('@/lib/api', async () => {
 vi.mock('@/lib/interactive-events', () => ({
   streamAssistantWorkspace: (_workspaceId: string, _token: string, _signal: AbortSignal, options?: { expectedSessionId?: string }) => (async function* () {
     const sessionId = options?.expectedSessionId ?? 'session-1'
-    yield { event: 'assistant.message', id: `event-${sessionId}-1`, data: JSON.stringify({ session_id: sessionId, text: '收到，我开始处理。' }) }
-    if (sessionId === 'session-1') yield { event: 'draft.ready', id: `event-${sessionId}-2`, data: JSON.stringify({ session_id: sessionId, draft: { confirmation_token: 'token-1', ready: true, project: { platform: 'video-edit' } } }) }
-    yield { event: 'turn.end', id: `event-${sessionId}-end`, data: JSON.stringify({ session_id: sessionId }) }
+    const terminalStream = mocks.streamEvents.some((event) => ['session.expired', 'expired'].includes(event.event))
+    if (!terminalStream) {
+      yield { event: 'assistant.message', id: `event-${sessionId}-1`, data: JSON.stringify({ session_id: sessionId, text: '收到，我开始处理。' }) }
+      if (sessionId === 'session-1') yield { event: 'draft.ready', id: `event-${sessionId}-2`, data: JSON.stringify({ session_id: sessionId, draft: { confirmation_token: 'token-1', ready: true, project: { platform: 'video-edit' } } }) }
+      yield { event: 'turn.end', id: `event-${sessionId}-end`, data: JSON.stringify({ session_id: sessionId }) }
+    }
     for (const event of mocks.streamEvents) yield event
   })(),
 }))
@@ -494,6 +497,20 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledTimes(2))
     expect(mocks.workspaceMessage).toHaveBeenLastCalledWith('workspace-1', 'profile', '继续完善画像')
+  })
+
+  it('silently returns to the home state when the event stream reports an expired session', async () => {
+    mocks.streamEvents = [{ event: 'session.expired', id: 'event-session-expired', data: JSON.stringify({ status: 'expired' }) }]
+    renderPage()
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '保留这段需求' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledTimes(1))
+    expect(screen.queryByText(/对话已过期/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/SSE connection failed/)).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getAllByRole('textbox', { name: '发送消息' }).map((item) => (item as HTMLTextAreaElement).value)).toContain('保留这段需求'))
   })
 
   it('renders the homepage persona rail with a create card and selects the first ready persona', async () => {
