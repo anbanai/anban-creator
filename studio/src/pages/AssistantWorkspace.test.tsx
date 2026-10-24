@@ -305,6 +305,7 @@ describe('AssistantWorkspace', () => {
 
   it('uses the DSH-style inline composer and removes setup controls after chat starts', async () => {
     renderPage()
+    expect(screen.getByRole('textbox', { name: '发送消息' }).closest('[data-slot="input-group"]')).not.toHaveClass('before:bg-gradient-to-b')
     fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '开始聊天' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
 
@@ -314,7 +315,7 @@ describe('AssistantWorkspace', () => {
     expect(screen.queryByRole('combobox', { name: '选择画像' })).not.toBeInTheDocument()
     expect(screen.getByTestId('assistant-context-bar')).toHaveAttribute('data-phase', 'locked')
     expect(screen.queryByRole('button', { name: '人设配置' })).not.toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: '发送消息' }).closest('[data-slot="input-group"]')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' }).closest('[data-slot="input-group"]')).toHaveClass('before:bg-gradient-to-b')
     expect(screen.getByRole('button', { name: '发送消息' }).parentElement).toHaveAttribute('data-align', 'inline-end')
   })
 
@@ -556,14 +557,39 @@ describe('AssistantWorkspace', () => {
     renderPage()
 
     const rail = await screen.findByRole('region', { name: '首页人设选择' })
-    expect(screen.getByRole('region', { name: '当前人设' })).toHaveClass('flex-1', 'items-center')
+    expect(screen.getByRole('region', { name: '当前人设' })).toHaveClass('flex-1', 'justify-end')
     expect(rail).toHaveClass('mt-auto')
-    expect(within(rail).getByTestId('persona-card-scroll')).toHaveClass('min-h-[7rem]', 'max-h-[17.5rem]', 'grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]', 'auto-rows-[7rem]')
+    expect(within(rail).getByTestId('persona-card-scroll')).toHaveClass('min-h-[5.25rem]', 'max-h-[14.125rem]', 'grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]', 'auto-rows-[5.25rem]')
     expect(within(rail).getByRole('button', { name: '创建新人设' })).toBeInTheDocument()
     expect(within(rail).getByRole('button', { name: '选择人设：第一个人设' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(rail).getByRole('button', { name: '选择人设：第二个人设' })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.queryByRole('button', { name: '画像模式' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '创作模式' })).not.toBeInTheDocument()
+  })
+
+  it('hides the persona rail fade after scrolling to the last row', async () => {
+    renderPage()
+    const scrollRegion = await screen.findByTestId('persona-card-scroll')
+    Object.defineProperties(scrollRegion, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 300 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    })
+    fireEvent.resize(window)
+
+    expect(scrollRegion.nextElementSibling).toHaveClass('bg-gradient-to-t')
+
+    Object.defineProperty(scrollRegion, 'scrollTop', { configurable: true, writable: true, value: 100 })
+    fireEvent.scroll(scrollRegion)
+
+    expect(scrollRegion.nextElementSibling).toBeNull()
+
+    fireEvent.scroll(scrollRegion, { target: { scrollTop: 40 } })
+    expect(scrollRegion.nextElementSibling).toHaveClass('bg-gradient-to-t')
+
+    Object.defineProperty(scrollRegion, 'clientHeight', { configurable: true, value: 300 })
+    fireEvent.resize(window)
+    expect(scrollRegion.nextElementSibling).toBeNull()
   })
 
   it('exposes persona actions for works and profile updates', async () => {
