@@ -159,6 +159,16 @@
     }
 }
 
+/* Assistant content keeps scrolling available without competing browser bars. */
+.assistant-scroll {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.assistant-scroll::-webkit-scrollbar {
+    display: none;
+}
+
 @keyframes pulse-dot {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }

@@ -7,7 +7,8 @@ const CREATION_FIELDS = [
   ['goal', '创作目标'], ['content_type', '内容类型'], ['target_audience', '目标受众'],
   ['angle', '主题与切入角度'], ['outline', '内容结构与大纲'], ['style_constraints', '风格与约束'],
   ['asset_plan', '素材与配图计划'], ['acceptance_criteria', '质量验收标准'],
-  ['cost_estimate', '预计成本'], ['execution_options', '执行选项'],
+  ['cost_estimate', '预计成本'], ['execution_options', '执行选项'], ['execution_profile', '执行配置'],
+  ['image_ratio', '图片比例'], ['image_capability_key', '图像能力'],
 ] as const
 
 const REVIEW_FIELDS = [
@@ -31,6 +32,14 @@ const CONTENT_TYPES: Record<string, string> = {
   article: '文章', wechat_article: '公众号文章', 'wechat-article': '公众号文章',
   seednote: '种草笔记', picture: '图文', wechat_picture: '公众号图文',
   montage: '视频剪辑', 'video-edit': '全自动视频剪辑', video_edit: '全自动视频剪辑', short_video: '短视频', live_slice: '直播切片',
+}
+
+const EXECUTION_PROFILES: Record<string, string> = {
+  effective: '性价比', balanced: '平衡', quality: '极致效果',
+}
+
+const IMAGE_CAPABILITIES: Record<string, string> = {
+  standard: '标准', enhanced: '增强', professional: '专业',
 }
 
 function isRecord(value: unknown): value is DraftFields {
@@ -61,6 +70,9 @@ function DraftValue({ value, label, field }: { value: unknown; label: string; fi
   }
   let text = value == null || value === '' ? '待补充' : typeof value === 'boolean' ? value ? '是' : '否' : String(value)
   if (field === 'content_type') text = CONTENT_TYPES[text] ?? text
+  if (field === 'execution_profile') text = EXECUTION_PROFILES[text] ?? text
+  if (field === 'image_ratio' && text === 'auto') text = '智能适配'
+  if (field === 'image_capability_key') text = IMAGE_CAPABILITIES[text] ?? text
   if (field === 'confidence') text = ({ high: '较高', medium: '中等', low: '较低' } as Record<string, string>)[text] ?? text
   return <p className="whitespace-pre-wrap break-words">{text}</p>
 }

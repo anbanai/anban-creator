@@ -272,6 +272,25 @@ describe('AgentPromptInput', () => {
     expect(addFiles).toHaveBeenCalledTimes(2)
   })
 
+  it('accepts files exposed only through clipboard items and deduplicates the browser file list', () => {
+    const file = image('clipboard.png')
+    const addFiles = vi.fn(() => ({ accepted: [{ file, type: 'image' as const }], rejected: [] }))
+    renderPrompt({ attachmentController: controller({ addFiles }) })
+
+    const textarea = screen.getByRole('textbox')
+    const paste = createEvent.paste(textarea)
+    Object.defineProperty(paste, 'clipboardData', {
+      value: {
+        files: [file],
+        items: [{ kind: 'file', getAsFile: () => file }],
+      },
+    })
+    fireEvent(textarea, paste)
+
+    expect(paste.defaultPrevented).toBe(true)
+    expect(addFiles).toHaveBeenCalledWith([file])
+  })
+
   it('handles a local drop once without leaking it to the global provider', () => {
     const file = image()
     const addFiles = vi.fn(() => ({ accepted: [{ file, type: 'image' as const }], rejected: [] }))

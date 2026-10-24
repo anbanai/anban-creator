@@ -36,6 +36,7 @@ export interface AssistantProject {
   profileReady: boolean
   avatar_url?: string
   description?: string
+  image_ratio?: string
   portrait_reference_image?: {
     download_url?: string
     preview_url?: string

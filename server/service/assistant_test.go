@@ -944,6 +944,10 @@ func TestCreationRequestNeedsOnlyGoalAndContentType(t *testing.T) {
 	if request.Goal != "介绍新茶" || request.ContentType != "wechat-article" || len(canonical) == 0 {
 		t.Fatalf("decoded request = %#v, canonical=%s", request, canonical)
 	}
+	request, _, err = decodeAssistantCreationPlan([]byte(`{"goal":"介绍新茶","content_type":"wechat-article","image_ratio":"16:9","image_capability_key":"standard"}`))
+	if err != nil || request.ImageRatio != "16:9" || request.ImageCapabilityKey != "standard" {
+		t.Fatalf("decode image settings = %#v, %v", request, err)
+	}
 	request, _, err = decodeAssistantCreationPlan([]byte(`{"goal":"介绍新茶","content_type":"wechat-article","assets":["参考链接：https://example.com/source"]}`))
 	if err != nil || len(request.Assets) != 1 || request.Assets[0].Type != "text" || request.Assets[0].Text != "参考链接：https://example.com/source" {
 		t.Fatalf("decode string asset = %#v, %v", request.Assets, err)

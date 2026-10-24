@@ -11,6 +11,7 @@ describe('AssistantDraftSummary', () => {
         goal: '发布春茶新品', content_type: 'article', target_audience: '新茶客', angle: '第一次泡茶',
         outline: ['介绍茶叶', '演示冲泡'], style_constraints: '简洁亲切', asset_plan: '冲泡步骤图',
         acceptance_criteria: '步骤可复现', cost_estimate: '预计 5 积分', execution_options: ['先生成草稿'],
+        execution_profile: 'quality', image_ratio: 'auto', image_capability_key: 'enhanced',
       } },
     }} />)
     expect(screen.getByText('创作目标')).toBeInTheDocument()
@@ -21,6 +22,12 @@ describe('AssistantDraftSummary', () => {
     expect(screen.getByText('预计成本')).toBeInTheDocument()
     expect(screen.getByText('预计 5 积分')).toBeInTheDocument()
     expect(screen.getByText('执行选项')).toBeInTheDocument()
+    expect(screen.getByText('执行配置')).toBeInTheDocument()
+    expect(screen.getByText('极致效果')).toBeInTheDocument()
+    expect(screen.getByText('图片比例')).toBeInTheDocument()
+    expect(screen.getByText('智能适配')).toBeInTheDocument()
+    expect(screen.getByText('图像能力')).toBeInTheDocument()
+    expect(screen.getByText('增强')).toBeInTheDocument()
     expect(screen.queryByText('target_audience')).not.toBeInTheDocument()
   })
 

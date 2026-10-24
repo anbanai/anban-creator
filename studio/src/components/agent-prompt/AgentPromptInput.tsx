@@ -413,7 +413,15 @@ export function AgentPromptInput({
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     if (!attachmentsEnabled) return
-    const files = Array.from(event.clipboardData.files ?? [])
+    const clipboardFiles = Array.from(event.clipboardData.files ?? [])
+    const itemFiles = Array.from(event.clipboardData.items ?? [])
+      .filter((item) => item.kind === 'file')
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file))
+    const files = [...clipboardFiles, ...itemFiles].filter((file, index, all) => {
+      const key = `${file.name}:${file.size}:${file.type}:${file.lastModified}`
+      return all.findIndex((candidate) => `${candidate.name}:${candidate.size}:${candidate.type}:${candidate.lastModified}` === key) === index
+    })
     if (files.length === 0) return
     event.preventDefault()
     addFiles(files)
@@ -462,7 +470,7 @@ export function AgentPromptInput({
           data-slot="agent-prompt-surface"
           className="min-h-40 h-auto rounded-xl bg-card max-h-[min(42rem,calc(100dvh-8rem))] flex-col overflow-hidden"
         >
-          <div data-slot="agent-prompt-content" className="flex min-h-0 w-full flex-1 flex-col overflow-y-auto">
+          <div data-slot="agent-prompt-content" className="assistant-scroll flex min-h-0 w-full flex-1 flex-col overflow-y-auto">
             {value.attachments.length > 0 ? (
               <div data-slot="agent-prompt-attachments" className="flex flex-row flex-wrap gap-2 px-2.5 pt-2.5">
                 {value.attachments.map((item) => (
