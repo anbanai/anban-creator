@@ -957,7 +957,7 @@ export default function AssistantWorkspace() {
       <main data-testid="assistant-workspace" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
       {!workspace ? (
         <section className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col px-4 pb-3 md:px-8">
-          <div data-testid="assistant-conversation" className="assistant-scroll min-h-0 flex-1 overflow-y-auto py-5 md:py-8">
+          <div data-testid="assistant-conversation" className="assistant-scroll min-h-0 flex flex-1 flex-col overflow-y-auto pb-1 pt-5 md:pb-2 md:pt-8">
             <HomeStage project={selectedProject} hasReadyPersona={readyProjects.length > 0} />
             {personaRail}
             {routeHasContext && mode === 'review' && <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} onProject={resetCreationProject} onContent={setContentId} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />}
@@ -1011,7 +1011,7 @@ function platformMeta(platform: string) {
 function HomeStage({ project, hasReadyPersona }: { project?: AssistantProject; hasReadyPersona: boolean }) {
   const imageURL = personaImageURL(project)
   const meta = platformMeta(project?.platform ?? '')
-  return <section aria-label="当前人设" className="mx-auto flex w-full max-w-xl translate-y-2 items-center justify-center gap-4 px-2 py-7 text-left sm:gap-6 sm:py-8">
+  return <section aria-label="当前人设" className="mx-auto flex min-h-0 w-full max-w-xl flex-1 translate-y-2 items-center justify-center gap-4 px-2 py-7 text-left sm:gap-6 sm:py-8 md:translate-y-8">
     <div className="relative flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-muted/60 shadow-sm sm:size-28">
       {imageURL ? <SignedImage src={imageURL} alt={`${project?.name ?? '当前人设'}形象`} className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-10 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-12 text-muted-foreground" />}
     </div>
@@ -1032,13 +1032,32 @@ function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWo
   onViewWorks: (projectId: string) => void
   onEditProfile: (projectId: string) => void
 }) {
-  return <section aria-label="首页人设选择" className="mx-auto mt-1 w-full max-w-5xl pb-1">
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [hasOverflow, setHasOverflow] = useState(false)
+
+  useEffect(() => {
+    const element = scrollRef.current
+    if (!element) return
+
+    const updateOverflow = () => setHasOverflow(element.scrollHeight > element.clientHeight + 1)
+    updateOverflow()
+    window.addEventListener('resize', updateOverflow)
+    if (typeof ResizeObserver === 'undefined') return () => window.removeEventListener('resize', updateOverflow)
+    const observer = new ResizeObserver(updateOverflow)
+    observer.observe(element)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', updateOverflow)
+    }
+  }, [projects.length])
+
+  return <section aria-label="首页人设选择" className="mx-auto mt-auto w-full max-w-5xl shrink-0 pb-1">
     <div className="mb-3 flex items-center justify-between px-1">
       <p className="text-sm font-medium">选择人设</p>
       <span className="text-xs text-muted-foreground">{projects.length ? `${projects.length} 个可用人设` : '还没有可用人设'}</span>
     </div>
     <div className="relative">
-      <div className="assistant-scroll persona-card-scroll grid h-[15rem] grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] auto-rows-[5.25rem] gap-2 overflow-y-auto pr-1" data-testid="persona-card-scroll" tabIndex={0}>
+      <div ref={scrollRef} className="assistant-scroll persona-card-scroll grid min-h-[7rem] max-h-[17.5rem] grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] auto-rows-[7rem] gap-2 overflow-y-auto pr-1" data-testid="persona-card-scroll" tabIndex={0}>
         <button type="button" aria-label="创建新人设" onClick={onCreate} className={`group flex h-full min-w-0 flex-col justify-between rounded-xl border border-dashed px-2.5 py-2 text-left transition-colors hover:border-primary/60 hover:bg-primary/[0.04] ${selectedProjectId === '' ? 'border-primary bg-primary/[0.05]' : 'border-border'}`}>
           <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary"><Plus className="size-4" /></span>
           <span><span className="block truncate text-sm font-semibold">创建新人设</span><span className="mt-0.5 block truncate text-xs leading-4 text-muted-foreground">聊一聊你的定位与风格</span></span>
@@ -1061,7 +1080,7 @@ function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWo
           </article>
         })}
       </div>
-      <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-background via-background/80 to-transparent" />
+      {hasOverflow && <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-background via-background/80 to-transparent" />}
     </div>
   </section>
 }

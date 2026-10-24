@@ -556,7 +556,9 @@ describe('AssistantWorkspace', () => {
     renderPage()
 
     const rail = await screen.findByRole('region', { name: '首页人设选择' })
-    expect(within(rail).getByTestId('persona-card-scroll')).toHaveClass('grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]', 'auto-rows-[5.25rem]')
+    expect(screen.getByRole('region', { name: '当前人设' })).toHaveClass('flex-1', 'items-center')
+    expect(rail).toHaveClass('mt-auto')
+    expect(within(rail).getByTestId('persona-card-scroll')).toHaveClass('min-h-[7rem]', 'max-h-[17.5rem]', 'grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]', 'auto-rows-[7rem]')
     expect(within(rail).getByRole('button', { name: '创建新人设' })).toBeInTheDocument()
     expect(within(rail).getByRole('button', { name: '选择人设：第一个人设' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(rail).getByRole('button', { name: '选择人设：第二个人设' })).toHaveAttribute('aria-pressed', 'false')
