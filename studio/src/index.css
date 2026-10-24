@@ -230,6 +230,12 @@
     [data-slot="button"], [data-slot="input"], [data-slot="select-trigger"], [data-slot="tabs-trigger"] {
         min-height: 2.75rem;
     }
+
+    /* Keep touch targets usable without letting persona actions overlap the next row. */
+    .persona-card-scroll {
+        grid-auto-rows: 6rem;
+        max-height: 15rem;
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {
