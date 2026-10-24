@@ -81,7 +81,8 @@ describe('TaskComposerParameters', () => {
     )
 
     const trigger = screen.getByRole('button', { name: /创作参数：/ })
-    expect(trigger).toHaveTextContent('创作参数')
+    expect(trigger).toHaveTextContent('性价比 / 16:9 / 标准图像')
+    expect(trigger).not.toHaveTextContent('创作参数')
     expect(screen.queryByRole('button', { name: /^执行配置：/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^图像设置：/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '作品数量：1' })).not.toBeInTheDocument()

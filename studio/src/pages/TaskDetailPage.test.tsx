@@ -1673,7 +1673,7 @@ describe('TaskDetailPage', () => {
     expect(within(dialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('原始作品要求')
     expect(within(dialog).queryByText('数量', { exact: true })).not.toBeInTheDocument()
     expect(await within(dialog).findByRole('button', {
-      name: /^创作参数：.*16:9 源图像.*作品数量 1/,
+      name: /^创作参数：.*16:9 \/ 源图像 \/ 作品数量 1/,
     })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '继续执行此作品' })).not.toBeInTheDocument()
 
