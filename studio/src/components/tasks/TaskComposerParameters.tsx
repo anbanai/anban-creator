@@ -24,6 +24,7 @@ export interface TaskComposerParametersProps {
   image?: ImageGenerationSettingsProps
   quantity?: QuantityStepperProps
   disabled?: boolean
+  label?: string
 }
 
 function executionSummary(execution: ExecutionProfileSelectorProps) {
@@ -55,6 +56,7 @@ export function TaskComposerParameters({
   image,
   quantity,
   disabled = false,
+  label = '创作参数',
 }: TaskComposerParametersProps) {
   const summary = [
     executionSummary(execution),
@@ -71,20 +73,21 @@ export function TaskComposerParameters({
             variant="ghost"
             size="sm"
             disabled={disabled}
-            aria-label={`创作参数：${summary}`}
+            aria-label={`${label}：${summary}`}
             className="max-w-full px-2 text-muted-foreground"
           />
         )}
       >
         <SlidersHorizontalIcon data-icon="inline-start" />
-        <span>创作参数</span>
+        <span className="hidden max-w-28 truncate sm:inline">{executionSummary(execution)}</span>
+        <span>{label}</span>
         <ChevronDownIcon data-icon="inline-end" />
       </PopoverTrigger>
       <PopoverContent
         align="start"
         className="max-h-[var(--available-height)] w-[min(48rem,calc(100vw-1rem))] gap-1.5 overflow-y-auto p-2"
       >
-        <PopoverTitle className="sr-only">创作参数</PopoverTitle>
+        <PopoverTitle className="sr-only">{label}</PopoverTitle>
         <section className="flex flex-col gap-2">
           <h3 className="font-medium">执行配置</h3>
           <ExecutionProfileSelector {...execution} layout="horizontal" />

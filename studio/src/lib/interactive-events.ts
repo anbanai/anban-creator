@@ -12,6 +12,16 @@ export interface InteractiveStreamOptions {
   endpoint?: string
 }
 
+export class InteractiveStreamError extends Error {
+  readonly status: number
+
+  constructor(status: number) {
+    super(`SSE connection failed: ${status}`)
+    this.name = 'InteractiveStreamError'
+    this.status = status
+  }
+}
+
 const TERMINAL_EVENTS = new Set(['session.error', 'session.expired', 'session.closed', 'expired', 'closed'])
 const MAX_RECONNECTS = 6
 const EVENT_GAP_MESSAGE = '会话历史已失效，请重新开始创建'
@@ -84,7 +94,7 @@ export async function* streamInteractiveSession(sessionId: string, token: string
         continue
       }
       if (response.status === 401 || response.status === 404 || response.status === 410) {
-        throw new Error(`SSE connection failed: ${response.status}`)
+        throw new InteractiveStreamError(response.status)
       }
       await retryOrFail(reconnects, signal)
       reconnects += 1

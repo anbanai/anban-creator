@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   taskGet: vi.fn(),
   taskFiles: vi.fn(),
   agentProfiles: vi.fn(),
+  imageCapabilities: vi.fn(),
+  platformConfigs: vi.fn(),
   streamEvents: [] as { event: string; id: string; data: string }[],
 }))
 
@@ -31,7 +33,8 @@ vi.mock('@/lib/api', async () => {
       ...actual.api,
       assistant: { ...actual.api.assistant, ...mocks },
       agentProfiles: { ...actual.api.agentProfiles, list: mocks.agentProfiles },
-      projects: { ...actual.api.projects, list: mocks.projectsList },
+      imageCapabilities: { ...actual.api.imageCapabilities, list: mocks.imageCapabilities },
+      projects: { ...actual.api.projects, list: mocks.projectsList, platformConfigs: mocks.platformConfigs },
       tasks: { ...actual.api.tasks, get: mocks.taskGet, files: mocks.taskFiles },
     },
   }
@@ -96,6 +99,8 @@ describe('AssistantWorkspace', () => {
       { id: 'strategy', task_id: 'video-task-1', state: 'delivered', role: 'artifact', delivery_role: 'edit_strategy', file_name: 'edit-strategy.md', mime_type: 'text/markdown', file_size: 10, url: '', created_at: '', is_deliverable: true },
     ])
     mocks.agentProfiles.mockResolvedValue([{ id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-flash', description: '日常创作', min_tier: 'free', available: true }])
+    mocks.imageCapabilities.mockResolvedValue({ tier: 'free', default_capability: 'standard', items: [{ key: 'standard', display_name: '标准图像', description: '适合日常配图', enabled: true, price_available: true, price_credits: 300 }] })
+    mocks.platformConfigs.mockResolvedValue([{ id: 'wechat', supported_image_ratios: ['16:9', '1:1'] }])
   })
 
   it('allows drafting while bootstrap is pending and enables sending when it is ready', async () => {
@@ -235,7 +240,7 @@ describe('AssistantWorkspace', () => {
     renderPage()
 
     await screen.findByRole('button', { name: '选择人设：我的人设' })
-    expect(screen.queryByRole('button', { name: /^创作参数：/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^选择参数：/ })).not.toBeInTheDocument()
   })
 
   it('only exposes attachment upload in creation mode', async () => {
@@ -304,6 +309,8 @@ describe('AssistantWorkspace', () => {
     expect(screen.queryByRole('navigation', { name: '助手模式' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '创作模式' })).not.toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: '选择画像' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('assistant-context-bar')).toHaveAttribute('data-phase', 'locked')
+    expect(screen.queryByRole('button', { name: '人设配置' })).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '发送消息' }).closest('[data-slot="input-group"]')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '发送消息' }).parentElement).toHaveAttribute('data-align', 'inline-end')
   })
@@ -334,9 +341,10 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled())
   })
 
-  it('hides mode controls and labels the page as 首页', async () => {
+  it('hides mode controls and omits the duplicate page title', async () => {
     renderPage()
-    expect(await screen.findByText('首页')).toBeInTheDocument()
+    await screen.findByRole('textbox', { name: '发送消息' })
+    expect(screen.queryByText('首页', { exact: true })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '画像模式' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '创作模式' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '复盘模式' })).not.toBeInTheDocument()
@@ -358,6 +366,32 @@ describe('AssistantWorkspace', () => {
 
     expect(creationSelect.parentElement).toHaveClass('w-full')
     expect(creationSelect.parentElement?.parentElement).toHaveClass('max-w-xs')
+  })
+
+  it('places model and parameter context in the composer without a persona picker', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'creation',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划', available: true },
+        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: true },
+      ],
+      projects: [{ id: 'project-1', name: '寻茗好茶', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    renderPage({ modeId: 'creation', projectId: 'project-1' })
+
+    const contextBar = await screen.findByTestId('assistant-context-bar')
+    await waitFor(() => expect(contextBar).toHaveTextContent('寻茗好茶'))
+    expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('创作模式')
+    const parameters = await screen.findByRole('button', { name: /^选择参数：/ })
+    expect(parameters).toHaveTextContent('选择参数')
+    expect(parameters).toHaveTextContent('性价比')
+    fireEvent.click(parameters)
+    const parameterDialog = await screen.findByRole('dialog', { name: '选择参数' })
+    expect(within(parameterDialog).getByRole('group', { name: '图像能力' })).toBeInTheDocument()
+    expect(within(parameterDialog).getByRole('button', { name: /^标准图像/ })).toBeInTheDocument()
+    expect(within(parameterDialog).getByRole('button', { name: '16:9' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '人设配置' })).not.toBeInTheDocument()
   })
 
   it('uses the product label 公众号贴图 for the WeChat picture creation type', async () => {
@@ -454,7 +488,8 @@ describe('AssistantWorkspace', () => {
     fireEvent.change(composer, { target: { value: '继续完善画像' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(composer).toHaveValue('继续完善画像'))
-    expect(await screen.findByText(/对话已过期/)).toBeInTheDocument()
+    expect(screen.queryByText(/对话已过期/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/SSE connection failed/)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledTimes(2))
@@ -641,7 +676,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.click(within(card).getByRole('button', { name: '确认并创建任务' }))
 
     await waitFor(() => expect(mocks.workspaceCheckpoint).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
-      payload: { plan: { goal: '发布春季新品', content_type: 'wechat-article', execution_profile: 'effective', target_audience: '关注茶饮的年轻人' } },
+      payload: { plan: { goal: '发布春季新品', content_type: 'wechat-article', execution_profile: 'effective', image_ratio: 'auto', image_capability_key: 'standard', target_audience: '关注茶饮的年轻人' } },
       status: 'ready',
     })))
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
@@ -650,6 +685,29 @@ describe('AssistantWorkspace', () => {
       idempotency_key: expect.any(String),
     })))
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tasks/task-created-1'))
+  })
+
+  it('uses the selected persona image ratio as the creation default', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'creation',
+      modes: [{ id: 'creation', displayName: '创作模式', description: '制定计划', available: true }],
+      projects: [{ id: 'project-ratio', name: '画幅人设', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    mocks.projectsList.mockResolvedValue([{ id: 'project-ratio', name: '画幅人设', platform: 'wechat', image_ratio: '1:1', status: 'active' }])
+    mocks.platformConfigs.mockResolvedValue([{ id: 'wechat', default_image_ratio: '16:9', supported_image_ratios: ['16:9', '1:1'] }])
+    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-ratio', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'project-ratio', runtime_status: 'starting', expires_at: '' })
+    mocks.streamEvents = [{ event: 'draft.ready', id: 'event-ratio', data: JSON.stringify({ mode_id: 'creation', session_id: 'session-1', draft: { ready: true, payload: { plan: { goal: '按人设画幅创作', content_type: 'wechat-article' } } } }) }]
+    renderPage({ modeId: 'creation', projectId: 'project-ratio' })
+
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '按人设画幅创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    const card = await screen.findByRole('region', { name: '创作计划确认' })
+    expect(within(card).getByText('1:1')).toBeInTheDocument()
+    fireEvent.click(within(card).getByRole('button', { name: '确认并创建任务' }))
+
+    await waitFor(() => expect(mocks.workspaceCheckpoint).toHaveBeenCalledWith('workspace-ratio', 'creation', expect.objectContaining({
+      payload: { plan: expect.objectContaining({ image_ratio: '1:1' }) },
+    })))
   })
 
   it('disables the composer while a creation confirmation is committing', async () => {
@@ -718,12 +776,14 @@ describe('AssistantWorkspace', () => {
         goal: '基于资料创作',
         content_type: 'wechat-article',
         execution_profile: 'effective',
+        image_ratio: 'auto',
+        image_capability_key: 'standard',
         assets: [{ type: 'document', upload_id: 'upload-session-1', file_name: 'brief.pdf', mime_type: 'application/pdf', file_size: 16 }],
       } },
     })))
   })
 
-  it('closes the current workspace before starting a new persona from the composer context', async () => {
+  it('keeps persona context in the composer header and uses the plus action for profile updates', async () => {
     mocks.bootstrap.mockResolvedValue({
       defaultModeId: 'profile',
       modes: [
@@ -742,14 +802,9 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(screen.queryByText('助手正在回复…')).not.toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('combobox', { name: '人设配置' }))
-    fireEvent.click(await screen.findByRole('option', { name: '创建新人设' }))
-    await waitFor(() => expect(mocks.closeWorkspace).toHaveBeenCalledWith('workspace-1'))
-
-    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '建立一个全新的人设' } })
-    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(2))
-    expect(mocks.createWorkspace).toHaveBeenLastCalledWith({ mode_id: 'profile' }, expect.any(String))
+    expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('已有的人设')
+    expect(screen.queryByRole('combobox', { name: '人设配置' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '进入人设模式' })).toBeInTheDocument()
   })
 
   it('synchronizes an active review persona change after selecting a work', async () => {
@@ -782,13 +837,8 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(screen.queryByText('助手正在回复…')).not.toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('combobox', { name: '人设配置' }))
-    fireEvent.click(await screen.findByRole('option', { name: /第二个人设/ }))
-    const workSelector = await screen.findByRole('combobox', { name: '选择作品' })
-    await waitFor(() => expect(workSelector).toBeEnabled())
-    fireEvent.change(workSelector, { target: { value: 'work-2' } })
-
-    await waitFor(() => expect(mocks.switchWorkspaceMode).toHaveBeenCalledWith('workspace-1', 'review', { project_id: 'project-2', content_id: 'work-2' }))
-    expect(screen.queryByRole('region', { name: '复盘结论确认' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('第一个人设')
+    expect(screen.queryByRole('combobox', { name: '人设配置' })).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '复盘结论确认' })).toBeInTheDocument()
   })
 })

@@ -7,16 +7,17 @@ import { api } from '@/lib/api'
 import type { AssistantModeID, AssistantWorkspace as AssistantWorkspaceState, AssistantProject } from '@/lib/api/assistant'
 import type { InteractiveDraft } from '@/lib/api/interactive'
 import { useAuth } from '@/contexts/AuthContext'
-import { streamAssistantWorkspace, type InteractiveStreamEvent } from '@/lib/interactive-events'
+import { InteractiveStreamError, streamAssistantWorkspace, type InteractiveStreamEvent } from '@/lib/interactive-events'
 import { Button } from '@/components/ui/button'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { AgentPromptDropProvider } from '@/components/agent-prompt/AgentPromptDropProvider'
-import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { TaskComposerParameters } from '@/components/tasks/TaskComposerParameters'
+import { AssistantContextBar } from '@/components/assistant/AssistantContextBar'
 import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
+import { useImageCapabilities } from '@/hooks/useImageCapabilities'
 import { DshQuestionComposer, type DshQuestion, type DshQuestionAnswer } from '@/components/dsh-user-questions/DshQuestionComposer'
 import { AssistantVideoEditInputs } from '@/components/video-edit/AssistantVideoEditInputs'
 import { VideoEditProjectDefaultsPanel } from '@/components/video-edit/VideoEditProjectDefaultsPanel'
@@ -27,6 +28,7 @@ import type { InputAttachment, PromptAttachment } from '@/types/input-attachment
 import type { AgentExecutionProfileID } from '@/types'
 import type { VideoEditDefaults, VideoEditPreferences } from '@/types/video-edit'
 import type { Task, TaskFile } from '@/types'
+import type { ImageRatio } from '@/lib/schemas'
 
 type Message = { id: string; role: 'user' | 'assistant'; text: string }
 type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers'] }
@@ -100,6 +102,15 @@ function assistantWorkspaceHttpStatus(error: unknown): number | undefined {
   return typeof status === 'number' ? status : undefined
 }
 
+function isStaleAssistantWorkspaceError(error: unknown) {
+  const errorCode = assistantWorkspaceErrorCode(error)
+  return errorCode === 'assistant_workspace_expired'
+    || errorCode === 'assistant_workspace_not_found'
+    || errorCode === 'interactive_session_closed'
+    || assistantWorkspaceHttpStatus(error) === 404
+    || assistantWorkspaceHttpStatus(error) === 410
+}
+
 function readPersistedWorkspace(): PersistedWorkspace | null {
   try {
     const raw = sessionStorage.getItem(WORKSPACE_STORAGE_KEY)
@@ -131,6 +142,8 @@ export default function AssistantWorkspace() {
   const [attachments, setAttachments] = useState<PromptAttachment[]>([])
   const [executionProfile, setExecutionProfile] = useState<AgentExecutionProfileID | ''>('')
   const [creationType, setCreationType] = useState(routeHasContext ? '' : persisted?.creationType ?? '')
+  const [imageRatio, setImageRatio] = useState<ImageRatio>('auto')
+  const [imageCapabilityKey, setImageCapabilityKey] = useState('')
   const [videoEditAssets, setVideoEditAssets] = useState<InputAttachment[]>([])
   const [videoEditBrief, setVideoEditBrief] = useState('')
   const [videoEditPreferences, setVideoEditPreferences] = useState<VideoEditPreferences>({})
@@ -154,6 +167,7 @@ export default function AssistantWorkspace() {
   const userMessageCounter = useRef(0)
   const workspaceCreateKey = useRef<string | null>(null)
   const sendInFlight = useRef(false)
+  const imageRatioContextKey = useRef<string | null>(null)
 
   useEffect(() => {
     if (!workspace) {
@@ -166,6 +180,7 @@ export default function AssistantWorkspace() {
   const projects = bootstrap?.projects ?? []
   const projectsQuery = useQuery({ queryKey: ['projects', 'assistant-home'], queryFn: () => api.projects.list({ status: 'active' }), staleTime: 30_000 })
   const executionProfilesQuery = useAgentExecutionProfiles()
+  const platformConfigsQuery = useQuery({ queryKey: ['platform-configs'], queryFn: api.projects.platformConfigs, staleTime: Infinity })
   const attachmentController = usePromptAttachments({
     adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
     policy: GENERAL_AGENT_ATTACHMENT_POLICY,
@@ -178,6 +193,7 @@ export default function AssistantWorkspace() {
       ...project,
       avatar_url: full.avatar_url,
       description: full.description,
+      image_ratio: full.image_ratio,
       portrait_reference_image: full.portrait_reference_image,
     } : project
   })
@@ -188,6 +204,11 @@ export default function AssistantWorkspace() {
   const creationTypes = CREATION_TYPES[selectedProject?.platform ?? ''] ?? []
   const selectedCreationType = creationTypes.some((item) => item.value === creationType) ? creationType : creationTypes[0]?.value ?? ''
   const isVideoEditCreation = mode === 'creation' && selectedCreationType === 'video-edit'
+  const usesImageSettings = mode === 'creation' && Boolean(selectedProject) && !isVideoEditCreation
+  const imageCapabilitiesQuery = useImageCapabilities(usesImageSettings)
+  const selectedPlatformConfig = platformConfigsQuery.data?.find((config) => config.id === selectedProject?.platform)
+  const supportedImageRatios = selectedPlatformConfig?.supported_image_ratios ?? []
+  const effectiveImageCapabilityKey = imageCapabilityKey || imageCapabilitiesQuery.defaultCapability || ''
   const worksQuery = useInfiniteQuery({
     queryKey: ['assistant-workspace-works', selectedProject?.id],
     initialPageParam: undefined as { created_at: string; id: string } | undefined,
@@ -241,9 +262,9 @@ export default function AssistantWorkspace() {
   const resetExpiredWorkspace = () => {
     setWorkspace(null)
     setConversationPhase('setup')
-    setAttachments([])
     setLastEventIds({})
     setResponding(false)
+    setError(null)
     setMessagesByMode((current) => ({ ...current, [mode]: [] }))
     setQuestionsByMode((current) => ({ ...current, [mode]: [] }))
     setDraftByMode((current) => ({ ...current, [mode]: null }))
@@ -275,6 +296,26 @@ export default function AssistantWorkspace() {
     if (creationTypes.length && !creationTypes.some((item) => item.value === creationType)) setCreationType(creationTypes[0].value)
     if (!creationTypes.length && creationType) setCreationType('')
   }, [conversationPhase, mode, creationType, creationTypes])
+
+  useEffect(() => {
+    if (!usesImageSettings) {
+      if (imageRatio !== 'auto') setImageRatio('auto')
+      if (imageCapabilityKey) setImageCapabilityKey('')
+      imageRatioContextKey.current = null
+      return
+    }
+    const contextKey = `${selectedProject?.id ?? ''}:${selectedProject?.platform ?? ''}:${selectedProject?.image_ratio ?? ''}:${selectedPlatformConfig?.default_image_ratio ?? ''}`
+    const configuredRatio = selectedProject?.image_ratio || selectedPlatformConfig?.default_image_ratio || 'auto'
+    const nextRatio = configuredRatio === 'auto' || supportedImageRatios.length === 0 || supportedImageRatios.includes(configuredRatio)
+      ? configuredRatio as ImageRatio
+      : 'auto'
+    if (imageRatioContextKey.current !== contextKey) {
+      imageRatioContextKey.current = contextKey
+      if (imageRatio !== nextRatio) setImageRatio(nextRatio)
+      return
+    }
+    if (imageRatio !== 'auto' && supportedImageRatios.length > 0 && !supportedImageRatios.includes(imageRatio)) setImageRatio(nextRatio)
+  }, [imageCapabilityKey, imageRatio, selectedPlatformConfig?.default_image_ratio, selectedProject?.id, selectedProject?.image_ratio, supportedImageRatios, usesImageSettings])
 
   useEffect(() => {
     if (mode !== 'creation' && attachments.length) setAttachments([])
@@ -342,7 +383,12 @@ export default function AssistantWorkspace() {
       } catch (streamError) {
         if (!controller.signal.aborted) {
           setResponding(false)
-          setError(streamError instanceof Error ? streamError.message : '助手连接已中断')
+          if (streamError instanceof InteractiveStreamError && (streamError.status === 404 || streamError.status === 410)) {
+            resetExpiredWorkspace()
+            setError(null)
+          } else {
+            setError(streamError instanceof Error ? streamError.message : '助手连接已中断')
+          }
         }
       }
     })()
@@ -396,9 +442,8 @@ export default function AssistantWorkspace() {
       setComposer(text)
       setMessagesByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).filter((message) => message.id !== optimisticID) }))
       const errorCode = assistantWorkspaceErrorCode(sendError)
-      if (errorCode === 'assistant_workspace_expired') {
+      if (isStaleAssistantWorkspaceError(sendError)) {
         resetExpiredWorkspace()
-        setError('对话已过期。消息仍保留在输入框中，重新发送后会建立新会话。')
       } else if (errorCode === 'assistant_workspace_busy') {
         setError('助手正在处理上一条消息，输入已保留，请稍后重试。')
       } else if (errorCode === 'interactive_session_busy' || errorCode === 'interactive_question_pending') {
@@ -467,10 +512,8 @@ export default function AssistantWorkspace() {
       setResponding(false)
     } catch (switchError) {
       const errorCode = assistantWorkspaceErrorCode(switchError)
-      if (errorCode === 'assistant_workspace_expired') {
-        setWorkspace(null)
-        setLastEventIds({})
-        setError('对话已过期，请重新发送消息以建立新会话。')
+      if (isStaleAssistantWorkspaceError(switchError)) {
+        resetExpiredWorkspace()
       } else if (errorCode === 'assistant_workspace_busy') {
         setError('助手仍在处理上一条消息，请稍后切换。')
       } else {
@@ -488,9 +531,8 @@ export default function AssistantWorkspace() {
       setQuestionsByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).map((item) => item.callId === batch.callId ? { ...item, answers: answer.answers } : item) }))
     } catch (answerError) {
       const errorCode = assistantWorkspaceErrorCode(answerError)
-      if (errorCode === 'assistant_workspace_expired') {
+      if (isStaleAssistantWorkspaceError(answerError)) {
         resetExpiredWorkspace()
-        setError('对话已过期，请重新发送消息以建立新会话。')
       } else if (errorCode === 'assistant_workspace_busy') {
         setError('助手仍在处理上一条消息，请稍后提交回答。')
       } else {
@@ -525,6 +567,10 @@ export default function AssistantWorkspace() {
           const plan = payload.plan && typeof payload.plan === 'object' && !Array.isArray(payload.plan) ? payload.plan as Record<string, unknown> : payload
           plan.content_type = selectedCreationType
           if (executionProfile) plan.execution_profile = executionProfile
+          if (usesImageSettings) {
+            if (imageRatio) plan.image_ratio = imageRatio
+            if (effectiveImageCapabilityKey) plan.image_capability_key = effectiveImageCapabilityKey
+          }
           const composerAssets = selectedCreationType === 'video-edit' ? [] : attachmentController.toInputAttachments().map((asset) => ({
             type: asset.type,
             ...(asset.asset_id ? { asset_id: asset.asset_id } : {}),
@@ -719,24 +765,6 @@ export default function AssistantWorkspace() {
     navigate(`/tasks?project_id=${encodeURIComponent(nextProjectId)}`)
   }
 
-  const composerPersonaControl = (
-    <ProjectContextControl
-      mode="select"
-      projects={selectableProjects}
-      value={newProfile ? null : (selectedProject?.id ?? projectId) || null}
-      onValueChange={(value) => {
-        if (value) selectPersona(value)
-        else void startNewProfile()
-      }}
-      allowNoProject
-      noProjectLabel="创建新人设"
-      placeholder="选择人设"
-      compact
-      showAgents={false}
-      disabled={switching || committing || sending || responding}
-      ariaLabel="人设配置"
-    />
-  )
   const composerParameters = (
     <TaskComposerParameters
       execution={{
@@ -747,10 +775,36 @@ export default function AssistantWorkspace() {
         disabled: executionProfilesQuery.isError,
         taskType: selectedProject?.platform,
       }}
+      image={usesImageSettings ? {
+        ratios: supportedImageRatios,
+        ratio: imageRatio,
+        onRatioChange: (value) => setImageRatio(value),
+        capabilities: imageCapabilitiesQuery.items,
+        capabilityKey: effectiveImageCapabilityKey,
+        onCapabilityChange: setImageCapabilityKey,
+        loading: imageCapabilitiesQuery.isLoading,
+        disabled: imageCapabilitiesQuery.isError,
+      } : undefined}
       disabled={switching || committing || sending || responding}
+      label="选择参数"
     />
   )
   const creationComposerParameters = mode === 'creation' ? composerParameters : null
+  const composerContextBar = (
+    <AssistantContextBar
+      phase="locked"
+      mode={mode}
+      modes={bootstrap?.modes ?? []}
+      projects={completeProjects}
+      projectId={selectedProject?.id ?? (newProfile ? '' : projectId)}
+      works={works}
+      contentId={selectedWork?.id ?? contentId}
+      creationType={selectedCreationType}
+      creationTypeOptions={creationTypes}
+      loadingProjects={!selectedProject && (bootstrapQuery.isLoading || projectsQuery.isLoading)}
+      loadingWorks={worksQuery.isLoading}
+    />
+  )
   const enterPersonaModeControl = (
     <Button
       type="button"
@@ -780,17 +834,22 @@ export default function AssistantWorkspace() {
       onEditProfile={editPersona}
     />
   ) : null
+  const confirmationDraft = activeDraft && mode === 'creation'
+    ? withCreationConfirmationSettings(activeDraft, {
+      execution_profile: executionProfile || undefined,
+      ...(usesImageSettings ? {
+        image_ratio: imageRatio,
+        image_capability_key: effectiveImageCapabilityKey || undefined,
+      } : {}),
+    })
+    : activeDraft
 
   return (
     <AgentPromptDropProvider>
       <main data-testid="assistant-workspace" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
-      <header className="hidden h-14 shrink-0 items-center gap-3 border-b border-border/70 px-5 md:flex md:px-8">
-        <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground"><Sparkles className="size-4" /></span><span className="text-sm font-semibold">首页</span>
-      </header>
-
       {!workspace ? (
         <section className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col px-4 pb-3 md:px-8">
-          <div data-testid="assistant-conversation" className="min-h-0 flex-1 overflow-y-auto py-5 md:py-8">
+          <div data-testid="assistant-conversation" className="assistant-scroll min-h-0 flex-1 overflow-y-auto py-5 md:py-8">
             <HomeStage project={selectedProject} hasReadyPersona={readyProjects.length > 0} />
             {personaRail}
             {routeHasContext && mode === 'review' && <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} onProject={resetCreationProject} onContent={setContentId} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />}
@@ -802,20 +861,20 @@ export default function AssistantWorkspace() {
             {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && <VideoEditReviewResults query={reviewVideoQuery} />}
             {videoEditInputs}
           </div>
-          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} status={missingContextInstruction} leadingTools={<>{enterPersonaModeControl}{composerPersonaControl}</>} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} status={missingContextInstruction} leadingTools={enterPersonaModeControl} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       ) : (
         <section className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col px-4 pb-3 md:px-8">
-          <div data-testid="assistant-conversation" className="min-h-0 flex-1 overflow-y-auto py-4" aria-live="polite">
+          <div data-testid="assistant-conversation" className="assistant-scroll min-h-0 flex-1 overflow-y-auto py-4" aria-live="polite">
             {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && (
               <VideoEditReviewResults query={reviewVideoQuery} />
             )}
             <Conversation messages={activeMessages} questions={activeQuestions} onAnswer={submitAnswers} />
             {activeReviewSelectors}
-            {activeDraft && <DraftConfirmationCard mode={mode} draft={activeDraft} committing={committing} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} />}
+            {activeDraft && confirmationDraft && <DraftConfirmationCard mode={mode} draft={confirmationDraft} committing={committing} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} />}
             {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
           </div>
-          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} placeholder={activeQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || activeQuestions.length > 0} sendDisabled={!canSend || activeQuestions.length > 0} status={responding ? '助手正在回复…' : undefined} leadingTools={<>{enterPersonaModeControl}{composerPersonaControl}</>} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={activeQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || activeQuestions.length > 0} sendDisabled={!canSend || activeQuestions.length > 0} status={responding ? '助手正在回复…' : undefined} leadingTools={enterPersonaModeControl} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       )}
       </main>
@@ -844,13 +903,13 @@ function platformMeta(platform: string) {
 function HomeStage({ project, hasReadyPersona }: { project?: AssistantProject; hasReadyPersona: boolean }) {
   const imageURL = personaImageURL(project)
   const meta = platformMeta(project?.platform ?? '')
-  return <section aria-label="当前人设" className="mx-auto flex w-full max-w-2xl items-center justify-center gap-5 px-2 py-3 text-left sm:gap-8 sm:py-5">
-    <div className="relative flex size-28 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-muted/60 shadow-sm sm:size-36">
+  return <section aria-label="当前人设" className="mx-auto flex w-full max-w-xl items-center justify-center gap-4 px-2 py-3 text-left sm:gap-6 sm:py-5">
+    <div className="relative flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-muted/60 shadow-sm sm:size-28">
       {imageURL ? <SignedImage src={imageURL} alt={`${project?.name ?? '当前人设'}形象`} className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-10 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-12 text-muted-foreground" />}
     </div>
     <div className="min-w-0">
       <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{project ? '当前人设' : '准备开始'}</p>
-      <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">{project?.name ?? '神秘人'}</h1>
+      <h1 className="mt-2 text-xl font-semibold tracking-tight sm:text-2xl">{project?.name ?? '神秘人'}</h1>
       <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{project?.description || (hasReadyPersona ? '选择一个人设，开始你的下一次创作。' : '为了创建更好的作品，需要先创建您的人设')}</p>
       {project && <span className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><meta.Icon aria-hidden="true" className="size-3.5" />{meta.label}</span>}
     </div>
@@ -865,14 +924,14 @@ function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWo
   onViewWorks: (projectId: string) => void
   onEditProfile: (projectId: string) => void
 }) {
-  return <section aria-label="首页人设选择" className="mx-auto mt-2 w-full max-w-3xl">
+  return <section aria-label="首页人设选择" className="mx-auto mt-3 w-full max-w-3xl pb-2">
     <div className="mb-3 flex items-center justify-between px-1">
       <p className="text-sm font-medium">选择人设</p>
       <span className="text-xs text-muted-foreground">{projects.length ? `${projects.length} 个可用人设` : '还没有可用人设'}</span>
     </div>
     <div className="relative">
-      <div className="persona-card-scroll grid h-[18rem] grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 lg:grid-cols-3" data-testid="persona-card-scroll" tabIndex={0}>
-        <button type="button" aria-label="创建新人设" onClick={onCreate} className={`group flex h-28 flex-col justify-between rounded-xl border border-dashed px-3 py-3 text-left transition-colors hover:border-primary/60 hover:bg-primary/[0.04] ${selectedProjectId === '' ? 'border-primary bg-primary/[0.05]' : 'border-border'}`}>
+      <div className="assistant-scroll persona-card-scroll grid h-[16.5rem] grid-cols-1 gap-2 overflow-y-auto pr-1" data-testid="persona-card-scroll" tabIndex={0}>
+        <button type="button" aria-label="创建新人设" onClick={onCreate} className={`group flex h-[6.5rem] flex-col justify-between rounded-xl border border-dashed px-3 py-2.5 text-left transition-colors hover:border-primary/60 hover:bg-primary/[0.04] ${selectedProjectId === '' ? 'border-primary bg-primary/[0.05]' : 'border-border'}`}>
           <span className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary"><Plus className="size-4" /></span>
           <span><span className="block text-sm font-semibold">创建新人设</span><span className="mt-0.5 block text-xs leading-4 text-muted-foreground">聊一聊你的定位与风格</span></span>
         </button>
@@ -880,9 +939,9 @@ function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWo
           const meta = platformMeta(project.platform)
           const imageURL = personaImageURL(project)
           const selected = selectedProjectId === project.id
-          return <article key={project.id} className={`group relative flex h-28 flex-col rounded-xl border bg-card p-2.5 transition-shadow ${selected ? 'border-primary shadow-sm ring-1 ring-primary/25' : 'border-border hover:shadow-sm'}`}>
+          return <article key={project.id} className={`group relative flex h-[6.5rem] flex-col rounded-xl border bg-card p-2 transition-shadow ${selected ? 'border-primary shadow-sm ring-1 ring-primary/25' : 'border-border hover:shadow-sm'}`}>
             <button type="button" aria-label={`选择人设：${project.name}`} aria-pressed={selected} onClick={() => onSelect(project.id)} className="flex w-full items-start gap-2 text-left">
-              <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
+              <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
                 {imageURL ? <SignedImage src={imageURL} alt="" className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-5 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-5 text-muted-foreground" />}
               </div>
               <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{project.name}</span><span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"><meta.Icon aria-hidden="true" className="size-3" />{meta.label}</span><span className="mt-1 line-clamp-1 text-xs leading-4 text-muted-foreground">{project.description || '已准备好开始创作'}</span></span>
@@ -894,7 +953,7 @@ function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWo
           </article>
         })}
       </div>
-      <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-background to-transparent" />
+      <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-background via-background/80 to-transparent" />
     </div>
   </section>
 }
@@ -911,6 +970,23 @@ function DraftConfirmationCard({ mode, draft, committing, disabled, onCommit }: 
   </section>
 }
 
+function withCreationConfirmationSettings(draft: Draft, settings: Record<string, unknown>): Draft {
+  const sourcePayload = draft.payload && typeof draft.payload === 'object' && !Array.isArray(draft.payload)
+    ? draft.payload as Record<string, unknown>
+    : draft
+  const sourcePlan = sourcePayload.plan && typeof sourcePayload.plan === 'object' && !Array.isArray(sourcePayload.plan)
+    ? sourcePayload.plan as Record<string, unknown>
+    : sourcePayload
+  const nextPlan = { ...sourcePlan }
+  for (const [key, value] of Object.entries(settings)) {
+    if (value !== undefined && value !== '') nextPlan[key] = value
+  }
+  return {
+    ...draft,
+    payload: { ...sourcePayload, plan: nextPlan },
+  }
+}
+
 function ProfileDraftSummary({ draft }: { draft: Draft }) {
   const project = draft.project && typeof draft.project === 'object' && !Array.isArray(draft.project) ? draft.project as Record<string, unknown> : undefined
   const profile = draft.profile && typeof draft.profile === 'object' && !Array.isArray(draft.profile) ? draft.profile as Record<string, unknown> : undefined
@@ -922,11 +998,12 @@ function WorkspaceSelectors({ mode, projects, projectId, contentId, works, disab
   return <div className="mx-auto mt-6 flex w-full max-w-xs flex-col items-stretch gap-3"><NativeSelect className="w-full" aria-label="选择人设" value={projectId} disabled={disabled} onChange={(event) => onProject(event.target.value)}><NativeSelectOption value="">{mode === 'profile' ? '新建人设' : '选择人设'}</NativeSelectOption>{projects.map((project) => <NativeSelectOption key={project.id} value={project.id}>{project.name}</NativeSelectOption>)}</NativeSelect>{mode === 'review' && <NativeSelect className="w-full" aria-label="选择作品" value={contentId} disabled={disabled} onChange={(event) => onContent(event.target.value)}><NativeSelectOption value="">选择作品</NativeSelectOption>{works.map((work) => <NativeSelectOption key={work.id} value={work.id}>{work.title}</NativeSelectOption>)}</NativeSelect>}{mode === 'review' && hasMore && <Button type="button" variant="ghost" size="sm" className="self-end" aria-label="加载更多作品" disabled={disabled} onClick={onMore}><ChevronDown className="size-4" />加载更多作品</Button>}</div>
 }
 
-function Composer({ value, attachments, attachmentController, attachmentsEnabled = true, placeholder, inputDisabled, sendDisabled, status, leadingTools, trailingTools, onChange, onAttachmentsChange, onSend }: {
+function Composer({ value, attachments, attachmentController, attachmentsEnabled = true, contextBar, placeholder, inputDisabled, sendDisabled, status, leadingTools, trailingTools, onChange, onAttachmentsChange, onSend }: {
   value: string
   attachments: PromptAttachment[]
   attachmentController: ReturnType<typeof usePromptAttachments>
   attachmentsEnabled?: boolean
+  contextBar?: ReactNode
   placeholder: string
   inputDisabled: boolean
   sendDisabled: boolean
@@ -949,6 +1026,7 @@ function Composer({ value, attachments, attachmentController, attachmentsEnabled
       attachmentController={attachmentController}
       attachmentPolicy={GENERAL_AGENT_ATTACHMENT_POLICY}
       attachmentsEnabled={attachmentsEnabled}
+      contextBar={contextBar}
       placeholder={placeholder}
       submitLabel="发送消息"
       ariaLabel="发送消息"

@@ -43,8 +43,9 @@ export type AssistantContextBarProps = AssistantContextBarCommonProps & (
 )
 
 function modeLabel(mode: AssistantModeID, modes: readonly AssistantMode[]) {
+  if (mode === 'profile') return '人设'
   return modes.find((candidate) => candidate.id === mode)?.displayName
-    ?? (mode === 'profile' ? '画像模式' : mode === 'creation' ? '创作模式' : '复盘模式')
+    ?? (mode === 'creation' ? '创作' : '复盘')
 }
 
 function modeIcon(mode: AssistantModeID) {

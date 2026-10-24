@@ -36,7 +36,7 @@ describe('AppLayout', () => {
 
     const main = screen.getByRole('main')
 
-    expect(main).toHaveClass('flex', 'min-h-0', 'min-w-0', 'flex-1', 'flex-col', 'overflow-auto')
+    expect(main).toHaveClass('flex', 'min-h-0', 'min-w-0', 'flex-1', 'flex-col', 'overflow-hidden')
     expect(main.parentElement).toHaveClass('flex', 'h-dvh')
   })
 

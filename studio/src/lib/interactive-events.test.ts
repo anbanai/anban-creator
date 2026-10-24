@@ -83,6 +83,16 @@ describe('streamInteractiveSession', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('returns a structured error for an expired stream', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(null, { status: 410 }))
+    const stream = streamInteractiveSession('session-expired', 'token')
+
+    await expect(stream.next()).rejects.toEqual(expect.objectContaining({
+      name: 'InteractiveStreamError',
+      status: 410,
+    }))
+  })
+
   it('reopens from retained history when the server reports a compacted cursor', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(null, { status: 409 }))

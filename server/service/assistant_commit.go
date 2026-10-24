@@ -271,6 +271,8 @@ type assistantCreationPlan struct {
 	Goal                 string                      `json:"goal"`
 	ContentType          string                      `json:"content_type"`
 	ExecutionProfile     string                      `json:"execution_profile,omitempty"`
+	ImageRatio           string                      `json:"image_ratio,omitempty"`
+	ImageCapabilityKey   string                      `json:"image_capability_key,omitempty"`
 	ExpectedResult       string                      `json:"expected_result,omitempty"`
 	Requirements         []string                    `json:"requirements,omitempty"`
 	Constraints          []string                    `json:"constraints,omitempty"`
@@ -440,6 +442,7 @@ func commitAssistantCreation(ctx context.Context, userID string, checkpoint *mod
 		UserID: userID, ProjectID: checkpoint.ProjectID, ExecutionProfile: executionProfile,
 		AgentID: selected.Agent.Name, Channel: selected.Channel, TaskKind: taskKind,
 		RequestedTaskType:     taskType,
+		ImageRatio:            plan.ImageRatio, ImageCapabilityKey: plan.ImageCapabilityKey,
 		AssistantCheckpointID: checkpoint.ID, AssistantProfileRevision: &checkpoint.BaseProfileRevision, Prompt: prompt, Quantity: 1,
 	}
 	if selected.Agent.Name == model.AgentIDVideoEdit {
