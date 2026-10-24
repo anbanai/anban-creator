@@ -59,7 +59,7 @@ export function ImageGenerationSettings({
           }}
           variant="outline"
           disabled={disabled}
-          className="flex w-full flex-col items-stretch"
+          className="grid w-full grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] items-stretch gap-2"
         >
           {capabilities.map((option) => {
             const available = option.enabled === true && option.price_available === true
@@ -68,7 +68,7 @@ export function ImageGenerationSettings({
                 key={option.key}
                 value={option.key}
                 disabled={!available}
-                className="h-auto min-h-16 w-full min-w-0 flex-col items-start justify-center gap-0.5 whitespace-normal px-3 py-2 text-left"
+                className="h-auto min-h-14 w-full min-w-0 flex-col items-start justify-center gap-0.5 whitespace-normal px-2.5 py-2 text-left"
               >
                 <span className="font-medium">{option.display_name}</span>
                 {option.description ? <span className="text-xs text-muted-foreground">{option.description}</span> : null}

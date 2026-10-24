@@ -60,7 +60,7 @@ describe('ExecutionProfileSelector', () => {
     )
 
     const group = screen.getByRole('group', { name: 'Agent 执行配置' })
-    expect(group).toHaveClass('grid-cols-3')
+    expect(group).toHaveClass('grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]')
     expect(group).not.toHaveClass('grid-cols-1')
     expect(screen.getByText('日常创作')).toHaveClass('max-sm:hidden')
     expect(screen.getByText('需要企业版')).not.toHaveClass('max-sm:hidden')

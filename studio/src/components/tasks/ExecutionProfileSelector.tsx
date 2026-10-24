@@ -51,7 +51,7 @@ export function ExecutionProfileSelector({
   if (loading) {
     return (
       <div
-        className={cn('grid gap-2', layout === 'horizontal' ? 'grid-cols-3' : 'grid-cols-1')}
+        className={cn('grid gap-2', layout === 'horizontal' ? 'grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]' : 'grid-cols-1')}
         aria-label="正在加载执行配置"
       >
         {[0, 1, 2].map((index) => <Skeleton key={index} className="h-16 w-full" />)}
@@ -64,7 +64,7 @@ export function ExecutionProfileSelector({
       aria-label="Agent 执行配置"
       className={cn(
         'grid w-full items-stretch gap-2',
-        layout === 'horizontal' ? 'grid-cols-3' : 'grid-cols-1',
+        layout === 'horizontal' ? 'grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]' : 'grid-cols-1',
       )}
       value={value ? [value] : []}
       onValueChange={(next) => {
@@ -84,8 +84,9 @@ export function ExecutionProfileSelector({
             disabled={!profile.available}
             aria-label={`${profile.display_name}，${minimumTierLabel[profile.min_tier]}${profile.available ? '' : `，不可用：${reason}`}`}
             className={cn(
-              'h-auto min-h-16 w-full min-w-0 flex-col items-start justify-center gap-1 whitespace-normal py-2 text-left',
-              layout === 'horizontal' ? 'px-2' : 'px-3',
+              'h-auto w-full min-w-0 flex-col items-start justify-center gap-0.5 whitespace-normal py-2 text-left',
+              layout === 'horizontal' ? 'min-h-14' : 'min-h-16',
+              layout === 'horizontal' ? 'px-2.5' : 'px-3',
             )}
           >
             <span className={cn(

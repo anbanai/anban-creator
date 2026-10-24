@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, Check, ChevronDown, FileText, Loader2, MessageSquare, Plus, Sparkles, UserRound, Video } from 'lucide-react'
+import { BookOpen, Bot, Check, ChevronDown, FileText, Loader2, Plus, Sparkles, UserRound, UserRoundPlus, Video } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
@@ -34,7 +34,18 @@ type Message = { id: string; role: 'user' | 'assistant'; text: string }
 type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers'] }
 type Draft = Record<string, unknown>
 type RouteState = { modeId?: AssistantModeID; projectId?: string; contentId?: string; checkpointId?: string; initialMessage?: string }
-type PersistedWorkspace = { workspace: AssistantWorkspaceState; lastEventIds: Record<string, string | undefined>; creationType?: string }
+type PersistedWorkspace = {
+  workspace: AssistantWorkspaceState | null
+  lastEventIds: Record<string, string | undefined>
+  creationType?: string
+  mode?: AssistantModeID
+  projectId?: string
+  contentId?: string
+  composer?: string
+  messagesByMode?: Record<string, Message[]>
+  questionsByMode?: Record<string, QuestionBatch[]>
+  draftByMode?: Record<string, Draft | null>
+}
 
 const WORKSPACE_STORAGE_KEY = 'anban:assistant-workspace'
 
@@ -50,6 +61,61 @@ function isMode(value: unknown): value is AssistantModeID {
 }
 function stringValue(value: unknown) {
   return typeof value === 'string' && value.trim() ? value : undefined
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+}
+
+function parsePersistedMessages(value: unknown): Record<string, Message[]> | undefined {
+  const source = recordValue(value)
+  if (!source) return undefined
+  const result: Record<string, Message[]> = {}
+  for (const [mode, entries] of Object.entries(source)) {
+    if (!Array.isArray(entries)) continue
+    result[mode] = entries.flatMap((entry) => {
+      const item = recordValue(entry)
+      const id = stringValue(item?.id)
+      const text = typeof item?.text === 'string' ? item.text : undefined
+      const role = item?.role === 'user' || item?.role === 'assistant' ? item.role : undefined
+      return id && text !== undefined && role ? [{ id, role, text }] : []
+    })
+  }
+  return result
+}
+
+function parsePersistedQuestions(value: unknown): Record<string, QuestionBatch[]> | undefined {
+  const source = recordValue(value)
+  if (!source) return undefined
+  const result: Record<string, QuestionBatch[]> = {}
+  for (const [mode, entries] of Object.entries(source)) {
+    if (!Array.isArray(entries)) continue
+    result[mode] = entries.flatMap((entry) => {
+      const item = recordValue(entry)
+      const callId = stringValue(item?.callId)
+      const questions = parseQuestions(item?.questions)
+      if (!callId || !questions.length) return []
+      return [{ callId, questions, answers: Array.isArray(item?.answers) ? item.answers as DshQuestionAnswer['answers'] : undefined }]
+    })
+  }
+  return result
+}
+
+function parsePersistedDrafts(value: unknown): Record<string, Draft | null> | undefined {
+  const source = recordValue(value)
+  if (!source) return undefined
+  const result: Record<string, Draft | null> = {}
+  for (const [mode, draft] of Object.entries(source)) {
+    const parsed = recordValue(draft)
+    if (draft === null || parsed) result[mode] = parsed ?? null
+  }
+  return result
+}
+
+function parsePersistedEventIds(value: unknown): Record<string, string | undefined> {
+  const source = recordValue(value)
+  if (!source) return {}
+  return Object.fromEntries(Object.entries(source).flatMap(([mode, eventId]) => typeof eventId === 'string' ? [[mode, eventId]] : []))
 }
 
 function parseEventData(event: InteractiveStreamEvent): Record<string, unknown> {
@@ -118,8 +184,19 @@ function readPersistedWorkspace(): PersistedWorkspace | null {
     const value: unknown = JSON.parse(raw)
     if (!value || typeof value !== 'object' || !('workspace' in value)) return null
     const candidate = value as Partial<PersistedWorkspace>
-    if (!candidate.workspace || typeof candidate.workspace !== 'object' || !isMode(candidate.workspace.mode_id) || typeof candidate.workspace.id !== 'string') return null
-    return { workspace: candidate.workspace as AssistantWorkspaceState, lastEventIds: candidate.lastEventIds ?? {}, creationType: typeof candidate.creationType === 'string' ? candidate.creationType : undefined }
+    if (candidate.workspace !== null && (typeof candidate.workspace !== 'object' || !isMode(candidate.workspace.mode_id) || typeof candidate.workspace.id !== 'string')) return null
+    return {
+      workspace: candidate.workspace as AssistantWorkspaceState | null,
+      lastEventIds: parsePersistedEventIds(candidate.lastEventIds),
+      creationType: typeof candidate.creationType === 'string' ? candidate.creationType : undefined,
+      mode: isMode(candidate.mode) ? candidate.mode : undefined,
+      projectId: typeof candidate.projectId === 'string' ? candidate.projectId : undefined,
+      contentId: typeof candidate.contentId === 'string' ? candidate.contentId : undefined,
+      composer: typeof candidate.composer === 'string' ? candidate.composer : undefined,
+      messagesByMode: parsePersistedMessages(candidate.messagesByMode),
+      questionsByMode: parsePersistedQuestions(candidate.questionsByMode),
+      draftByMode: parsePersistedDrafts(candidate.draftByMode),
+    }
   } catch {
     return null
   }
@@ -135,10 +212,10 @@ export default function AssistantWorkspace() {
   const bootstrapQuery = useQuery({ queryKey: ['assistant-bootstrap'], queryFn: api.assistant.bootstrap, staleTime: 30_000 })
   const queryClient = useQueryClient()
   const bootstrap = bootstrapQuery.data
-  const [mode, setMode] = useState<AssistantModeID>(() => isMode(routeState.modeId) ? routeState.modeId : persisted?.workspace.mode_id ?? 'profile')
-  const [projectId, setProjectId] = useState(routeState.projectId ?? persisted?.workspace.project_id ?? '')
-  const [contentId, setContentId] = useState(routeState.contentId ?? persisted?.workspace.content_id ?? '')
-  const [composer, setComposer] = useState(routeState.initialMessage ?? '')
+  const [mode, setMode] = useState<AssistantModeID>(() => isMode(routeState.modeId) ? routeState.modeId : persisted?.mode ?? persisted?.workspace?.mode_id ?? 'profile')
+  const [projectId, setProjectId] = useState(routeState.projectId ?? persisted?.projectId ?? persisted?.workspace?.project_id ?? '')
+  const [contentId, setContentId] = useState(routeState.contentId ?? persisted?.contentId ?? persisted?.workspace?.content_id ?? '')
+  const [composer, setComposer] = useState(routeState.initialMessage ?? persisted?.composer ?? '')
   const [attachments, setAttachments] = useState<PromptAttachment[]>([])
   const [executionProfile, setExecutionProfile] = useState<AgentExecutionProfileID | ''>('')
   const [creationType, setCreationType] = useState(routeHasContext ? '' : persisted?.creationType ?? '')
@@ -153,9 +230,9 @@ export default function AssistantWorkspace() {
   const [workspace, setWorkspace] = useState<AssistantWorkspaceState | null>(() => routeHasContext ? null : persisted?.workspace ?? null)
   const [newProfile, setNewProfile] = useState(false)
   const [conversationPhase, setConversationPhase] = useState<'setup' | 'active'>(() => routeHasContext ? 'setup' : persisted?.workspace ? 'active' : 'setup')
-  const [messagesByMode, setMessagesByMode] = useState<Record<string, Message[]>>({})
-  const [questionsByMode, setQuestionsByMode] = useState<Record<string, QuestionBatch[]>>({})
-  const [draftByMode, setDraftByMode] = useState<Record<string, Draft | null>>({})
+  const [messagesByMode, setMessagesByMode] = useState<Record<string, Message[]>>(persisted?.messagesByMode ?? {})
+  const [questionsByMode, setQuestionsByMode] = useState<Record<string, QuestionBatch[]>>(persisted?.questionsByMode ?? {})
+  const [draftByMode, setDraftByMode] = useState<Record<string, Draft | null>>(persisted?.draftByMode ?? {})
   const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [responding, setResponding] = useState(false)
@@ -172,12 +249,23 @@ export default function AssistantWorkspace() {
   const imageRatioContextKey = useRef<string | null>(null)
 
   useEffect(() => {
-    if (!workspace) {
-      sessionStorage.removeItem(WORKSPACE_STORAGE_KEY)
-      return
+    try {
+      sessionStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({
+        workspace,
+        lastEventIds,
+        creationType,
+        mode,
+        projectId,
+        contentId,
+        composer,
+        messagesByMode,
+        questionsByMode,
+        draftByMode,
+      } satisfies PersistedWorkspace))
+    } catch {
+      // Conversation recovery is best effort when browser storage is unavailable or full.
     }
-    sessionStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({ workspace, lastEventIds, creationType }))
-  }, [workspace, lastEventIds, creationType, routeHasContext])
+  }, [workspace, lastEventIds, creationType, mode, projectId, contentId, composer, messagesByMode, questionsByMode, draftByMode])
 
   const projects = bootstrap?.projects ?? []
   const projectsQuery = useQuery({ queryKey: ['projects', 'assistant-home'], queryFn: () => api.projects.list({ status: 'active' }), staleTime: 30_000 })
@@ -231,8 +319,10 @@ export default function AssistantWorkspace() {
     staleTime: 30_000,
   })
   const activeMessages = messagesByMode[mode] ?? []
-  const activeQuestions = (questionsByMode[mode] ?? []).filter((question) => !question.answers)
+  const activeQuestions = questionsByMode[mode] ?? []
+  const pendingQuestions = activeQuestions.filter((question) => !question.answers)
   const activeDraft = draftByMode[mode]
+  const draftPending = Boolean(activeDraft)
   const activeMode = bootstrap?.modes.find((candidate) => candidate.id === mode)
   const isRuntimeUnavailable = activeMode?.disabledReason === '助手运行环境暂不可用，请稍后重试'
   const modePrerequisiteBlocked = Boolean(activeMode && !activeMode.available && activeMode.disabledReason && !isRuntimeUnavailable)
@@ -259,7 +349,7 @@ export default function AssistantWorkspace() {
     : undefined
   const profilePlatform = selectedProject?.platform ?? stringValue(draftProject?.platform)
   const isVideoEditProfile = mode === 'profile' && profilePlatform === 'video-edit'
-  const canSend = Boolean(composer.trim()) && Boolean(activeMode?.available) && (mode === 'profile' || Boolean(selectedProject)) && (mode !== 'review' || Boolean(selectedWork)) && !sending && !responding && !committing && !composerBlocked
+  const canSend = Boolean(composer.trim()) && Boolean(activeMode?.available) && (mode === 'profile' || Boolean(selectedProject)) && (mode !== 'review' || Boolean(selectedWork)) && !sending && !responding && !committing && !composerBlocked && !draftPending
 
   const resetExpiredWorkspace = (preservedComposer?: string) => {
     workspaceResetVersion.current += 1
@@ -275,14 +365,14 @@ export default function AssistantWorkspace() {
   }
 
   useEffect(() => {
-    if (!bootstrap || routeState.modeId || persisted?.workspace.mode_id || workspace || newProfile || projectId || readyProjects.length === 0) return
+    if (!bootstrap || routeState.modeId || persisted?.workspace?.mode_id || workspace || newProfile || projectId || readyProjects.length === 0) return
     setProjectId(readyProjects[0].id)
-  }, [bootstrap, persisted?.workspace.mode_id, projectId, readyProjects, routeState.modeId, newProfile, workspace])
+  }, [bootstrap, persisted?.workspace?.mode_id, projectId, readyProjects, routeState.modeId, newProfile, workspace])
 
   useEffect(() => {
-    if (!bootstrap || routeState.modeId || persisted?.workspace.mode_id || workspace || !isMode(bootstrap.defaultModeId)) return
+    if (!bootstrap || routeState.modeId || persisted?.workspace?.mode_id || workspace || !isMode(bootstrap.defaultModeId)) return
     setMode(bootstrap.defaultModeId)
-  }, [bootstrap, persisted?.workspace.mode_id, routeState.modeId, workspace])
+  }, [bootstrap, persisted?.workspace?.mode_id, routeState.modeId, workspace])
 
   useEffect(() => {
     if (executionProfile || executionProfilesQuery.isLoading) return
@@ -668,6 +758,16 @@ export default function AssistantWorkspace() {
       setVideoEditUploadFailed(false)
     }
   }
+
+  const creationTypeSelector = mode === 'creation' && selectedProject?.platform === 'video-edit' ? (
+    <label className="flex w-full max-w-xs min-w-0 items-center gap-1.5 text-xs text-muted-foreground sm:w-auto">
+      <span className="sr-only">创作类型</span>
+      <NativeSelect className="h-8 w-full min-w-28 max-w-44 text-xs sm:w-auto" aria-label="创作类型" value={selectedCreationType} disabled={switching || committing || sending || responding || draftPending} onChange={(event) => chooseCreationType(event.target.value)}>
+        {creationTypes.map((item) => <NativeSelectOption key={item.value} value={item.value}>{item.label}</NativeSelectOption>)}
+      </NativeSelect>
+    </label>
+  ) : null
+
   const resetCreationProject = (value: string | null) => {
     const nextValue = value ?? ''
     setProjectId(nextValue)
@@ -685,14 +785,6 @@ export default function AssistantWorkspace() {
       void chooseMode('review', { projectId, contentId: value })
     }
   }
-  const creationTypeSelector = mode === 'creation' && selectedProject ? (
-    <label className="flex w-full max-w-xs min-w-0 items-center gap-1.5 text-xs text-muted-foreground sm:w-auto">
-      <span className="sr-only">创作类型</span>
-      <NativeSelect className="h-8 w-full min-w-28 max-w-44 text-xs sm:w-auto" aria-label="创作类型" value={selectedCreationType} onChange={(event) => chooseCreationType(event.target.value)}>
-        {creationTypes.map((item) => <NativeSelectOption key={item.value} value={item.value}>{item.label}</NativeSelectOption>)}
-      </NativeSelect>
-    </label>
-  ) : null
   const videoEditInputs = isVideoEditCreation && selectedProject ? (
     <AssistantVideoEditInputs
       assets={videoEditAssets}
@@ -800,7 +892,7 @@ export default function AssistantWorkspace() {
         loading: imageCapabilitiesQuery.isLoading,
         disabled: imageCapabilitiesQuery.isError,
       } : undefined}
-      disabled={switching || committing || sending || responding}
+      disabled={switching || committing || sending || responding || draftPending}
       label="选择参数"
     />
   )
@@ -827,13 +919,14 @@ export default function AssistantWorkspace() {
       size="icon-sm"
       aria-label="进入人设模式"
       title="进入人设模式"
-      disabled={switching || committing || sending || responding}
+      className="ml-1 border-l border-border pl-2"
+      disabled={switching || committing || sending || responding || draftPending}
       onClick={() => {
         if (selectedProject) editPersona(selectedProject.id)
         else void startNewProfile()
       }}
     >
-      <Plus className="size-4" />
+      <UserRoundPlus className="size-4" />
     </Button>
   )
 
@@ -884,12 +977,12 @@ export default function AssistantWorkspace() {
             {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && (
               <VideoEditReviewResults query={reviewVideoQuery} />
             )}
-            <Conversation messages={activeMessages} questions={activeQuestions} onAnswer={submitAnswers} />
+            <Conversation messages={activeMessages} questions={activeQuestions} responding={responding} disabled={draftPending} onAnswer={submitAnswers} />
             {activeReviewSelectors}
-            {activeDraft && confirmationDraft && <DraftConfirmationCard mode={mode} draft={confirmationDraft} committing={committing} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} />}
+            {activeDraft && confirmationDraft && <DraftConfirmationCard mode={mode} draft={confirmationDraft} committing={committing} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => { setDraftByMode((current) => ({ ...current, [mode]: null })); setError(null) }} />}
             {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
           </div>
-          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={activeQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || activeQuestions.length > 0} sendDisabled={!canSend || activeQuestions.length > 0} status={responding ? '助手正在回复…' : undefined} leadingTools={enterPersonaModeControl} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} status={responding ? <span className="inline-flex items-center gap-1.5"><Loader2 className="size-3.5 animate-spin" />AI 正在处理…</span> : undefined} leadingTools={enterPersonaModeControl} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       )}
       </main>
@@ -918,7 +1011,7 @@ function platformMeta(platform: string) {
 function HomeStage({ project, hasReadyPersona }: { project?: AssistantProject; hasReadyPersona: boolean }) {
   const imageURL = personaImageURL(project)
   const meta = platformMeta(project?.platform ?? '')
-  return <section aria-label="当前人设" className="mx-auto flex w-full max-w-xl items-center justify-center gap-4 px-2 py-3 text-left sm:gap-6 sm:py-5">
+  return <section aria-label="当前人设" className="mx-auto flex w-full max-w-xl translate-y-2 items-center justify-center gap-4 px-2 py-7 text-left sm:gap-6 sm:py-8">
     <div className="relative flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-muted/60 shadow-sm sm:size-28">
       {imageURL ? <SignedImage src={imageURL} alt={`${project?.name ?? '当前人设'}形象`} className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-10 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-12 text-muted-foreground" />}
     </div>
@@ -939,24 +1032,24 @@ function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWo
   onViewWorks: (projectId: string) => void
   onEditProfile: (projectId: string) => void
 }) {
-  return <section aria-label="首页人设选择" className="mx-auto mt-3 w-full max-w-3xl pb-2">
+  return <section aria-label="首页人设选择" className="mx-auto mt-1 w-full max-w-5xl pb-1">
     <div className="mb-3 flex items-center justify-between px-1">
       <p className="text-sm font-medium">选择人设</p>
       <span className="text-xs text-muted-foreground">{projects.length ? `${projects.length} 个可用人设` : '还没有可用人设'}</span>
     </div>
     <div className="relative">
-      <div className="assistant-scroll persona-card-scroll grid h-[16.5rem] grid-cols-1 gap-2 overflow-y-auto pr-1" data-testid="persona-card-scroll" tabIndex={0}>
-        <button type="button" aria-label="创建新人设" onClick={onCreate} className={`group flex h-[6.5rem] flex-col justify-between rounded-xl border border-dashed px-3 py-2.5 text-left transition-colors hover:border-primary/60 hover:bg-primary/[0.04] ${selectedProjectId === '' ? 'border-primary bg-primary/[0.05]' : 'border-border'}`}>
-          <span className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary"><Plus className="size-4" /></span>
-          <span><span className="block text-sm font-semibold">创建新人设</span><span className="mt-0.5 block text-xs leading-4 text-muted-foreground">聊一聊你的定位与风格</span></span>
+      <div className="assistant-scroll persona-card-scroll grid h-[15rem] grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] auto-rows-[5.25rem] gap-2 overflow-y-auto pr-1" data-testid="persona-card-scroll" tabIndex={0}>
+        <button type="button" aria-label="创建新人设" onClick={onCreate} className={`group flex h-full min-w-0 flex-col justify-between rounded-xl border border-dashed px-2.5 py-2 text-left transition-colors hover:border-primary/60 hover:bg-primary/[0.04] ${selectedProjectId === '' ? 'border-primary bg-primary/[0.05]' : 'border-border'}`}>
+          <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary"><Plus className="size-4" /></span>
+          <span><span className="block truncate text-sm font-semibold">创建新人设</span><span className="mt-0.5 block truncate text-xs leading-4 text-muted-foreground">聊一聊你的定位与风格</span></span>
         </button>
         {projects.map((project) => {
           const meta = platformMeta(project.platform)
           const imageURL = personaImageURL(project)
           const selected = selectedProjectId === project.id
-          return <article key={project.id} className={`group relative flex h-[6.5rem] flex-col rounded-xl border bg-card p-2 transition-shadow ${selected ? 'border-primary shadow-sm ring-1 ring-primary/25' : 'border-border hover:shadow-sm'}`}>
+          return <article key={project.id} className={`group relative flex h-full min-w-0 flex-col rounded-xl border bg-card p-2 transition-shadow ${selected ? 'border-primary shadow-sm ring-1 ring-primary/25' : 'border-border hover:shadow-sm'}`}>
             <button type="button" aria-label={`选择人设：${project.name}`} aria-pressed={selected} onClick={() => onSelect(project.id)} className="flex w-full items-start gap-2 text-left">
-              <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
+              <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
                 {imageURL ? <SignedImage src={imageURL} alt="" className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-5 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-5 text-muted-foreground" />}
               </div>
               <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{project.name}</span><span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"><meta.Icon aria-hidden="true" className="size-3" />{meta.label}</span><span className="mt-1 line-clamp-1 text-xs leading-4 text-muted-foreground">{project.description || '已准备好开始创作'}</span></span>
@@ -973,15 +1066,20 @@ function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWo
   </section>
 }
 
-function DraftConfirmationCard({ mode, draft, committing, disabled, onCommit }: { mode: AssistantModeID; draft: Draft; committing: boolean; disabled: boolean; onCommit: () => void }) {
+function DraftConfirmationCard({ mode, draft, committing, disabled, onCommit, onContinue }: { mode: AssistantModeID; draft: Draft; committing: boolean; disabled: boolean; onCommit: () => void; onContinue: () => void }) {
   const isCreation = mode === 'creation'
-  const title = isCreation ? '创作计划确认' : mode === 'profile' ? '人设确认' : '复盘结论确认'
-  const buttonLabel = isCreation ? '确认并创建任务' : '确认并保存'
+  const isProfile = mode === 'profile'
+  const title = isCreation ? '确认创作' : isProfile ? '保存人设' : '确认复盘结论'
+  const buttonLabel = isCreation ? '创作作品' : isProfile ? '保存人设' : '保存复盘结论'
+  const continueLabel = isCreation ? '继续讨论' : '继续深入访谈'
   return <section role="region" aria-label={title} className="mt-6 rounded-xl border border-primary/30 bg-primary/[0.04] p-4">
     <div className="flex items-center gap-2 text-sm font-medium"><Check className="size-4 text-emerald-600" />{title}</div>
-    <p className="mt-2 text-xs leading-5 text-muted-foreground">{isCreation ? '确认后会按这份计划创建一条作品任务。' : '确认后保存当前结构化结果。'}</p>
+    <p className="mt-2 text-xs leading-5 text-muted-foreground">{isCreation ? '确认后会按这份计划创建作品，也可以继续讨论细节。' : isProfile ? '确认后保存当前人设，也可以继续补充访谈内容。' : '确认后保存当前结构化结果。'}</p>
     {isCreation || mode === 'review' ? <div className="mt-4 rounded-lg border border-border/70 bg-background/70 p-3"><AssistantDraftSummary draft={draft as unknown as InteractiveDraft} mode={mode} compact /></div> : <ProfileDraftSummary draft={draft} />}
-    <Button className="mt-4" size="sm" disabled={committing || disabled} onClick={onCommit}>{committing ? <Loader2 className="size-4 animate-spin" /> : buttonLabel}</Button>
+    <div className="mt-4 flex flex-wrap items-center gap-2">
+      <Button size="sm" disabled={committing || disabled} onClick={onCommit}>{committing ? <Loader2 className="size-4 animate-spin" /> : buttonLabel}</Button>
+      {isCreation || isProfile ? <Button type="button" variant="outline" size="sm" disabled={committing} onClick={onContinue}>{continueLabel}</Button> : null}
+    </div>
   </section>
 }
 
@@ -1022,14 +1120,14 @@ function Composer({ value, attachments, attachmentController, attachmentsEnabled
   placeholder: string
   inputDisabled: boolean
   sendDisabled: boolean
-  status?: string
+  status?: ReactNode
   leadingTools?: ReactNode
   trailingTools?: ReactNode
   onChange: (value: string) => void
   onAttachmentsChange: (attachments: PromptAttachment[]) => void
   onSend: () => void
 }) {
-  return <div data-slot="input-group" className="shrink-0 pt-2">
+  return <div data-slot="input-group" className="relative shrink-0 pt-2 before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-gradient-to-b before:from-transparent before:via-background/75 before:to-background">
     {status && <p role="status" className="pb-2 text-xs text-muted-foreground">{status}</p>}
     <AgentPromptInput
       value={{ prompt: value, attachments }}
@@ -1054,7 +1152,13 @@ function Composer({ value, attachments, attachmentController, attachmentsEnabled
   </div>
 }
 
-function Conversation({ messages, questions, onAnswer }: { messages: Message[]; questions: QuestionBatch[]; onAnswer: (batch: QuestionBatch, answer: DshQuestionAnswer) => Promise<void> }) {
+function Conversation({ messages, questions, responding, disabled, onAnswer }: { messages: Message[]; questions: QuestionBatch[]; responding: boolean; disabled: boolean; onAnswer: (batch: QuestionBatch, answer: DshQuestionAnswer) => Promise<void> }) {
+  const endRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [messages.length, questions.length, responding])
+
   if (messages.length === 0 && questions.length === 0) return <div className="flex min-h-[18rem] items-center justify-center text-sm text-muted-foreground">输入你的需求后开始</div>
-  return <div className="space-y-5">{messages.map((message) => <div key={message.id} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}><div className={`flex max-w-[min(720px,90%)] gap-3 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}><div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{message.role === 'user' ? <UserRound className="size-3.5" /> : <MessageSquare className="size-3.5" />}</div><div className={`rounded-2xl px-4 py-3 text-sm leading-6 ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'}`}><Streamdown>{message.text}</Streamdown></div></div></div>)}{questions.map((batch) => <DshQuestionComposer key={batch.callId} questions={batch.questions} answers={batch.answers} onSubmit={(answer) => onAnswer(batch, answer)} />)}</div>
+  return <div className="space-y-5">{messages.map((message) => <div key={message.id} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}><div className={`flex max-w-[min(720px,90%)] gap-3 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}><div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{message.role === 'user' ? <UserRound className="size-3.5" /> : <Bot className="size-3.5" />}</div><div className={`rounded-2xl px-4 py-3 text-sm leading-6 ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'}`}><Streamdown>{message.text}</Streamdown></div></div></div>)}{questions.map((batch) => <DshQuestionComposer key={batch.callId} questions={batch.questions} submitted={Boolean(batch.answers)} answers={batch.answers} disabled={disabled} onSubmit={(answer) => onAnswer(batch, answer)} />)}{responding && <div role="status" className="flex items-center gap-2 px-10 text-sm text-muted-foreground"><Bot className="size-4" /><Loader2 className="size-4 animate-spin" />AI 正在处理…</div>}<div ref={endRef} aria-hidden="true" className="h-px" /></div>
 }

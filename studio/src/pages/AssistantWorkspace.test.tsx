@@ -340,7 +340,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '开始处理' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
 
-    expect(await screen.findByText('助手正在回复…')).toBeInTheDocument()
+    expect((await screen.findAllByText('AI 正在处理…')).length).toBeGreaterThan(0)
     await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled())
   })
 
@@ -353,7 +353,7 @@ describe('AssistantWorkspace', () => {
     expect(screen.queryByRole('button', { name: '复盘模式' })).not.toBeInTheDocument()
   })
 
-  it('keeps the creation selector at a stable width', async () => {
+  it('keeps the creation type selector out of the composer', async () => {
     mocks.bootstrap.mockResolvedValue({
       defaultModeId: 'creation',
       modes: [
@@ -365,10 +365,9 @@ describe('AssistantWorkspace', () => {
     })
     renderPage({ modeId: 'creation', projectId: 'project-1' })
 
-    const creationSelect = await screen.findByRole('combobox', { name: '创作类型' })
-
-    expect(creationSelect.parentElement).toHaveClass('w-full')
-    expect(creationSelect.parentElement?.parentElement).toHaveClass('max-w-xs')
+    await screen.findByRole('textbox', { name: '发送消息' })
+    expect(screen.queryByRole('combobox', { name: '创作类型' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^选择参数：/ })).toBeInTheDocument()
   })
 
   it('places model and parameter context in the composer without a persona picker', async () => {
@@ -385,19 +384,21 @@ describe('AssistantWorkspace', () => {
 
     const contextBar = await screen.findByTestId('assistant-context-bar')
     await waitFor(() => expect(contextBar).toHaveTextContent('寻茗好茶'))
-    expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('创作模式')
+    expect(screen.getByTestId('assistant-context-bar')).not.toHaveTextContent('创作模式')
     const parameters = await screen.findByRole('button', { name: /^选择参数：/ })
     expect(parameters).toHaveTextContent('选择参数')
     expect(parameters).toHaveTextContent('性价比')
     fireEvent.click(parameters)
     const parameterDialog = await screen.findByRole('dialog', { name: '选择参数' })
-    expect(within(parameterDialog).getByRole('group', { name: '图像能力' })).toBeInTheDocument()
+    const imageCapabilities = within(parameterDialog).getByRole('group', { name: '图像能力' })
+    expect(imageCapabilities).toBeInTheDocument()
+    expect(imageCapabilities).toHaveClass('grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]')
     expect(within(parameterDialog).getByRole('button', { name: /^标准图像/ })).toBeInTheDocument()
     expect(within(parameterDialog).getByRole('button', { name: '16:9' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '人设配置' })).not.toBeInTheDocument()
   })
 
-  it('uses the product label 公众号贴图 for the WeChat picture creation type', async () => {
+  it('does not expose a creation type selector for WeChat personas', async () => {
     mocks.bootstrap.mockResolvedValue({
       defaultModeId: 'creation',
       modes: [
@@ -409,8 +410,9 @@ describe('AssistantWorkspace', () => {
     })
     renderPage({ modeId: 'creation', projectId: 'project-1' })
 
-    expect(await screen.findByRole('option', { name: '公众号贴图' })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: '公众号图片消息' })).not.toBeInTheDocument()
+    await screen.findByRole('textbox', { name: '发送消息' })
+    expect(screen.queryByRole('combobox', { name: '创作类型' })).not.toBeInTheDocument()
+    expect(screen.queryByText('公众号文章')).not.toBeInTheDocument()
   })
 
   it('keeps the empty and active states on the root route', async () => {
@@ -453,8 +455,10 @@ describe('AssistantWorkspace', () => {
     fireEvent.change(await screen.findByRole('combobox', { name: '默认质量档位' }), { target: { value: 'quality' } })
     fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '建立画像' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: '确认并保存' })).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: '确认并保存' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存人设' })).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: '继续深入访谈' })).toBeEnabled()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '保存人设' }))
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledWith('workspace-1', 'profile', expect.objectContaining({
       confirmation_token: 'token-1',
       idempotency_key: expect.any(String),
@@ -513,6 +517,25 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(screen.getAllByRole('textbox', { name: '发送消息' }).map((item) => (item as HTMLTextAreaElement).value)).toContain('保留这段需求'))
   })
 
+  it('restores the conversation and confirmation card after a page refresh', async () => {
+    const firstRender = renderPage()
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '刷新后继续保留这段需求' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(await screen.findByText('刷新后继续保留这段需求')).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: '保存人设' })).toBeInTheDocument()
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(1))
+    firstRender.unmount()
+
+    const secondRender = renderPage()
+    expect(await screen.findByText('刷新后继续保留这段需求')).toBeInTheDocument()
+    expect(screen.getByText('收到，我开始处理。')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '保存人设' })).toBeInTheDocument()
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(1))
+    secondRender.unmount()
+  })
+
   it('renders the homepage persona rail with a create card and selects the first ready persona', async () => {
     mocks.bootstrap.mockResolvedValue({
       defaultModeId: 'creation',
@@ -533,6 +556,7 @@ describe('AssistantWorkspace', () => {
     renderPage()
 
     const rail = await screen.findByRole('region', { name: '首页人设选择' })
+    expect(within(rail).getByTestId('persona-card-scroll')).toHaveClass('grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]', 'auto-rows-[5.25rem]')
     expect(within(rail).getByRole('button', { name: '创建新人设' })).toBeInTheDocument()
     expect(within(rail).getByRole('button', { name: '选择人设：第一个人设' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(rail).getByRole('button', { name: '选择人设：第二个人设' })).toHaveAttribute('aria-pressed', 'false')
@@ -645,7 +669,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '自动剪辑我的访谈素材' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', expect.stringContaining('自动剪辑我的访谈素材')))
-    fireEvent.click(await screen.findByRole('button', { name: '确认并创建任务' }))
+    fireEvent.click(await screen.findByRole('button', { name: '创作作品' }))
 
     await waitFor(() => expect(mocks.workspaceCheckpoint).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
       payload: expect.objectContaining({
@@ -687,10 +711,13 @@ describe('AssistantWorkspace', () => {
     fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '帮我制定春季新品内容计划' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
 
-    const card = await screen.findByRole('region', { name: '创作计划确认' })
+    const card = await screen.findByRole('region', { name: '确认创作' })
     expect(within(card).getByText('发布春季新品')).toBeInTheDocument()
     expect(within(card).getByText('公众号文章')).toBeInTheDocument()
-    fireEvent.click(within(card).getByRole('button', { name: '确认并创建任务' }))
+    expect(within(card).getByRole('button', { name: '创作作品' })).toBeEnabled()
+    expect(within(card).getByRole('button', { name: '继续讨论' })).toBeEnabled()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
+    fireEvent.click(within(card).getByRole('button', { name: '创作作品' }))
 
     await waitFor(() => expect(mocks.workspaceCheckpoint).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
       payload: { plan: { goal: '发布春季新品', content_type: 'wechat-article', execution_profile: 'effective', image_ratio: 'auto', image_capability_key: 'standard', target_audience: '关注茶饮的年轻人' } },
@@ -718,9 +745,9 @@ describe('AssistantWorkspace', () => {
 
     fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '按人设画幅创作' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    const card = await screen.findByRole('region', { name: '创作计划确认' })
+    const card = await screen.findByRole('region', { name: '确认创作' })
     expect(within(card).getByText('1:1')).toBeInTheDocument()
-    fireEvent.click(within(card).getByRole('button', { name: '确认并创建任务' }))
+    fireEvent.click(within(card).getByRole('button', { name: '创作作品' }))
 
     await waitFor(() => expect(mocks.workspaceCheckpoint).toHaveBeenCalledWith('workspace-ratio', 'creation', expect.objectContaining({
       payload: { plan: expect.objectContaining({ image_ratio: '1:1' }) },
@@ -750,9 +777,9 @@ describe('AssistantWorkspace', () => {
     const composer = await screen.findByRole('textbox', { name: '发送消息' })
     fireEvent.change(composer, { target: { value: '开始创作' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    const card = await screen.findByRole('region', { name: '创作计划确认' })
+    const card = await screen.findByRole('region', { name: '确认创作' })
     fireEvent.change(composer, { target: { value: '不应并发发送' } })
-    fireEvent.click(within(card).getByRole('button', { name: '确认并创建任务' }))
+    fireEvent.click(within(card).getByRole('button', { name: '创作作品' }))
 
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalled())
     expect(composer).toBeDisabled()
@@ -785,8 +812,8 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'ai_entry_attachment' })))
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '按照资料完成文章' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    const card = await screen.findByRole('region', { name: '创作计划确认' })
-    fireEvent.click(within(card).getByRole('button', { name: '确认并创建任务' }))
+    const card = await screen.findByRole('region', { name: '确认创作' })
+    fireEvent.click(within(card).getByRole('button', { name: '创作作品' }))
 
     await waitFor(() => expect(mocks.workspaceCheckpoint).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
       payload: { plan: {
@@ -817,11 +844,11 @@ describe('AssistantWorkspace', () => {
     fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '继续完善已有的人设' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(screen.queryByText('助手正在回复…')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText('AI 正在处理…')).not.toBeInTheDocument())
 
     expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('已有的人设')
     expect(screen.queryByRole('combobox', { name: '人设配置' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '进入人设模式' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '进入人设模式' })).toHaveClass('border-l')
   })
 
   it('synchronizes an active review persona change after selecting a work', async () => {
@@ -852,10 +879,10 @@ describe('AssistantWorkspace', () => {
     fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '复盘第一个作品' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(screen.queryByText('助手正在回复…')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText('AI 正在处理…')).not.toBeInTheDocument())
 
     expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('第一个人设')
     expect(screen.queryByRole('combobox', { name: '人设配置' })).not.toBeInTheDocument()
-    expect(screen.getByRole('region', { name: '复盘结论确认' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '确认复盘结论' })).toBeInTheDocument()
   })
 })

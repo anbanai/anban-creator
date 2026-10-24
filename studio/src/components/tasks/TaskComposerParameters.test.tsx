@@ -90,7 +90,7 @@ describe('TaskComposerParameters', () => {
     const popover = screen.getByRole('dialog', { name: '创作参数' })
     expect(within(popover).getByText('执行配置')).toBeInTheDocument()
     expect(popover).toHaveClass('w-[min(48rem,calc(100vw-1rem))]', 'gap-1.5', 'p-2')
-    expect(within(popover).getByRole('group', { name: 'Agent 执行配置' })).toHaveClass('grid-cols-3')
+    expect(within(popover).getByRole('group', { name: 'Agent 执行配置' })).toHaveClass('grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]')
     expect(within(popover).getByRole('group', { name: 'Agent 执行配置' })).not.toHaveClass('grid-cols-1')
     expect(within(popover).getByRole('group', { name: '图片比例' })).toBeInTheDocument()
     expect(within(popover).getByRole('group', { name: '图像能力' })).toBeInTheDocument()
