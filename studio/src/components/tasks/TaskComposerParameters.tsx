@@ -16,7 +16,6 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { Separator } from '@/components/ui/separator'
-import { executionProfilePriceInfo } from '@/lib/pricing'
 import { ExecutionProfileSelector, type ExecutionProfileSelectorProps } from './ExecutionProfileSelector'
 
 export interface TaskComposerParametersProps {
@@ -31,24 +30,14 @@ function executionSummary(execution: ExecutionProfileSelectorProps) {
   if (execution.loading) return '执行配置加载中'
   const selected = execution.profiles.find((profile) => profile.id === execution.value)
   if (!selected) return '未选择执行配置'
-  const pricing = execution.taskType
-    ? executionProfilePriceInfo(
-        execution.catalog,
-        execution.taskType,
-        selected.id,
-        execution.priceUnit,
-      )
-    : undefined
-  return pricing?.price === undefined
-    ? selected.display_name
-    : `${selected.display_name} ${pricing.price.toLocaleString()} 积分`
+  return selected.display_name
 }
 
 function imageSummary(image: ImageGenerationSettingsProps) {
   if (image.loading) return '图像设置加载中'
   const capability = image.capabilities.find((option) => option.key === image.capabilityKey)
   const ratio = image.ratio === 'auto' ? '智能适配' : image.ratio
-  return [ratio, capability?.display_name].filter(Boolean).join(' ')
+  return [ratio, capability?.display_name].filter(Boolean).join(' / ')
 }
 
 export function TaskComposerParameters({
@@ -62,7 +51,7 @@ export function TaskComposerParameters({
     executionSummary(execution),
     image ? imageSummary(image) : undefined,
     quantity ? `${quantity.label} ${quantity.value}` : undefined,
-  ].filter(Boolean).join(' · ')
+  ].filter(Boolean).join(' / ')
 
   return (
     <Popover>
@@ -79,8 +68,7 @@ export function TaskComposerParameters({
         )}
       >
         <SlidersHorizontalIcon data-icon="inline-start" />
-        <span className="hidden max-w-28 truncate sm:inline">{executionSummary(execution)}</span>
-        <span>{label}</span>
+        <span className="max-w-64 truncate">{summary}</span>
         <ChevronDownIcon data-icon="inline-end" />
       </PopoverTrigger>
       <PopoverContent

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, Bot, Check, ChevronDown, FileText, Loader2, Plus, Sparkles, UserRound, UserRoundPlus, Video } from 'lucide-react'
+import { Bot, Check, ChevronDown, Loader2, Plus, UserRound, UserRoundPlus } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
@@ -13,6 +13,7 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { AgentPromptDropProvider } from '@/components/agent-prompt/AgentPromptDropProvider'
+import { AgentIconStack } from '@/components/agent-prompt/AgentIconStack'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { TaskComposerParameters } from '@/components/tasks/TaskComposerParameters'
 import { AssistantContextBar } from '@/components/assistant/AssistantContextBar'
@@ -29,6 +30,7 @@ import type { AgentExecutionProfileID } from '@/types'
 import type { VideoEditDefaults, VideoEditPreferences } from '@/types/video-edit'
 import type { Task, TaskFile } from '@/types'
 import type { ImageRatio } from '@/lib/schemas'
+import { platformDisplayName } from '@/lib/labels'
 
 type Message = { id: string; role: 'user' | 'assistant'; text: string }
 type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers'] }
@@ -982,7 +984,7 @@ export default function AssistantWorkspace() {
             {activeDraft && confirmationDraft && <DraftConfirmationCard mode={mode} draft={confirmationDraft} committing={committing} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => { setDraftByMode((current) => ({ ...current, [mode]: null })); setError(null) }} />}
             {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
           </div>
-          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} status={responding ? <span className="inline-flex items-center gap-1.5"><Loader2 className="size-3.5 animate-spin" />AI 正在处理…</span> : undefined} leadingTools={enterPersonaModeControl} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} leadingTools={enterPersonaModeControl} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       )}
       </main>
@@ -1001,11 +1003,14 @@ function personaImageURL(project?: AssistantProject) {
   return project?.avatar_url || project?.portrait_reference_image?.download_url || project?.portrait_reference_image?.preview_url || ''
 }
 
+function platformAgentID(platform: string) {
+  if (platform === 'wechat') return 'wechat-article'
+  if (platform === 'video-edit') return 'montage'
+  return platform
+}
+
 function platformMeta(platform: string) {
-  if (platform === 'wechat') return { label: '公众号', Icon: FileText }
-  if (platform === 'seednote') return { label: '种草笔记', Icon: BookOpen }
-  if (platform === 'video-edit' || platform === 'montage') return { label: '视频', Icon: Video }
-  return { label: '创作', Icon: Sparkles }
+  return { label: platformDisplayName(platform, '创作'), agentID: platformAgentID(platform) }
 }
 
 function HomeStage({ project, hasReadyPersona }: { project?: AssistantProject; hasReadyPersona: boolean }) {
@@ -1020,7 +1025,7 @@ function HomeStage({ project, hasReadyPersona }: { project?: AssistantProject; h
       <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{project ? '当前人设' : '准备开始'}</p>
       <h1 className="mt-2 text-xl font-semibold tracking-tight sm:text-2xl">{project?.name ?? '神秘人'}</h1>
       <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{project?.description || (hasReadyPersona ? '选择一个人设，开始你的下一次创作。' : '为了创建更好的作品，需要先创建您的人设')}</p>
-      {project && <span className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><meta.Icon aria-hidden="true" className="size-3.5" />{meta.label}</span>}
+      {project && <span className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><AgentIconStack agentIds={[meta.agentID]} maxVisible={1} compact />{meta.label}</span>}
     </div>
     </div>
   </section>
@@ -1060,7 +1065,7 @@ function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWo
       <span className="text-xs text-muted-foreground">{projects.length ? `${projects.length} 个可用人设` : '还没有可用人设'}</span>
     </div>
     <div className="relative">
-      <div ref={scrollRef} className="assistant-scroll persona-card-scroll grid min-h-[5.25rem] max-h-[14.125rem] grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] auto-rows-[5.25rem] gap-2 overflow-y-auto pr-1" data-testid="persona-card-scroll" tabIndex={0}>
+      <div ref={scrollRef} className="assistant-scroll persona-card-scroll grid min-h-[5.25rem] max-h-[14.125rem] grid-cols-2 min-[700px]:grid-cols-3 min-[1600px]:grid-cols-4 min-[1900px]:grid-cols-5 min-[2200px]:grid-cols-6 auto-rows-[5.25rem] gap-2 overflow-y-auto pr-1" data-testid="persona-card-scroll" tabIndex={0}>
         <button type="button" aria-label="创建新人设" onClick={onCreate} className={`group flex h-full min-w-0 items-center gap-2 rounded-xl border border-dashed px-2.5 py-2 text-left transition-colors hover:border-primary/60 hover:bg-primary/[0.04] ${selectedProjectId === '' ? 'border-primary bg-primary/[0.05]' : 'border-border'}`}>
           <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Plus className="size-4" /></span>
           <span className="min-w-0"><span className="block truncate text-sm font-semibold">创建新人设</span><span className="mt-0.5 block truncate text-xs leading-4 text-muted-foreground">聊一聊你的定位与风格</span></span>
@@ -1074,7 +1079,7 @@ function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWo
               <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
                 {imageURL ? <SignedImage src={imageURL} alt="" className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-5 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-5 text-muted-foreground" />}
               </div>
-              <span className="min-w-0 flex-1"><span className="flex items-center gap-1 text-sm font-semibold"><span className="truncate">{project.name}</span><meta.Icon aria-label={meta.label} className="size-3 shrink-0 text-muted-foreground" /></span><span className="block truncate text-xs leading-4 text-muted-foreground">{project.description || '已准备好开始创作'}</span></span>
+              <span className="min-w-0 flex-1"><span className="flex items-center gap-1 text-sm font-semibold"><span className="truncate">{project.name}</span><AgentIconStack agentIds={[meta.agentID]} maxVisible={1} compact /></span><span className="block truncate text-xs leading-4 text-muted-foreground">{project.description || '已准备好开始创作'}</span></span>
             </button>
             <div className="mt-auto flex shrink-0 items-center justify-end gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
               <Button type="button" variant="ghost" size="sm" aria-label={`查看作品：${project.name}`} onClick={() => onViewWorks(project.id)} className="h-7 px-1.5 text-[11px]">查看作品</Button>

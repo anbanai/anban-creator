@@ -64,7 +64,7 @@ export function AssistantContextBar(props: AssistantContextBarProps) {
         ? '新人设'
         : projectId ? '已选人设' : '未关联人设'
     return (
-      <div data-testid="assistant-context-bar" data-phase="locked" aria-disabled="true" className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 border-b border-border/50 py-3 text-left text-sm text-muted-foreground">
+      <div data-testid="assistant-context-bar" data-phase="locked" aria-disabled="true" className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 py-3 text-left text-sm text-muted-foreground">
         <ProjectContextControl mode="readonly" project={selectedProject} noProjectLabel={projectFallback} compact showAgents={false} />
         {mode === 'review' && (contentId || selectedWork) ? <ContextLabel icon={FileText}>{selectedWork?.title ?? (loadingWorks ? '加载作品…' : '已选作品')}</ContextLabel> : null}
       </div>
@@ -74,7 +74,7 @@ export function AssistantContextBar(props: AssistantContextBarProps) {
   const projectValue = projectId || null
   const disabled = props.disabled ?? false
   return (
-    <div data-testid="assistant-context-bar" data-phase="setup" className="flex w-full flex-wrap items-center gap-2 border-b border-border/60 py-3 text-left">
+    <div data-testid="assistant-context-bar" data-phase="setup" className="flex w-full flex-wrap items-center gap-2 py-3 text-left">
       <span className="sr-only">会话上下文</span>
       {(projects.length > 0 || mode === 'profile') ? (
         <ProjectContextControl
