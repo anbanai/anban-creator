@@ -1,6 +1,10 @@
 package model
 
-import "time"
+import (
+	"database/sql/driver"
+	"fmt"
+	"time"
+)
 
 const (
 	FeedbackCadenceDaily   = "daily"
@@ -40,42 +44,67 @@ const (
 // FeedbackJob is the durable, idempotent unit of periodic feedback work.
 // Skipped rows are retained as an audit trail and never dispatch an Agent.
 type FeedbackJob struct {
-	ID                     string     `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID                 string     `gorm:"type:char(36);index;not null" json:"user_id"`
-	ProjectID              string     `gorm:"type:char(36);index;not null" json:"project_id"`
-	Platform               string     `gorm:"type:varchar(20);index;not null" json:"platform"`
-	AccountID              string     `gorm:"type:varchar(128);index;not null;default:''" json:"account_id"`
-	Operation              string     `gorm:"type:varchar(40);index;not null" json:"operation"`
-	Cadence                string     `gorm:"type:varchar(16);index;not null" json:"cadence"`
-	PeriodStart            string     `gorm:"type:char(10);not null" json:"period_start"`
-	PeriodEnd              string     `gorm:"type:char(10);not null" json:"period_end"`
-	MaturityCutoff         string     `gorm:"type:char(10);not null;default:''" json:"maturity_cutoff,omitempty"`
-	AnalyticsRevision      int64      `gorm:"not null;default:0" json:"analytics_revision"`
-	ContentSetDigest       string     `gorm:"type:char(64);not null;default:''" json:"content_set_digest"`
-	StrategyRevision       int64      `gorm:"not null;default:0" json:"strategy_revision"`
-	ProfileRevision        int64      `gorm:"not null;default:0" json:"profile_revision"`
-	FrozenContextJSON      string     `gorm:"type:json" json:"-"`
-	TargetContentID        string     `gorm:"type:varchar(100);index;not null;default:''" json:"target_content_id,omitempty"`
-	Trigger                string     `gorm:"column:trigger_source;type:varchar(32);index;not null;default:''" json:"trigger,omitempty"`
-	AttributionDirection   string     `gorm:"type:varchar(8);not null;default:''" json:"attribution_direction,omitempty"`
-	PerformanceMetric      string     `gorm:"type:varchar(40);not null;default:''" json:"performance_metric,omitempty"`
-	PerformanceMetricBasis string     `gorm:"type:varchar(16);not null;default:''" json:"performance_metric_basis,omitempty"`
-	PerformanceScore       float64    `gorm:"not null;default:0" json:"performance_score,omitempty"`
-	PerformancePercentile  float64    `gorm:"not null;default:0" json:"performance_percentile,omitempty"`
-	TaskID                 string     `gorm:"type:char(36);index;not null;default:''" json:"task_id,omitempty"`
-	ExecutionID            string     `gorm:"type:char(36);index;not null;default:''" json:"execution_id,omitempty"`
-	Fingerprint            string     `gorm:"type:char(64);uniqueIndex;not null" json:"fingerprint"`
-	Status                 string     `gorm:"type:varchar(20);index;not null" json:"status"`
-	SkipReason             string     `gorm:"type:varchar(64);index;not null;default:''" json:"skip_reason,omitempty"`
-	SampleCount            int        `gorm:"not null;default:0" json:"sample_count"`
-	Coverage               string     `gorm:"type:varchar(20);not null;default:'unknown'" json:"coverage"`
-	Attempts               int        `gorm:"not null;default:0" json:"attempts"`
-	LastError              string     `gorm:"type:text;not null" json:"last_error,omitempty"`
-	QueuedAt               *time.Time `gorm:"index" json:"queued_at,omitempty"`
-	StartedAt              *time.Time `gorm:"index" json:"started_at,omitempty"`
-	CompletedAt            *time.Time `gorm:"index" json:"completed_at,omitempty"`
-	CreatedAt              time.Time  `json:"created_at"`
-	UpdatedAt              time.Time  `json:"updated_at"`
+	ID                     string       `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID                 string       `gorm:"type:char(36);index;not null" json:"user_id"`
+	ProjectID              string       `gorm:"type:char(36);index;not null" json:"project_id"`
+	Platform               string       `gorm:"type:varchar(20);index;not null" json:"platform"`
+	AccountID              string       `gorm:"type:varchar(128);index;not null;default:''" json:"account_id"`
+	Operation              string       `gorm:"type:varchar(40);index;not null" json:"operation"`
+	Cadence                string       `gorm:"type:varchar(16);index;not null" json:"cadence"`
+	PeriodStart            string       `gorm:"type:char(10);not null" json:"period_start"`
+	PeriodEnd              string       `gorm:"type:char(10);not null" json:"period_end"`
+	MaturityCutoff         string       `gorm:"type:char(10);not null;default:''" json:"maturity_cutoff,omitempty"`
+	AnalyticsRevision      int64        `gorm:"not null;default:0" json:"analytics_revision"`
+	ContentSetDigest       string       `gorm:"type:char(64);not null;default:''" json:"content_set_digest"`
+	StrategyRevision       int64        `gorm:"not null;default:0" json:"strategy_revision"`
+	ProfileRevision        int64        `gorm:"not null;default:0" json:"profile_revision"`
+	FrozenContextJSON      NullableJSON `gorm:"type:json" json:"-"`
+	TargetContentID        string       `gorm:"type:varchar(100);index;not null;default:''" json:"target_content_id,omitempty"`
+	Trigger                string       `gorm:"column:trigger_source;type:varchar(32);index;not null;default:''" json:"trigger,omitempty"`
+	AttributionDirection   string       `gorm:"type:varchar(8);not null;default:''" json:"attribution_direction,omitempty"`
+	PerformanceMetric      string       `gorm:"type:varchar(40);not null;default:''" json:"performance_metric,omitempty"`
+	PerformanceMetricBasis string       `gorm:"type:varchar(16);not null;default:''" json:"performance_metric_basis,omitempty"`
+	PerformanceScore       float64      `gorm:"not null;default:0" json:"performance_score,omitempty"`
+	PerformancePercentile  float64      `gorm:"not null;default:0" json:"performance_percentile,omitempty"`
+	TaskID                 string       `gorm:"type:char(36);index;not null;default:''" json:"task_id,omitempty"`
+	ExecutionID            string       `gorm:"type:char(36);index;not null;default:''" json:"execution_id,omitempty"`
+	Fingerprint            string       `gorm:"type:char(64);uniqueIndex;not null" json:"fingerprint"`
+	Status                 string       `gorm:"type:varchar(20);index;not null" json:"status"`
+	SkipReason             string       `gorm:"type:varchar(64);index;not null;default:''" json:"skip_reason,omitempty"`
+	SampleCount            int          `gorm:"not null;default:0" json:"sample_count"`
+	Coverage               string       `gorm:"type:varchar(20);not null;default:'unknown'" json:"coverage"`
+	Attempts               int          `gorm:"not null;default:0" json:"attempts"`
+	LastError              string       `gorm:"type:text;not null" json:"last_error,omitempty"`
+	QueuedAt               *time.Time   `gorm:"index" json:"queued_at,omitempty"`
+	StartedAt              *time.Time   `gorm:"index" json:"started_at,omitempty"`
+	CompletedAt            *time.Time   `gorm:"index" json:"completed_at,omitempty"`
+	CreatedAt              time.Time    `json:"created_at"`
+	UpdatedAt              time.Time    `json:"updated_at"`
+}
+
+// NullableJSON keeps optional JSON columns valid on MySQL. An empty Go value
+// represents SQL NULL, while non-empty values are stored as JSON text.
+type NullableJSON string
+
+func (j NullableJSON) Value() (driver.Value, error) {
+	if j == "" {
+		return nil, nil
+	}
+	return string(j), nil
+}
+
+func (j *NullableJSON) Scan(value any) error {
+	switch v := value.(type) {
+	case nil:
+		*j = ""
+	case []byte:
+		*j = NullableJSON(string(v))
+	case string:
+		*j = NullableJSON(v)
+	default:
+		return fmt.Errorf("cannot scan %T into NullableJSON", value)
+	}
+	return nil
 }
 
 // FeedbackFrozenContext is captured when a feedback job is admitted. Agent

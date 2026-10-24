@@ -159,7 +159,7 @@ func buildAttributionCandidateJobs(ctx context.Context, repo repository.Reposito
 		if err != nil {
 			return nil, fmt.Errorf("marshal frozen attribution context: %w", err)
 		}
-		job.FrozenContextJSON = string(frozenJSON)
+		job.FrozenContextJSON = model.NullableJSON(string(frozenJSON))
 		job.Fingerprint = FeedbackJobFingerprint(FeedbackEligibilityInput{ProjectID: job.ProjectID, Platform: job.Platform, AccountID: job.AccountID, Operation: job.Operation, Cadence: job.Cadence, TargetContentID: job.TargetContentID, AttributionDirection: job.AttributionDirection, PeriodStart: job.PeriodStart, PeriodEnd: job.PeriodEnd, AnalyticsRevision: job.AnalyticsRevision, ContentSetDigest: job.ContentSetDigest, StrategyRevision: job.StrategyRevision})
 		jobs = append(jobs, job)
 	}
