@@ -334,6 +334,7 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(await screen.findByRole('heading', { level: 1, name: '不重复显示的作品标题' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1 }).closest('div.space-y-6')).toHaveClass('pb-12')
     expect(screen.queryByRole('link', { name: '不重复显示的作品标题' })).not.toBeInTheDocument()
     const status = screen.getByTestId('status-pill')
     expect(status).toHaveAttribute('data-status', 'completed')

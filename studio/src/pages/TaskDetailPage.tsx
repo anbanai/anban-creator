@@ -611,7 +611,7 @@ export default function TaskDetailPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-12">
       {/* Screen reader live region for status changes */}
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {task.status === 'completed' && '作品已完成'}
