@@ -985,7 +985,7 @@ export default function AssistantWorkspace() {
             {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && (
               <VideoEditReviewResults query={reviewVideoQuery} />
             )}
-            <Conversation messages={activeMessages} questions={activeQuestions} responding={responding} disabled={draftPending} onAnswer={submitAnswers} />
+            <Conversation messages={activeMessages} questions={activeQuestions} responding={responding} disabled={draftPending} userAvatarURL={personaImageURL(selectedProject)} onAnswer={submitAnswers} />
             {activeReviewSelectors}
             {activeDraft && confirmationDraft && <DraftConfirmationCard mode={mode} draft={confirmationDraft} committing={committing} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => { setDraftByMode((current) => ({ ...current, [mode]: null })); setError(null) }} />}
             {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
@@ -1196,7 +1196,7 @@ function Composer({ value, attachments, attachmentController, attachmentsEnabled
   </div>
 }
 
-function Conversation({ messages, questions, responding, disabled, onAnswer }: { messages: Message[]; questions: QuestionBatch[]; responding: boolean; disabled: boolean; onAnswer: (batch: QuestionBatch, answer: DshQuestionAnswer) => Promise<void> }) {
+function Conversation({ messages, questions, responding, disabled, userAvatarURL, onAnswer }: { messages: Message[]; questions: QuestionBatch[]; responding: boolean; disabled: boolean; userAvatarURL?: string; onAnswer: (batch: QuestionBatch, answer: DshQuestionAnswer) => Promise<void> }) {
   const endRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -1209,6 +1209,6 @@ function Conversation({ messages, questions, responding, disabled, onAnswer }: {
     ...questions.map((batch) => ({ kind: 'question' as const, order: batch.order, batch })),
   ].sort((left, right) => left.order - right.order)
   return <div className="min-w-0 space-y-5">{entries.map((entry) => entry.kind === 'message'
-    ? <div key={entry.message.id} className={`flex min-w-0 gap-3 ${entry.message.role === 'user' ? 'justify-end' : ''}`}><div className={`flex min-w-0 max-w-[min(900px,100%)] gap-3 ${entry.message.role === 'user' ? 'flex-row-reverse' : ''}`}><div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{entry.message.role === 'user' ? <UserRound className="size-3.5" /> : <Bot className="size-3.5" />}</div><div className={`min-w-0 max-w-full rounded-2xl px-4 py-3 text-sm leading-6 ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'} [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto`}><Streamdown>{entry.message.text}</Streamdown></div></div></div>
+    ? <div key={entry.message.id} className={`flex min-w-0 gap-3 ${entry.message.role === 'user' ? 'justify-end' : ''}`}><div className={`flex min-w-0 max-w-[min(900px,100%)] gap-3 ${entry.message.role === 'user' ? 'flex-row-reverse' : ''}`}><div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{entry.message.role === 'user' ? userAvatarURL ? <SignedImage src={userAvatarURL} alt="当前人设头像" className="size-7 rounded-full object-cover" fallbackIcon={<UserRound className="size-3.5" />} fallbackClassName="bg-primary text-primary-foreground" /> : <UserRound className="size-3.5" /> : <Bot className="size-3.5" />}</div><div className={`min-w-0 max-w-full rounded-2xl px-4 py-3 text-sm leading-6 ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'} [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto`}><Streamdown>{entry.message.text}</Streamdown></div></div></div>
     : <DshQuestionComposer key={entry.batch.callId} questions={entry.batch.questions} submitted={Boolean(entry.batch.answers)} answers={entry.batch.answers} disabled={disabled} onSubmit={(answer) => onAnswer(entry.batch, answer)} />)}{responding && <div role="status" className="flex items-center gap-2 px-10 text-sm text-muted-foreground"><Bot className="size-4" /><Loader2 className="size-4 animate-spin" />AI 正在处理…</div>}<div ref={endRef} aria-hidden="true" className="h-px" /></div>
 }

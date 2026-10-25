@@ -232,6 +232,26 @@ describe('AssistantWorkspace', () => {
     expect(screen.queryByText('创作类型：seednote')).not.toBeInTheDocument()
   })
 
+  it('uses the selected persona avatar for user messages', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'creation',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划', available: true },
+        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: true },
+      ],
+      projects: [{ id: 'project-seednote', name: '种草人设', platform: 'seednote', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    mocks.projectsList.mockResolvedValue([{ id: 'project-seednote', name: '种草人设', platform: 'seednote', avatar_url: 'https://example.com/persona.png', status: 'active' }])
+    renderPage({ modeId: 'creation', projectId: 'project-seednote' })
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '写一篇种草笔记' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(await screen.findByRole('img', { name: '当前人设头像' })).toHaveAttribute('src', 'https://example.com/persona.png')
+  })
+
   it('blocks creation when the selected persona has no supported creation type', async () => {
     mocks.bootstrap.mockResolvedValue({
       defaultModeId: 'creation',
