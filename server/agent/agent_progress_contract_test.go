@@ -34,28 +34,28 @@ func TestManagedAgentsOwnDynamicLifecycleReporting(t *testing.T) {
 				wantVersion = "1.0.0"
 			}
 			if pack.ID == "wechat-article" || pack.ID == "article" {
-				wantVersion = "2.0.12"
+				wantVersion = "2.0.13"
 			}
 			if pack.ID == "wechat-picture" {
 				wantVersion = "1.0.7"
 			}
 			if pack.ID == "montage" {
-				wantVersion = "2.0.7"
+				wantVersion = "2.0.8"
 			}
 			if pack.ID == "hypit" {
-				wantVersion = "0.3.3"
+				wantVersion = "0.3.4"
 			}
 			if pack.ID == "seednote" {
-				wantVersion = "2.0.9"
+				wantVersion = "2.0.10"
 			}
 			if pack.ID == "feedback-analysis" {
 				wantVersion = "1.0.2"
 			}
 			if pack.ID == "profile-analysis" {
-				wantVersion = "2.1.5"
+				wantVersion = "2.1.6"
 			}
 			if pack.ID == "video-edit" {
-				wantVersion = "1.0.0"
+				wantVersion = "1.0.1"
 			}
 			if pack.ID == "whiteboard-animation" {
 				wantVersion = "2.0.5"

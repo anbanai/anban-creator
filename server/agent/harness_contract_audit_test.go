@@ -84,10 +84,10 @@ func TestProjectCreatorProfileRefreshPreservesScopeAndDirectionSemantics(t *test
 			t.Fatalf("Project Creator refresh contract missing %q", term)
 		}
 	}
-	profile := readArticleContractFile(t, filepath.Join(root, "harness/skills/project-profile-context/SKILL.md"))
-	for _, term := range []string{"soft topic/format preferences", "not an indefinite filter", "Never invent a fixed number of pieces"} {
+	profile := readArticleContractFile(t, filepath.Join(root, "harness/packs/profile-analysis/agent.claude.md"))
+	for _, term := range []string{"AGENTS.md", "六个 `profile/*.md` 文件", "submit_profile_result"} {
 		if !strings.Contains(profile, term) {
-			t.Fatalf("project profile direction contract missing %q", term)
+			t.Fatalf("profile analysis routing contract missing %q", term)
 		}
 	}
 	for _, contract := range []struct {

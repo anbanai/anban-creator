@@ -26,6 +26,11 @@ func TestProfileDimensionMarkdownIncludesStructuredContentAndSources(t *testing.
 
 func TestProfileAgentsMarkdownReferencesAllSixDimensions(t *testing.T) {
 	content := ProfileAgentsMarkdown()
+	for _, want := range []string{"每个 Anban 托管任务工作区的必读入口", "Agent 开始任何业务工作前必须先读取本文件", "六维项目画像路由", "每个任务都必须先读取 AGENTS.md"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("AGENTS.md is missing mandatory routing rule %q: %s", want, content)
+		}
+	}
 	for _, name := range model.ProfileDimensions() {
 		if !strings.Contains(content, "profile/"+name+".md") {
 			t.Fatalf("AGENTS.md does not reference %s", name)

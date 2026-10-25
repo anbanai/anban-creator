@@ -39,7 +39,7 @@ func TestAgentPackHandlerListsEmbeddedCatalog(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.Code != 0 || len(envelope.Data.Packs) != 16 {
+	if envelope.Code != 0 || len(envelope.Data.Packs) != 17 {
 		t.Fatalf("catalog response = %#v", envelope)
 	}
 	if envelope.Data.Packs[0].ID != "ecommerce" {
@@ -54,6 +54,11 @@ func TestAgentPackHandlerListsEmbeddedCatalog(t *testing.T) {
 		if pack.ID == "hypit" {
 			if pack.Kind != "managed" || !slices.Equal(pack.Surfaces, []string{"plugin", "task"}) || pack.Channel != "hypit" || !slices.Equal(pack.Bindings.TaskKinds, []string{"hypit"}) {
 				t.Fatalf("managed video Pack has an incomplete task contract: %#v", pack)
+			}
+		}
+		if pack.ID == "viral-ip-video-editor" {
+			if pack.Kind != "plugin" || !slices.Equal(pack.Surfaces, []string{"plugin"}) || pack.Channel != "" || len(pack.Bindings.TaskKinds) != 0 {
+				t.Fatalf("viral-ip-video-editor Pack has an incomplete plugin contract: %#v", pack)
 			}
 		}
 	}

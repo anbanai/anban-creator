@@ -1048,7 +1048,7 @@ function requiredSkills(taskType: string): string[] {
   if (taskType === "wechat-article") return ["anban:humanizer", "anban:portrait-cover-design"];
   if (taskType === "ecommerce") return ["anban:humanizer"];
   if (taskType === "montage") return ["anban:montage", "anban:portrait-cover-design"];
-  if (taskType === "video-edit") return ["anban:project-profile-context", "anban:video-edit", "anban:content-tagging"];
+  if (taskType === "video-edit") return ["anban:video-edit", "anban:content-tagging"];
   if (taskType === "hypit") return ["anban:portrait-cover-design"];
   return [];
 }

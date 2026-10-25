@@ -159,7 +159,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "e3c4bd1224dd47e6960ea78669cfd97e8d2552bfeea0c0507e0401ad65cda86c"
+      "digest": "96586301e03d36e716dbf4828b169b2fc6d4fd3f975547b9e983b2eea3c8f5c3"
     },
     {
       "id": "content-planning",
@@ -1297,7 +1297,7 @@
       "ui": {
         "renderer": "custom:content-planning"
       },
-      "digest": "ac0ad5c21147b1a37b211c75c26d1252b8b2efba900ffdec92f4bf97f3e2f97e"
+      "digest": "08273867b660921faba7df34e2120f07e1cb19d616b234441af62da005deef83"
     },
     {
       "id": "creation-planner",
@@ -1420,14 +1420,13 @@
     {
       "id": "hypit",
       "channel": "hypit",
-      "version": "0.3.3",
+      "version": "0.3.4",
       "kind": "managed",
       "display_name": "视频复刻",
       "description": "根据参考视频和替换要求生成成片，保留完整工程用于再次改编。",
       "agent": {
         "name": "hypit",
         "skills": [
-          "project-profile-context",
           "portrait-cover-design",
           "content-reuse"
         ],
@@ -1626,7 +1625,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "c6d4d0e4b6b1b06a3b2f09dd2a485b7be0b82e38e1e7e995a02f32d57ae109d9"
+      "digest": "e08fd30e87add93d737d2da682dd1a82d2ce0a283daed8070d354aa55733a7fe"
     },
     {
       "id": "local-life",
@@ -1774,7 +1773,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "41c62ad1d99cc0d0e5fafab4fbd17aec166f1b04c172efe5f8a537eb8a510bbc"
+      "digest": "db0a943e04e7c3de4339931a0a87c7e0856e7dc036e219e2e7f4ae124ef4b7cc"
     },
     {
       "id": "moments",
@@ -1882,19 +1881,18 @@
           "funnel_stage"
         ]
       },
-      "digest": "f2d0697e832e24a56ce8c144590733bf1e090330f362f5c0b89d264fd8bb64c1"
+      "digest": "cbcbc476abed3bb39219ebc92d767a985ca485c499cce448fda79fb6b4da5b26"
     },
     {
       "id": "montage",
       "channel": "montage",
-      "version": "2.0.7",
+      "version": "2.0.8",
       "kind": "managed",
       "display_name": "视频生成",
       "description": "从素材和业务输入生成最终视频与交付清单。",
       "agent": {
         "name": "montage",
         "skills": [
-          "project-profile-context",
           "montage",
           "portrait-cover-design",
           "content-reuse"
@@ -2040,7 +2038,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "cbc4ef8ae6ae11331c1e32f6ef00182969e2f1f35a1b231a586ab934d872056f"
+      "digest": "b3820eea1978c3eeff639632197da75f337dca45800632e53aefacc937f6366d"
     },
     {
       "id": "postmortem-review",
@@ -2082,15 +2080,12 @@
     {
       "id": "profile-analysis",
       "channel": "profile-analysis",
-      "version": "2.1.5",
+      "version": "2.1.6",
       "kind": "managed",
       "display_name": "账号画像分析",
       "description": "基于用户提供的公开资料和问答生成并提交六维项目账号画像。",
       "agent": {
         "name": "profile-analysis",
-        "skills": [
-          "project-profile-context"
-        ],
         "max_turns": 80
       },
       "bindings": {
@@ -2386,7 +2381,7 @@
       "ui": {
         "renderer": "custom:profile-analysis"
       },
-      "digest": "7e99a3e4ac85f92a40e1a02b5663cb569776f68ca50e8b06b9c90489c98e5686"
+      "digest": "044845feeba1f905e9863f67f17b372de218759bf8bf9e06f79d5d26ec22b78a"
     },
     {
       "id": "project-creator",
@@ -2664,14 +2659,13 @@
       "id": "seednote",
       "channel": "seednote",
       "plan_task_kind": "content_generation",
-      "version": "2.0.9",
+      "version": "2.0.10",
       "kind": "managed",
       "display_name": "种草笔记",
       "description": "支持原创、复刻和爆款分析的种草笔记图文创作流程。",
       "agent": {
         "name": "seednote",
         "skills": [
-          "project-profile-context",
           "portrait-cover-design",
           "humanizer",
           "seednote-research",
@@ -2917,19 +2911,18 @@
           "funnel_stage"
         ]
       },
-      "digest": "06ea6da600b7cd0941e769c4164ae8d1466cb9485ee7e2ec3ee512ea143333ca"
+      "digest": "59cd1b0bb096d8e71ff385158f5a1d782fbbd17c00f38185af74a7f23cd88d86"
     },
     {
       "id": "video-edit",
       "channel": "video-edit",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "kind": "managed",
       "display_name": "全自动视频剪辑",
       "description": "使用 browser-use/video-use 自动完成转写、剪辑、字幕和渲染，并交付可复核的成片与编辑证据。",
       "agent": {
         "name": "video-edit",
         "skills": [
-          "project-profile-context",
           "video-edit",
           "content-tagging"
         ],
@@ -3071,20 +3064,138 @@
           "funnel_stage"
         ]
       },
-      "digest": "72bc16067496811a332bbb1694990872fe9a2f8741dbb7ce7221f0d0f2fba242"
+      "digest": "045de82ff436b51543414a1f9af2a3454315f282e22c04bb696cd7006332a07b"
+    },
+    {
+      "id": "viral-ip-video-editor",
+      "version": "1.0.1",
+      "kind": "plugin",
+      "display_name": "爆款 IP 视频剪辑",
+      "description": "基于 Montage 运行时处理真人 IP 口播素材，完成留存导向的剪辑规划、制作指导和成片质量复核。",
+      "agent": {
+        "name": "viral-ip-video-editor",
+        "skills": [
+          "content-reuse",
+          "content-tagging",
+          "montage"
+        ],
+        "max_turns": 250
+      },
+      "interaction": {},
+      "bindings": {},
+      "runtime": {
+        "profile": "viral-ip-video-editor",
+        "adapter": "openmontage"
+      },
+      "surfaces": [
+        "plugin"
+      ],
+      "features": [
+        "viral-ip-video-editing",
+        "retention-editing",
+        "source-assets",
+        "montage-runtime"
+      ],
+      "artifacts": [
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4",
+          "required": false
+        },
+        {
+          "role": "project_manifest",
+          "path": "output/montage-project.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "content_reuse_brief",
+          "path": "output/content-reuse-brief.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "content_lineage",
+          "path": "output/content-lineage.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "topic_analysis",
+          "path": "output/topic-analysis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "quality_report",
+          "path": "output/quality-report.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "cover_plan",
+          "path": "output/cover-plan.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_prompt",
+          "path": "output/cover-prompt.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_review",
+          "path": "output/cover-quality.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "failure_diagnosis",
+          "path": "output/failure-diagnosis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        }
+      ],
+      "ui": {},
+      "digest": "131e7009501e8c0c331481aebdd181a591834a5a00ef063f027c2462786fd2de"
     },
     {
       "id": "wechat-article",
       "channel": "wechat-article",
       "plan_task_kind": "content_generation",
-      "version": "2.0.12",
+      "version": "2.0.13",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到文章交付物的完整创作流程。",
       "agent": {
         "name": "wechat-article",
         "skills": [
-          "project-profile-context",
           "portrait-cover-design",
           "content-writing",
           "humanizer",
@@ -3336,7 +3447,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "ecf6be049b290a8fcd8d344565ffbfddf6895f5196e2f83dc035eb5af07e52a9"
+      "digest": "accc0233e958d484b25875b6e4c2d7eeeb8e74d5a00c189b9c29548e22006a49"
     },
     {
       "id": "wechat-picture",
@@ -3514,7 +3625,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "4e1fb0cab633e3c42f38639ed7049757c2278ca4afab9c5983e3878e5cc4816e"
+      "digest": "2b863859e1072c703db8ba8bbb8b5fd20cde89a555bd9809753577c470c8c517"
     },
     {
       "id": "whiteboard-animation",
@@ -3692,7 +3803,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "705af8ca7ab9d3bf82f03c7c81cf9fbccc1d4e735c6795cb824de948ed04d174"
+      "digest": "22a779c07c666f9d397b1a6ecbf2f19ec268004a8a94adbe365f6297c2fc145d"
     }
   ]
 }
