@@ -71,8 +71,7 @@ func (r *userMediaAssetRepository) List(ctx context.Context, filter UserMediaAss
 		q = q.Where("user_media_assets.removed_at IS NULL")
 	}
 	if filter.Query != "" {
-		like := "%" + filter.Query + "%"
-		q = q.Where("user_media_assets.description LIKE ? OR user_media_assets.usage_notes LIKE ?", like, like)
+		q = withUserMediaSearch(q, filter.Query)
 	}
 	if filter.MediaType != "" {
 		q = q.Where("user_media_assets.media_type = ?", filter.MediaType)
@@ -104,8 +103,7 @@ func (r *userMediaAssetRepository) ListReadyCandidates(ctx context.Context, user
 	base := func() *gorm.DB {
 		q := r.db.WithContext(ctx).Where("user_media_assets.user_id = ? AND user_media_assets.status = ? AND user_media_assets.removed_at IS NULL", userID, model.UserMediaAssetStatusAvailable)
 		if query != "" {
-			like := "%" + query + "%"
-			q = q.Where("user_media_assets.description LIKE ? OR user_media_assets.usage_notes LIKE ?", like, like)
+			q = withUserMediaSearch(q, query)
 		}
 		if mediaType != "" {
 			q = q.Where("user_media_assets.media_type = ?", mediaType)
@@ -129,6 +127,13 @@ func (r *userMediaAssetRepository) ListReadyCandidates(ctx context.Context, user
 		}
 	}
 	return append(preferred, fallback...), nil
+}
+
+// withUserMediaSearch keeps the immutable asset table as the source of truth
+// for file names while limiting the subquery to the current library row.
+func withUserMediaSearch(q *gorm.DB, query string) *gorm.DB {
+	like := "%" + query + "%"
+	return q.Where("(user_media_assets.description LIKE ? OR user_media_assets.usage_notes LIKE ? OR EXISTS (SELECT 1 FROM assets WHERE assets.id = user_media_assets.asset_id AND assets.file_name LIKE ?))", like, like, like)
 }
 
 func maxInt(a, b int) int {

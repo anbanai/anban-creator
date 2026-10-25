@@ -1057,6 +1057,39 @@ func (s *AgentBootstrapService) materializeMontageTaskFileSources(ctx context.Co
 	totalBytes := int64(0)
 	for i := range input.SourceAssets {
 		asset := &input.SourceAssets[i]
+		assetID := strings.TrimSpace(asset.AssetID)
+		if assetID != "" {
+			if strings.TrimSpace(asset.TaskFileID) != "" || strings.TrimSpace(asset.URL) != "" {
+				return nil, fmt.Errorf("%w: Montage source asset %q has multiple locators", ErrAgentBootstrapConflict, assetID)
+			}
+			if s.repo == nil || s.cfg.Store == nil {
+				return nil, fmt.Errorf("%w: Montage source asset storage is unavailable", ErrAgentBootstrapUnavailable)
+			}
+			stored, err := s.repo.Assets().FindOwnedByID(ctx, assetID, task.UserID)
+			if err != nil || stored == nil {
+				return nil, fmt.Errorf("%w: Montage source asset %q is unavailable", ErrAgentBootstrapConflict, assetID)
+			}
+			if err := validateMontageStoredAssetMaterializable(stored, task.UserID, s.cfg.Store.Name(), *asset); err != nil {
+				return nil, fmt.Errorf("%w: Montage source asset %q %v", ErrAgentBootstrapConflict, assetID, err)
+			}
+			if stored.Size > montageSourceTotalMaxBytes-totalBytes {
+				return nil, fmt.Errorf("%w: Montage source assets exceed the runtime aggregate size limit", ErrAgentBootstrapConflict)
+			}
+			totalBytes += stored.Size
+			signed, err := s.signedBootstrapObjectKey(ctx, stored.StorageKey, credentialDeadline)
+			if err != nil {
+				return nil, fmt.Errorf("sign Montage source asset %q: %w", assetID, err)
+			}
+			name := serveragent.InputAttachmentFilename(i+1, model.EntryAttachment{FileName: stored.FileName, ContentType: stored.ContentType, Key: stored.StorageKey})
+			rel := path.Join(".anban-creator/montage-assets", name)
+			files = append(files, BootstrapFile{Path: rel, DownloadURL: signed, Mode: 0644, ExpectedSize: stored.Size, MaxBytes: montageSourceMaxBytes})
+			asset.AssetID = ""
+			asset.URL = rel
+			asset.FileName = stored.FileName
+			asset.MimeType = stored.ContentType
+			asset.FileSize = stored.Size
+			continue
+		}
 		fileID := strings.TrimSpace(asset.TaskFileID)
 		if fileID == "" {
 			continue
@@ -1186,7 +1219,7 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, execut
 				return nil, fmt.Errorf("%w: attachment %q has ambiguous storage identity", ErrAgentBootstrapConflict, attachment.FileName)
 			}
 			var err error
-			asset, err = NewReferenceAssetService(s.repo, nil, nil).RequireOwnedAttachment(ctx, task.UserID, assetID, []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment, DirectUploadPurposeEcommercePhoto})
+			asset, err = NewReferenceAssetService(s.repo, nil, nil).RequireOwnedAttachment(ctx, task.UserID, assetID, []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment, DirectUploadPurposeEcommercePhoto, DirectUploadPurposeMediaLibrary})
 			if err != nil {
 				return nil, fmt.Errorf("resolve attachment asset %q: %w", assetID, err)
 			}

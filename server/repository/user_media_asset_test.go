@@ -13,10 +13,20 @@ func TestUserMediaAssetRepositoryScopesSearchAndRanksProjectMatches(t *testing.T
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&model.UserMediaAsset{}); err != nil {
+	if err := db.AutoMigrate(&model.Asset{}, &model.UserMediaAsset{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	repo := newUserMediaAssetRepository(db)
+	for _, asset := range []*model.Asset{
+		{ID: "asset-1", UserID: "user-1", Purpose: "media_library", StorageKey: "assets/asset-1", FileName: "front-packaging.png", ContentType: "image/png", Size: 1, ETag: "etag-1"},
+		{ID: "asset-2", UserID: "user-1", Purpose: "media_library", StorageKey: "assets/asset-2", FileName: "back-packaging.png", ContentType: "image/png", Size: 1, ETag: "etag-2"},
+		{ID: "asset-3", UserID: "user-2", Purpose: "media_library", StorageKey: "assets/asset-3", FileName: "foreign.png", ContentType: "image/png", Size: 1, ETag: "etag-3"},
+		{ID: "asset-4", UserID: "user-1", Purpose: "media_library", StorageKey: "assets/asset-4", FileName: "demo.mp4", ContentType: "video/mp4", Size: 1, ETag: "etag-4"},
+	} {
+		if err := db.Create(asset).Error; err != nil {
+			t.Fatalf("create asset %s: %v", asset.ID, err)
+		}
+	}
 	rows := []*model.UserMediaAsset{
 		{ID: "same-project", UserID: "user-1", AssetID: "asset-1", ProjectID: "project-1", MediaType: "image", Status: model.UserMediaAssetStatusAvailable, Description: "包装正面"},
 		{ID: "other-project", UserID: "user-1", AssetID: "asset-2", ProjectID: "project-2", MediaType: "image", Status: model.UserMediaAssetStatusAvailable, Description: "包装背面"},
@@ -37,5 +47,12 @@ func TestUserMediaAssetRepositoryScopesSearchAndRanksProjectMatches(t *testing.T
 	}
 	if _, err := repo.FindByIDForUser(t.Context(), "user-2", "same-project", false); err == nil {
 		t.Fatal("foreign user accessed media")
+	}
+	byName, _, err := repo.List(t.Context(), UserMediaAssetListFilter{UserID: "user-1", Query: "front-packaging", Limit: 10})
+	if err != nil {
+		t.Fatalf("filename search: %v", err)
+	}
+	if len(byName) != 1 || byName[0].ID != "same-project" {
+		t.Fatalf("filename search ids = %#v", byName)
 	}
 }

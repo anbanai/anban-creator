@@ -50,8 +50,8 @@ func (s *imageAnalysisStorageFake) Read(_ context.Context, key string) ([]byte, 
 	return s.data[key], nil
 }
 func (s *imageAnalysisStorageFake) Delete(context.Context, string) error { return nil }
-func (s *imageAnalysisStorageFake) DownloadURL(context.Context, string, int) (string, error) {
-	return "", nil
+func (s *imageAnalysisStorageFake) DownloadURL(_ context.Context, key string, _ int) (string, error) {
+	return "https://cdn.example.com/" + key, nil
 }
 func (s *imageAnalysisStorageFake) HasCustomDomain() bool  { return false }
 func (s *imageAnalysisStorageFake) IsOwnedURL(string) bool { return false }
@@ -60,6 +60,18 @@ type imageAnalysisLLMFake struct {
 	imageResult string
 	textResult  string
 	err         error
+}
+
+type userMediaVideoLLMFake struct{}
+
+func (userMediaVideoLLMFake) Complete(context.Context, string, string) (string, error) {
+	return "", nil
+}
+func (userMediaVideoLLMFake) CompleteWithImage(context.Context, string, string, string) (string, error) {
+	return "", nil
+}
+func (userMediaVideoLLMFake) CompleteWithVideoURLResult(context.Context, string, string, string) (*LLMResult, error) {
+	return &LLMResult{Text: `{"description":"一段展示产品开箱过程的视频","recommended_uses":["短视频开场"]}`}, nil
 }
 
 func (f *imageAnalysisLLMFake) Complete(context.Context, string, string) (string, error) {
@@ -86,6 +98,78 @@ func setupImageAnalysisService(t *testing.T) (*ImageAnalysisService, repository.
 		textResult:  `{"allowed":true}`,
 	}, enqueuer, nil, ImageAnalysisConfig{LeaseDuration: time.Minute}, &logger)
 	return svc, repo, enqueuer, db
+}
+
+func TestUserMediaAnalysisStoresDescriptionAndKeepsUsageNotes(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.Asset{}, &model.UserMediaAsset{}, &model.ImageAnalysisJob{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	enqueuer := &imageAnalysisEnqueuerFake{}
+	client := &imageAnalysisLLMFake{imageResult: `{"description":"一张展示白色包装正面的产品图","recommended_uses":["商品介绍主图","电商详情页"]}`}
+	store := &imageAnalysisStorageFake{data: map[string][]byte{"media.png": {'\x89', 'P', 'N', 'G', '\r', '\n', '\x1a', '\n'}}}
+	svc := NewImageAnalysisService(repo, store, client, enqueuer, nil, ImageAnalysisConfig{LeaseDuration: time.Minute}, &logger)
+	asset := &model.Asset{ID: uuid.NewString(), UserID: "user-1", Purpose: DirectUploadPurposeMediaLibrary, StorageKey: "media.png", FileName: "media.png", ContentType: "image/png", Size: 8, ETag: "etag"}
+	if err := repo.Assets().Create(t.Context(), asset); err != nil {
+		t.Fatal(err)
+	}
+	media := &model.UserMediaAsset{ID: uuid.NewString(), UserID: "user-1", AssetID: asset.ID, MediaType: "image", Status: model.UserMediaAssetStatusQueued, UsageNotes: "只在新品发布时使用"}
+	if err := repo.UserMediaAssets().Create(t.Context(), media); err != nil {
+		t.Fatal(err)
+	}
+	job, err := svc.CreateUserMediaJob(t.Context(), media)
+	if err != nil {
+		t.Fatalf("CreateUserMediaJob: %v", err)
+	}
+	if err := svc.Process(t.Context(), job.ID, job.Generation); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	got, err := repo.UserMediaAssets().FindByIDForUser(t.Context(), "user-1", media.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.UserMediaAssetStatusAvailable || got.Description == "" || got.UsageNotes != "只在新品发布时使用" || len(got.RecommendedUses) != 2 {
+		t.Fatalf("media after analysis = %#v", got)
+	}
+}
+
+func TestUserMediaVideoAnalysisUsesNativeClientAndKeepsNotesOnRetry(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.Asset{}, &model.UserMediaAsset{}, &model.ImageAnalysisJob{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	enqueuer := &imageAnalysisEnqueuerFake{}
+	client := userMediaVideoLLMFake{}
+	svc := NewImageAnalysisService(repo, &imageAnalysisStorageFake{data: map[string][]byte{}}, client, enqueuer, nil, ImageAnalysisConfig{LeaseDuration: time.Minute}, &logger)
+	asset := &model.Asset{ID: uuid.NewString(), UserID: "user-1", Purpose: DirectUploadPurposeMediaLibrary, StorageKey: "media.mp4", FileName: "media.mp4", ContentType: "video/mp4", Size: 12, ETag: "etag"}
+	if err := repo.Assets().Create(t.Context(), asset); err != nil {
+		t.Fatal(err)
+	}
+	media := &model.UserMediaAsset{ID: uuid.NewString(), UserID: "user-1", AssetID: asset.ID, MediaType: "video", Status: model.UserMediaAssetStatusQueued, UsageNotes: "保留原声"}
+	if err := repo.UserMediaAssets().Create(t.Context(), media); err != nil {
+		t.Fatal(err)
+	}
+	job, err := svc.CreateUserMediaJob(t.Context(), media)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Process(t.Context(), job.ID, job.Generation); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	got, err := repo.UserMediaAssets().FindByIDForUser(t.Context(), "user-1", media.ID, false)
+	if err != nil || got.Status != model.UserMediaAssetStatusAvailable || got.UsageNotes != "保留原声" {
+		t.Fatalf("video media = %#v err=%v", got, err)
+	}
 }
 
 func seedAnalysisAsset(t *testing.T, repo repository.Repository, userID, purpose string) *model.Asset {

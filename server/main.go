@@ -386,6 +386,7 @@ func main() {
 	var posterSvc *service.PosterService
 	var referenceAssetSvc *service.ReferenceAssetService
 	var imageAnalysisSvc *service.ImageAnalysisService
+	var userMediaLibrarySvc *service.UserMediaLibraryService
 	var asynqClient *scheduler.AsynqClient
 	var analyticsRebuildManager *service.AnalyticsRebuildManager
 	var feedbackScheduler *service.FeedbackScheduler
@@ -503,6 +504,7 @@ func main() {
 
 	var imageUnderstandingBaseClient service.LLMClient
 	var imageUnderstandingClient service.ImageUnderstandingClient
+	var videoUnderstandingClient service.LLMClient
 	if cfg.ImageUnderstanding.BaseURL != "" && cfg.ImageUnderstanding.Key != "" && cfg.ImageUnderstanding.Model != "" {
 		imageUnderstandingBaseClient = service.NewOpenAILLMClient(cfg.ImageUnderstanding.BaseURL, cfg.ImageUnderstanding.Key, cfg.ImageUnderstanding.Model, cfg.ImageUnderstanding.Timeout)
 		imageUnderstandingClient, _ = imageUnderstandingBaseClient.(service.ImageUnderstandingClient)
@@ -517,10 +519,15 @@ func main() {
 		projectSvc.SetImageAnalysisService(imageAnalysisSvc)
 		templateSvc.SetImageAnalysisService(imageAnalysisSvc)
 	}
-	var videoUnderstandingClient service.LLMClient
 	if cfg.VideoUnderstanding.BaseURL != "" && cfg.VideoUnderstanding.Key != "" && cfg.VideoUnderstanding.Model != "" {
 		videoUnderstandingClient = service.NewOpenAILLMClient(cfg.VideoUnderstanding.BaseURL, cfg.VideoUnderstanding.Key, cfg.VideoUnderstanding.Model, cfg.VideoUnderstanding.Timeout)
 		log.Info().Str("endpoint", cfg.VideoUnderstanding.BaseURL).Str("model", cfg.VideoUnderstanding.Model).Msg("video understanding LLM client initialized")
+	}
+	if imageAnalysisSvc != nil {
+		imageAnalysisSvc.SetVideoClient(videoUnderstandingClient, cfg.VideoUnderstanding.ProviderKey, cfg.VideoUnderstanding.Model)
+	}
+	if repo != nil && store != nil && imageAnalysisSvc != nil {
+		userMediaLibrarySvc = service.NewUserMediaLibraryService(repo, store, imageAnalysisSvc)
 	}
 	var aiEntrySvc *service.AIEntryService
 	if repo != nil && taskSvc != nil {
@@ -597,6 +604,7 @@ func main() {
 	var apiKeyHandler *handler.APIKeyHandler
 	var fileHandler *handler.FileHandler
 	var uploadHandler *handler.UploadHandler
+	var userMediaLibraryHandler *handler.UserMediaLibraryHandler
 	var aiEntryHandler *handler.AIEntryHandler
 	var feedbackHandler *handler.FeedbackHandler
 	var imageCapabilityHandler *handler.ImageCapabilityHandler
@@ -688,6 +696,9 @@ func main() {
 		templateHandler = handler.NewTemplateHandler(templateSvc, log)
 		templateHandler.SetReferenceAssetService(referenceAssetSvc)
 		imageAnalysisHandler = handler.NewImageAnalysisHandler(imageAnalysisSvc, log)
+		if userMediaLibrarySvc != nil {
+			userMediaLibraryHandler = handler.NewUserMediaLibraryHandler(userMediaLibrarySvc, log)
+		}
 		if viralAnalysisHistorySvc != nil {
 			viralAnalysisHandler = handler.NewViralAnalysisHandler(viralAnalysisHistorySvc, log)
 		}
@@ -926,6 +937,7 @@ func main() {
 			SearchSvc:      searchSvc,
 			FetchSvc:       fetchSvc,
 			ImageSearchSvc: imageSearchSvc,
+			UserMediaSvc:   userMediaLibrarySvc,
 		})
 		mcp.SetBillingServices(imageCapabilityResolver, cfg)
 		mcp.SetLogger(log)
@@ -1058,6 +1070,7 @@ func main() {
 		APIKeyHandler:                       apiKeyHandler,
 		FileHandler:                         fileHandler,
 		UploadHandler:                       uploadHandler,
+		UserMediaLibraryHandler:             userMediaLibraryHandler,
 		AIEntryHandler:                      aiEntryHandler,
 		FeedbackHandler:                     feedbackHandler,
 		ImageCapabilityHandler:              imageCapabilityHandler,

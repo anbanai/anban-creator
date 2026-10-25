@@ -1012,6 +1012,24 @@ describe('AssistantWorkspace', () => {
     })))
   })
 
+  it('offers local upload and media-library selection from the creation plus menu', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'creation',
+      modes: [{ id: 'creation', displayName: '创作模式', description: '制定计划', available: true }],
+      projects: [{ id: 'project-1', name: '我的人设', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    mocks.projectsList.mockResolvedValue([{ id: 'project-1', name: '我的人设', platform: 'wechat', status: 'active' }])
+    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'project-1', runtime_status: 'starting', expires_at: '' })
+    uploadToOSSMock.mockResolvedValue({ uploadSessionId: 'upload-1', uploadId: 'upload-1', key: 'staging/cover.png', previewUrl: '', publicUrl: '', contentType: 'image/png', size: 4 })
+    renderPage({ modeId: 'creation', projectId: 'project-1' })
+
+    fireEvent.click(await screen.findByRole('button', { name: '从素材库选择' }))
+    expect(screen.getByRole('button', { name: '上传素材' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '从素材库选择' })).toHaveLength(2)
+    fireEvent.change(screen.getByLabelText('上传创作素材'), { target: { files: [new File(['png'], 'cover.png', { type: 'image/png' })] } })
+    await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'ai_entry_attachment' })))
+  })
+
   it('keeps persona context in the composer header without a profile-mode entry action', async () => {
     mocks.bootstrap.mockResolvedValue({
       defaultModeId: 'profile',

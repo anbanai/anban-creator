@@ -65,6 +65,7 @@ type Services struct {
 	SearchSvc              *service.SearchService
 	FetchSvc               *service.FetchService
 	ImageSearchSvc         *service.ImageSearchService
+	UserMediaSvc           *service.UserMediaLibraryService
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -88,6 +89,7 @@ func RegisterTools(server *mcp.Server) {
 	registerContentReuseTools(server)
 	registerContentMetadataTools(server)
 	registerInteractiveTools(server)
+	registerUserMediaTools(server)
 }
 
 // parseArgs unmarshals raw JSON arguments into a map.

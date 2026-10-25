@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bot, Check, ChevronDown, Loader2, Plus, UserRound } from 'lucide-react'
+import { ArrowLeft, Bot, Check, ChevronDown, Library, Loader2, Plus, Upload, UserRound } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
@@ -9,6 +9,8 @@ import type { InteractiveDraft } from '@/lib/api/interactive'
 import { useAuth } from '@/contexts/AuthContext'
 import { InteractiveStreamError, streamAssistantWorkspace, type InteractiveStreamEvent } from '@/lib/interactive-events'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
@@ -26,6 +28,7 @@ import { TaskResults } from '@/components/tasks/TaskResults'
 import { AssistantDraftSummary } from '@/components/assistant/AssistantDraftSummary'
 import { SignedImage } from '@/components/ui/SignedImage'
 import type { InputAttachment, PromptAttachment } from '@/types/input-attachment'
+import type { UserMediaAsset } from '@/lib/api/user-media'
 import type { AgentExecutionProfileID } from '@/types'
 import type { VideoEditDefaults, VideoEditPreferences } from '@/types/video-edit'
 import type { Task, TaskFile } from '@/types'
@@ -709,6 +712,21 @@ export default function AssistantWorkspace() {
     if (!workspace) return
     try {
       await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers)
+      const mediaIDs = [...new Set(answer.answers.flatMap((item) => item.selected).flatMap((label) => {
+        const match = /^media_asset:(.+)$/.exec(label.trim())
+        return match?.[1]?.trim() ? [match[1].trim()] : []
+      }))]
+      if (mediaIDs.length > 0) {
+        const selectedMedia = await Promise.all(mediaIDs.map((id) => api.userMedia.get(id)))
+        setAttachments((current) => {
+          const existing = new Set(current.flatMap((item) => item.assetId ? [item.assetId] : []))
+          const additions = selectedMedia.filter((asset) => asset.status === 'available').filter((asset) => !existing.has(asset.id)).map((asset) => ({
+            id: `media-${asset.id}`, type: asset.media_type, fileName: asset.file_name, contentType: asset.content_type, size: asset.size,
+            status: 'uploaded' as const, progress: 100, assetId: asset.id,
+          }))
+          return [...current, ...additions]
+        })
+      }
       setQuestionsByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).map((item) => item.callId === batch.callId ? { ...item, answers: answer.answers } : item) }))
     } catch (answerError) {
       const errorCode = assistantWorkspaceErrorCode(answerError)
@@ -1034,7 +1052,7 @@ export default function AssistantWorkspace() {
             {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && <VideoEditReviewResults query={reviewVideoQuery} />}
             {videoEditInputs}
           </div>
-          <Composer fadeAbove={false} value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <Composer fadeAbove={false} value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || composerBlocked} /> : undefined} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       ) : (
         <section className="mx-auto flex min-h-0 w-full max-w-6xl min-w-0 flex-1 flex-col px-4 pb-3 md:px-8">
@@ -1047,7 +1065,7 @@ export default function AssistantWorkspace() {
             {activeDraft && confirmationDraft && <DraftConfirmationCard mode={mode} draft={confirmationDraft} committing={committing} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => { setDraftByMode((current) => ({ ...current, [mode]: null })); setError(null) }} />}
             {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
           </div>
-          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} /> : undefined} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       )}
       </main>
@@ -1209,6 +1227,60 @@ function ProfileDraftSummary({ draft }: { draft: Draft }) {
 
 function WorkspaceSelectors({ mode, projects, projectId, contentId, works, disabled = false, onProject, onContent, onMore, hasMore }: { mode: AssistantModeID; projects: AssistantProject[]; projectId: string; contentId: string; works: AssistantProject['works']; disabled?: boolean; onProject: (value: string) => void; onContent: (value: string) => void; onMore: () => void; hasMore: boolean }) {
   return <div className="mx-auto mt-6 flex w-full max-w-xs flex-col items-stretch gap-3"><NativeSelect className="w-full" aria-label="选择人设" value={projectId} disabled={disabled} onChange={(event) => onProject(event.target.value)}><NativeSelectOption value="">{mode === 'profile' ? '新建人设' : '选择人设'}</NativeSelectOption>{projects.map((project) => <NativeSelectOption key={project.id} value={project.id}>{project.name}</NativeSelectOption>)}</NativeSelect>{mode === 'review' && <NativeSelect className="w-full" aria-label="选择作品" value={contentId} disabled={disabled} onChange={(event) => onContent(event.target.value)}><NativeSelectOption value="">选择作品</NativeSelectOption>{works.map((work) => <NativeSelectOption key={work.id} value={work.id}>{work.title}</NativeSelectOption>)}</NativeSelect>}{mode === 'review' && hasMore && <Button type="button" variant="ghost" size="sm" className="self-end" aria-label="加载更多作品" disabled={disabled} onClick={onMore}><ChevronDown className="size-4" />加载更多作品</Button>}</div>
+}
+
+function MediaLibraryPicker({ projectId, attachments, onChange, attachmentController, disabled }: { projectId?: string; attachments: PromptAttachment[]; onChange: (attachments: PromptAttachment[]) => void; attachmentController: ReturnType<typeof usePromptAttachments>; disabled?: boolean }) {
+  const [open, setOpen] = useState(false)
+  const [view, setView] = useState<'menu' | 'library'>('menu')
+  const [query, setQuery] = useState('')
+  const fileRef = useRef<HTMLInputElement | null>(null)
+  const media = useQuery({
+    queryKey: ['user-media-picker', projectId, query],
+    queryFn: () => api.userMedia.list({ q: query || undefined, project_id: projectId || undefined, status: 'available', limit: 30 }),
+    enabled: open,
+    staleTime: 10_000,
+  })
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen)
+    if (nextOpen) {
+      setView('menu')
+      setQuery('')
+    }
+  }
+  const handleUpload = (file: File) => {
+    const result = attachmentController.addFiles([file])
+    if (result.accepted.length > 0) setOpen(false)
+  }
+  const toggle = (asset: UserMediaAsset) => {
+    const selected = attachments.some((item) => item.assetId === asset.id)
+    if (selected) {
+      onChange(attachments.filter((item) => item.assetId !== asset.id))
+      return
+    }
+    onChange([...attachments, { id: `media-${asset.id}`, type: asset.media_type, fileName: asset.file_name, contentType: asset.content_type, size: asset.size, status: 'uploaded', progress: 100, assetId: asset.id }])
+  }
+  return <Popover open={open} onOpenChange={handleOpenChange}>
+    <PopoverTrigger render={<Button type="button" variant="ghost" size="icon-xs" aria-label="从素材库选择" disabled={disabled} />}><Plus /></PopoverTrigger>
+    <PopoverContent align="start" className="w-[min(24rem,calc(100vw-2rem))]">
+      {view === 'menu' ? <>
+        <PopoverTitle>添加创作素材</PopoverTitle>
+        <input ref={fileRef} type="file" accept="image/*,video/*" className="sr-only" aria-label="上传创作素材" onChange={(event) => { const file = event.target.files?.[0]; if (file) handleUpload(file); event.target.value = '' }} />
+        <div className="mt-2 grid gap-1">
+          <button type="button" aria-label="上传素材" className="flex items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-muted" onClick={() => fileRef.current?.click()}><Upload className="size-4" /><span><span className="block text-sm font-medium">上传素材</span><span className="block text-xs text-muted-foreground">上传图片或视频到本次创作</span></span></button>
+          <button type="button" aria-label="从素材库选择" className="flex items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-muted" onClick={() => setView('library')}><Library className="size-4" /><span><span className="block text-sm font-medium">从素材库选择</span><span className="block text-xs text-muted-foreground">选择已解析、可复用的素材</span></span></button>
+        </div>
+      </> : <>
+        <div className="flex items-center gap-2"><Button type="button" variant="ghost" size="icon-xs" aria-label="返回添加创作素材" onClick={() => setView('menu')}><ArrowLeft /></Button><PopoverTitle>从素材库选择</PopoverTitle></div>
+        <Input className="mt-3" aria-label="搜索素材库" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索已解析素材" />
+        <div className="mt-3 max-h-64 space-y-1 overflow-y-auto">
+          {media.isPending && <p className="py-4 text-center text-xs text-muted-foreground">正在加载…</p>}
+          {!media.isPending && (media.data?.items ?? []).length === 0 && <p className="py-4 text-center text-xs text-muted-foreground">没有可用素材，请先上传或重新解析。</p>}
+          {(media.data?.items ?? []).map((asset) => { const selected = attachments.some((item) => item.assetId === asset.id); return <button key={asset.id} type="button" className={`flex w-full items-start gap-2 rounded-md border px-2 py-2 text-left ${selected ? 'border-primary bg-primary/5' : 'border-transparent hover:bg-muted/70'}`} onClick={() => toggle(asset)}><span className="mt-0.5 size-4 shrink-0 rounded border border-input text-center text-[10px] leading-3">{selected ? '✓' : ''}</span><span className="min-w-0"><span className="block truncate text-sm font-medium">{asset.file_name}</span><span className="block line-clamp-2 text-xs text-muted-foreground">{asset.description || '暂无描述'}</span></span></button> })}
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">已选择 {attachments.filter((item) => item.assetId).length} 个；确认后会随本次创作提交，不会重复上传。</p>
+      </>}
+    </PopoverContent>
+  </Popover>
 }
 
 function Composer({ value, attachments, attachmentController, attachmentsEnabled = true, fadeAbove = true, contextBar, placeholder, inputDisabled, sendDisabled, leadingTools, trailingTools, onChange, onAttachmentsChange, onSend }: {

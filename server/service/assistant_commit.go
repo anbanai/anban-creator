@@ -466,19 +466,19 @@ func commitAssistantCreation(ctx context.Context, userID string, checkpoint *mod
 			Brief: firstNonEmptyAssistant(plan.VideoEditBrief, prompt), SourceAssets: assets,
 			Preferences: preferences,
 		}
+	} else if selected.Agent.Name == model.AgentIDMontage {
+		inputAttachments, assets, assetErr := assistantMontageCreationAssets(ctx, userID, plan.Assets, tasks, repo)
+		if assetErr != nil {
+			return AssistantCommitResult{}, assetErr
+		}
+		params.InputAttachments = inputAttachments
+		params.MontageInput = &model.MontageInput{Brief: prompt, SourceAssets: assets}
 	} else {
 		inputAttachments, attachmentErr := assistantCreationAttachmentsWithTasks(ctx, userID, plan.Assets, tasks, repo)
 		if attachmentErr != nil {
 			return AssistantCommitResult{}, attachmentErr
 		}
 		params.InputAttachments = inputAttachments
-	}
-	if selected.Agent.Name == model.AgentIDMontage {
-		assets := make([]model.MontageAsset, 0, len(plan.Assets))
-		for _, asset := range plan.Assets {
-			assets = append(assets, model.MontageAsset{Type: asset.Type, URL: asset.URL, TaskFileID: asset.TaskFileID, Text: asset.Text, FileName: asset.FileName, MimeType: asset.MimeType, FileSize: asset.FileSize})
-		}
-		params.MontageInput = &model.MontageInput{Brief: prompt, SourceAssets: assets}
 	}
 	created, err := tasks.CreateManual(ctx, params)
 	if err != nil {
@@ -531,10 +531,17 @@ func assistantCreationAttachmentsWithTasks(ctx context.Context, userID string, a
 			attachment.URL = ""
 		}
 		if attachment.AssetID != "" {
-			owned, err := NewReferenceAssetService(repo, nil, nil).RequireOwnedAttachment(ctx, userID, attachment.AssetID, []string{DirectUploadPurposeAIEntryAttachment, DirectUploadPurposeTaskReference})
+			_, owned, found, err := resolveAssistantMediaAsset(ctx, userID, attachment.AssetID, repo)
 			if err != nil {
 				return nil, fmt.Errorf("%w: 素材不可访问，请重新上传或移除该素材", ErrAssistantCreationAssetUnavailable)
 			}
+			if !found {
+				owned, err = NewReferenceAssetService(repo, nil, nil).RequireOwnedAttachment(ctx, userID, attachment.AssetID, []string{DirectUploadPurposeAIEntryAttachment, DirectUploadPurposeTaskReference})
+				if err != nil {
+					return nil, fmt.Errorf("%w: 素材不可访问，请重新上传或移除该素材", ErrAssistantCreationAssetUnavailable)
+				}
+			}
+			attachment.AssetID = owned.ID
 			attachment.Type = ClassifyDirectUploadFile(owned.ContentType, strings.ToLower(filepath.Ext(strings.TrimSpace(owned.FileName))))
 			attachment.FileName = owned.FileName
 			attachment.ContentType = owned.ContentType
@@ -558,20 +565,26 @@ func assistantVideoEditCreationAssets(ctx context.Context, userID string, inputs
 	assets := make([]model.VideoEditAsset, 0, len(inputs))
 	for i, input := range inputs {
 		var stored *model.Asset
+		var err error
 		assetID := strings.TrimSpace(input.AssetID)
 		uploadID := strings.TrimSpace(input.UploadID)
 		if uploadID != "" {
 			allowed := []string{DirectUploadPurposeVideoEditAsset, DirectUploadPurposeAIEntryAttachment}
-			var err error
 			stored, err = FinalizeUploadSession(ctx, finalStore, repo, FinalizeUploadRequest{SessionID: uploadID, UserID: userID, AllowedPurposes: allowed, Now: tasks.now()})
 			if err != nil {
 				return nil, nil, fmt.Errorf("%w: video-edit 素材 %d 上传尚未完成或不可访问: %v", ErrAssistantCreationAssetUnavailable, i+1, err)
 			}
 		} else if assetID != "" {
-			var err error
-			stored, err = NewReferenceAssetService(repo, nil, nil).RequireOwnedAttachment(ctx, userID, assetID, []string{DirectUploadPurposeAIEntryAttachment, DirectUploadPurposeVideoEditAsset})
+			var found bool
+			_, stored, found, err = resolveAssistantMediaAsset(ctx, userID, assetID, repo)
 			if err != nil {
 				return nil, nil, fmt.Errorf("%w: video-edit 素材 %d 不可访问", ErrAssistantCreationAssetUnavailable, i+1)
+			}
+			if !found {
+				stored, err = NewReferenceAssetService(repo, nil, nil).RequireOwnedAttachment(ctx, userID, assetID, []string{DirectUploadPurposeAIEntryAttachment, DirectUploadPurposeVideoEditAsset})
+				if err != nil {
+					return nil, nil, fmt.Errorf("%w: video-edit 素材 %d 不可访问", ErrAssistantCreationAssetUnavailable, i+1)
+				}
 			}
 		} else {
 			return nil, nil, fmt.Errorf("%w: video-edit 素材必须来自 Anban 上传", ErrAssistantCreationAssetUnavailable)
@@ -584,6 +597,99 @@ func assistantVideoEditCreationAssets(ctx context.Context, userID string, inputs
 		assets = append(assets, model.VideoEditAsset{AssetID: stored.ID, Type: typ, FileName: stored.FileName, MimeType: stored.ContentType, FileSize: stored.Size})
 	}
 	return attachments, assets, nil
+}
+
+func assistantMontageCreationAssets(ctx context.Context, userID string, inputs []assistantCreationAsset, tasks *TaskService, repo repository.Repository) ([]model.EntryAttachment, []model.MontageAsset, error) {
+	if tasks == nil || repo == nil {
+		return nil, nil, fmt.Errorf("%w: 视频素材服务不可用", ErrAssistantCreationAssetUnavailable)
+	}
+	if len(inputs) == 0 {
+		return []model.EntryAttachment{}, []model.MontageAsset{}, nil
+	}
+	finalStore, _ := tasks.store.(DirectUploadFinalizationStorage)
+	attachments := make([]model.EntryAttachment, 0, len(inputs))
+	assets := make([]model.MontageAsset, 0, len(inputs))
+	for i, input := range inputs {
+		assetID := strings.TrimSpace(input.AssetID)
+		var stored *model.Asset
+		if uploadID := strings.TrimSpace(input.UploadID); uploadID != "" {
+			var err error
+			stored, err = FinalizeUploadSession(ctx, finalStore, repo, FinalizeUploadRequest{
+				SessionID: uploadID, UserID: userID,
+				AllowedPurposes: []string{DirectUploadPurposeMontageAsset, DirectUploadPurposeAIEntryAttachment, DirectUploadPurposeMediaLibrary},
+				Now:             tasks.now(),
+			})
+			if err != nil {
+				return nil, nil, fmt.Errorf("%w: 视频素材 %d 上传尚未完成或不可访问", ErrAssistantCreationAssetUnavailable, i+1)
+			}
+		} else if assetID != "" {
+			var found bool
+			_, resolved, found, err := resolveAssistantMediaAsset(ctx, userID, assetID, repo)
+			if err != nil {
+				return nil, nil, fmt.Errorf("%w: 视频素材 %d 不可访问", ErrAssistantCreationAssetUnavailable, i+1)
+			}
+			stored = resolved
+			if !found {
+				stored, err = NewReferenceAssetService(repo, nil, nil).RequireOwnedAttachment(ctx, userID, assetID, []string{DirectUploadPurposeAIEntryAttachment, DirectUploadPurposeTaskReference, DirectUploadPurposeMontageAsset})
+				if err != nil {
+					return nil, nil, fmt.Errorf("%w: 视频素材 %d 不可访问", ErrAssistantCreationAssetUnavailable, i+1)
+				}
+			}
+		}
+		if stored == nil {
+			attachment := model.EntryAttachment{Type: strings.TrimSpace(input.Type), URL: strings.TrimSpace(input.URL), Text: input.Text, FileName: strings.TrimSpace(input.FileName), ContentType: strings.TrimSpace(input.MimeType), Size: input.FileSize, Instruction: strings.TrimSpace(input.Instruction)}
+			if attachment.AssetID == "" && attachment.URL == "" && attachment.Text == "" {
+				return nil, nil, fmt.Errorf("%w: 视频素材 %d 缺少来源", ErrAssistantCreationAssetUnavailable, i+1)
+			}
+			attachments = append(attachments, attachment)
+			assets = append(assets, model.MontageAsset{Type: attachment.Type, URL: attachment.URL, Text: attachment.Text, FileName: attachment.FileName, MimeType: attachment.ContentType, FileSize: attachment.Size})
+			continue
+		}
+		typ := ClassifyDirectUploadFile(stored.ContentType, strings.ToLower(filepath.Ext(strings.TrimSpace(stored.FileName))))
+		requestedType := strings.ToLower(strings.TrimSpace(input.Type))
+		if requestedType != "" && strings.TrimSuffix(requestedType, "_url") != typ {
+			return nil, nil, fmt.Errorf("%w: 视频素材 %d 类型不匹配", ErrAssistantCreationAssetUnavailable, i+1)
+		}
+		attachments = append(attachments, model.EntryAttachment{AssetID: stored.ID, Type: typ, FileName: stored.FileName, ContentType: stored.ContentType, Size: stored.Size, Instruction: strings.TrimSpace(input.Instruction)})
+		assets = append(assets, model.MontageAsset{AssetID: stored.ID, Type: typ, FileName: stored.FileName, MimeType: stored.ContentType, FileSize: stored.Size})
+	}
+	return attachments, assets, nil
+}
+
+// resolveAssistantMediaAsset accepts either the stable user-media-library ID
+// or its underlying immutable Asset ID. Only active, analysis-ready rows are
+// accepted, so a removed/queued/failed library item can never enter a new task.
+func resolveAssistantMediaAsset(ctx context.Context, userID, id string, repo repository.Repository) (*model.UserMediaAsset, *model.Asset, bool, error) {
+	if repo == nil || strings.TrimSpace(id) == "" {
+		return nil, nil, false, nil
+	}
+	media, err := repo.UserMediaAssets().FindByIDForUser(ctx, userID, id, false)
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "no such table") {
+		return nil, nil, false, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		media, err = repo.UserMediaAssets().FindByAssetIDForUser(ctx, userID, id, false)
+		if err != nil && strings.Contains(strings.ToLower(err.Error()), "no such table") {
+			return nil, nil, false, nil
+		}
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil, false, nil
+	}
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if media.Status != model.UserMediaAssetStatusAvailable || media.RemovedAt != nil {
+		return media, nil, true, ErrAssistantCreationAssetUnavailable
+	}
+	asset, err := repo.Assets().FindByID(ctx, media.AssetID)
+	if err != nil || asset.UserID != userID {
+		if err == nil {
+			err = ErrAssistantCreationAssetUnavailable
+		}
+		return media, nil, true, err
+	}
+	return media, asset, true, nil
 }
 
 func assistantCreationIdentity(project *model.Project, contentType string) (agentpack.Manifest, string, string, error) {

@@ -1,9 +1,11 @@
 import { useEffect, useState, type ChangeEvent, type KeyboardEvent } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, FileText, Loader2, Maximize2, SkipForward } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { api } from '@/lib/api'
 
 export interface DshQuestionOption {
   label: string
@@ -65,6 +67,22 @@ function optionDisplay(option: DshQuestionOption) {
     label: parsed.label,
     recommended: option.recommended === true || parsed.recommended,
   }
+}
+
+function mediaAssetID(label: string) {
+  const match = /^media_asset:(.+)$/.exec(label.trim())
+  return match?.[1]?.trim() || undefined
+}
+
+function MediaCandidateOption({ option, selected, disabled, multi, onChoose }: { option: DshQuestionOption; selected: boolean; disabled: boolean; multi: boolean; onChoose: () => void }) {
+  const id = mediaAssetID(option.label)
+  const media = useQuery({ queryKey: ['user-media', id], queryFn: () => api.userMedia.get(id as string), enabled: Boolean(id), staleTime: 60_000 })
+  const item = media.data
+  return <button type="button" role={multi ? 'checkbox' : 'radio'} aria-checked={selected} aria-label={item?.file_name ?? option.description ?? option.label} disabled={disabled} onClick={onChoose} className={`flex min-h-20 w-full items-center gap-3 rounded-md border px-3 py-2 text-left transition-colors disabled:cursor-default disabled:opacity-60 ${selected ? 'border-primary/50 bg-primary/5' : 'border-transparent hover:bg-muted/70'}`}>
+    {item?.preview_url && item.media_type === 'image' ? <img src={item.preview_url} alt="" className="size-14 shrink-0 rounded object-cover" /> : item?.preview_url && item.media_type === 'video' ? <video src={item.preview_url} muted preload="metadata" aria-label={item.file_name} className="size-14 shrink-0 rounded object-cover" /> : <span className="grid size-14 shrink-0 place-items-center rounded bg-muted text-xs text-muted-foreground">{item?.media_type === 'video' ? '视频' : '素材'}</span>}
+    {multi ? <span aria-hidden="true" className={`flex size-4 shrink-0 items-center justify-center rounded-[4px] border ${selected ? 'border-primary bg-primary text-primary-foreground' : 'border-input'}`}>{selected && <Check className="size-3" />}</span> : null}
+    <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{item?.file_name ?? '正在加载素材…'}</span><span className="mt-1 line-clamp-3 text-xs leading-5 text-muted-foreground">{item?.description ?? option.description ?? '候选素材'}</span></span>
+  </button>
 }
 
 function isComposing(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -284,6 +302,9 @@ export function DshQuestionComposer({
                 {question.options.map((option, optionIndex) => {
                   const selected = draft.selected.includes(option.label)
                   const display = optionDisplay(option)
+                  if (mediaAssetID(option.label)) {
+                    return <MediaCandidateOption key={`${option.label}-${optionIndex}`} option={option} selected={selected} disabled={interactionDisabled} multi={multi} onChoose={() => choose(option.label)} />
+                  }
                   return (
                     <button
                       key={`${option.label}-${optionIndex}`} type="button"

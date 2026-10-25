@@ -5,9 +5,11 @@ import "time"
 const (
 	ImageAnalysisKindProjectVisualStyle = "project_visual_style"
 	ImageAnalysisKindTemplatePrompt     = "template_prompt"
+	ImageAnalysisKindUserMedia          = "user_media_description"
 
-	ImageAnalysisSubjectProject  = "project"
-	ImageAnalysisSubjectTemplate = "template"
+	ImageAnalysisSubjectProject   = "project"
+	ImageAnalysisSubjectTemplate  = "template"
+	ImageAnalysisSubjectUserMedia = "user_media_asset"
 
 	ImageAnalysisStatusQueued     = "queued"
 	ImageAnalysisStatusRunning    = "running"

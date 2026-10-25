@@ -152,6 +152,7 @@ func (s *TaskService) materializeFrozenImageAttachment(ctx context.Context, task
 		DirectUploadPurposeTaskReference,
 		DirectUploadPurposeAIEntryAttachment,
 		DirectUploadPurposeEcommercePhoto,
+		DirectUploadPurposeMediaLibrary,
 	})
 	if err != nil {
 		return "", nil, fmt.Errorf("authorize image attachment %q: %w", logicalPath, err)

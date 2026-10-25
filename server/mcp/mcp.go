@@ -208,7 +208,8 @@ func requestIdentityMiddleware(next mcp.MethodHandler) mcp.MethodHandler {
 		// Empty values intentionally shadow any identity from session setup when
 		// this request uses a user/API-key credential instead of an execution JWT.
 		ctx = withMCPExecutionIdentity(ctx, info.UserID, projectID, taskID, executionID)
-		ctx = withMCPInteractiveIdentity(ctx, info.UserID, interactiveSessionID)
+		interactiveProjectID, _ := info.Extra["project_id"].(string)
+		ctx = withMCPInteractiveIdentity(ctx, info.UserID, interactiveSessionID, interactiveProjectID)
 		return next(ctx, method, req)
 	}
 }
@@ -252,6 +253,10 @@ func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, execut
 				if modeErr != nil {
 					return nil, modeErr
 				}
+				projectID := ""
+				if session, sessionErr := interactiveSvc.Session(userID, sessionID); sessionErr == nil && session != nil {
+					projectID = session.ProjectID
+				}
 				return &mcpauth.TokenInfo{
 					UserID:     userID,
 					Scopes:     []string{"mcp", "interactive"},
@@ -259,6 +264,7 @@ func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, execut
 					Extra: map[string]any{
 						"interactive_session_id": sessionID,
 						"assistant_mode_id":      modeID,
+						"project_id":             projectID,
 					},
 				}, nil
 			}
@@ -389,6 +395,7 @@ var interactiveMCPTools = map[string]struct{}{
 	"list_trends":                 {},
 	"list_resources":              {},
 	"get_resource":                {},
+	"search_user_media_assets":    {},
 }
 
 // interactiveScopeMiddleware constrains the opaque credential issued to a
@@ -507,14 +514,15 @@ var executionToolScopes = map[string]executionToolScope{
 	// These tools are deterministic or read-only. The
 	// central authorizer still runs before dispatch, so stale executions cannot
 	// use them.
-	"score_article":        {},
-	"export_seednote":      {},
-	"list_resources":       {},
-	"get_resource":         {},
-	"search_web":           {},
-	"search_images":        {},
-	"list_search_receipts": {},
-	"fetch_web_page":       {},
+	"score_article":            {},
+	"export_seednote":          {},
+	"list_resources":           {},
+	"get_resource":             {},
+	"search_web":               {},
+	"search_images":            {},
+	"search_user_media_assets": {},
+	"list_search_receipts":     {},
+	"fetch_web_page":           {},
 }
 
 func validateExecutionToolScope(toolName string, arguments map[string]any, projectID, taskID, executionID string) error {
@@ -693,6 +701,7 @@ type mcpExecutionIdentity struct {
 type mcpInteractiveIdentity struct {
 	UserID    string
 	SessionID string
+	ProjectID string
 }
 
 func withMCPUserID(ctx context.Context, userID string) context.Context {
@@ -720,10 +729,12 @@ func getMCPExecutionIdentity(ctx context.Context) (mcpExecutionIdentity, bool) {
 	return identity, true
 }
 
-func withMCPInteractiveIdentity(ctx context.Context, userID, sessionID string) context.Context {
-	return context.WithValue(ctx, mcpInteractiveIdentityContextKey{}, mcpInteractiveIdentity{
-		UserID: strings.TrimSpace(userID), SessionID: strings.TrimSpace(sessionID),
-	})
+func withMCPInteractiveIdentity(ctx context.Context, userID, sessionID string, projectID ...string) context.Context {
+	identity := mcpInteractiveIdentity{UserID: strings.TrimSpace(userID), SessionID: strings.TrimSpace(sessionID)}
+	if len(projectID) > 0 {
+		identity.ProjectID = strings.TrimSpace(projectID[0])
+	}
+	return context.WithValue(ctx, mcpInteractiveIdentityContextKey{}, identity)
 }
 
 func getMCPInteractiveIdentity(ctx context.Context) (mcpInteractiveIdentity, bool) {

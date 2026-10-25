@@ -7,6 +7,9 @@ import (
 
 	serverconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 )
 
 func testMontageCapabilityService() *MontageCapabilityService {
@@ -17,6 +20,28 @@ func testMontageCapabilityService() *MontageCapabilityService {
 		MaxDurationSeconds: 600,
 		MaxAssets:          20,
 	})
+}
+
+func TestValidateMaterializableMontageSourceAssetScopesMediaLibraryAsset(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:montage-source-asset?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&model.Asset{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repo := repository.New(db)
+	asset := &model.Asset{ID: "media-asset", UserID: "owner", Purpose: DirectUploadPurposeMediaLibrary, StorageKey: "assets/users/owner/media-asset/clip.mp4", FileName: "clip.mp4", ContentType: "video/mp4", Size: 10, ETag: "etag"}
+	if err := repo.Assets().Create(t.Context(), asset); err != nil {
+		t.Fatalf("create asset: %v", err)
+	}
+	input := []model.MontageAsset{{Type: "video", AssetID: asset.ID, FileName: asset.FileName, MimeType: asset.ContentType, FileSize: asset.Size}}
+	if err := ValidateMaterializableMontageSourceTaskFiles(t.Context(), repo, "oss", "owner", "project", input); err != nil {
+		t.Fatalf("owner validation: %v", err)
+	}
+	if err := ValidateMaterializableMontageSourceTaskFiles(t.Context(), repo, "oss", "other-user", "project", input); err == nil || !containsText(err.Error(), "unavailable") {
+		t.Fatalf("foreign validation = %v, want unavailable asset", err)
+	}
 }
 
 func TestMontageCapabilityServiceCatalogUsesConfiguredOrderAndSafeFallbacks(t *testing.T) {

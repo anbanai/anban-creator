@@ -44,6 +44,7 @@ var taskInputAttachmentAssetPurposes = []string{
 	service.DirectUploadPurposeTaskReference,
 	service.DirectUploadPurposeAIEntryAttachment,
 	service.DirectUploadPurposeEcommercePhoto,
+	service.DirectUploadPurposeMediaLibrary,
 }
 
 var errInputAttachmentValidation = errors.New("input attachment validation failed")
