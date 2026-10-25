@@ -378,6 +378,51 @@ describe('AssistantWorkspace', () => {
     expect(screen.queryByText('Request failed with status code 409')).not.toBeInTheDocument()
   })
 
+  it('distinguishes workspace mode conflicts from generic conversation conflicts', async () => {
+    const conflict = Object.assign(new Error('Request failed with status code 409'), {
+      response: { status: 409, data: { error_code: 'assistant_workspace_mode_mismatch' } },
+    })
+    mocks.workspaceMessage.mockRejectedValueOnce(conflict)
+    renderPage()
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '保留这条输入' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(await screen.findByText('当前对话模式已变化，输入已保留，请重新建立对话后重试。')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('保留这条输入')
+    expect(screen.queryByText('对话状态刚刚发生变化，输入已保留，请稍后重试。')).not.toBeInTheDocument()
+  })
+
+  it('explains profile revision conflicts while preserving the staged draft', async () => {
+    const conflict = Object.assign(new Error('Request failed with status code 409'), {
+      response: { status: 409, data: { error_code: 'project_profile_revision_conflict' } },
+    })
+    mocks.workspaceCommit.mockRejectedValueOnce(conflict)
+    renderPage()
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '建立画像' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    fireEvent.click(await screen.findByRole('button', { name: '保存人设' }))
+
+    expect(await screen.findByText('人设已在其他窗口更新，输入已保留，请刷新后核对再继续。')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '保存人设' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存人设' })).toBeInTheDocument()
+  })
+
+  it('restores a deferred message when the runtime reports an asynchronous send failure', async () => {
+    mocks.streamEvents = [{
+      event: 'session.error',
+      id: 'event-session-error',
+      data: JSON.stringify({ status: 'runtime_failed', retry_text: '保留这条延迟消息' }),
+    }]
+    renderPage()
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '保留这条延迟消息' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(await screen.findByText('消息发送失败，输入已保留，请重试。')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('保留这条延迟消息'))
+  })
+
   it('keeps the send action disabled while the runtime turn is active', async () => {
     mocks.streamEvents = [{ event: 'turn.start', id: 'event-3', data: JSON.stringify({ session_id: 'session-1' }) }]
     renderPage()

@@ -77,6 +77,118 @@ func newAssistantWorkspaceTestService(repo repository.Repository) *InteractiveSe
 	return svc
 }
 
+func TestAssistantWorkspaceMessageQueuesBehindOpeningPrompt(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	runtime := &interactiveWorkspaceRecordingRuntime{}
+	startGate := make(chan struct{})
+	factory := &interactiveWorkspaceRuntimeFactory{runtime: runtime, spec: make(chan InteractiveRuntimeSpec, 1), startGate: startGate}
+	svc := NewInteractiveServiceWithRuntime(repo, factory)
+	svc.SetEnabled(true)
+	workspace, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", AssistantWorkspaceInput{ModeID: AssistantModeProfile}, "opening-race")
+	if err != nil {
+		t.Fatalf("CreateAssistantWorkspace() error = %v", err)
+	}
+	t.Cleanup(func() { _ = svc.CloseAssistantWorkspace(context.Background(), "user-1", workspace.ID) })
+	select {
+	case <-factory.spec:
+	case <-time.After(time.Second):
+		t.Fatal("runtime factory did not start")
+	}
+	if err := svc.WorkspaceMessage(context.Background(), "user-1", workspace.ID, AssistantModeProfile, "继续完善画像"); err != nil {
+		t.Fatalf("WorkspaceMessage() while runtime is starting = %v", err)
+	}
+	close(startGate)
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		runtime.mu.Lock()
+		methodCount := len(runtime.methods)
+		runtime.mu.Unlock()
+		if methodCount >= 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	runtime.mu.Lock()
+	methods := append([]string(nil), runtime.methods...)
+	runtime.mu.Unlock()
+	if len(methods) < 2 || !reflect.DeepEqual(methods[:2], []string{"session/start", "session/prompt"}) {
+		t.Fatalf("runtime methods = %#v, want startup and opening prompt", methods)
+	}
+
+	sessionID := workspace.Sessions[AssistantModeProfile]
+	svc.runtimeEvent(sessionID, "turn.end", map[string]any{"turn": 1})
+	deadline = time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		runtime.mu.Lock()
+		methodCount := len(runtime.methods)
+		runtime.mu.Unlock()
+		if methodCount >= 3 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	runtime.mu.Lock()
+	methods = append([]string(nil), runtime.methods...)
+	runtime.mu.Unlock()
+	if len(methods) < 3 || methods[2] != "session/prompt" {
+		t.Fatalf("runtime methods after opening turn = %#v, want queued user prompt", methods)
+	}
+}
+
+func TestAssistantWorkspaceOpeningPromptFailureRetainsAcceptedMessage(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	runtime := &interactiveWorkspaceRecordingRuntime{commandErr: map[string]error{"session/prompt": errors.New("opening prompt failed")}}
+	startGate := make(chan struct{})
+	factory := &interactiveWorkspaceRuntimeFactory{runtime: runtime, spec: make(chan InteractiveRuntimeSpec, 1), startGate: startGate}
+	svc := NewInteractiveServiceWithRuntime(repo, factory)
+	svc.SetEnabled(true)
+	workspace, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", AssistantWorkspaceInput{ModeID: AssistantModeProfile}, "opening-failure")
+	if err != nil {
+		t.Fatalf("CreateAssistantWorkspace() error = %v", err)
+	}
+	t.Cleanup(func() { _ = svc.CloseAssistantWorkspace(context.Background(), "user-1", workspace.ID) })
+	select {
+	case <-factory.spec:
+	case <-time.After(time.Second):
+		t.Fatal("runtime factory did not start")
+	}
+	if err := svc.WorkspaceMessage(context.Background(), "user-1", workspace.ID, AssistantModeProfile, "恢复我的输入"); err != nil {
+		t.Fatalf("WorkspaceMessage() while runtime starts = %v", err)
+	}
+	close(startGate)
+
+	deadline := time.Now().Add(time.Second)
+	var history []InteractiveEvent
+	for time.Now().Before(deadline) {
+		svc.mu.RLock()
+		sess := svc.sessions[workspace.Sessions[AssistantModeProfile]]
+		svc.mu.RUnlock()
+		if sess != nil {
+			sess.mu.Lock()
+			history = append([]InteractiveEvent(nil), sess.events...)
+			sess.mu.Unlock()
+		}
+		for _, event := range history {
+			if event.Type == "session.error" {
+				goto historyReady
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+historyReady:
+	for _, event := range history {
+		if event.Type != "session.error" {
+			continue
+		}
+		data, ok := event.Data.(map[string]any)
+		if ok && data["retry_text"] == "恢复我的输入" {
+			return
+		}
+	}
+	t.Fatalf("session events = %#v, want retry_text for accepted message", history)
+}
+
 func TestAssistantBootstrapReturnsAllModesAndServerDefaults(t *testing.T) {
 	t.Run("video-edit project defaults are returned to the workspace", func(t *testing.T) {
 		repo := newAssistantTestRepo(t)

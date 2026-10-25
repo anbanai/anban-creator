@@ -94,8 +94,9 @@ func (f interactiveDelayedRuntimeFactory) Start(_ context.Context, _ string, _ s
 }
 
 type interactiveWorkspaceRuntimeFactory struct {
-	runtime *interactiveWorkspaceRecordingRuntime
-	spec    chan InteractiveRuntimeSpec
+	runtime   *interactiveWorkspaceRecordingRuntime
+	spec      chan InteractiveRuntimeSpec
+	startGate <-chan struct{}
 }
 
 func (f *interactiveWorkspaceRuntimeFactory) Start(_ context.Context, _ string, _ string, _ string, _ func(string, any)) (Runtime, error) {
@@ -104,6 +105,9 @@ func (f *interactiveWorkspaceRuntimeFactory) Start(_ context.Context, _ string, 
 
 func (f *interactiveWorkspaceRuntimeFactory) StartSession(_ context.Context, spec InteractiveRuntimeSpec, emit func(string, any)) (Runtime, error) {
 	f.spec <- spec
+	if f.startGate != nil {
+		<-f.startGate
+	}
 	f.runtime.mu.Lock()
 	f.runtime.emit = emit
 	f.runtime.mu.Unlock()
@@ -115,13 +119,14 @@ type interactiveWorkspaceRecordingRuntime struct {
 	methods    []string
 	closeCount int
 	emit       func(string, any)
+	commandErr map[string]error
 }
 
 func (r *interactiveWorkspaceRecordingRuntime) Command(_ context.Context, method string, _ any) error {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.methods = append(r.methods, method)
-	r.mu.Unlock()
-	return nil
+	return r.commandErr[method]
 }
 
 func (r *interactiveWorkspaceRecordingRuntime) Close() error {
@@ -802,6 +807,33 @@ func TestInteractiveMessageStaysBusyUntilRuntimeTurnEnds(t *testing.T) {
 	defer runtime.mu.Unlock()
 	if runtime.commands != 2 {
 		t.Fatalf("prompt command count = %d, want 2", runtime.commands)
+	}
+}
+
+func TestDeferredPromptFailureRetainsRetryText(t *testing.T) {
+	sess := newInteractiveTestSession()
+	sess.runtime = &interactiveTestRuntime{commandErr: errors.New("runtime unavailable")}
+	sess.runtimeStarted = true
+	sess.busy = true
+	sess.openingPromptActive = true
+	sess.deferredPrompt = "继续完善画像"
+	svc := newInteractiveTestService(sess)
+
+	svc.runtimeEvent(sess.ID, "turn.end", map[string]any{"turn": 1})
+
+	sess.mu.Lock()
+	busy := sess.busy
+	events := append([]InteractiveEvent(nil), sess.events...)
+	sess.mu.Unlock()
+	if busy {
+		t.Fatalf("busy = %v, want idle session", busy)
+	}
+	if len(events) == 0 {
+		t.Fatal("missing session.error event")
+	}
+	errorData, ok := events[len(events)-1].Data.(map[string]any)
+	if !ok || errorData["retry_text"] != "继续完善画像" {
+		t.Fatalf("session.error data = %#v, want retry text", events[len(events)-1].Data)
 	}
 }
 

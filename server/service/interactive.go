@@ -174,7 +174,9 @@ type InteractiveSession struct {
 	committing                  bool
 	runtimeStarted              bool
 	initialPromptSent           bool
+	openingPromptActive         bool
 	queuedPrompt                string
+	deferredPrompt              string
 	runtimeExitPending          bool
 	runtimeExitData             any
 	runtime                     Runtime
@@ -1192,7 +1194,7 @@ func (s *InteractiveService) startWorkspaceRuntime(ctx context.Context, sess *In
 		}
 		s.mu.Unlock()
 		s.logRuntimeFields("error", sess.ID, "interactive workspace runtime failed to start", err, identityFields)
-		s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": fmt.Sprintf("interactive runtime failed to start: %v", err)})
+		s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": fmt.Sprintf("interactive runtime failed to start: %v", err), "retry_text": s.pendingSessionPrompt(sess)})
 		s.closeSession(sess.ID, false)
 		return
 	}
@@ -1206,7 +1208,7 @@ func (s *InteractiveService) startWorkspaceRuntime(ctx context.Context, sess *In
 			close(current.ready)
 		}
 		s.mu.Unlock()
-		s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": err.Error()})
+		s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": err.Error(), "retry_text": s.pendingSessionPrompt(sess)})
 		s.closeSession(sess.ID, false)
 		return
 	}
@@ -1245,9 +1247,10 @@ func (s *InteractiveService) initializeRuntimeSession(ctx context.Context, sess 
 	}
 	if err := rt.Command(ctx, "session/start", map[string]any{"sessionId": sess.ID, "presetId": sess.AgentID, "initialContext": sess.initialContext}); err != nil {
 		s.logRuntimeFields("error", sess.ID, "interactive runtime failed to initialize", err, map[string]any{"mode_id": sess.ModeID, "workspace_id": sess.WorkspaceID})
-		s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": fmt.Sprintf("interactive runtime failed to initialize: %v", err)})
+		s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": fmt.Sprintf("interactive runtime failed to initialize: %v", err), "retry_text": s.pendingSessionPrompt(sess)})
 		return
 	}
+	opening := interactiveOpeningPrompt(sess.Intent)
 	sess.mu.Lock()
 	if sess.Closed {
 		sess.mu.Unlock()
@@ -1255,11 +1258,29 @@ func (s *InteractiveService) initializeRuntimeSession(ctx context.Context, sess 
 	}
 	sess.runtimeStarted = true
 	sess.Status = "running"
+	queued := sess.queuedPrompt
+	sess.queuedPrompt = ""
+	if opening != "" && !sess.initialPromptSent {
+		sess.busy = true
+		sess.openingPromptActive = true
+		sess.commandSequence++
+		sess.activeCommand = sess.commandSequence
+		sess.activeCommandAt = time.Now()
+		if queued != "" && sess.deferredPrompt == "" {
+			sess.deferredPrompt = queued
+		}
+	} else if queued != "" && sess.deferredPrompt == "" {
+		sess.deferredPrompt = queued
+	}
 	sess.mu.Unlock()
 	s.persistAssistantSessionStatus(sess, "running")
 	s.persistWorkspaceRuntimeStatus(sess.WorkspaceID, "running")
-	opening := interactiveOpeningPrompt(sess.Intent)
 	if opening == "" {
+		sess.mu.Lock()
+		sess.busy = false
+		deferredText, deferredRuntime, deferredCommand := s.takeDeferredPromptLocked(sess)
+		sess.mu.Unlock()
+		s.sendClaimedDeferredPrompt(sess, deferredText, deferredRuntime, deferredCommand)
 		return
 	}
 	sess.mu.Lock()
@@ -1267,19 +1288,16 @@ func (s *InteractiveService) initializeRuntimeSession(ctx context.Context, sess 
 		sess.mu.Unlock()
 		return
 	}
-	sess.busy = true
-	sess.commandSequence++
-	sess.activeCommand = sess.commandSequence
-	sess.activeCommandAt = time.Now()
 	commandSeq := sess.activeCommand
 	sess.mu.Unlock()
 	if err := rt.Command(ctx, "session/prompt", map[string]any{"sessionId": sess.ID, "contentBlocks": []map[string]string{{"type": "text", "text": opening}}}); err != nil {
 		sess.mu.Lock()
 		sess.busy = false
+		sess.openingPromptActive = false
 		sess.activeCommand = 0
 		sess.activeCommandAt = time.Time{}
 		sess.mu.Unlock()
-		s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": fmt.Sprintf("interactive opening prompt failed: %v", err)})
+		s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": fmt.Sprintf("interactive opening prompt failed: %v", err), "retry_text": s.pendingSessionPrompt(sess)})
 		return
 	}
 	sess.mu.Lock()
@@ -1381,8 +1399,9 @@ func (s *InteractiveService) startStandaloneRuntime(ctx context.Context, sess *I
 	if e != nil {
 		s.logRuntimeFields("error", sess.ID, "interactive runtime failed to start", e, identityFields)
 		s.runtimeEvent(sess.ID, "session.error", map[string]any{
-			"status":  "runtime_failed",
-			"message": fmt.Sprintf("interactive runtime failed to start: %v", e),
+			"status":     "runtime_failed",
+			"message":    fmt.Sprintf("interactive runtime failed to start: %v", e),
+			"retry_text": s.pendingSessionPrompt(sess),
 		})
 		s.closeSession(sess.ID, false)
 		return
@@ -1400,8 +1419,9 @@ func (s *InteractiveService) startStandaloneRuntime(ctx context.Context, sess *I
 	if e = rt.Command(ctx, "session/start", map[string]any{"sessionId": sess.ID, "presetId": sess.AgentID, "initialContext": sess.initialContext}); e != nil {
 		s.logRuntimeFields("error", sess.ID, "interactive runtime failed to initialize", e, identityFields)
 		s.runtimeEvent(sess.ID, "session.error", map[string]any{
-			"status":  "runtime_failed",
-			"message": fmt.Sprintf("interactive runtime failed to initialize: %v", e),
+			"status":     "runtime_failed",
+			"message":    fmt.Sprintf("interactive runtime failed to initialize: %v", e),
+			"retry_text": s.pendingSessionPrompt(sess),
 		})
 		return
 	}
@@ -1418,6 +1438,7 @@ func (s *InteractiveService) startStandaloneRuntime(ctx context.Context, sess *I
 		opening = interactiveOpeningPrompt(sess.Intent)
 		if opening != "" && !sess.Closed {
 			sess.busy = true
+			sess.openingPromptActive = true
 			sess.commandSequence++
 			sess.activeCommand = sess.commandSequence
 			sess.activeCommandAt = time.Now()
@@ -1433,13 +1454,15 @@ func (s *InteractiveService) startStandaloneRuntime(ctx context.Context, sess *I
 		}); e != nil {
 			sess.mu.Lock()
 			sess.busy = false
+			sess.openingPromptActive = false
 			sess.activeCommand = 0
 			sess.activeCommandAt = time.Time{}
 			sess.mu.Unlock()
 			s.logRuntimeFields("error", sess.ID, "interactive opening prompt failed", e, map[string]any{"command": "session/prompt", "command_seq": openingCommandSeq})
 			s.runtimeEvent(sess.ID, "session.error", map[string]any{
-				"status":  "runtime_failed",
-				"message": fmt.Sprintf("interactive opening prompt failed: %v", e),
+				"status":     "runtime_failed",
+				"message":    fmt.Sprintf("interactive opening prompt failed: %v", e),
+				"retry_text": s.pendingSessionPrompt(sess),
 			})
 			return
 		}
@@ -1715,6 +1738,8 @@ func (s *InteractiveService) closeSessionAtDeadline(id string, generation uint64
 	sess.Draft = InteractiveDraft{}
 	sess.pendingCall = ""
 	sess.pendingQuestions = map[string]InteractiveQuestion{}
+	sess.deferredPrompt = ""
+	sess.openingPromptActive = false
 	sess.runtimeTokenHash = ""
 	sess.confirmationTokenHash = ""
 	sess.confirmationToken = ""
@@ -2030,6 +2055,9 @@ func (s *InteractiveService) runtimeEvent(id, typ string, data any) {
 	}
 	switch typ {
 	case "question.opened":
+		sess.mu.Lock()
+		sess.openingPromptActive = false
+		sess.mu.Unlock()
 		if !s.openQuestions(sess, data) {
 			return
 		}
@@ -2048,11 +2076,18 @@ func (s *InteractiveService) runtimeEvent(id, typ string, data any) {
 					// DSH emits idle after a turn. Keep this as a fallback terminal
 					// signal if a runtime version omits turn/end.
 					sess.mu.Lock()
+					openingPromptActive := sess.openingPromptActive
+					deferredText, deferredRuntime, deferredCommand := "", Runtime(nil), uint64(0)
 					if !sess.Closed && sess.pendingCall == "" {
 						sess.busy = false
+						sess.openingPromptActive = false
 						sess.Status = "running"
+						if openingPromptActive {
+							deferredText, deferredRuntime, deferredCommand = s.takeDeferredPromptLocked(sess)
+						}
 					}
 					sess.mu.Unlock()
+					s.sendClaimedDeferredPrompt(sess, deferredText, deferredRuntime, deferredCommand)
 				}
 				if st == "starting" || st == "running" || st == "waiting_answer" || st == "runtime_failed" || st == "idle" {
 					s.persistAssistantSessionStatus(sess, "running")
@@ -2067,15 +2102,19 @@ func (s *InteractiveService) runtimeEvent(id, typ string, data any) {
 		if !sess.activeCommandAt.IsZero() {
 			durationMS = time.Since(sess.activeCommandAt).Milliseconds()
 		}
-		if !sess.Closed {
-			sess.busy = false
-			if sess.pendingCall == "" {
-				sess.Status = "running"
-			}
-		}
+		deferredText, deferredRuntime, deferredCommand := "", Runtime(nil), uint64(0)
 		sess.activeCommand = 0
 		sess.activeCommandAt = time.Time{}
+		if !sess.Closed {
+			sess.busy = false
+			sess.openingPromptActive = false
+			if sess.pendingCall == "" {
+				sess.Status = "running"
+				deferredText, deferredRuntime, deferredCommand = s.takeDeferredPromptLocked(sess)
+			}
+		}
 		sess.mu.Unlock()
+		s.sendClaimedDeferredPrompt(sess, deferredText, deferredRuntime, deferredCommand)
 		s.persistAssistantSessionStatus(sess, "running")
 		s.logRuntimeFields("info", id, "interactive turn ended", nil, map[string]any{"event_type": typ, "turn": interactiveTurnNumber(data), "command_seq": commandSeq, "duration_ms": durationMS})
 	case "turn.start":
@@ -2339,6 +2378,76 @@ func decodeStage(data any) (InteractiveStageInput, bool) {
 	return in, true
 }
 
+// dispatchDeferredPrompt releases the first user message that arrived while
+// the session's automatic opening prompt was still running. The message is
+// claimed under the session lock, then sent outside the lock so runtime
+// callbacks can continue updating the session state.
+func (s *InteractiveService) takeDeferredPromptLocked(sess *InteractiveSession) (string, Runtime, uint64) {
+	if sess.Closed || sess.pendingCall != "" || sess.busy || sess.deferredPrompt == "" {
+		return "", nil, 0
+	}
+	text := sess.deferredPrompt
+	sess.deferredPrompt = ""
+	rt := sess.runtime
+	if rt == nil || !sess.runtimeStarted {
+		sess.queuedPrompt = text
+		sess.busy = true
+		return "", nil, 0
+	}
+	sess.busy = true
+	sess.commandSequence++
+	commandSeq := sess.commandSequence
+	sess.activeCommand = commandSeq
+	sess.activeCommandAt = time.Now()
+	return text, rt, commandSeq
+}
+
+func (s *InteractiveService) pendingSessionPrompt(sess *InteractiveSession) string {
+	if sess == nil {
+		return ""
+	}
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	if sess.deferredPrompt != "" {
+		return sess.deferredPrompt
+	}
+	return sess.queuedPrompt
+}
+
+func (s *InteractiveService) dispatchDeferredPrompt(sess *InteractiveSession) {
+	if sess == nil {
+		return
+	}
+	sess.mu.Lock()
+	text, rt, commandSeq := s.takeDeferredPromptLocked(sess)
+	sess.mu.Unlock()
+	s.sendClaimedDeferredPrompt(sess, text, rt, commandSeq)
+}
+
+func (s *InteractiveService) sendClaimedDeferredPrompt(sess *InteractiveSession, text string, rt Runtime, commandSeq uint64) {
+	if sess == nil || text == "" || rt == nil {
+		return
+	}
+	err := rt.Command(context.Background(), "session/prompt", map[string]any{
+		"sessionId":     sess.ID,
+		"contentBlocks": []map[string]string{{"type": "text", "text": text}},
+	})
+	if err != nil {
+		sess.mu.Lock()
+		if !sess.Closed && sess.deferredPrompt == "" {
+			sess.deferredPrompt = text
+		}
+		sess.busy = false
+		sess.activeCommand = 0
+		sess.activeCommandAt = time.Time{}
+		sess.mu.Unlock()
+		s.logRuntimeFields("error", sess.ID, "deferred interactive prompt enqueue failed", err, map[string]any{"command": "session/prompt", "command_seq": commandSeq})
+		s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": fmt.Sprintf("interactive prompt failed: %v", err), "retry_text": text})
+		return
+	}
+	s.logRuntimeFields("info", sess.ID, "deferred interactive prompt enqueued", nil, map[string]any{"command": "session/prompt", "command_seq": commandSeq})
+}
+
 func (s *InteractiveService) Message(ctx context.Context, uid, id, text string) error {
 	sess, e := s.getOwned(uid, id)
 	if e != nil {
@@ -2357,6 +2466,12 @@ func (s *InteractiveService) Message(ctx context.Context, uid, id, text string) 
 		return ErrInteractivePending
 	}
 	if sess.busy {
+		if sess.openingPromptActive && sess.deferredPrompt == "" {
+			sess.deferredPrompt = text
+			sess.mu.Unlock()
+			s.emit(sess, "user.message", map[string]string{"text": text})
+			return nil
+		}
 		sess.mu.Unlock()
 		return ErrInteractiveBusy
 	}

@@ -180,6 +180,29 @@ function isStaleAssistantWorkspaceError(error: unknown) {
     || assistantWorkspaceHttpStatus(error) === 410
 }
 
+function assistantWorkspaceConflictMessage(errorCode: string | undefined, action: 'send' | 'switch' | 'answer' | 'commit') {
+  switch (errorCode) {
+    case 'assistant_workspace_mode_mismatch':
+      return '当前对话模式已变化，输入已保留，请重新建立对话后重试。'
+    case 'assistant_checkpoint_conflict':
+      return action === 'commit'
+        ? '草稿版本已更新，请重新加载最新草稿后再确认。'
+        : '草稿版本已更新，输入已保留，请重新加载后重试。'
+    case 'project_profile_revision_conflict':
+      return '人设已在其他窗口更新，输入已保留，请刷新后核对再继续。'
+    case 'interactive_idempotency_conflict':
+      return '这次操作的请求标识已被占用，输入已保留，请重新发送。'
+    case 'interactive_event_gap':
+      return '对话事件已中断，输入已保留，请重新连接后重试。'
+    case 'assistant_mode_unavailable':
+      return '当前模式暂不可用，输入已保留，请稍后重试或切换模式。'
+    case 'interactive_confirmation_stale':
+      return action === 'commit' ? '确认信息已过期，请重新生成最新草稿后再确认。' : '确认信息已过期，输入已保留，请重新加载后重试。'
+    default:
+      return undefined
+  }
+}
+
 function readPersistedWorkspace(): PersistedWorkspace | null {
   try {
     const raw = sessionStorage.getItem(WORKSPACE_STORAGE_KEY)
@@ -462,6 +485,14 @@ export default function AssistantWorkspace() {
             setResponding(false)
             lastSubmittedMessage.current = ''
           }
+          if (event.event === 'session.error') {
+            const retryText = stringValue(data.retry_text)
+            if (retryText) {
+              setComposer(retryText)
+              lastSubmittedMessage.current = retryText
+              setError('消息发送失败，输入已保留，请重试。')
+            }
+          }
           if (event.event === 'session.status' && ['idle', 'waiting_answer', 'runtime_failed'].includes(String(data.status))) setResponding(false)
           const eventMode = isMode(data.mode_id) ? data.mode_id : mode
           const eventSession = stringValue(data.session_id)
@@ -583,10 +614,21 @@ export default function AssistantWorkspace() {
         setError(errorCode === 'interactive_question_pending'
           ? '请先完成上方的问题，再发送新消息。输入已保留。'
           : '助手正在处理上一条消息，输入已保留，请稍后重试。')
+      } else if (errorCode === 'assistant_workspace_mode_mismatch' || errorCode === 'interactive_event_gap') {
+        resetExpiredWorkspace(text)
+        setError(assistantWorkspaceConflictMessage(errorCode, 'send') ?? '对话状态已变化，输入已保留，请重新建立对话后重试。')
       } else if (assistantWorkspaceHttpStatus(sendError) === 409) {
         setError('对话状态刚刚发生变化，输入已保留，请稍后重试。')
       } else {
         setError(sendError instanceof Error ? sendError.message : '消息发送失败')
+      }
+      const conflictMessage = assistantWorkspaceConflictMessage(errorCode, 'send')
+      if (conflictMessage && errorCode !== 'assistant_workspace_mode_mismatch' && errorCode !== 'interactive_event_gap'
+        && errorCode !== 'assistant_workspace_busy' && errorCode !== 'interactive_session_busy' && errorCode !== 'interactive_question_pending') {
+        setError(conflictMessage)
+      }
+      if (errorCode === 'project_profile_revision_conflict') {
+        void queryClient.invalidateQueries({ queryKey: ['assistant-bootstrap'] })
       }
     } finally {
       sendInFlight.current = false
@@ -649,9 +691,15 @@ export default function AssistantWorkspace() {
         resetExpiredWorkspace()
       } else if (errorCode === 'assistant_workspace_busy') {
         setError('助手仍在处理上一条消息，请稍后切换。')
+      } else if (errorCode === 'assistant_workspace_mode_mismatch' || errorCode === 'interactive_event_gap') {
+        resetExpiredWorkspace()
+        setError(assistantWorkspaceConflictMessage(errorCode, 'switch') ?? '对话状态已变化，请重新建立对话后重试。')
       } else {
         setError(switchError instanceof Error ? switchError.message : '当前模式正在处理，请稍后切换')
       }
+      const conflictMessage = assistantWorkspaceConflictMessage(errorCode, 'switch')
+      if (conflictMessage && errorCode !== 'assistant_workspace_mode_mismatch' && errorCode !== 'interactive_event_gap'
+        && errorCode !== 'assistant_workspace_busy') setError(conflictMessage)
     } finally {
       setSwitching(false)
     }
@@ -671,6 +719,8 @@ export default function AssistantWorkspace() {
       } else {
         setError(answerError instanceof Error ? answerError.message : '提交回答失败')
       }
+      const conflictMessage = assistantWorkspaceConflictMessage(errorCode, 'answer')
+      if (conflictMessage && errorCode !== 'assistant_workspace_busy') setError(conflictMessage)
     }
   }
 
@@ -771,7 +821,11 @@ export default function AssistantWorkspace() {
       setDraftByMode((current) => ({ ...current, [mode]: null }))
       if (mode === 'creation' && committedTaskID) navigate(`/tasks/${encodeURIComponent(committedTaskID)}`)
     } catch (commitError) {
-      setError(commitError instanceof Error ? commitError.message : '确认失败')
+      const errorCode = assistantWorkspaceErrorCode(commitError)
+      setError(assistantWorkspaceConflictMessage(errorCode, 'commit') ?? (commitError instanceof Error ? commitError.message : '确认失败'))
+      if (errorCode === 'project_profile_revision_conflict') {
+        void queryClient.invalidateQueries({ queryKey: ['assistant-bootstrap'] })
+      }
     } finally {
       setCommitting(false)
     }
