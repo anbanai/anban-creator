@@ -3068,7 +3068,7 @@
     },
     {
       "id": "viral-ip-video-editor",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "kind": "plugin",
       "display_name": "爆款 IP 视频剪辑",
       "description": "基于 Montage 运行时处理真人 IP 口播素材，完成留存导向的剪辑规划、制作指导和成片质量复核。",
@@ -3077,7 +3077,9 @@
         "skills": [
           "content-reuse",
           "content-tagging",
-          "montage"
+          "montage",
+          "portrait-cover-design",
+          "viral-ip-editing"
         ],
         "max_turns": 250
       },
@@ -3097,6 +3099,72 @@
         "montage-runtime"
       ],
       "artifacts": [
+        {
+          "role": "project_brief",
+          "path": "output/project_brief.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "transcript",
+          "path": "output/transcript.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "content_map",
+          "path": "output/content_map.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "edit_master_plan",
+          "path": "output/edit_master_plan.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "plan_review",
+          "path": "output/plan_review.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "edit_decision_list",
+          "path": "output/edit_decision_list.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "visual_plan",
+          "path": "output/visual_plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "sfx_cues",
+          "path": "output/sfx_cues.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "bgm_plan",
+          "path": "output/bgm_plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "captions",
+          "path": "output/captions.srt",
+          "mime_type": "text/plain",
+          "required": false
+        },
+        {
+          "role": "qc_report",
+          "path": "output/qc_report.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
         {
           "role": "content_tags",
           "path": "output/content-tags.json",
@@ -3183,7 +3251,7 @@
         }
       ],
       "ui": {},
-      "digest": "131e7009501e8c0c331481aebdd181a591834a5a00ef063f027c2462786fd2de"
+      "digest": "2095a2e2558d1d5392d863d637128e0cf2026eff1603dce9a65a19f344670c65"
     },
     {
       "id": "wechat-article",
