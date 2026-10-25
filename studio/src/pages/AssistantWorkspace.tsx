@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bot, Check, ChevronDown, Loader2, Plus, UserRound, UserRoundPlus } from 'lucide-react'
+import { Bot, Check, ChevronDown, Loader2, Plus, UserRound } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
@@ -527,11 +527,14 @@ export default function AssistantWorkspace() {
     const resetVersion = workspaceResetVersion.current
     const submittedAttachments = attachmentController.toInputAttachments()
     const contextLines = mode === 'creation' && selectedCreationType
-      ? [`创作类型：${selectedCreationType}`, ...(isVideoEditCreation ? [
-          `剪辑要求：${videoEditBrief.trim() || '按本次创作需求自动决定'}`,
-          `剪辑偏好：${JSON.stringify(videoEditPreferences)}`,
-          `已上传素材：${videoEditAssets.map((asset) => asset.file_name).filter(Boolean).join('、') || '待上传'}`,
-        ] : [])]
+      ? [
+          ...(selectedCreationType === 'seednote' ? [] : [`创作类型：${selectedCreationType}`]),
+          ...(isVideoEditCreation ? [
+            `剪辑要求：${videoEditBrief.trim() || '按本次创作需求自动决定'}`,
+            `剪辑偏好：${JSON.stringify(videoEditPreferences)}`,
+            `已上传素材：${videoEditAssets.map((asset) => asset.file_name).filter(Boolean).join('、') || '待上传'}`,
+          ] : []),
+        ]
       : []
     if (submittedAttachments.length) {
       contextLines.push(`已附加素材：${submittedAttachments.map((asset) => asset.file_name || asset.type).join('、')}`)
@@ -935,24 +938,6 @@ export default function AssistantWorkspace() {
       loadingWorks={worksQuery.isLoading}
     />
   )
-  const enterPersonaModeControl = (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-sm"
-      aria-label="进入人设模式"
-      title="进入人设模式"
-      className="ml-1 border-l border-border pl-2"
-      disabled={switching || committing || sending || responding || draftPending}
-      onClick={() => {
-        if (selectedProject) editPersona(selectedProject.id)
-        else void startNewProfile()
-      }}
-    >
-      <UserRoundPlus className="size-4" />
-    </Button>
-  )
-
   const activeReviewSelectors = workspace && pendingMode === 'review' ? <WorkspaceSelectors mode="review" projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={contentId} works={works} disabled={switching} onProject={selectPersona} onContent={selectReviewContent} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} /> : null
 
   const personaRail = bootstrap ? (
@@ -992,7 +977,7 @@ export default function AssistantWorkspace() {
             {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && <VideoEditReviewResults query={reviewVideoQuery} />}
             {videoEditInputs}
           </div>
-          <Composer fadeAbove={false} value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} status={missingContextInstruction} leadingTools={enterPersonaModeControl} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <Composer fadeAbove={false} value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} status={missingContextInstruction} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       ) : (
         <section className="mx-auto flex min-h-0 w-full max-w-6xl min-w-0 flex-1 flex-col px-4 pb-3 md:px-8">
@@ -1005,7 +990,7 @@ export default function AssistantWorkspace() {
             {activeDraft && confirmationDraft && <DraftConfirmationCard mode={mode} draft={confirmationDraft} committing={committing} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => { setDraftByMode((current) => ({ ...current, [mode]: null })); setError(null) }} />}
             {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
           </div>
-          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} leadingTools={enterPersonaModeControl} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       )}
       </main>

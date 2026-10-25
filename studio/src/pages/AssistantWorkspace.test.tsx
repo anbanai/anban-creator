@@ -211,6 +211,27 @@ describe('AssistantWorkspace', () => {
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
   })
 
+  it('does not append the redundant seednote creation type to the message', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'creation',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划', available: true },
+        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: true },
+      ],
+      projects: [{ id: 'project-seednote', name: '种草人设', platform: 'seednote', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    mocks.projectsList.mockResolvedValue([{ id: 'project-seednote', name: '种草人设', platform: 'seednote', avatar_url: '', status: 'active' }])
+    renderPage({ modeId: 'creation', projectId: 'project-seednote' })
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '写一篇种草笔记' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '写一篇种草笔记'))
+    expect(screen.queryByText('创作类型：seednote')).not.toBeInTheDocument()
+  })
+
   it('blocks creation when the selected persona has no supported creation type', async () => {
     mocks.bootstrap.mockResolvedValue({
       defaultModeId: 'creation',
@@ -911,7 +932,7 @@ describe('AssistantWorkspace', () => {
     })))
   })
 
-  it('keeps persona context in the composer header and uses the plus action for profile updates', async () => {
+  it('keeps persona context in the composer header without a profile-mode entry action', async () => {
     mocks.bootstrap.mockResolvedValue({
       defaultModeId: 'profile',
       modes: [
@@ -932,7 +953,7 @@ describe('AssistantWorkspace', () => {
 
     expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('已有的人设')
     expect(screen.queryByRole('combobox', { name: '人设配置' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '进入人设模式' })).toHaveClass('border-l')
+    expect(screen.queryByRole('button', { name: '进入人设模式' })).not.toBeInTheDocument()
   })
 
   it('synchronizes an active review persona change after selecting a work', async () => {
