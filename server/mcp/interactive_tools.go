@@ -14,13 +14,13 @@ import (
 func registerInteractiveTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "stage_assistant_draft",
-		Description: "Stage a structured creation plan or postmortem review draft for the authenticated Assistant session. The Server selects the schema from the session mode.",
+		Description: "Stage a structured creation plan or postmortem review draft for the authenticated Assistant session. For creation, send payload.plan with only the documented fields: goal, content_type, expected_result, requirements, constraints, assets, missing_inputs, agent_decisions, target_audience, angle, outline (string array), style_constraints, asset_plan, acceptance_criteria, cost_estimate, execution_options, and optional image/video fields. Keep all metadata inside plan; do not invent nested objects or fields.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
 				"name":    map[string]any{"type": "string", "maxLength": 200},
-				"payload": map[string]any{"type": "object", "additionalProperties": true},
+				"payload": assistantDraftPayloadSchema(),
 				"ready":   map[string]any{"type": "boolean"},
 			},
 			"required": []any{"payload", "ready"},
@@ -50,6 +50,33 @@ func registerInteractiveTools(server *mcp.Server) {
 			"required": []any{"project", "profile", "progress", "ready", "missing_fields", "inferred_fields"},
 		},
 	}, stageProjectCreatorDraftHandler)
+}
+
+func assistantDraftPayloadSchema() map[string]any {
+	stringArray := map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
+	asset := map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
+		"type": map[string]any{"type": "string"}, "asset_id": map[string]any{"type": "string"},
+		"upload_id": map[string]any{"type": "string"}, "url": map[string]any{"type": "string"},
+		"task_file_id": map[string]any{"type": "string"}, "text": map[string]any{"type": "string"},
+		"file_name": map[string]any{"type": "string"}, "mime_type": map[string]any{"type": "string"},
+		"file_size": map[string]any{"type": "integer", "minimum": 0}, "instruction": map[string]any{"type": "string"},
+	}}
+	plan := map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
+		"goal": map[string]any{"type": "string"}, "content_type": map[string]any{"type": "string"},
+		"execution_profile": map[string]any{"type": "string"}, "image_ratio": map[string]any{"type": "string"},
+		"image_capability_key": map[string]any{"type": "string"}, "expected_result": map[string]any{"type": "string"},
+		"requirements": stringArray, "constraints": stringArray, "assets": map[string]any{"type": "array", "items": map[string]any{"oneOf": []any{asset, map[string]any{"type": "string"}}}},
+		"video_edit_brief": map[string]any{"type": "string"}, "video_edit_preferences": map[string]any{"type": "object"},
+		"missing_inputs": stringArray, "agent_decisions": stringArray, "target_audience": map[string]any{"type": "string"},
+		"angle": map[string]any{"type": "string"}, "outline": stringArray, "style_constraints": map[string]any{"type": "string"},
+		"asset_plan": map[string]any{"type": "string"}, "acceptance_criteria": map[string]any{"type": "string"},
+		"cost_estimate": map[string]any{"type": "string"}, "execution_options": stringArray,
+	}}
+	return map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
+		"plan": plan,
+		// Review payloads are validated by the mode-specific Server decoder.
+		"review": map[string]any{"type": "object", "additionalProperties": true},
+	}}
 }
 
 func stageAssistantDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

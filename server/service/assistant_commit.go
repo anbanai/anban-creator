@@ -333,10 +333,17 @@ func decodeAssistantCreationPlan(payload []byte) (assistantCreationPlan, []byte,
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&plan); err != nil {
-		return assistantCreationPlan{}, nil, ErrAssistantCheckpointInvalid
+		return assistantCreationPlan{}, nil, fmt.Errorf("%w: plan: %v", ErrAssistantCheckpointInvalid, err)
 	}
 	if strings.TrimSpace(plan.Goal) == "" || strings.TrimSpace(plan.ContentType) == "" {
-		return assistantCreationPlan{}, nil, ErrAssistantCheckpointInvalid
+		missing := make([]string, 0, 2)
+		if strings.TrimSpace(plan.Goal) == "" {
+			missing = append(missing, "plan.goal")
+		}
+		if strings.TrimSpace(plan.ContentType) == "" {
+			missing = append(missing, "plan.content_type")
+		}
+		return assistantCreationPlan{}, nil, fmt.Errorf("%w: missing required fields: %s", ErrAssistantCheckpointInvalid, strings.Join(missing, ", "))
 	}
 	for _, list := range [][]string{plan.Requirements, plan.Constraints, plan.MissingInputs, plan.AgentDecisions, plan.Outline, plan.ExecutionOptions} {
 		for _, value := range list {
@@ -441,8 +448,8 @@ func commitAssistantCreation(ctx context.Context, userID string, checkpoint *mod
 	params := CreateManualParams{
 		UserID: userID, ProjectID: checkpoint.ProjectID, ExecutionProfile: executionProfile,
 		AgentID: selected.Agent.Name, Channel: selected.Channel, TaskKind: taskKind,
-		RequestedTaskType:     taskType,
-		ImageRatio:            plan.ImageRatio, ImageCapabilityKey: plan.ImageCapabilityKey,
+		RequestedTaskType: taskType,
+		ImageRatio:        plan.ImageRatio, ImageCapabilityKey: plan.ImageCapabilityKey,
 		AssistantCheckpointID: checkpoint.ID, AssistantProfileRevision: &checkpoint.BaseProfileRevision, Prompt: prompt, Quantity: 1,
 	}
 	if selected.Agent.Name == model.AgentIDVideoEdit {

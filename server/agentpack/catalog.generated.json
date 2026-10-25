@@ -1334,7 +1334,7 @@
         "interactive-creation-clarification"
       ],
       "ui": {},
-      "digest": "0e317e5b7a7561554405e6d79542da812fbe603f82ea9135d096fa0c07c67dde"
+      "digest": "94fd634c9b3e57bc9e1af85635346650a503a59475efdd0da4d33b8da13e130c"
     },
     {
       "id": "feedback-analysis",
@@ -2479,7 +2479,99 @@
             },
             "profile": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": false,
+              "required": [
+                "schema_version",
+                "status",
+                "initialization_status",
+                "dimensions"
+              ],
+              "properties": {
+                "schema_version": {
+                  "type": "integer",
+                  "const": 1
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "draft",
+                    "confirmed"
+                  ]
+                },
+                "initialization_status": {
+                  "type": "string",
+                  "enum": [
+                    "not_started",
+                    "queued",
+                    "running",
+                    "ready",
+                    "failed"
+                  ]
+                },
+                "last_error": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer"
+                },
+                "application_source": {
+                  "type": "string",
+                  "enum": [
+                    "",
+                    "system_analysis",
+                    "user_confirmation",
+                    "user_edit",
+                    "user_restore"
+                  ]
+                },
+                "analysis_task_id": {
+                  "type": "string"
+                },
+                "analysis_limits": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "follow_up_questions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "dimensions": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "identity",
+                    "style",
+                    "audience",
+                    "platforms",
+                    "preferences",
+                    "memory"
+                  ],
+                  "properties": {
+                    "identity": {
+                      "$ref": "#/definitions/dimension"
+                    },
+                    "style": {
+                      "$ref": "#/definitions/dimension"
+                    },
+                    "audience": {
+                      "$ref": "#/definitions/dimension"
+                    },
+                    "platforms": {
+                      "$ref": "#/definitions/dimension"
+                    },
+                    "preferences": {
+                      "$ref": "#/definitions/dimension"
+                    },
+                    "memory": {
+                      "$ref": "#/definitions/dimension"
+                    }
+                  }
+                }
+              }
             },
             "progress": {
               "type": "object",
@@ -2524,13 +2616,49 @@
               "type": "string",
               "maxLength": 65536
             }
+          },
+          "definitions": {
+            "dimension": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "content",
+                "sources",
+                "evidence",
+                "missing_fields"
+              ],
+              "properties": {
+                "content": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "evidence": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "missing_fields": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
           }
         }
       },
       "ui": {
         "renderer": "custom:project-creator"
       },
-      "digest": "6d8515cafdcaf324d94bf324c9a65d9004920a6474b6877e5dd7d465be34ddb2"
+      "digest": "7f36d87caff7c670b4358847be2f3952087b10275ac17dce1bad83fb11c5b862"
     },
     {
       "id": "seednote",
