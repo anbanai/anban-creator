@@ -338,7 +338,9 @@ export function cronToHuman(cron: string): string {
 
 export function formatDateTimeCN(dateStr: string): string {
   if (!dateStr) return '--'
-  return new Date(dateStr).toLocaleString('zh-CN', {
+  const date = new Date(dateStr)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',

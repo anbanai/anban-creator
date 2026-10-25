@@ -118,7 +118,7 @@ export function taskCreationCostPreview({
 
 export interface TaskActionSignal {
   label: string
-  hint: string
+  hint?: string
   tone: 'risk' | 'publishing' | 'running' | 'success' | 'neutral'
 }
 
@@ -131,7 +131,7 @@ export function taskActionSignal(task: Task): TaskActionSignal {
   if (task.status === 'failed') {
     const failureMessage = taskFailureMessage(task)
     return failureMessage
-      ? { label: stage.title, hint: '进入详情后可继续执行或克隆', tone: 'risk' }
+      ? { label: stage.title, tone: 'risk' }
       : { label: stage.title, hint: '未返回失败详情', tone: 'risk' }
   }
   if (task.status === 'running' || task.status === 'pending') {

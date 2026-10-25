@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { cronToHuman, contentTypeDisplayName, contentTypeLabel, contentTypeOptions, platformDefaultRatio, platformDisplayName, platformLabels, progressStageLabel, statusBadgeVariant, taskFailurePresentation, taskTypeLabelCN } from './labels'
+import { cronToHuman, contentTypeDisplayName, contentTypeLabel, contentTypeOptions, formatDateTimeCN, platformDefaultRatio, platformDisplayName, platformLabels, progressStageLabel, statusBadgeVariant, taskFailurePresentation, taskTypeLabelCN } from './labels'
 
 describe('statusBadgeVariant', () => {
   it('returns "outline" for running', () => {
@@ -132,5 +132,11 @@ describe('plan schedule summaries', () => {
     ['*/15 * * * *', '*/15 * * * *'],
   ])('describes the complete schedule %s', (cron, expected) => {
     expect(cronToHuman(cron)).toBe(expected)
+  })
+})
+
+describe('date-time labels', () => {
+  it('includes the year for current-year timestamps too', () => {
+    expect(formatDateTimeCN('2026-01-01T00:05:00Z')).toContain('2026')
   })
 })

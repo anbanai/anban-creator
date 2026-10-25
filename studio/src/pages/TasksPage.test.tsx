@@ -438,10 +438,43 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect(await screen.findByText('失败文章')).toBeInTheDocument()
     expect(screen.queryByRole('alert', { name: '失败作品提醒' })).not.toBeInTheDocument()
     expect(screen.queryByText('查看失败原因，或重试并保留原作品。')).not.toBeInTheDocument()
+    expect(screen.queryByText('进入详情后可继续执行或克隆')).not.toBeInTheDocument()
     expect(screen.getByText('撰写正文')).toBeInTheDocument()
-    expect(screen.getByLabelText('最近活动：7/6 09:02')).toBeInTheDocument()
+    expect(screen.getByLabelText('最近活动：2026/7/6 09:02')).toBeInTheDocument()
     const retryButton = screen.getByRole('button', { name: '重试作品：失败文章' })
     expect(retryButton).not.toHaveTextContent('重试')
+  })
+
+  it('shows a fallback hint when a failed task has no failure details', async () => {
+    vi.mocked(api.tasks.list).mockResolvedValue({
+      items: [{ ...fixtures.failedTask as Task, error_message: '' }],
+      total: 1,
+    })
+
+    renderTasksPage()
+
+    expect(await screen.findByText('未返回失败详情')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试作品：失败文章' })).toBeInTheDocument()
+  })
+
+  it('falls back to a valid task timestamp when lifecycle updated_at is the zero time', async () => {
+    vi.mocked(api.tasks.list).mockResolvedValue({
+      items: [{
+        ...fixtures.failedTask as Task,
+        created_at: new Date(2026, 6, 6, 9, 0).toISOString(),
+        lifecycle: {
+          version: 1,
+          revision: 1,
+          updated_at: '0001-01-01T00:00:00Z',
+          stages: [{ id: 'writing', title: '撰写正文', source: 'agent', kind: 'work', state: 'failed' }],
+        },
+      }],
+      total: 1,
+    })
+
+    renderTasksPage()
+
+    expect(await screen.findByLabelText('最近活动：2026/7/6 09:00')).toBeInTheDocument()
   })
 
   it('offers content analytics from completed article task rows', async () => {

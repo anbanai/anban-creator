@@ -44,8 +44,15 @@ function normalizeTaskStatusFilter(value: string | null) {
 }
 
 function taskActivityTimestamp(task: { status: TaskStatus; lifecycle?: { updated_at?: string }; completed_at: string; started_at: string; created_at: string; last_heartbeat_at?: string }) {
-  if (task.status === 'completed' && task.completed_at) return task.completed_at
-  return task.lifecycle?.updated_at || task.last_heartbeat_at || task.completed_at || task.started_at || task.created_at
+  const timestamps = task.status === 'completed'
+    ? [task.completed_at, task.lifecycle?.updated_at, task.last_heartbeat_at, task.started_at, task.created_at]
+    : [task.lifecycle?.updated_at, task.last_heartbeat_at, task.completed_at, task.started_at, task.created_at]
+
+  return timestamps.find((value) => {
+    if (!value) return false
+    const date = new Date(value)
+    return Number.isFinite(date.getTime()) && date.getUTCFullYear() > 1
+  }) ?? ''
 }
 
 function taskAgentId(task: { agent_id?: string; type: TaskType; project_snapshot?: { agent_id?: string; channel?: string } }) {
@@ -737,7 +744,7 @@ export default function TasksPage() {
                           {project ? <span className="max-w-[min(16rem,42vw)] truncate text-muted-foreground">{project.name}</span> : <span>未设置人设</span>}
                           <span aria-hidden="true" className="text-border">·</span>
                           <span className={actionSignal.tone === 'risk' ? 'font-medium text-destructive' : 'font-medium text-foreground'}>{stage.title}</span>
-                          {actionSignal.tone === 'risk' && <span>{actionSignal.hint}</span>}
+                          {actionSignal.tone === 'risk' && actionSignal.hint && <span>{actionSignal.hint}</span>}
                           <span className="hidden text-border sm:inline" aria-hidden="true">·</span>
                           <span aria-label={`最近活动：${formatDateTimeCN(activityAt)}`}>{formatDateTimeCN(activityAt)}</span>
                           <span className="hidden text-border sm:inline" aria-hidden="true">·</span>
