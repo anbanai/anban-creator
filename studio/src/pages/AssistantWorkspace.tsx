@@ -33,8 +33,8 @@ import type { ImageRatio } from '@/lib/schemas'
 import { platformDisplayName } from '@/lib/labels'
 import { profileLabAgents } from '@/lib/project-capabilities'
 
-type Message = { id: string; role: 'user' | 'assistant'; text: string }
-type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers'] }
+type Message = { id: string; role: 'user' | 'assistant'; text: string; order: number }
+type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers']; order: number }
 type Draft = Record<string, unknown>
 type RouteState = { modeId?: AssistantModeID; projectId?: string; contentId?: string; checkpointId?: string; initialMessage?: string }
 type PersistedWorkspace = {
@@ -76,12 +76,12 @@ function parsePersistedMessages(value: unknown): Record<string, Message[]> | und
   const result: Record<string, Message[]> = {}
   for (const [mode, entries] of Object.entries(source)) {
     if (!Array.isArray(entries)) continue
-    result[mode] = entries.flatMap((entry) => {
+    result[mode] = entries.flatMap((entry, index) => {
       const item = recordValue(entry)
       const id = stringValue(item?.id)
       const text = typeof item?.text === 'string' ? item.text : undefined
       const role = item?.role === 'user' || item?.role === 'assistant' ? item.role : undefined
-      return id && text !== undefined && role ? [{ id, role, text }] : []
+      return id && text !== undefined && role ? [{ id, role, text, order: typeof item?.order === 'number' ? item.order : index + 1 }] : []
     })
   }
   return result
@@ -93,12 +93,12 @@ function parsePersistedQuestions(value: unknown): Record<string, QuestionBatch[]
   const result: Record<string, QuestionBatch[]> = {}
   for (const [mode, entries] of Object.entries(source)) {
     if (!Array.isArray(entries)) continue
-    result[mode] = entries.flatMap((entry) => {
+    result[mode] = entries.flatMap((entry, index) => {
       const item = recordValue(entry)
       const callId = stringValue(item?.callId)
       const questions = parseQuestions(item?.questions)
       if (!callId || !questions.length) return []
-      return [{ callId, questions, answers: Array.isArray(item?.answers) ? item.answers as DshQuestionAnswer['answers'] : undefined }]
+      return [{ callId, questions, answers: Array.isArray(item?.answers) ? item.answers as DshQuestionAnswer['answers'] : undefined, order: typeof item?.order === 'number' ? item.order : entries.length + index + 1 }]
     })
   }
   return result
@@ -250,6 +250,21 @@ export default function AssistantWorkspace() {
   const workspaceCreateKey = useRef<string | null>(null)
   const sendInFlight = useRef(false)
   const imageRatioContextKey = useRef<string | null>(null)
+  const conversationOrder = useRef<Record<string, number>>({})
+
+  const nextConversationOrder = (conversationMode: AssistantModeID) => {
+    const next = (conversationOrder.current[conversationMode] ?? 0) + 1
+    conversationOrder.current[conversationMode] = next
+    return next
+  }
+
+  useEffect(() => {
+    for (const conversationMode of new Set([...Object.keys(messagesByMode), ...Object.keys(questionsByMode)])) {
+      const maxMessageOrder = Math.max(0, ...(messagesByMode[conversationMode] ?? []).map((item) => item.order))
+      const maxQuestionOrder = Math.max(0, ...(questionsByMode[conversationMode] ?? []).map((item) => item.order))
+      conversationOrder.current[conversationMode] = Math.max(conversationOrder.current[conversationMode] ?? 0, maxMessageOrder, maxQuestionOrder)
+    }
+  }, [messagesByMode, questionsByMode])
 
   useEffect(() => {
     try {
@@ -465,6 +480,7 @@ export default function AssistantWorkspace() {
             const text = stringValue(data.text)
             if (!text) continue
             const role = event.event === 'assistant.message' ? 'assistant' : 'user'
+            const order = nextConversationOrder(eventMode)
             setMessagesByMode((current) => {
               const list = current[eventMode] ?? []
               if (event.id && list.some((item) => item.id === event.id)) return current
@@ -472,16 +488,19 @@ export default function AssistantWorkspace() {
                 const optimisticIndex = list.findIndex((item) => item.id.startsWith('optimistic-') && item.text === text)
                 if (optimisticIndex >= 0) {
                   const next = [...list]
-                  next[optimisticIndex] = { id: event.id, role, text }
+                  next[optimisticIndex] = { ...next[optimisticIndex], id: event.id, role, text }
                   return { ...current, [eventMode]: next }
                 }
               }
-              return { ...current, [eventMode]: [...list, { id: event.id ?? `${role}-${Date.now()}-${list.length}`, role, text }] }
+              return { ...current, [eventMode]: [...list, { id: event.id ?? `${role}-${Date.now()}-${list.length}`, role, text, order }] }
             })
           } else if (event.event === 'question.opened') {
             const callId = stringValue(data.call_id)
             const questions = parseQuestions(data.questions)
-            if (callId && questions.length) setQuestionsByMode((current) => ({ ...current, [eventMode]: [...(current[eventMode] ?? []).filter((item) => item.callId !== callId), { callId, questions }] }))
+            if (callId && questions.length) {
+              const order = nextConversationOrder(eventMode)
+              setQuestionsByMode((current) => ({ ...current, [eventMode]: [...(current[eventMode] ?? []).filter((item) => item.callId !== callId), { callId, questions, order }] }))
+            }
           } else if (event.event === 'draft.ready' && data.draft && typeof data.draft === 'object') {
             setDraftByMode((current) => ({ ...current, [eventMode]: data.draft as Draft }))
           }
@@ -519,11 +538,12 @@ export default function AssistantWorkspace() {
     }
     const messageText = contextLines.length ? `${text}\n\n${contextLines.join('\n')}` : text
     const optimisticID = `optimistic-${++userMessageCounter.current}`
+    const order = nextConversationOrder(mode)
     setSending(true)
     setError(null)
     lastSubmittedMessage.current = text
     setComposer('')
-    setMessagesByMode((current) => ({ ...current, [mode]: [...(current[mode] ?? []), { id: optimisticID, role: 'user', text: messageText }] }))
+    setMessagesByMode((current) => ({ ...current, [mode]: [...(current[mode] ?? []), { id: optimisticID, role: 'user', text: messageText, order }] }))
     let createdWorkspace: AssistantWorkspaceState | null = null
     try {
       let currentWorkspace = workspace
@@ -975,7 +995,7 @@ export default function AssistantWorkspace() {
           <Composer fadeAbove={false} value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} status={missingContextInstruction} leadingTools={enterPersonaModeControl} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       ) : (
-        <section className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col px-4 pb-3 md:px-8">
+        <section className="mx-auto flex min-h-0 w-full max-w-6xl min-w-0 flex-1 flex-col px-4 pb-3 md:px-8">
           <div data-testid="assistant-conversation" className="assistant-scroll min-h-0 flex-1 overflow-y-auto py-4" aria-live="polite">
             {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && (
               <VideoEditReviewResults query={reviewVideoQuery} />
@@ -1199,5 +1219,11 @@ function Conversation({ messages, questions, responding, disabled, onAnswer }: {
   }, [messages.length, questions.length, responding])
 
   if (messages.length === 0 && questions.length === 0) return <div className="flex min-h-[18rem] items-center justify-center text-sm text-muted-foreground">输入你的需求后开始</div>
-  return <div className="space-y-5">{messages.map((message) => <div key={message.id} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}><div className={`flex max-w-[min(720px,90%)] gap-3 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}><div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{message.role === 'user' ? <UserRound className="size-3.5" /> : <Bot className="size-3.5" />}</div><div className={`rounded-2xl px-4 py-3 text-sm leading-6 ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'}`}><Streamdown>{message.text}</Streamdown></div></div></div>)}{questions.map((batch) => <DshQuestionComposer key={batch.callId} questions={batch.questions} submitted={Boolean(batch.answers)} answers={batch.answers} disabled={disabled} onSubmit={(answer) => onAnswer(batch, answer)} />)}{responding && <div role="status" className="flex items-center gap-2 px-10 text-sm text-muted-foreground"><Bot className="size-4" /><Loader2 className="size-4 animate-spin" />AI 正在处理…</div>}<div ref={endRef} aria-hidden="true" className="h-px" /></div>
+  const entries = [
+    ...messages.map((message) => ({ kind: 'message' as const, order: message.order, message })),
+    ...questions.map((batch) => ({ kind: 'question' as const, order: batch.order, batch })),
+  ].sort((left, right) => left.order - right.order)
+  return <div className="min-w-0 space-y-5">{entries.map((entry) => entry.kind === 'message'
+    ? <div key={entry.message.id} className={`flex min-w-0 gap-3 ${entry.message.role === 'user' ? 'justify-end' : ''}`}><div className={`flex min-w-0 max-w-[min(900px,100%)] gap-3 ${entry.message.role === 'user' ? 'flex-row-reverse' : ''}`}><div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{entry.message.role === 'user' ? <UserRound className="size-3.5" /> : <Bot className="size-3.5" />}</div><div className={`min-w-0 max-w-full rounded-2xl px-4 py-3 text-sm leading-6 ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'} [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto`}><Streamdown>{entry.message.text}</Streamdown></div></div></div>
+    : <DshQuestionComposer key={entry.batch.callId} questions={entry.batch.questions} submitted={Boolean(entry.batch.answers)} answers={entry.batch.answers} disabled={disabled} onSubmit={(answer) => onAnswer(entry.batch, answer)} />)}{responding && <div role="status" className="flex items-center gap-2 px-10 text-sm text-muted-foreground"><Bot className="size-4" /><Loader2 className="size-4 animate-spin" />AI 正在处理…</div>}<div ref={endRef} aria-hidden="true" className="h-px" /></div>
 }

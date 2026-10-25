@@ -429,6 +429,30 @@ describe('AssistantWorkspace', () => {
     expect(screen.queryByRole('tab')).not.toBeInTheDocument()
   })
 
+  it('renders question cards in the order they arrive between assistant messages', async () => {
+    mocks.streamEvents = [
+      { event: 'question.opened', id: 'event-question-1', data: JSON.stringify({ session_id: 'session-1', call_id: 'call-1', questions: [{ id: 'q1', question: '先确定作品主题？', options: [{ label: '主题一' }] }] }) },
+      { event: 'assistant.message', id: 'event-assistant-2', data: JSON.stringify({ session_id: 'session-1', text: '根据你的回答，我接着问受众。' }) },
+      { event: 'question.opened', id: 'event-question-2', data: JSON.stringify({ session_id: 'session-1', call_id: 'call-2', questions: [{ id: 'q2', question: '这篇作品面向谁？', options: [{ label: '新手' }] }] }) },
+    ]
+    renderPage()
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    const conversation = await screen.findByTestId('assistant-conversation')
+    await within(conversation).findByRole('heading', { name: '先确定作品主题？' })
+    const entries = [
+      within(conversation).getByText('收到，我开始处理。'),
+      within(conversation).getByRole('heading', { name: '先确定作品主题？' }),
+      within(conversation).getByText('根据你的回答，我接着问受众。'),
+      within(conversation).getByRole('heading', { name: '这篇作品面向谁？' }),
+    ]
+    expect(entries[0].compareDocumentPosition(entries[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(entries[1].compareDocumentPosition(entries[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(entries[2].compareDocumentPosition(entries[3]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(conversation.parentElement).toHaveClass('max-w-6xl')
+  })
+
   it('opens profile setup from the create persona card before starting a workspace', async () => {
     renderPage()
     fireEvent.click(await screen.findByRole('button', { name: '创建新人设' }))
