@@ -31,6 +31,7 @@ import type { VideoEditDefaults, VideoEditPreferences } from '@/types/video-edit
 import type { Task, TaskFile } from '@/types'
 import type { ImageRatio } from '@/lib/schemas'
 import { platformDisplayName } from '@/lib/labels'
+import { profileLabAgents } from '@/lib/project-capabilities'
 
 type Message = { id: string; role: 'user' | 'assistant'; text: string }
 type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers'] }
@@ -1013,6 +1014,11 @@ function platformMeta(platform: string) {
   return { label: platformDisplayName(platform, '创作'), agentID: platformAgentID(platform) }
 }
 
+function platformIntroduction(platform: string) {
+  const agentID = platformAgentID(platform)
+  return profileLabAgents.find((agent) => agent.id === agentID)?.detail ?? `${platformDisplayName(platform, '创作')}内容创作`
+}
+
 function HomeStage({ project, hasReadyPersona }: { project?: AssistantProject; hasReadyPersona: boolean }) {
   const imageURL = personaImageURL(project)
   const meta = platformMeta(project?.platform ?? '')
@@ -1040,13 +1046,17 @@ function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWo
   onEditProfile: (projectId: string) => void
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [hasContentAbove, setHasContentAbove] = useState(false)
   const [hasContentBelow, setHasContentBelow] = useState(false)
 
   useEffect(() => {
     const element = scrollRef.current
     if (!element) return
 
-    const updateOverflow = () => setHasContentBelow(element.scrollHeight - element.scrollTop > element.clientHeight + 1)
+    const updateOverflow = () => {
+      setHasContentAbove(element.scrollTop > 1)
+      setHasContentBelow(element.scrollHeight - element.scrollTop > element.clientHeight + 1)
+    }
     updateOverflow()
     element.addEventListener('scroll', updateOverflow, { passive: true })
     window.addEventListener('resize', updateOverflow)
@@ -1079,7 +1089,7 @@ function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWo
               <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
                 {imageURL ? <SignedImage src={imageURL} alt="" className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-5 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-5 text-muted-foreground" />}
               </div>
-              <span className="min-w-0 flex-1"><span className="flex items-center gap-1 text-sm font-semibold"><span className="truncate">{project.name}</span><AgentIconStack agentIds={[meta.agentID]} maxVisible={1} compact /></span><span className="block truncate text-xs leading-4 text-muted-foreground">{project.description || '已准备好开始创作'}</span></span>
+              <span className="min-w-0 flex-1"><span className="flex items-center gap-1 text-sm font-semibold"><span className="truncate">{project.name}</span><AgentIconStack agentIds={[meta.agentID]} maxVisible={1} compact /></span><span className="block truncate text-xs leading-4 text-muted-foreground">{project.description || platformIntroduction(project.platform)}</span></span>
             </button>
             <div className="mt-auto flex shrink-0 items-center justify-end gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
               <Button type="button" variant="ghost" size="sm" aria-label={`查看作品：${project.name}`} onClick={() => onViewWorks(project.id)} className="h-7 px-1.5 text-[11px]">查看作品</Button>
@@ -1088,7 +1098,8 @@ function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWo
           </article>
         })}
       </div>
-      {hasContentBelow && <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-background via-background/80 to-transparent" />}
+      {hasContentAbove && <div data-testid="persona-card-fade-top" aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-background via-background/80 to-transparent" />}
+      {hasContentBelow && <div data-testid="persona-card-fade-bottom" aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-background via-background/80 to-transparent" />}
     </div>
   </section>
 }

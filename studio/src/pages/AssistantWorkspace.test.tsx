@@ -570,6 +570,27 @@ describe('AssistantWorkspace', () => {
     expect(screen.queryByRole('button', { name: '创作模式' })).not.toBeInTheDocument()
   })
 
+  it('uses a platform introduction when a persona has no custom description', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'creation',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划', available: true },
+        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: true },
+      ],
+      projects: [{ id: 'project-seednote', name: '种草人设', platform: 'seednote', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    mocks.projectsList.mockResolvedValue([{ id: 'project-seednote', name: '种草人设', platform: 'seednote', avatar_url: '', status: 'active' }])
+
+    const rail = await (async () => {
+      renderPage()
+      return screen.findByRole('region', { name: '首页人设选择' })
+    })()
+
+    expect(within(rail).getByText('笔记文案与多页内容')).toBeInTheDocument()
+    expect(within(rail).queryByText('已准备好开始创作')).not.toBeInTheDocument()
+  })
+
   it('hides the persona rail fade after scrolling to the last row', async () => {
     renderPage()
     const scrollRegion = await screen.findByTestId('persona-card-scroll')
@@ -580,19 +601,27 @@ describe('AssistantWorkspace', () => {
     })
     fireEvent.resize(window)
 
-    expect(scrollRegion.nextElementSibling).toHaveClass('bg-gradient-to-t')
+    expect(screen.queryByTestId('persona-card-fade-top')).not.toBeInTheDocument()
+    expect(screen.getByTestId('persona-card-fade-bottom')).toHaveClass('bg-gradient-to-t')
 
     Object.defineProperty(scrollRegion, 'scrollTop', { configurable: true, writable: true, value: 100 })
     fireEvent.scroll(scrollRegion)
 
-    expect(scrollRegion.nextElementSibling).toBeNull()
+    expect(screen.getByTestId('persona-card-fade-top')).toHaveClass('bg-gradient-to-b')
+    expect(screen.queryByTestId('persona-card-fade-bottom')).not.toBeInTheDocument()
 
     fireEvent.scroll(scrollRegion, { target: { scrollTop: 40 } })
-    expect(scrollRegion.nextElementSibling).toHaveClass('bg-gradient-to-t')
+    expect(screen.getByTestId('persona-card-fade-top')).toHaveClass('bg-gradient-to-b')
+    expect(screen.getByTestId('persona-card-fade-bottom')).toHaveClass('bg-gradient-to-t')
 
     Object.defineProperty(scrollRegion, 'clientHeight', { configurable: true, value: 300 })
     fireEvent.resize(window)
-    expect(scrollRegion.nextElementSibling).toBeNull()
+    expect(screen.getByTestId('persona-card-fade-top')).toHaveClass('bg-gradient-to-b')
+    expect(screen.queryByTestId('persona-card-fade-bottom')).not.toBeInTheDocument()
+
+    Object.defineProperty(scrollRegion, 'scrollTop', { configurable: true, writable: true, value: 0 })
+    fireEvent.scroll(scrollRegion)
+    expect(screen.queryByTestId('persona-card-fade-top')).not.toBeInTheDocument()
   })
 
   it('exposes persona actions for works and profile updates', async () => {
