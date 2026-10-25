@@ -1210,6 +1210,24 @@ func TestAssistantReadyDraftRejectsIncompleteModePayload(t *testing.T) {
 	}
 }
 
+func TestAssistantReadyDraftReportsUnsupportedPlanField(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	project := createAssistantProject(t, repo, "user-1", "画像")
+	svc := NewInteractiveService(repo)
+	sessionID := uuid.NewString()
+	svc.sessions[sessionID] = &InteractiveSession{
+		ID: sessionID, UserID: "user-1", ModeID: AssistantModeCreation, AgentID: "creation-planner",
+		ProjectID: project.ID, ExpiresAt: time.Now().Add(time.Hour), watchers: map[*interactiveWatcher]struct{}{},
+	}
+	err := svc.StageAssistantDraftForSession(sessionID, AssistantDraftStageInput{
+		Payload: json.RawMessage(`{"plan":{"goal":"介绍新茶","content_type":"wechat-article","account":"茶文化研究院"}}`),
+		Ready:   true,
+	})
+	if !errors.Is(err, ErrAssistantCheckpointInvalid) || !strings.Contains(err.Error(), `plan: json: unknown field "account"`) {
+		t.Fatalf("unsupported plan field error = %v, want field path", err)
+	}
+}
+
 func TestAssistantReviewSessionReceivesBoundedAnalyticsSnapshot(t *testing.T) {
 	repo := newAssistantTestRepo(t)
 	project := createAssistantProject(t, repo, "user-1", "复盘画像")

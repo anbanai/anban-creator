@@ -178,6 +178,22 @@ func TestStageAssistantDraftToolSchema(t *testing.T) {
 		if !ok || properties["payload"].(map[string]any)["type"] != "object" || properties["ready"].(map[string]any)["type"] != "boolean" {
 			t.Fatalf("assistant draft properties = %#v", schema["properties"])
 		}
+		payloadSchema := properties["payload"].(map[string]any)
+		if payloadSchema["additionalProperties"] != false {
+			t.Fatalf("assistant payload schema = %#v, want closed envelope", payloadSchema)
+		}
+		planSchema := payloadSchema["properties"].(map[string]any)["plan"].(map[string]any)
+		planProperties := planSchema["properties"].(map[string]any)
+		for _, field := range []string{"goal", "content_type", "expected_result", "requirements", "constraints", "assets", "missing_inputs", "agent_decisions", "target_audience", "angle", "outline", "style_constraints", "asset_plan", "acceptance_criteria", "cost_estimate", "execution_options"} {
+			if _, ok := planProperties[field]; !ok {
+				t.Fatalf("assistant plan schema missing %q: %#v", field, planSchema)
+			}
+		}
+		for _, field := range []string{"account", "platform", "column", "topic", "visual_plan", "success_criteria"} {
+			if _, ok := planProperties[field]; ok {
+				t.Fatalf("assistant plan schema still exposes unsupported %q", field)
+			}
+		}
 		return
 	}
 	t.Fatal("stage_assistant_draft tool not registered")
@@ -255,6 +271,67 @@ func TestStageProjectCreatorDraftReturnsValidationCause(t *testing.T) {
 	message := toolResultText(result)
 	if !result.IsError || !strings.Contains(message, "interactive project draft is invalid") || !strings.Contains(message, "profile dimension identity") || !strings.Contains(message, "content") {
 		t.Fatalf("draft error = %#v, want root cause details", result)
+	}
+}
+
+func TestStageProjectCreatorDraftKeepsProfileMetadataAtToolLevel(t *testing.T) {
+	schema := projectCreatorProfileSchema()
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("profile schema properties = %#v", schema["properties"])
+	}
+	if _, ok := properties["missing_fields"]; ok {
+		t.Fatal("profile schema must not accept profile-level missing_fields")
+	}
+	if _, ok := properties["inferred_fields"]; ok {
+		t.Fatal("profile schema must not accept profile-level inferred_fields")
+	}
+	dimensions, ok := properties["dimensions"].(map[string]any)
+	if !ok {
+		t.Fatalf("profile dimensions schema = %#v", properties["dimensions"])
+	}
+	dimensionProperties := dimensions["properties"].(map[string]any)
+	identity := dimensionProperties["identity"].(map[string]any)
+	identityProperties := identity["properties"].(map[string]any)
+	if _, ok := identityProperties["inferred_fields"]; ok {
+		t.Fatal("profile dimensions must not accept inferred_fields")
+	}
+	if _, ok := identityProperties["missing_fields"]; !ok {
+		t.Fatal("profile dimensions must accept dimension-level missing_fields")
+	}
+}
+
+func TestStageProjectCreatorDraftRejectsProfileLevelInferenceFields(t *testing.T) {
+	svc := service.NewInteractiveServiceWithRuntime(nil, &interactiveMCPFactory{tokens: make(chan string, 1)})
+	svc.SetEnabled(true)
+	old := svcs
+	svcs = &Services{InteractiveSvc: svc}
+	t.Cleanup(func() { svcs = old })
+	sess, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := interactiveMCPStageInput()
+	rawProfile, err := json.Marshal(in.Profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var profile map[string]any
+	if err := json.Unmarshal(rawProfile, &profile); err != nil {
+		t.Fatal(err)
+	}
+	profile["missing_fields"] = []string{"style.tone"}
+	profile["inferred_fields"] = []string{"audience.primary"}
+	result, err := stageProjectCreatorDraftHandler(withMCPInteractiveIdentity(context.Background(), "user-1", sess.ID), interactiveMCPRequest(t, map[string]any{
+		"project": in.Project, "profile": profile, "progress": in.Progress, "ready": false,
+		"missing_fields": []string{}, "inferred_fields": []string{},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := toolResultText(result)
+	if !result.IsError || !strings.Contains(message, "unknown field") || (!strings.Contains(message, `"missing_fields"`) && !strings.Contains(message, `"inferred_fields"`)) {
+		t.Fatalf("profile-level metadata result = %#v, want explicit unknown field", result)
 	}
 }
 
