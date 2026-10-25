@@ -936,6 +936,7 @@ export default function AssistantWorkspace() {
       creationTypeOptions={creationTypes}
       loadingProjects={!selectedProject && (bootstrapQuery.isLoading || projectsQuery.isLoading)}
       loadingWorks={worksQuery.isLoading}
+      status={missingContextInstruction ? <span role="status" className="text-xs text-muted-foreground">{missingContextInstruction}</span> : undefined}
     />
   )
   const activeReviewSelectors = workspace && pendingMode === 'review' ? <WorkspaceSelectors mode="review" projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={contentId} works={works} disabled={switching} onProject={selectPersona} onContent={selectReviewContent} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} /> : null
@@ -977,7 +978,7 @@ export default function AssistantWorkspace() {
             {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && <VideoEditReviewResults query={reviewVideoQuery} />}
             {videoEditInputs}
           </div>
-          <Composer fadeAbove={false} value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} status={missingContextInstruction} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <Composer fadeAbove={false} value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       ) : (
         <section className="mx-auto flex min-h-0 w-full max-w-6xl min-w-0 flex-1 flex-col px-4 pb-3 md:px-8">
@@ -1075,7 +1076,7 @@ function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWo
   }, [projects.length])
 
   return <section aria-label="首页人设选择" className="mx-auto mt-auto w-full max-w-5xl shrink-0 pb-1">
-    <div className="mb-3 flex items-center justify-between px-1">
+    <div data-testid="persona-rail-header" className="mb-3 flex items-center gap-2 px-1">
       <p className="text-sm font-medium">选择人设</p>
       <span className="text-xs text-muted-foreground">{projects.length ? `${projects.length} 个可用人设` : '还没有可用人设'}</span>
     </div>
@@ -1154,7 +1155,7 @@ function WorkspaceSelectors({ mode, projects, projectId, contentId, works, disab
   return <div className="mx-auto mt-6 flex w-full max-w-xs flex-col items-stretch gap-3"><NativeSelect className="w-full" aria-label="选择人设" value={projectId} disabled={disabled} onChange={(event) => onProject(event.target.value)}><NativeSelectOption value="">{mode === 'profile' ? '新建人设' : '选择人设'}</NativeSelectOption>{projects.map((project) => <NativeSelectOption key={project.id} value={project.id}>{project.name}</NativeSelectOption>)}</NativeSelect>{mode === 'review' && <NativeSelect className="w-full" aria-label="选择作品" value={contentId} disabled={disabled} onChange={(event) => onContent(event.target.value)}><NativeSelectOption value="">选择作品</NativeSelectOption>{works.map((work) => <NativeSelectOption key={work.id} value={work.id}>{work.title}</NativeSelectOption>)}</NativeSelect>}{mode === 'review' && hasMore && <Button type="button" variant="ghost" size="sm" className="self-end" aria-label="加载更多作品" disabled={disabled} onClick={onMore}><ChevronDown className="size-4" />加载更多作品</Button>}</div>
 }
 
-function Composer({ value, attachments, attachmentController, attachmentsEnabled = true, fadeAbove = true, contextBar, placeholder, inputDisabled, sendDisabled, status, leadingTools, trailingTools, onChange, onAttachmentsChange, onSend }: {
+function Composer({ value, attachments, attachmentController, attachmentsEnabled = true, fadeAbove = true, contextBar, placeholder, inputDisabled, sendDisabled, leadingTools, trailingTools, onChange, onAttachmentsChange, onSend }: {
   value: string
   attachments: PromptAttachment[]
   attachmentController: ReturnType<typeof usePromptAttachments>
@@ -1164,7 +1165,6 @@ function Composer({ value, attachments, attachmentController, attachmentsEnabled
   placeholder: string
   inputDisabled: boolean
   sendDisabled: boolean
-  status?: ReactNode
   leadingTools?: ReactNode
   trailingTools?: ReactNode
   onChange: (value: string) => void
@@ -1172,7 +1172,6 @@ function Composer({ value, attachments, attachmentController, attachmentsEnabled
   onSend: () => void
 }) {
   return <div data-slot="input-group" className={`relative shrink-0 pt-2 ${fadeAbove ? 'before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-gradient-to-b before:from-transparent before:via-background/75 before:to-background' : ''}`}>
-    {status && <p role="status" className="pb-2 text-xs text-muted-foreground">{status}</p>}
     <AgentPromptInput
       value={{ prompt: value, attachments }}
       onChange={(next) => {

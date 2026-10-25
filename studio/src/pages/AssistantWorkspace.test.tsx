@@ -268,6 +268,7 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(composer).toHaveAttribute('placeholder', '当前人设暂不支持首页创作，请选择其他人设'))
     expect(composer).toBeDisabled()
     expect(composer).toHaveAttribute('placeholder', '当前人设暂不支持首页创作，请选择其他人设')
+    expect(within(screen.getByTestId('assistant-context-bar')).getByRole('status')).toHaveTextContent('当前人设暂不支持首页创作，请选择其他人设')
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
   })
 
@@ -625,6 +626,10 @@ describe('AssistantWorkspace', () => {
     const rail = await screen.findByRole('region', { name: '首页人设选择' })
     expect(screen.getByRole('region', { name: '当前人设' })).toHaveClass('flex-1', 'justify-end')
     expect(rail).toHaveClass('mt-auto')
+    const railHeader = within(rail).getByTestId('persona-rail-header')
+    expect(railHeader).toHaveTextContent('选择人设2 个可用人设')
+    expect(railHeader.firstElementChild).toHaveTextContent('选择人设')
+    expect(railHeader.lastElementChild).toHaveTextContent('2 个可用人设')
     expect(within(rail).getByTestId('persona-card-scroll')).toHaveClass('min-h-[5.25rem]', 'max-h-[14.125rem]', 'grid-cols-2', 'min-[700px]:grid-cols-3', 'min-[1600px]:grid-cols-4', 'min-[1900px]:grid-cols-5', 'min-[2200px]:grid-cols-6', 'auto-rows-[5.25rem]')
     expect(within(rail).getByRole('button', { name: '创建新人设' })).toBeInTheDocument()
     expect(within(rail).getByRole('button', { name: '选择人设：第一个人设' })).toHaveAttribute('aria-pressed', 'true')

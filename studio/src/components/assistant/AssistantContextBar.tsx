@@ -20,6 +20,7 @@ interface AssistantContextBarCommonProps {
   loadingProjects?: boolean
   loadingWorks?: boolean
   hasMoreWorks?: boolean
+  status?: ReactNode
 }
 export type AssistantContextBarProps = AssistantContextBarCommonProps & (
   | {
@@ -54,6 +55,7 @@ export function AssistantContextBar(props: AssistantContextBarProps) {
     loadingProjects = false,
     loadingWorks = false,
     hasMoreWorks = false,
+    status,
   } = props
   const selectedProject = projects.find((project) => project.id === projectId) ?? null
   const selectedWork = works.find((work) => work.id === contentId) ?? null
@@ -66,6 +68,7 @@ export function AssistantContextBar(props: AssistantContextBarProps) {
     return (
       <div data-testid="assistant-context-bar" data-phase="locked" aria-disabled="true" className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 py-3 text-left text-sm text-muted-foreground">
         <ProjectContextControl mode="readonly" project={selectedProject} noProjectLabel={projectFallback} compact showAgents={false} />
+        {status}
         {mode === 'review' && (contentId || selectedWork) ? <ContextLabel icon={FileText}>{selectedWork?.title ?? (loadingWorks ? '加载作品…' : '已选作品')}</ContextLabel> : null}
       </div>
     )
