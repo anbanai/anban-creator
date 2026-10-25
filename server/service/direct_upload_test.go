@@ -694,6 +694,44 @@ func TestPrepareDirectUploadAllowsAIEntryMediaAndDocuments(t *testing.T) {
 	}
 }
 
+func TestPrepareDirectUploadMediaLibraryAcceptsOnlyImagesAndVideosWithinAttachmentLimit(t *testing.T) {
+	store := &fakeDirectUploadStore{name: "oss"}
+	cfg := DirectUploadConfig{
+		Storage: config.StorageConfig{Provider: "oss", BucketName: "bucket", Region: "oss-cn-hangzhou"},
+		CredentialIssuer: StaticUploadCredentialIssuer(func(context.Context, UploadCredentialRequest) (*UploadCredential, error) {
+			return &UploadCredential{AccessKeyID: "ak", AccessKeySecret: "sk", SecurityToken: "token", ExpiresAt: time.Now().Add(time.Minute)}, nil
+		}),
+	}
+	cases := []struct {
+		name        string
+		filename    string
+		contentType string
+		size        int64
+		wantOK      bool
+	}{
+		{name: "image", filename: "photo.png", contentType: "image/png", size: 50 * 1024 * 1024, wantOK: true},
+		{name: "video", filename: "clip.mp4", contentType: "video/mp4", size: 50 * 1024 * 1024, wantOK: true},
+		{name: "document", filename: "brief.pdf", contentType: "application/pdf", size: 1024},
+		{name: "audio", filename: "voice.m4a", contentType: "audio/mp4", size: 1024},
+		{name: "oversized image", filename: "photo.png", contentType: "image/png", size: 50*1024*1024 + 1},
+		{name: "oversized video", filename: "clip.mp4", contentType: "video/mp4", size: 50*1024*1024 + 1},
+		{name: "mismatched type", filename: "clip.mp4", contentType: "image/png", size: 1024},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := PrepareDirectUpload(context.Background(), store, &fakeUploadSessionRepo{}, cfg, DirectUploadPrepareRequest{
+				UserID: "user-1", Purpose: "media_library", Filename: tc.filename, ContentType: tc.contentType, Size: tc.size,
+			})
+			if tc.wantOK && err != nil {
+				t.Fatalf("PrepareDirectUpload media library: %v", err)
+			}
+			if !tc.wantOK && err == nil {
+				t.Fatal("PrepareDirectUpload media library succeeded, want rejection")
+			}
+		})
+	}
+}
+
 func TestPrepareDirectUploadAllowsMontageMedia(t *testing.T) {
 	store := &fakeDirectUploadStore{name: "oss"}
 	repo := &fakeUploadSessionRepo{}
