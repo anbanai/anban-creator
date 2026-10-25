@@ -131,7 +131,18 @@ func addWorkspaceEventScope(c fiber.Ctx, ev service.InteractiveEvent, sessionID 
 	}
 	data, ok := ev.Data.(map[string]any)
 	if !ok {
-		data = map[string]any{"value": ev.Data}
+		if ev.Type == "draft.ready" || ev.Type == "draft.updated" {
+			// Draft events are emitted as typed service values. Keep them under
+			// the same envelope used by session snapshots so Studio can render
+			// a confirmation card after both live delivery and replay.
+			data = map[string]any{"draft": ev.Data}
+		} else {
+			data = map[string]any{"value": ev.Data}
+		}
+	} else if ev.Type == "draft.ready" || ev.Type == "draft.updated" {
+		if _, exists := data["draft"]; !exists {
+			data = map[string]any{"draft": ev.Data}
+		}
 	}
 	copyData := make(map[string]any, len(data)+2)
 	for key, value := range data {

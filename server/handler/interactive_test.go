@@ -286,6 +286,40 @@ func TestInteractiveHandlerEventsStreamsPublishedEvent(t *testing.T) {
 	}
 }
 
+func TestInteractiveHandlerScopesDraftEventsForAssistantWorkspace(t *testing.T) {
+	app := fiber.New()
+	app.Get("/", func(c fiber.Ctx) error {
+		c.Locals("assistant_workspace_mode", service.AssistantModeProfile)
+		event := addWorkspaceEventScope(c, service.InteractiveEvent{
+			Type: "draft.ready",
+			Data: service.InteractiveDraft{Ready: true, Revision: 1},
+		}, "session-1")
+		return c.JSON(event.Data)
+	})
+
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var data map[string]json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		t.Fatal(err)
+	}
+	var draft service.InteractiveDraft
+	if raw, ok := data["draft"]; !ok {
+		t.Fatalf("scoped draft event = %#v, want draft payload", data)
+	} else if err := json.Unmarshal(raw, &draft); err != nil {
+		t.Fatalf("decode scoped draft payload: %v", err)
+	}
+	if !draft.Ready {
+		t.Fatalf("scoped draft = %#v, want ready draft", draft)
+	}
+	if got := string(data["mode_id"]); got != `"profile"` {
+		t.Fatalf("mode_id = %s, want profile", got)
+	}
+}
+
 func TestInteractiveHandlerSSEHeartbeatRenewsIdleLease(t *testing.T) {
 	svc := service.NewInteractiveServiceWithRuntime(nil, handlerInteractiveRuntimeFactory{})
 	svc.SetEnabled(true)

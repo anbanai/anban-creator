@@ -45,6 +45,11 @@ export type AssistantContextBarProps = AssistantContextBarCommonProps & (
 function ContextLabel({ icon: Icon, children }: { icon: typeof UserRound; children: ReactNode }) {
   return <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"><Icon aria-hidden="true" className="size-3.5 shrink-0" />{children}</span>
 }
+
+function modeLabel(mode: AssistantModeID) {
+  return mode === 'profile' ? '人设模式' : mode === 'creation' ? '创作模式' : '复盘模式'
+}
+
 export function AssistantContextBar(props: AssistantContextBarProps) {
   const {
     mode,
@@ -67,6 +72,7 @@ export function AssistantContextBar(props: AssistantContextBarProps) {
         : projectId ? '已选人设' : '未关联人设'
     return (
       <div data-testid="assistant-context-bar" data-phase="locked" aria-disabled="true" className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 py-3 text-left text-sm text-muted-foreground">
+        <ContextLabel icon={BriefcaseBusiness}>当前模式：{modeLabel(mode)}</ContextLabel>
         <ProjectContextControl mode="readonly" project={selectedProject} noProjectLabel={projectFallback} compact showAgents={false} />
         {status}
         {mode === 'review' && (contentId || selectedWork) ? <ContextLabel icon={FileText}>{selectedWork?.title ?? (loadingWorks ? '加载作品…' : '已选作品')}</ContextLabel> : null}
@@ -79,6 +85,7 @@ export function AssistantContextBar(props: AssistantContextBarProps) {
   return (
     <div data-testid="assistant-context-bar" data-phase="setup" className="flex w-full flex-wrap items-center gap-2 py-3 text-left">
       <span className="sr-only">会话上下文</span>
+      <ContextLabel icon={BriefcaseBusiness}>当前模式：{modeLabel(mode)}</ContextLabel>
       {(projects.length > 0 || mode === 'profile') ? (
         <ProjectContextControl
           mode="select"

@@ -501,8 +501,10 @@ export default function AssistantWorkspace() {
               const order = nextConversationOrder(eventMode)
               setQuestionsByMode((current) => ({ ...current, [eventMode]: [...(current[eventMode] ?? []).filter((item) => item.callId !== callId), { callId, questions, order }] }))
             }
-          } else if (event.event === 'draft.ready' && data.draft && typeof data.draft === 'object') {
-            setDraftByMode((current) => ({ ...current, [eventMode]: data.draft as Draft }))
+          } else if (event.event === 'draft.ready') {
+            const stagedDraft = recordValue(data.draft) ?? recordValue(data.value)
+              ?? (data.ready === true || data.confirmation_token ? data : undefined)
+            if (stagedDraft) setDraftByMode((current) => ({ ...current, [eventMode]: stagedDraft }))
           }
         }
       } catch (streamError) {

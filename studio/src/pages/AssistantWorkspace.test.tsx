@@ -46,7 +46,7 @@ vi.mock('@/lib/interactive-events', () => ({
     const terminalStream = mocks.streamEvents.some((event) => ['session.expired', 'expired'].includes(event.event))
     if (!terminalStream) {
       yield { event: 'assistant.message', id: `event-${sessionId}-1`, data: JSON.stringify({ session_id: sessionId, text: '收到，我开始处理。' }) }
-      if (sessionId === 'session-1') yield { event: 'draft.ready', id: `event-${sessionId}-2`, data: JSON.stringify({ session_id: sessionId, draft: { confirmation_token: 'token-1', ready: true, project: { platform: 'video-edit' } } }) }
+      if (sessionId === 'session-1') yield { event: 'draft.ready', id: `event-${sessionId}-2`, data: JSON.stringify({ session_id: sessionId, confirmation_token: 'token-1', ready: true, project: { platform: 'video-edit' } }) }
       yield { event: 'turn.end', id: `event-${sessionId}-end`, data: JSON.stringify({ session_id: sessionId }) }
     }
     for (const event of mocks.streamEvents) yield event
@@ -428,7 +428,7 @@ describe('AssistantWorkspace', () => {
 
     const contextBar = await screen.findByTestId('assistant-context-bar')
     await waitFor(() => expect(contextBar).toHaveTextContent('寻茗好茶'))
-    expect(screen.getByTestId('assistant-context-bar')).not.toHaveTextContent('创作模式')
+    expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('当前模式：创作模式')
     const parameters = await screen.findByRole('button', { name: /^选择参数：/ })
     expect(parameters).toHaveTextContent('性价比 / 智能适配 / 标准图像')
     expect(parameters).not.toHaveTextContent('选择参数')
@@ -440,6 +440,16 @@ describe('AssistantWorkspace', () => {
     expect(within(parameterDialog).getByRole('button', { name: /^标准图像/ })).toBeInTheDocument()
     expect(within(parameterDialog).getByRole('button', { name: '16:9' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '人设配置' })).not.toBeInTheDocument()
+  })
+
+  it('labels a new persona conversation as profile mode', async () => {
+    renderPage()
+
+    const contextBar = await screen.findByTestId('assistant-context-bar')
+    expect(contextBar).toHaveTextContent('当前模式：人设模式')
+    await screen.findByText('还没有可用人设')
+    fireEvent.click(screen.getByRole('button', { name: '创建新人设' }))
+    expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('当前模式：人设模式')
   })
 
   it('does not expose a creation type selector for WeChat personas', async () => {
