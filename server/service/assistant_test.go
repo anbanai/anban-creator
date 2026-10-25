@@ -1228,6 +1228,23 @@ func TestAssistantReadyDraftReportsUnsupportedPlanField(t *testing.T) {
 	}
 }
 
+func TestAssistantReadyDraftReportsMissingCreationProjectContext(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	svc := NewInteractiveService(repo)
+	sessionID := uuid.NewString()
+	svc.sessions[sessionID] = &InteractiveSession{
+		ID: sessionID, UserID: "user-1", ModeID: AssistantModeCreation, AgentID: "creation-planner",
+		ExpiresAt: time.Now().Add(time.Hour), watchers: map[*interactiveWatcher]struct{}{},
+	}
+	err := svc.StageAssistantDraftForSession(sessionID, AssistantDraftStageInput{
+		Payload: json.RawMessage(`{"plan":{"goal":"写种草笔记","content_type":"seednote"}}`),
+		Ready:   true,
+	})
+	if !errors.Is(err, ErrAssistantCheckpointInvalid) || !strings.Contains(err.Error(), "session project_id is required") {
+		t.Fatalf("missing creation project context error = %v, want contextual checkpoint error", err)
+	}
+}
+
 func TestAssistantReviewSessionReceivesBoundedAnalyticsSnapshot(t *testing.T) {
 	repo := newAssistantTestRepo(t)
 	project := createAssistantProject(t, repo, "user-1", "复盘画像")

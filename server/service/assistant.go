@@ -1130,9 +1130,16 @@ func (s *InteractiveService) StageAssistantDraftForSessionContext(ctx context.Co
 		sess.mu.Unlock()
 		return ErrAssistantModeUnavailable
 	}
-	if sess.ProjectID == "" || (modeID == AssistantModeReview && sess.ContentID == "") {
+	if sess.ProjectID == "" {
 		sess.mu.Unlock()
-		return ErrAssistantCheckpointInvalid
+		if modeID == AssistantModeCreation {
+			return fmt.Errorf("%w: session project_id is required for creation", ErrAssistantCheckpointInvalid)
+		}
+		return fmt.Errorf("%w: session project_id is required for review", ErrAssistantCheckpointInvalid)
+	}
+	if modeID == AssistantModeReview && sess.ContentID == "" {
+		sess.mu.Unlock()
+		return fmt.Errorf("%w: session content_id is required for review", ErrAssistantCheckpointInvalid)
 	}
 	sess.mu.Unlock()
 
