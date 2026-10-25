@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"strings"
+	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
 	"gorm.io/gorm"
@@ -23,6 +25,8 @@ type UserMediaAssetRepository interface {
 	FindByIDForUser(context.Context, string, string, bool) (*model.UserMediaAsset, error)
 	FindByAssetIDForUser(context.Context, string, string, bool) (*model.UserMediaAsset, error)
 	Update(context.Context, *model.UserMediaAsset) error
+	UpdateMetadata(context.Context, string, string, *string, *string) error
+	MarkRemoved(context.Context, string, string, time.Time) error
 	List(context.Context, UserMediaAssetListFilter) ([]*model.UserMediaAsset, int64, error)
 	ListReadyCandidates(context.Context, string, string, string, string, int) ([]*model.UserMediaAsset, error)
 }
@@ -63,6 +67,38 @@ func (r *userMediaAssetRepository) FindByAssetIDForUser(ctx context.Context, use
 
 func (r *userMediaAssetRepository) Update(ctx context.Context, row *model.UserMediaAsset) error {
 	return r.db.WithContext(ctx).Save(row).Error
+}
+
+func (r *userMediaAssetRepository) UpdateMetadata(ctx context.Context, userID, id string, projectID *string, usageNotes *string) error {
+	updates := map[string]any{"updated_at": time.Now().UTC()}
+	if projectID != nil {
+		updates["project_id"] = strings.TrimSpace(*projectID)
+	}
+	if usageNotes != nil {
+		updates["usage_notes"] = strings.TrimSpace(*usageNotes)
+	}
+	if len(updates) == 1 {
+		return nil
+	}
+	result := r.db.WithContext(ctx).Model(&model.UserMediaAsset{}).Where("id = ? AND user_id = ? AND removed_at IS NULL", id, userID).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (r *userMediaAssetRepository) MarkRemoved(ctx context.Context, userID, id string, removedAt time.Time) error {
+	result := r.db.WithContext(ctx).Model(&model.UserMediaAsset{}).Where("id = ? AND user_id = ? AND removed_at IS NULL", id, userID).Updates(map[string]any{"removed_at": removedAt, "updated_at": removedAt})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (r *userMediaAssetRepository) List(ctx context.Context, filter UserMediaAssetListFilter) ([]*model.UserMediaAsset, int64, error) {

@@ -105,6 +105,66 @@ func TestUserMediaLibraryUpdateKeepsUserNotesAndRejectsForeignProject(t *testing
 	if view.UpdatedAt.Before(view.CreatedAt.Add(-time.Second)) {
 		t.Fatalf("invalid timestamps: %#v", view)
 	}
+	cleared := ""
+	view, err = svc.Update(ctx, UserMediaUpdateRequest{UserID: "user-1", ProjectID: &cleared}, row.ID)
+	if err != nil || view.ProjectID != "" || view.UsageNotes != notes {
+		t.Fatalf("cleared project tag = %#v, %v", view, err)
+	}
+}
+
+func TestValidateUserMediaAssetForCreationRequiresReadyActiveRow(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Asset{}, &model.UserMediaAsset{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	for _, tc := range []struct {
+		name   string
+		status string
+		remove bool
+	}{
+		{name: "queued", status: model.UserMediaAssetStatusQueued},
+		{name: "failed", status: model.UserMediaAssetStatusFailed},
+		{name: "removed", status: model.UserMediaAssetStatusAvailable, remove: true},
+	} {
+		assetID := "asset-" + tc.name
+		if err := repo.Assets().Create(t.Context(), &model.Asset{ID: assetID, UserID: "user-1", Purpose: DirectUploadPurposeMediaLibrary, StorageKey: assetID + ".png", FileName: "source.png", ContentType: "image/png", Size: 1, ETag: assetID}); err != nil {
+			t.Fatal(err)
+		}
+		row := &model.UserMediaAsset{ID: "media-" + tc.name, UserID: "user-1", AssetID: assetID, MediaType: "image", Status: tc.status}
+		if tc.remove {
+			removedAt := time.Now().UTC()
+			row.RemovedAt = &removedAt
+		}
+		if err := repo.UserMediaAssets().Create(t.Context(), row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ready := &model.Asset{ID: "asset-ready", UserID: "user-1", Purpose: DirectUploadPurposeMediaLibrary, StorageKey: "asset-ready.png", FileName: "source.png", ContentType: "image/png", Size: 1, ETag: "asset-ready"}
+	if err := repo.Assets().Create(t.Context(), ready); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UserMediaAssets().Create(t.Context(), &model.UserMediaAsset{ID: "media-ready", UserID: "user-1", AssetID: ready.ID, MediaType: "image", Status: model.UserMediaAssetStatusAvailable}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ValidateUserMediaAssetForCreation(t.Context(), repo, "user-1", ready); err != nil {
+		t.Fatalf("ready media asset rejected: %v", err)
+	}
+	for _, tc := range []string{"queued", "failed", "removed"} {
+		t.Run(tc, func(t *testing.T) {
+			asset, err := repo.Assets().FindOwnedByID(t.Context(), "asset-"+tc, "user-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ValidateUserMediaAssetForCreation(t.Context(), repo, "user-1", asset); !errors.Is(err, ErrUserMediaUnavailable) {
+				t.Fatalf("validation error = %v, want ErrUserMediaUnavailable", err)
+			}
+		})
+	}
 }
 
 func userMediaStringPtr(value string) *string { return &value }

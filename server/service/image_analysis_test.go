@@ -87,7 +87,7 @@ func setupImageAnalysisService(t *testing.T) (*ImageAnalysisService, repository.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.Asset{}, &model.Project{}, &model.Template{}, &model.ImageAnalysisJob{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Asset{}, &model.Project{}, &model.Template{}, &model.UserMediaAsset{}, &model.ImageAnalysisJob{}); err != nil {
 		t.Fatal(err)
 	}
 	repo := repository.New(db)
@@ -150,7 +150,8 @@ func TestUserMediaVideoAnalysisUsesNativeClientAndKeepsNotesOnRetry(t *testing.T
 	logger := zerolog.New(io.Discard)
 	enqueuer := &imageAnalysisEnqueuerFake{}
 	client := userMediaVideoLLMFake{}
-	svc := NewImageAnalysisService(repo, &imageAnalysisStorageFake{data: map[string][]byte{}}, client, enqueuer, nil, ImageAnalysisConfig{LeaseDuration: time.Minute}, &logger)
+	svc := NewImageAnalysisService(repo, &imageAnalysisStorageFake{data: map[string][]byte{}}, nil, enqueuer, nil, ImageAnalysisConfig{LeaseDuration: time.Minute}, &logger)
+	svc.SetVideoClient(client, "video-provider", "video-model")
 	asset := &model.Asset{ID: uuid.NewString(), UserID: "user-1", Purpose: DirectUploadPurposeMediaLibrary, StorageKey: "media.mp4", FileName: "media.mp4", ContentType: "video/mp4", Size: 12, ETag: "etag"}
 	if err := repo.Assets().Create(t.Context(), asset); err != nil {
 		t.Fatal(err)
@@ -169,6 +170,45 @@ func TestUserMediaVideoAnalysisUsesNativeClientAndKeepsNotesOnRetry(t *testing.T
 	got, err := repo.UserMediaAssets().FindByIDForUser(t.Context(), "user-1", media.ID, false)
 	if err != nil || got.Status != model.UserMediaAssetStatusAvailable || got.UsageNotes != "保留原声" {
 		t.Fatalf("video media = %#v err=%v", got, err)
+	}
+}
+
+func TestUserMediaVideoAnalysisRequiresConfiguredVideoClient(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.Asset{}, &model.UserMediaAsset{}, &model.ImageAnalysisJob{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	enqueuer := &imageAnalysisEnqueuerFake{}
+	// This client supports native video calls, but it represents the image
+	// route. A video analysis must not silently reuse it when no video route is
+	// configured.
+	svc := NewImageAnalysisService(repo, &imageAnalysisStorageFake{data: map[string][]byte{}}, userMediaVideoLLMFake{}, enqueuer, nil, ImageAnalysisConfig{LeaseDuration: time.Minute}, &logger)
+	asset := &model.Asset{ID: uuid.NewString(), UserID: "user-1", Purpose: DirectUploadPurposeMediaLibrary, StorageKey: "media.mp4", FileName: "media.mp4", ContentType: "video/mp4", Size: 12, ETag: "etag"}
+	if err := repo.Assets().Create(t.Context(), asset); err != nil {
+		t.Fatal(err)
+	}
+	media := &model.UserMediaAsset{ID: uuid.NewString(), UserID: "user-1", AssetID: asset.ID, MediaType: "video", Status: model.UserMediaAssetStatusQueued}
+	if err := repo.UserMediaAssets().Create(t.Context(), media); err != nil {
+		t.Fatal(err)
+	}
+	job, err := svc.CreateUserMediaJob(t.Context(), media)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Process(t.Context(), job.ID, job.Generation); !errors.Is(err, ErrVideoUnderstandingUnavailable) {
+		t.Fatalf("Process error = %v, want ErrVideoUnderstandingUnavailable", err)
+	}
+	got, err := repo.UserMediaAssets().FindByIDForUser(t.Context(), "user-1", media.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.UserMediaAssetStatusQueued || got.ErrorCode != "video_model_unavailable" {
+		t.Fatalf("media after missing video route = %#v", got)
 	}
 }
 
@@ -289,6 +329,35 @@ func TestImageAnalysisRecoverRequeuesQueuedAndExpiredRunningJobs(t *testing.T) {
 	}
 	if recovered.Generation != 2 || recovered.Status != model.ImageAnalysisStatusQueued || recovered.AttemptCount != 1 || recovered.EnqueuedAt == nil {
 		t.Fatalf("recovered expired job = %+v", recovered)
+	}
+}
+
+func TestImageAnalysisRecoverRequeuesExpiredUserMediaAndUpdatesLibraryStatus(t *testing.T) {
+	svc, repo, _, _ := setupImageAnalysisService(t)
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+	asset := seedAnalysisAsset(t, repo, "user-media-owner", DirectUploadPurposeMediaLibrary)
+	media := &model.UserMediaAsset{ID: uuid.NewString(), UserID: asset.UserID, AssetID: asset.ID, MediaType: "image", Status: model.UserMediaAssetStatusAnalyzing, Description: "旧描述"}
+	if err := repo.UserMediaAssets().Create(t.Context(), media); err != nil {
+		t.Fatal(err)
+	}
+	job := newImageAnalysisJob(media.UserID, model.ImageAnalysisSubjectUserMedia, media.ID, model.ImageAnalysisKindUserMedia, asset.ID)
+	job.Status = model.ImageAnalysisStatusRunning
+	job.AttemptCount = 1
+	lease := now.Add(-time.Minute)
+	job.LeaseExpiresAt = &lease
+	if err := repo.ImageAnalyses().Create(t.Context(), job); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Recover(t.Context(), 10); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := repo.UserMediaAssets().FindByIDForUser(t.Context(), media.UserID, media.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != model.UserMediaAssetStatusQueued || persisted.Description != media.Description || persisted.ErrorCode != "" {
+		t.Fatalf("recovered user media = %+v, want queued with metadata preserved", persisted)
 	}
 }
 

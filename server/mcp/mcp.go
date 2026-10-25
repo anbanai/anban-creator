@@ -395,7 +395,6 @@ var interactiveMCPTools = map[string]struct{}{
 	"list_trends":                 {},
 	"list_resources":              {},
 	"get_resource":                {},
-	"search_user_media_assets":    {},
 }
 
 // interactiveScopeMiddleware constrains the opaque credential issued to a
@@ -429,11 +428,16 @@ func interactiveScopeMiddleware(next http.Handler) http.Handler {
 		for _, request := range requests {
 			if request.Method == "tools/call" {
 				modeID, _ := info.Extra["assistant_mode_id"].(string)
-				if (modeID == service.AssistantModeCreation || modeID == service.AssistantModeReview) && strings.TrimSpace(request.Params.Name) != "stage_assistant_draft" {
+				toolName := strings.TrimSpace(request.Params.Name)
+				creationMediaSearch := modeID == service.AssistantModeCreation && toolName == "search_user_media_assets"
+				if (modeID == service.AssistantModeCreation || modeID == service.AssistantModeReview) && toolName != "stage_assistant_draft" && !creationMediaSearch {
 					http.Error(w, "Assistant runtime credential cannot read outside its frozen context", http.StatusForbidden)
 					return
 				}
-				if _, allowed := interactiveMCPTools[strings.TrimSpace(request.Params.Name)]; allowed {
+				if creationMediaSearch {
+					continue
+				}
+				if _, allowed := interactiveMCPTools[toolName]; allowed {
 					continue
 				}
 				http.Error(w, "interactive runtime credential cannot call this MCP tool", http.StatusForbidden)

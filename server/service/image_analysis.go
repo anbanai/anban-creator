@@ -254,19 +254,29 @@ func (s *ImageAnalysisService) CreateUserMediaJob(ctx context.Context, media *mo
 	}
 	var job *model.ImageAnalysisJob
 	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
-		media.Status = model.UserMediaAssetStatusQueued
-		media.ErrorCode, media.ErrorMessage = "", ""
-		if err := tx.UserMediaAssets().Update(ctx, media); err != nil {
-			return err
-		}
 		var err error
-		job, err = s.upsertJobTx(ctx, tx, media.UserID, model.ImageAnalysisSubjectUserMedia, media.ID, model.ImageAnalysisKindUserMedia, media.AssetID, media.Description)
+		job, err = s.CreateUserMediaJobInTx(ctx, tx, media)
 		return err
 	}); err != nil {
 		return nil, err
 	}
 	s.enqueue(ctx, job)
 	return job, nil
+}
+
+// CreateUserMediaJobInTx creates or resets the durable analysis job while the
+// caller's transaction also creates the library row. The caller must enqueue
+// the returned job only after the surrounding transaction commits.
+func (s *ImageAnalysisService) CreateUserMediaJobInTx(ctx context.Context, tx repository.Repository, media *model.UserMediaAsset) (*model.ImageAnalysisJob, error) {
+	if tx == nil || media == nil || media.ID == "" || media.UserID == "" || media.AssetID == "" {
+		return nil, errors.New("user media asset is invalid")
+	}
+	media.Status = model.UserMediaAssetStatusQueued
+	media.ErrorCode, media.ErrorMessage = "", ""
+	if err := tx.UserMediaAssets().Update(ctx, media); err != nil {
+		return nil, err
+	}
+	return s.upsertJobTx(ctx, tx, media.UserID, model.ImageAnalysisSubjectUserMedia, media.ID, model.ImageAnalysisKindUserMedia, media.AssetID, media.Description)
 }
 
 func (s *ImageAnalysisService) RetryUserMedia(ctx context.Context, userID, id string) (*model.ImageAnalysisJob, error) {
@@ -502,7 +512,7 @@ func (s *ImageAnalysisService) claim(ctx context.Context, id string, generation 
 }
 
 func (s *ImageAnalysisService) analyze(ctx context.Context, job *model.ImageAnalysisJob) (string, error) {
-	if s.client == nil && !(job.SubjectType == model.ImageAnalysisSubjectUserMedia && s.videoClient != nil) {
+	if s.client == nil && job.SubjectType != model.ImageAnalysisSubjectUserMedia {
 		return "", errors.New("image understanding model is not configured")
 	}
 	asset, err := s.repo.Assets().FindOwnedByID(ctx, job.SourceAssetID, job.UserID)
@@ -557,7 +567,7 @@ func (s *ImageAnalysisService) analyzeUserMedia(ctx context.Context, job *model.
 	if strings.HasPrefix(strings.ToLower(asset.ContentType), "video/") {
 		client := s.videoClient
 		if client == nil {
-			client = s.client
+			return "", ErrVideoUnderstandingUnavailable
 		}
 		native, ok := client.(NativeVideoUnderstandingClient)
 		if !ok {
@@ -932,6 +942,13 @@ func (s *ImageAnalysisService) requeueExpired(ctx context.Context, id string) (b
 		job.Generation++
 		job.Status = model.ImageAnalysisStatusQueued
 		job.StartedAt, job.CompletedAt = nil, nil
+		if subject.userMedia != nil {
+			subject.userMedia.Status = model.UserMediaAssetStatusQueued
+			subject.userMedia.ErrorCode, subject.userMedia.ErrorMessage = "", ""
+			if err := tx.UserMediaAssets().Update(ctx, subject.userMedia); err != nil {
+				return err
+			}
+		}
 		requeued = true
 		return tx.ImageAnalyses().Update(ctx, job)
 	})

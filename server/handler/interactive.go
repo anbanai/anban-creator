@@ -260,7 +260,7 @@ func interactiveError(c fiber.Ctx, err error) error {
 		return Error(c, 404, err.Error())
 	case errors.Is(err, service.ErrAssistantCheckpointInvalid):
 		return Error(c, 400, err.Error())
-	case errors.Is(err, service.ErrAssistantCreationInputsMissing), errors.Is(err, service.ErrAssistantCreationAssetUnavailable):
+	case errors.Is(err, service.ErrAssistantCreationInputsMissing), errors.Is(err, service.ErrAssistantCreationAssetUnavailable), errors.Is(err, service.ErrUserMediaUnavailable):
 		return Error(c, 400, err.Error())
 	case errors.Is(err, service.ErrAssistantModeUnavailable):
 		return ErrorWithCode(c, 409, "assistant_mode_unavailable", err.Error())

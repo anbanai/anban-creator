@@ -29,6 +29,7 @@ func TestInteractiveHandlerMapsAssistantErrors(t *testing.T) {
 		{name: "checkpoint invalid", err: service.ErrAssistantCheckpointInvalid, want: fiber.StatusBadRequest},
 		{name: "creation input missing", err: service.ErrAssistantCreationInputsMissing, want: fiber.StatusBadRequest},
 		{name: "creation asset unavailable", err: service.ErrAssistantCreationAssetUnavailable, want: fiber.StatusBadRequest},
+		{name: "media library asset unavailable", err: service.ErrUserMediaUnavailable, want: fiber.StatusBadRequest},
 		{name: "runtime context too large", err: service.ErrAssistantRuntimeContextTooLarge, want: fiber.StatusRequestEntityTooLarge},
 	}
 	for _, test := range tests {

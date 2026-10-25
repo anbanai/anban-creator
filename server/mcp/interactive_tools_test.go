@@ -503,6 +503,27 @@ func TestInteractiveRuntimeCredentialCanCallReadOnlyMCPTools(t *testing.T) {
 	}
 }
 
+func TestInteractiveProfileCredentialCannotSearchUserMediaAssets(t *testing.T) {
+	factory := &interactiveMCPFactory{tokens: make(chan string, 1)}
+	svc := service.NewInteractiveServiceWithRuntimeAndAgents(nil, factory, []service.InteractiveAgent{{ID: "project-creator", Available: true, Intents: []string{"create-project"}}})
+	svc.SetEnabled(true)
+	if _, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project"); err != nil {
+		t.Fatal(err)
+	}
+	var runtimeToken string
+	select {
+	case runtimeToken = <-factory.tokens:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for runtime token")
+	}
+	handler := NewMCPHandler(nil, "", nil, WithInteractiveAuthentication(svc))
+	sessionID := initializeMCPExecutionSession(t, handler, runtimeToken)
+	rec := callMCPToolForScopeTest(handler, runtimeToken, sessionID, "search_user_media_assets", `{}`)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("interactive profile media search status = %d, body = %s; want 403", rec.Code, rec.Body.String())
+	}
+}
+
 func TestInteractiveRuntimeCredentialCanStageOwnDraftOverMCP(t *testing.T) {
 	factory := &interactiveMCPFactory{tokens: make(chan string, 1)}
 	svc := service.NewInteractiveServiceWithRuntime(nil, factory)
@@ -568,6 +589,10 @@ func TestInteractiveRuntimeCredentialCanStageAssistantDraftOverMCP(t *testing.T)
 	}
 	handler := NewMCPHandler(nil, "", nil, WithInteractiveAuthentication(svc))
 	sessionID := initializeMCPExecutionSession(t, handler, runtimeToken)
+	mediaSearch := callMCPToolForScopeTest(handler, runtimeToken, sessionID, "search_user_media_assets", `{}`)
+	if mediaSearch.Code != http.StatusOK {
+		t.Fatalf("interactive creation media search status = %d, body = %s; want 200", mediaSearch.Code, mediaSearch.Body.String())
+	}
 	for _, tool := range []string{"list_projects", "get_project", "list_drafts"} {
 		rec := callMCPToolForScopeTest(handler, runtimeToken, sessionID, tool, `{"project_id":"foreign-project"}`)
 		if rec.Code != http.StatusForbidden {

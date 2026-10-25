@@ -70,4 +70,17 @@ describe('UserMediaLibraryPage', () => {
     fireEvent.change(await screen.findByLabelText('上传素材'), { target: { files: [file] } })
     expect(await screen.findByRole('alert')).toHaveTextContent('视频超过模型支持的大小限制')
   })
+
+  it('confirms removal before calling the API', async () => {
+    mocks.projects.mockResolvedValue([])
+    mocks.list.mockResolvedValue({ items: [{ id: 'media-1', file_name: 'product.png', media_type: 'image', content_type: 'image/png', size: 10, status: 'available', created_at: '', updated_at: '' }], total: 1, offset: 0, limit: 50 })
+    mocks.remove.mockImplementation((_id: string, options?: { onSuccess?: () => void }) => { options?.onSuccess?.(); return undefined })
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: /移除/ }))
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+    expect(mocks.remove).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '确认移除' }))
+    await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith('media-1'))
+  })
 })

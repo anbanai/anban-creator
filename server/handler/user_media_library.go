@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"strconv"
 
@@ -26,9 +28,30 @@ type createUserMediaRequest struct {
 	UsageNotes      string `json:"usage_notes,omitempty"`
 }
 
+// nullableString preserves the distinction between an omitted PATCH field and
+// an explicit JSON null. The service uses an empty string to clear the
+// nullable project tag/usage note stored by the current model.
+type nullableString struct {
+	value *string
+}
+
+func (s *nullableString) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		value := ""
+		s.value = &value
+		return nil
+	}
+	var value string
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	s.value = &value
+	return nil
+}
+
 type updateUserMediaRequest struct {
-	ProjectID  *string `json:"project_id"`
-	UsageNotes *string `json:"usage_notes"`
+	ProjectID  nullableString `json:"project_id"`
+	UsageNotes nullableString `json:"usage_notes"`
 }
 
 func (h *UserMediaLibraryHandler) Create(c fiber.Ctx) error {
@@ -82,7 +105,7 @@ func (h *UserMediaLibraryHandler) Update(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
-	view, err := h.service.Update(c.Context(), service.UserMediaUpdateRequest{UserID: userID, ProjectID: req.ProjectID, UsageNotes: req.UsageNotes}, c.Params("id"))
+	view, err := h.service.Update(c.Context(), service.UserMediaUpdateRequest{UserID: userID, ProjectID: req.ProjectID.value, UsageNotes: req.UsageNotes.value}, c.Params("id"))
 	if err != nil {
 		return h.respondError(c, err)
 	}

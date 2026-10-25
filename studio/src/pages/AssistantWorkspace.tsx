@@ -711,16 +711,19 @@ export default function AssistantWorkspace() {
   const submitAnswers = async (batch: QuestionBatch, answer: DshQuestionAnswer) => {
     if (!workspace) return
     try {
-      await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers)
       const mediaIDs = [...new Set(answer.answers.flatMap((item) => item.selected).flatMap((label) => {
         const match = /^media_asset:(.+)$/.exec(label.trim())
         return match?.[1]?.trim() ? [match[1].trim()] : []
       }))]
+      const selectedMedia = mediaIDs.length > 0 ? await Promise.all(mediaIDs.map((id) => api.userMedia.get(id))) : []
+      if (selectedMedia.some((asset) => asset.status !== 'available')) {
+        throw new Error('候选素材已不可用，请重新选择或上传素材。')
+      }
+      await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers)
       if (mediaIDs.length > 0) {
-        const selectedMedia = await Promise.all(mediaIDs.map((id) => api.userMedia.get(id)))
         setAttachments((current) => {
           const existing = new Set(current.flatMap((item) => item.assetId ? [item.assetId] : []))
-          const additions = selectedMedia.filter((asset) => asset.status === 'available').filter((asset) => !existing.has(asset.id)).map((asset) => ({
+          const additions = selectedMedia.filter((asset) => !existing.has(asset.id)).map((asset) => ({
             id: `media-${asset.id}`, type: asset.media_type, fileName: asset.file_name, contentType: asset.content_type, size: asset.size,
             status: 'uploaded' as const, progress: 100, assetId: asset.id,
           }))
@@ -1236,7 +1239,7 @@ function MediaLibraryPicker({ projectId, attachments, onChange, attachmentContro
   const fileRef = useRef<HTMLInputElement | null>(null)
   const media = useQuery({
     queryKey: ['user-media-picker', projectId, query],
-    queryFn: () => api.userMedia.list({ q: query || undefined, project_id: projectId || undefined, status: 'available', limit: 30 }),
+    queryFn: () => api.userMedia.list({ q: query || undefined, status: 'available', limit: 30 }),
     enabled: open,
     staleTime: 10_000,
   })

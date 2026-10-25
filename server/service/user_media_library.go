@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ var (
 	ErrUserMediaInvalidUpload  = errors.New("user media upload is invalid")
 	ErrUserMediaNotRetryable   = errors.New("user media analysis is not retryable")
 	ErrUserMediaAlreadyRemoved = errors.New("user media asset is already removed")
+	ErrUserMediaUnavailable    = errors.New("user media asset is unavailable for new creation")
 )
 
 const userMediaPreviewTTL = 5 * 60
@@ -125,12 +127,18 @@ func (s *UserMediaLibraryService) Create(ctx context.Context, req UserMediaCreat
 		ID: uuid.NewString(), UserID: userID, AssetID: asset.ID, ProjectID: projectID,
 		MediaType: mediaType, Status: model.UserMediaAssetStatusQueued, UsageNotes: strings.TrimSpace(req.UsageNotes),
 	}
-	if err := s.repo.UserMediaAssets().Create(ctx, media); err != nil {
+	var job *model.ImageAnalysisJob
+	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if err := tx.UserMediaAssets().Create(ctx, media); err != nil {
+			return err
+		}
+		var err error
+		job, err = s.analysis.CreateUserMediaJobInTx(ctx, tx, media)
+		return err
+	}); err != nil {
 		return nil, err
 	}
-	if _, err := s.analysis.CreateUserMediaJob(ctx, media); err != nil {
-		return nil, err
-	}
+	s.analysis.enqueue(ctx, job)
 	return s.present(ctx, media)
 }
 
@@ -190,10 +198,14 @@ func (s *UserMediaLibraryService) Update(ctx context.Context, req UserMediaUpdat
 		}
 		row.ProjectID = projectID
 	}
-	if req.UsageNotes != nil {
-		row.UsageNotes = strings.TrimSpace(*req.UsageNotes)
+	if err := s.repo.UserMediaAssets().UpdateMetadata(ctx, req.UserID, id, req.ProjectID, req.UsageNotes); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrUserMediaNotFound
+		}
+		return nil, err
 	}
-	if err := s.repo.UserMediaAssets().Update(ctx, row); err != nil {
+	row, err = s.repo.UserMediaAssets().FindByIDForUser(ctx, strings.TrimSpace(req.UserID), strings.TrimSpace(id), false)
+	if err != nil {
 		return nil, err
 	}
 	return s.present(ctx, row)
@@ -228,7 +240,7 @@ func (s *UserMediaLibraryService) Retry(ctx context.Context, userID, id string) 
 }
 
 func (s *UserMediaLibraryService) Remove(ctx context.Context, userID, id string) error {
-	row, err := s.repo.UserMediaAssets().FindByIDForUser(ctx, strings.TrimSpace(userID), strings.TrimSpace(id), false)
+	_, err := s.repo.UserMediaAssets().FindByIDForUser(ctx, strings.TrimSpace(userID), strings.TrimSpace(id), false)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return ErrUserMediaNotFound
 	}
@@ -236,8 +248,11 @@ func (s *UserMediaLibraryService) Remove(ctx context.Context, userID, id string)
 		return err
 	}
 	now := s.now().UTC()
-	row.RemovedAt = &now
-	return s.repo.UserMediaAssets().Update(ctx, row)
+	if err := s.repo.UserMediaAssets().MarkRemoved(ctx, strings.TrimSpace(userID), strings.TrimSpace(id), now); errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrUserMediaNotFound
+	} else {
+		return err
+	}
 }
 
 func (s *UserMediaLibraryService) SearchCandidates(ctx context.Context, userID, projectID, query, mediaType string, limit int) ([]*UserMediaAssetView, error) {
@@ -278,7 +293,7 @@ func (s *UserMediaLibraryService) present(ctx context.Context, row *model.UserMe
 	if row == nil {
 		return nil, ErrUserMediaNotFound
 	}
-	asset, err := s.repo.Assets().FindByID(ctx, row.AssetID)
+	asset, err := s.repo.Assets().FindOwnedByID(ctx, row.AssetID, row.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -297,6 +312,30 @@ func (s *UserMediaLibraryService) present(ctx context.Context, row *model.UserMe
 		view.PreviewURL, view.PreviewExpiresAt = url, &expires
 	}
 	return view, nil
+}
+
+// ValidateUserMediaAssetForCreation enforces the library lifecycle boundary
+// for new tasks. Historical tasks keep their immutable Asset reference and are
+// still readable by runtime code after a library row is removed.
+func ValidateUserMediaAssetForCreation(ctx context.Context, repo repository.Repository, userID string, asset *model.Asset) error {
+	if asset == nil || asset.Purpose != DirectUploadPurposeMediaLibrary {
+		return nil
+	}
+	userID = strings.TrimSpace(userID)
+	if repo == nil || userID == "" || asset.UserID != userID {
+		return ErrUserMediaUnavailable
+	}
+	row, err := repo.UserMediaAssets().FindByAssetIDForUser(ctx, userID, asset.ID, false)
+	if errors.Is(err, gorm.ErrRecordNotFound) || row == nil && err == nil {
+		return ErrUserMediaUnavailable
+	}
+	if err != nil {
+		return fmt.Errorf("find user media asset: %w", err)
+	}
+	if row.Status != model.UserMediaAssetStatusAvailable || row.RemovedAt != nil {
+		return ErrUserMediaUnavailable
+	}
+	return nil
 }
 
 func mediaTypeForContentType(contentType string) string {

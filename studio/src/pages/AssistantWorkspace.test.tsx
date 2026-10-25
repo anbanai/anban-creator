@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   agentProfiles: vi.fn(),
   imageCapabilities: vi.fn(),
   platformConfigs: vi.fn(),
+  userMediaList: vi.fn(),
   streamEvents: [] as { event: string; id: string; data: string }[],
 }))
 
@@ -35,6 +36,7 @@ vi.mock('@/lib/api', async () => {
       agentProfiles: { ...actual.api.agentProfiles, list: mocks.agentProfiles },
       imageCapabilities: { ...actual.api.imageCapabilities, list: mocks.imageCapabilities },
       projects: { ...actual.api.projects, list: mocks.projectsList, platformConfigs: mocks.platformConfigs },
+      userMedia: { ...actual.api.userMedia, list: mocks.userMediaList },
       tasks: { ...actual.api.tasks, get: mocks.taskGet, files: mocks.taskFiles },
     },
   }
@@ -104,6 +106,7 @@ describe('AssistantWorkspace', () => {
     mocks.agentProfiles.mockResolvedValue([{ id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-flash', description: '日常创作', min_tier: 'free', available: true }])
     mocks.imageCapabilities.mockResolvedValue({ tier: 'free', default_capability: 'standard', items: [{ key: 'standard', display_name: '标准图像', description: '适合日常配图', enabled: true, price_available: true, price_credits: 300 }] })
     mocks.platformConfigs.mockResolvedValue([{ id: 'wechat', supported_image_ratios: ['16:9', '1:1'] }])
+    mocks.userMediaList.mockResolvedValue({ items: [], total: 0, offset: 0, limit: 30 })
   })
 
   it('allows drafting while bootstrap is pending and enables sending when it is ready', async () => {
@@ -1024,6 +1027,7 @@ describe('AssistantWorkspace', () => {
     renderPage({ modeId: 'creation', projectId: 'project-1' })
 
     fireEvent.click(await screen.findByRole('button', { name: '从素材库选择' }))
+    await waitFor(() => expect(mocks.userMediaList).toHaveBeenCalledWith({ q: undefined, status: 'available', limit: 30 }))
     expect(screen.getByRole('button', { name: '上传素材' })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '从素材库选择' })).toHaveLength(2)
     fireEvent.change(screen.getByLabelText('上传创作素材'), { target: { files: [new File(['png'], 'cover.png', { type: 'image/png' })] } })

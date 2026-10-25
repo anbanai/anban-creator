@@ -2,10 +2,12 @@ import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Film, Image, Loader2, RefreshCw, Search, Trash2, Upload } from 'lucide-react'
 import PageHeader from '@/components/layout/PageHeader'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { api } from '@/lib/api'
+import type { UserMediaAsset } from '@/lib/api/user-media'
 import { uploadToOSS } from '@/lib/direct-upload'
 
 const statusLabels: Record<string, string> = { queued: '排队中', analyzing: '解析中', available: '可用', failed: '解析失败' }
@@ -20,15 +22,17 @@ export default function UserMediaLibraryPage() {
   const [notes, setNotes] = useState<Record<string, string>>({})
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [operationError, setOperationError] = useState<string | null>(null)
+  const [removeTarget, setRemoveTarget] = useState<UserMediaAsset | null>(null)
   const projects = useQuery({ queryKey: ['projects', 'media-library'], queryFn: () => api.projects.list({ status: 'active' }), staleTime: 30_000 })
   const assets = useQuery({
     queryKey: ['user-media', query, mediaType, projectID, status],
     queryFn: () => api.userMedia.list({ q: query || undefined, media_type: mediaType || undefined, project_id: projectID || undefined, status: status || undefined, limit: 50 }),
     refetchInterval: (current) => (current.state.data?.items ?? []).some((item) => item.status === 'queued' || item.status === 'analyzing') ? 5000 : false,
   })
-  const update = useMutation({ mutationFn: ({ id, data }: { id: string; data: { project_id?: string | null; usage_notes?: string } }) => api.userMedia.update(id, data), onSuccess: () => { void client.invalidateQueries({ queryKey: ['user-media'] }) } })
-  const retry = useMutation({ mutationFn: (id: string) => api.userMedia.reanalyze(id), onSuccess: () => { void client.invalidateQueries({ queryKey: ['user-media'] }) } })
-  const remove = useMutation({ mutationFn: (id: string) => api.userMedia.remove(id), onSuccess: () => { void client.invalidateQueries({ queryKey: ['user-media'] }) } })
+  const update = useMutation({ mutationFn: ({ id, data }: { id: string; data: { project_id?: string | null; usage_notes?: string } }) => api.userMedia.update(id, data), onSuccess: () => { setOperationError(null); void client.invalidateQueries({ queryKey: ['user-media'] }) }, onError: (error) => { setOperationError(error instanceof Error ? error.message : '素材更新失败，请重试。') } })
+  const retry = useMutation({ mutationFn: (id: string) => api.userMedia.reanalyze(id), onSuccess: () => { setOperationError(null); void client.invalidateQueries({ queryKey: ['user-media'] }) }, onError: (error) => { setOperationError(error instanceof Error ? error.message : '素材重新解析失败，请重试。') } })
+  const remove = useMutation({ mutationFn: (id: string) => api.userMedia.remove(id), onSuccess: () => { setOperationError(null); void client.invalidateQueries({ queryKey: ['user-media'] }) }, onError: (error) => { setOperationError(error instanceof Error ? error.message : '素材移除失败，请重试。') } })
 
   const onFile = async (file: File) => {
     setUploading(true)
@@ -51,6 +55,7 @@ export default function UserMediaLibraryPage() {
       <Button disabled={uploading} onClick={() => fileRef.current?.click()}>{uploading ? <Loader2 className="animate-spin" /> : <Upload />}上传素材</Button>
     </PageHeader>
     {uploadError && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{uploadError}</p>}
+    {operationError && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{operationError}</p>}
 
     <div className="grid gap-2 border-b border-border pb-4 sm:grid-cols-2 lg:grid-cols-4">
       <label className="flex items-center gap-2 text-sm"><Search className="size-4 text-muted-foreground" /><Input aria-label="搜索素材" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索描述或使用说明" /></label>
@@ -72,10 +77,12 @@ export default function UserMediaLibraryPage() {
           {asset.description ? <p className="line-clamp-3 text-sm leading-6">{asset.description}</p> : <p className="text-sm text-muted-foreground">{asset.status === 'failed' ? asset.error_message ?? '解析失败' : 'AI 正在生成内容描述…'}</p>}
           {asset.recommended_uses?.length ? <p className="text-xs text-muted-foreground">适用：{asset.recommended_uses.join('、')}</p> : null}
           <Input aria-label={`${asset.file_name} 使用说明`} value={notes[asset.id] ?? asset.usage_notes ?? ''} onChange={(event) => setNotes((current) => ({ ...current, [asset.id]: event.target.value }))} onBlur={() => { const value = notes[asset.id]; if (value !== undefined && value !== asset.usage_notes) update.mutate({ id: asset.id, data: { usage_notes: value } }) }} placeholder="补充使用说明（可选）" />
-          <div className="flex justify-end gap-1"><Button variant="ghost" size="sm" disabled={retry.isPending || asset.status === 'queued' || asset.status === 'analyzing'} onClick={() => retry.mutate(asset.id)}><RefreshCw />重新解析</Button><Button variant="ghost" size="sm" className="text-destructive" disabled={remove.isPending} onClick={() => remove.mutate(asset.id)}><Trash2 />移除</Button></div>
+          <select aria-label={`${asset.file_name} 所属项目`} className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={asset.project_id ?? ''} disabled={update.isPending} onChange={(event) => update.mutate({ id: asset.id, data: { project_id: event.target.value || null } })}><option value="">跨项目复用</option>{(projects.data ?? []).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
+          <div className="flex justify-end gap-1"><Button variant="ghost" size="sm" disabled={retry.isPending || asset.status === 'queued' || asset.status === 'analyzing'} onClick={() => retry.mutate(asset.id)}><RefreshCw />重新解析</Button><Button variant="ghost" size="sm" className="text-destructive" disabled={remove.isPending} onClick={() => setRemoveTarget(asset)}><Trash2 />移除</Button></div>
         </div>
       </article>)}
     </section>
     <p className="text-xs text-muted-foreground">共 {assets.data?.total ?? 0} 个素材。移除素材只会停止新的创作调用，历史作品引用仍然保留。</p>
+    <AlertDialog open={removeTarget !== null} onOpenChange={(open) => { if (!open) setRemoveTarget(null) }}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>移除这个素材？</AlertDialogTitle><AlertDialogDescription>移除后素材不会再用于新的创作，但历史作品引用仍然保留，存储文件不会永久删除。</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>取消</AlertDialogCancel><AlertDialogAction disabled={remove.isPending} onClick={() => { if (removeTarget) remove.mutate(removeTarget.id, { onSuccess: () => setRemoveTarget(null) }) }}>确认移除</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
   </div>
 }

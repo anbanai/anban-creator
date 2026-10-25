@@ -109,6 +109,12 @@ func validateInputAttachments(ctx context.Context, store storage.Provider, repo 
 				}
 				return nil, fmt.Errorf("attachment %d: resolve asset attachment: %w", i+1, err)
 			}
+			if err := service.ValidateUserMediaAssetForCreation(ctx, repo, userID, asset); err != nil {
+				if errors.Is(err, service.ErrUserMediaUnavailable) {
+					return nil, inputAttachmentValidationErrorf("attachment %d: media-library asset is not available for new creation", i+1)
+				}
+				return nil, fmt.Errorf("attachment %d: validate media-library asset: %w", i+1, err)
+			}
 			a = model.EntryAttachment{
 				AssetID:     asset.ID,
 				Type:        service.ClassifyDirectUploadFile(asset.ContentType, attachmentExt(model.EntryAttachment{FileName: asset.FileName})),

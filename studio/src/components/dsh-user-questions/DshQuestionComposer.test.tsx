@@ -1,6 +1,12 @@
+import { QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { createTestQueryClient } from '@/test/test-utils'
 import { DshQuestionComposer, type DshQuestion } from './DshQuestionComposer'
+
+const mediaGet = vi.hoisted(() => vi.fn())
+
+vi.mock('@/lib/api', () => ({ api: { userMedia: { get: mediaGet } } }))
 
 const questions: DshQuestion[] = [
   {
@@ -177,5 +183,26 @@ describe('DshQuestionComposer', () => {
     expect(screen.getByText('计划审阅')).toBeInTheDocument()
     expect(screen.getAllByText('先整理素材，再生成草稿。')).toHaveLength(1)
     expect(screen.getByRole('radio', { name: '执行计划' })).toBeInTheDocument()
+  })
+
+  it('renders ready media candidates as selectable cards and preserves the stable label', async () => {
+    mediaGet.mockResolvedValue({
+      id: 'media-1', file_name: 'product.png', media_type: 'image', content_type: 'image/png', size: 10,
+      status: 'available', description: '白色包装正面', preview_url: 'https://cdn.example/product.png', created_at: '', updated_at: '',
+    })
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    render(<QueryClientProvider client={createTestQueryClient()}><DshQuestionComposer questions={[{
+      id: 'media', question: '选择素材', multiSelect: true,
+      options: [{ label: 'media_asset:media-1', description: '适合商品介绍' }],
+    }]} onSubmit={onSubmit} /></QueryClientProvider>)
+
+    const card = await screen.findByRole('checkbox', { name: 'product.png' })
+    expect(screen.getByText('白色包装正面')).toBeInTheDocument()
+    fireEvent.click(card)
+    fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({
+      answers: [{ id: 'media', selected: ['media_asset:media-1'] }],
+    }))
   })
 })

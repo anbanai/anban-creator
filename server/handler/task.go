@@ -753,6 +753,9 @@ func (h *TaskHandler) respondTaskCreationServiceError(c fiber.Ctx, userID string
 	if errors.Is(err, service.ErrInvalidAgentInput) {
 		return Error(c, fiber.StatusBadRequest, "invalid_agent_input: "+err.Error())
 	}
+	if errors.Is(err, service.ErrUserMediaUnavailable) {
+		return Error(c, fiber.StatusBadRequest, "media-library asset is not available for new creation")
+	}
 	if errors.Is(err, service.ErrLocalLifeDisabled) {
 		return Error(c, fiber.StatusServiceUnavailable, err.Error())
 	}
