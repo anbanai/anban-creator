@@ -261,7 +261,6 @@ describe("validateManagedInit", () => {
 
   test("requires the complete video-edit runtime surface", () => {
     const requiredSkills = [
-      "anban:project-profile-context",
       "anban:video-edit",
       "anban:content-tagging",
     ];

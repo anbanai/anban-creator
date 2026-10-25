@@ -93,6 +93,9 @@ func TestBootstrapUsesDatabaseProfileWhenNASProjectionIsStale(t *testing.T) {
 	if strings.Contains(files["AGENTS.md"], "旧版本规则") {
 		t.Fatalf("bootstrap used stale AGENTS.md: %q", files["AGENTS.md"])
 	}
+	if !strings.Contains(files["AGENTS.md"], "六维项目画像路由") {
+		t.Fatalf("bootstrap AGENTS.md is missing the profile router: %q", files["AGENTS.md"])
+	}
 }
 
 var recoveryBootstrapTestPaths = []string{

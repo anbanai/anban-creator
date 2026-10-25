@@ -76,27 +76,32 @@ func markdownList(values []string) string {
 func ProfileAgentsMarkdown() string {
 	return `# AGENTS.md
 
-## 项目画像引用
+## 任务入口
 
-生成内容前必须读取以下六个项目画像文件：
+本文件是每个 Anban 托管任务工作区的必读入口。Agent 开始任何业务工作前必须先读取本文件，再按下表读取所需的项目画像文件。Server 在每次任务启动时写入当前版本；Agent 不得修改本文件、画像文件或用 Agent memory 替代它们。
 
-| 引用路径 | 用途 |
-| --- | --- |
-| profile/identity.md | 定位、主题边界和差异化 |
-| profile/style.md | 语言、结构、视觉和表达风格 |
-| profile/audience.md | 受众、需求和表达深度 |
-| profile/platforms.md | 平台格式和适配规则 |
-| profile/preferences.md | 内容偏好、形式偏好，以及明确的禁用项和合规红线 |
-| profile/memory.md | 已验证经验和复盘结论 |
+## 六维项目画像路由
 
-## 读取规则
+六个画像文件始终由 Server 一起注入任务工作区。它们是只读事实来源，不是 Agent 的提示词副本。
 
-- 生成内容前必须读取六个文件。
+| 引用路径 | 读取时机 | 用途 |
+| --- | --- | --- |
+| profile/identity.md | 选题、定位、IP 主张或内容方向 | 定位、主题边界和差异化 |
+| profile/style.md | 写作、剪辑、视觉、配音或表达设计 | 语言、结构、视觉和表达风格 |
+| profile/audience.md | 钩子、节奏、表达深度、转化和受众判断 | 受众、需求和表达深度 |
+| profile/platforms.md | 平台规格、比例、时长、格式、发布或适配 | 平台格式和适配规则 |
+| profile/preferences.md | 每个任务都必须读取 | 偏好、形式偏好、明确的禁用项和合规红线 |
+| profile/memory.md | 复用经验、历史复盘、归因或恢复任务 | 已验证经验和复盘结论 |
+
+## 路由规则
+
+- 每个任务都必须先读取 AGENTS.md；需要画像时按上表读取相关文件。画像分析 Agent 为了生成完整结果必须读取六个文件。
+- Agent 不得在自身提示词、Skill 或输出中复制一套六维画像；不得绕过本文件直接猜测画像路径。
 - 明确的禁用项和合规红线是硬约束；普通主题或形式偏好只用于候选排序，不得作为排除条件。
 - 一次性或首批内容方向属于有范围的活动偏好，只在其确认的范围内生效；范围结束或需要延长时重新评估，不得无限期沿用。
 - 只有用户明确确认的长期定位才作为持续定位。当前任务的明确要求优先于一般偏好。
 - [待补充] 和 [推断待确认] 不能当作事实。
-- 画像文件不属于 Agent 自动记忆，不要写入 .claude/agent-memory/*/MEMORY.md。
+- 画像文件不属于 Agent 自动记忆，不要写入 .claude/agent-memory/*/MEMORY.md；Agent 只读它们，不直接写回。
 - 数据不足时保留缺失字段，不得编造结论。
 `
 }

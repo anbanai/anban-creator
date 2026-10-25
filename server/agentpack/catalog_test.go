@@ -1031,8 +1031,21 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if err != nil {
 		t.Fatalf("LoadCatalog repository Packs: %v", err)
 	}
-	if len(catalog.Packs) != 16 {
-		t.Fatalf("Pack count = %d, want 16", len(catalog.Packs))
+	if len(catalog.Packs) != 17 {
+		t.Fatalf("Pack count = %d, want 17", len(catalog.Packs))
+	}
+	viralEditor, ok := catalog.Pack("viral-ip-video-editor")
+	if !ok {
+		t.Fatal("viral-ip-video-editor Pack missing")
+	}
+	if viralEditor.Kind != KindPlugin || !containsString(viralEditor.Surfaces, "plugin") {
+		t.Fatalf("viral-ip-video-editor Pack must be plugin-only: %#v", viralEditor)
+	}
+	if !containsString(viralEditor.Agent.Skills, "montage") || containsString(viralEditor.Agent.Skills, "project-profile-context") || !containsString(viralEditor.Agent.Skills, "content-reuse") || !containsString(viralEditor.Agent.Skills, "content-tagging") {
+		t.Fatalf("viral-ip-video-editor Skills = %#v", viralEditor.Agent.Skills)
+	}
+	if viralEditor.Runtime.Profile != "viral-ip-video-editor" || viralEditor.Runtime.Adapter != AdapterOpenMontage {
+		t.Fatalf("viral-ip-video-editor runtime = %#v, want its own profile with OpenMontage adapter", viralEditor.Runtime)
 	}
 	contentPacks := []string{"wechat-article", "seednote", "ecommerce", "moments", "montage", "video-edit", "hypit", "local-life", "wechat-picture", "whiteboard-animation"}
 	for _, id := range contentPacks {
