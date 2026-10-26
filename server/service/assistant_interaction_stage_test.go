@@ -27,6 +27,17 @@ func TestStageDraftForInteractionPersistsAndReplaysByAttempt(t *testing.T) {
 	if err != nil || replay.DraftID != first.DraftID || replay.Revision != first.Revision {
 		t.Fatalf("replay = %#v, %v", replay, err)
 	}
+	events, err := svc.Events(context.Background(), "user-1", snapshot.ID, 0)
+	if err != nil || len(events) == 0 {
+		t.Fatalf("stage events = %#v, %v", events, err)
+	}
+	var liveData map[string]any
+	if err := json.Unmarshal(events[len(events)-1].Data, &liveData); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := liveData["draft"]; !ok || !strings.Contains(string(events[len(events)-1].Data), "write") {
+		t.Fatalf("live stage event = %s, want rich draft payload", events[len(events)-1].Data)
+	}
 	input.AttemptID = "stage-2"
 	input.Payload = json.RawMessage(`{"plan":{"goal":"different"}}`)
 	if _, err := svc.StageDraftForInteraction(context.Background(), "user-1", input); !errors.Is(err, ErrInteractiveIdempotency) && !errors.Is(err, ErrInteractiveDraftInvalid) {

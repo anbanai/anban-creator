@@ -80,9 +80,24 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 	}
 	sequence, sequenceErr := s.repo.AssistantInteractions().NextEventSequence(ctx, in.InteractionID)
 	eventData, _ := json.Marshal(map[string]any{"durable": true, "draft_id": persisted.ID, "revision": persisted.Revision, "mode_id": persisted.ModeID, "ready": persisted.Ready, "payload_digest": persisted.PayloadDigest})
-	if sequenceErr != nil || s.repo.AssistantInteractions().CreateEvent(ctx, &model.AssistantInteractionEvent{ID: uuid.NewString(), InteractionID: in.InteractionID, Sequence: sequence, Type: "draft.ready", Data: eventData, CreatedAt: now}) != nil {
+	if sequenceErr != nil {
 		return InteractionStageResult{}, errors.Join(ErrInteractivePersistence, errors.New("interaction event persistence failed"))
 	}
+	durableEvent := &model.AssistantInteractionEvent{ID: uuid.NewString(), InteractionID: in.InteractionID, Sequence: sequence, Type: "draft.ready", Data: eventData, CreatedAt: now}
+	if err := s.repo.AssistantInteractions().CreateEvent(ctx, durableEvent); err != nil {
+		return InteractionStageResult{}, errors.Join(ErrInteractivePersistence, errors.New("interaction event persistence failed"))
+	}
+	// Keep the rich draft available to an already-connected Studio stream. The
+	// same event sequence is replaced with this process-local form; after a
+	// restart, Snapshot supplies the durable draft payload instead.
+	s.cacheLiveEvent(in.InteractionID, in.Generation, durableEvent, map[string]any{
+		"durable": true,
+		"draft": map[string]any{
+			"draft_id": persisted.ID, "mode_id": persisted.ModeID, "revision": persisted.Revision,
+			"payload": persisted.Payload, "payload_digest": persisted.PayloadDigest,
+			"ready": persisted.Ready, "confirmation_state": persisted.ConfirmationState,
+		},
+	}, now)
 	if in.Ready {
 		_ = s.repo.AssistantInteractions().UpdateLifecycle(ctx, in.InteractionID, model.AssistantInteractionNeedsConfirmation, now)
 	}

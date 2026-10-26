@@ -442,18 +442,27 @@ func (s *AssistantInteractionService) AcceptRuntimeEvent(interactionID string, g
 	if err := s.repo.AssistantInteractions().CreateEvent(context.Background(), durableEvent); err != nil {
 		return false
 	}
-	// The original event is process-local only. It is never written to the
-	// database and disappears on Server restart, where the client falls back to
-	// its display cache and the durable draft snapshot.
-	if live, marshalErr := json.Marshal(data); marshalErr == nil {
-		s.runtimeMu.Lock()
-		if s.liveEvents == nil {
-			s.liveEvents = map[string][]interactionLiveEvent{}
-		}
-		s.liveEvents[interactionID] = append(s.liveEvents[interactionID], interactionLiveEvent{generation: generation, event: &model.AssistantInteractionEvent{ID: durableEvent.ID, InteractionID: interactionID, Sequence: sequence, Type: eventType, Data: live, CreatedAt: now}, expiresAt: now.Add(InteractionEventRetention)})
-		s.runtimeMu.Unlock()
-	}
+	s.cacheLiveEvent(interactionID, generation, durableEvent, data, now)
 	return true
+}
+
+// cacheLiveEvent keeps the process-local event rich enough for an active
+// Studio stream while the durable row remains metadata-only. The sequence and
+// event ID stay identical so Events can replace the redacted row in-place.
+func (s *AssistantInteractionService) cacheLiveEvent(interactionID string, generation int64, durableEvent *model.AssistantInteractionEvent, data any, now time.Time) {
+	if durableEvent == nil {
+		return
+	}
+	live, marshalErr := json.Marshal(data)
+	if marshalErr != nil {
+		return
+	}
+	s.runtimeMu.Lock()
+	defer s.runtimeMu.Unlock()
+	if s.liveEvents == nil {
+		s.liveEvents = map[string][]interactionLiveEvent{}
+	}
+	s.liveEvents[interactionID] = append(s.liveEvents[interactionID], interactionLiveEvent{generation: generation, event: &model.AssistantInteractionEvent{ID: durableEvent.ID, InteractionID: interactionID, Sequence: durableEvent.Sequence, Type: durableEvent.Type, Data: live, CreatedAt: now}, expiresAt: now.Add(InteractionEventRetention)})
 }
 
 // durableInteractionEventData keeps the event chain useful for recovery and
