@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { streamInteractiveSession } from './interactive-events'
+import { streamAssistantWorkspace, streamInteractiveSession } from './interactive-events'
 
 function response(body: string) {
   return new Response(body, { headers: { 'Content-Type': 'text/event-stream' } })
@@ -154,5 +154,17 @@ describe('streamInteractiveSession', () => {
     expect(fetchMock).toHaveBeenCalledTimes(7)
     controller.abort()
     await nextEvent.catch(() => undefined)
+  })
+})
+
+describe('streamAssistantWorkspace', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('always uses the interaction event stream even when a stale session hint is supplied', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response('event:session.closed\ndata:{}\n\n'))
+    const stream = streamAssistantWorkspace('interaction-1', 'token', undefined, { expectedSessionId: 'legacy-session' } as never)
+
+    await expect(stream.next()).resolves.toMatchObject({ value: { event: 'session.closed' }, done: false })
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/assistant/interactions/interaction-1/events', expect.anything())
   })
 })

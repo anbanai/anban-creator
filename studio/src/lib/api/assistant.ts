@@ -117,8 +117,6 @@ export interface AssistantWorkspace {
   content_id?: string
   runtime_id?: string
   runtime_status: string
-  session_id: string
-  sessions: Partial<Record<AssistantModeID, string>>
   expires_at: string
   generation?: number
 }
@@ -225,5 +223,5 @@ export const assistantApi = {
 }
 
 function interactionSnapshotAsWorkspace(snapshot: AssistantInteractionSnapshot): AssistantWorkspace {
-  return { id: snapshot.interaction_id, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, runtime_status: snapshot.runtime_status, session_id: '', sessions: {}, expires_at: snapshot.expires_at, generation: snapshot.generation }
+  return { id: snapshot.interaction_id, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, runtime_status: snapshot.runtime_status, expires_at: snapshot.expires_at, generation: snapshot.generation }
 }

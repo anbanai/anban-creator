@@ -233,7 +233,7 @@ function readPersistedWorkspace(): PersistedWorkspace | null {
     const candidate = value as Partial<PersistedWorkspace>
     if (candidate.workspace !== null && (typeof candidate.workspace !== 'object' || !isMode(candidate.workspace.mode_id) || typeof candidate.workspace.id !== 'string')) return null
     return {
-      workspace: candidate.workspace ? { ...(candidate.workspace as AssistantWorkspaceState), session_id: '', sessions: {} } : null,
+      workspace: candidate.workspace ? { ...(candidate.workspace as AssistantWorkspaceState) } : null,
       // Event cursors and runtime session identities are transport state. The
       // Server snapshot is authoritative after a refresh or generation change.
       lastEventIds: {},
@@ -338,7 +338,7 @@ export default function AssistantWorkspace() {
   useEffect(() => {
     try {
       sessionStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({
-        workspace: workspace ? { ...workspace, session_id: '', sessions: {} } : null,
+        workspace,
         lastEventIds: {},
         creationType,
         mode,
@@ -508,7 +508,6 @@ export default function AssistantWorkspace() {
     streamAbort.current = controller
     const stream = streamAssistantWorkspace(workspace.id, token, controller.signal, {
       lastEventId: lastEventIds[mode],
-      expectedSessionId: workspace.sessions[mode],
       generation: workspace.generation,
       onGenerationChanged: (generation) => {
         dispatchInteraction({ type: 'generation_changed', generation })
@@ -546,18 +545,6 @@ export default function AssistantWorkspace() {
           }
           if (event.event === 'session.status' && ['idle', 'waiting_answer', 'runtime_failed'].includes(String(data.status))) setResponding(false)
           const eventMode = isMode(data.mode_id) ? data.mode_id : mode
-          const eventSession = stringValue(data.session_id)
-          if (eventSession && workspace.sessions[eventMode] && eventSession !== workspace.sessions[eventMode]) {
-            // A Server restart may replace the durable logical session while
-            // the browser still has the old workspace snapshot. The scoped
-            // SSE event is authoritative for the current mode; reconcile the
-            // session map before processing its payload.
-            setWorkspace((current) => current ? {
-              ...current,
-              session_id: eventMode === mode ? eventSession : current.session_id,
-              sessions: { ...current.sessions, [eventMode]: eventSession },
-            } : current)
-          }
           if (event.event === 'assistant.message' || event.event === 'user.message') {
             const text = stringValue(data.text)
             if (!text) continue
@@ -726,13 +713,13 @@ export default function AssistantWorkspace() {
         ...(requestedContentId ? { content_id: requestedContentId } : {}),
       })
       const contextChanged = (workspace.project_id ?? '') !== (nextWorkspace.project_id ?? '') || (workspace.content_id ?? '') !== (nextWorkspace.content_id ?? '')
-      const sessionChanged = workspace.sessions[nextMode] !== nextWorkspace.sessions[nextMode]
+      const generationChanged = workspace.generation !== nextWorkspace.generation
       if (contextChanged) {
         setMessagesByMode((current) => ({ ...current, [nextMode]: [] }))
         setQuestionsByMode((current) => ({ ...current, [nextMode]: [] }))
         setDraftByMode((current) => ({ ...current, [nextMode]: null }))
       }
-      if (sessionChanged) setLastEventIds((current) => ({ ...current, [nextMode]: undefined }))
+      if (generationChanged) setLastEventIds((current) => ({ ...current, [nextMode]: undefined }))
       setMode(nextMode)
       setPendingMode(null)
       setProjectId(nextWorkspace.project_id ?? projectId)

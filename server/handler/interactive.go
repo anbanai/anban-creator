@@ -64,12 +64,6 @@ func (h *InteractiveHandler) EventsForSession(c fiber.Ctx, uid, sessionID string
 	if raw := c.Get("Last-Event-ID"); raw != "" {
 		after, _ = strconv.ParseUint(raw, 10, 64)
 	}
-	// Workspace clients persist cursors across reloads. A Server restart can
-	// replace the logical session while keeping the Workspace ID, in which
-	// case the old cursor belongs to a different event history.
-	if expected := strings.TrimSpace(c.Get("X-Assistant-Session-ID")); expected != "" && expected != sessionID {
-		after = 0
-	}
 	if err := h.svc.TouchSession(uid, sessionID); err != nil {
 		return interactiveError(c, err)
 	}
