@@ -4,10 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/auth"
 	"github.com/anbanai/anban-creator/server/model"
 )
@@ -36,6 +38,7 @@ func baseKubernetesConfigForTest() Config {
 		NASStorageClass:    "nas-sc-creator",
 		ProjectMemoryClaim: "creator-project-memory",
 		TaskWorkspaceSize:  "10Gi",
+		ResourceProfiles:   completeKubernetesResourceProfilesForTest(),
 	}
 	cfg := Config{
 		Server:   ServerConfig{TLSCertFile: "/tls/tls.crt", TLSKeyFile: "/tls/tls.key"},
@@ -196,26 +199,76 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 	}
 }
 
-func TestKubernetesResourcesForTaskOverlaysDefaults(t *testing.T) {
+func completeKubernetesResourceProfilesForTest() map[string]KubernetesResourceConfig {
+	profiles := make(map[string]KubernetesResourceConfig)
+	for _, taskType := range executableKubernetesTaskTypes() {
+		profiles[taskType] = KubernetesResourceConfig{
+			Requests: map[string]string{"cpu": "500m", "memory": "512Mi"},
+			Limits:   map[string]string{"cpu": "1", "memory": "1Gi"},
+		}
+	}
+	return profiles
+}
+
+func executableKubernetesTaskTypes() []string {
+	types := make([]string, 0)
+	for _, pack := range agentpack.Default().Packs {
+		if pack.Kind != agentpack.KindManaged || pack.Channel == "" || (pack.Interaction != nil && pack.Interaction.UserQuestions) {
+			continue
+		}
+		for _, taskKind := range pack.Bindings.TaskKinds {
+			if taskKind == model.TaskKindContentGeneration {
+				types = append(types, pack.Channel)
+			} else {
+				types = append(types, model.TaskTypeForTaskKind(taskKind))
+			}
+		}
+	}
+	return types
+}
+
+func TestKubernetesResourcesForTaskRequiresExactProfile(t *testing.T) {
+	for _, taskType := range KubernetesTaskTypes() {
+		if strings.Contains(taskType, "_") {
+			t.Errorf("registered task type %q uses snake_case; resource profile types must be kebab-case", taskType)
+		}
+	}
+	if !slices.Contains(KubernetesTaskTypes(), "viral-analysis") {
+		t.Fatal("registered task types missing canonical viral-analysis")
+	}
+
 	cfg := KubernetesConfig{
-		Resources: KubernetesResourceConfig{
-			Requests: map[string]string{"cpu": "1", "memory": "2Gi"},
-			Limits:   map[string]string{"cpu": "2", "memory": "4Gi"},
-		},
 		ResourceProfiles: map[string]KubernetesResourceConfig{
-			"video": {
-				Requests: map[string]string{"cpu": "2"},
+			"wechat": {
+				Requests: map[string]string{"cpu": "2", "memory": "4Gi"},
 				Limits:   map[string]string{"cpu": "4", "memory": "7Gi"},
 			},
 		},
 	}
-	got := cfg.ResourcesForTask("video")
-	if got.Requests["cpu"] != "2" || got.Requests["memory"] != "2Gi" || got.Limits["cpu"] != "4" || got.Limits["memory"] != "7Gi" {
-		t.Fatalf("profile resources = %#v", got)
+	got, err := cfg.ResourcesForTask("wechat-article")
+	if err == nil {
+		t.Fatal("missing exact profile unexpectedly succeeded")
 	}
-	got.Requests["cpu"] = "mutated"
-	if cfg.Resources.Requests["cpu"] != "1" {
-		t.Fatal("resource selection mutated config defaults")
+	if len(got.Requests) != 0 || len(got.Limits) != 0 {
+		t.Fatalf("wechat profile unexpectedly matched wechat-article: %#v", got)
+	}
+	cfg.ResourceProfiles["wechat-article"] = KubernetesResourceConfig{
+		Requests: map[string]string{"cpu": "500m", "memory": "500Mi"},
+		Limits:   map[string]string{"cpu": "1", "memory": "1Gi"},
+	}
+	got, err = cfg.ResourcesForTask("wechat-article")
+	if err != nil {
+		t.Fatalf("exact profile resources: %v", err)
+	}
+	if got.Requests["cpu"] != "500m" || got.Requests["memory"] != "500Mi" || got.Limits["cpu"] != "1" || got.Limits["memory"] != "1Gi" {
+		t.Fatalf("exact profile resources = %#v", got)
+	}
+}
+
+func TestKubernetesConfigRejectsDefaultResourcesField(t *testing.T) {
+	body := strings.Replace(validClaudeConfigYAML, "  executor: docker\n", "  executor: kubernetes\n  kubernetes:\n    resources:\n      requests: { cpu: \"1\", memory: \"1Gi\" }\n", 1)
+	if _, err := loadClaudeConfigYAML(t, body); err == nil || !strings.Contains(err.Error(), `unknown claude.kubernetes config field "resources"`) {
+		t.Fatalf("load config error = %v, want removed default resources field rejected", err)
 	}
 }
 
@@ -225,16 +278,46 @@ func TestValidateKubernetesResourceProfiles(t *testing.T) {
 		profile KubernetesResourceConfig
 		want    string
 	}{
-		{name: "invalid quantity", profile: KubernetesResourceConfig{Requests: map[string]string{"cpu": "invalid"}}, want: "must be a positive Kubernetes quantity"},
-		{name: "request exceeds limit", profile: KubernetesResourceConfig{Requests: map[string]string{"memory": "5Gi"}, Limits: map[string]string{"memory": "4Gi"}}, want: "must not exceed its limit"},
+		{name: "invalid quantity", profile: KubernetesResourceConfig{Requests: map[string]string{"cpu": "invalid", "memory": "512Mi"}, Limits: map[string]string{"cpu": "1", "memory": "1Gi"}}, want: "must be a positive Kubernetes quantity"},
+		{name: "request exceeds limit", profile: KubernetesResourceConfig{Requests: map[string]string{"cpu": "500m", "memory": "5Gi"}, Limits: map[string]string{"cpu": "1", "memory": "4Gi"}}, want: "must not exceed its limit"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			cfg := baseKubernetesConfigForTest()
-			cfg.Claude.Kubernetes.Resources = KubernetesResourceConfig{Requests: map[string]string{"cpu": "1", "memory": "2Gi"}, Limits: map[string]string{"cpu": "2", "memory": "4Gi"}}
-			cfg.Claude.Kubernetes.ResourceProfiles = map[string]KubernetesResourceConfig{"seednote": test.profile}
+			cfg.Claude.Kubernetes.ResourceProfiles["seednote"] = test.profile
 			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Validate() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestValidateRequiresResourceProfileForEveryExecutableTaskType(t *testing.T) {
+	cfg := baseKubernetesConfigForTest()
+	delete(cfg.Claude.Kubernetes.ResourceProfiles, "wechat-article")
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "claude.kubernetes.resource_profiles.wechat-article is required") {
+		t.Fatalf("Validate() error = %v, want missing exact task profile", err)
+	}
+}
+
+func TestValidateRejectsUnknownAndIncompleteResourceProfiles(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		key    string
+		value  KubernetesResourceConfig
+		wanted string
+	}{
+		{name: "unknown type", key: "wechat", value: KubernetesResourceConfig{Requests: map[string]string{"cpu": "1", "memory": "1Gi"}, Limits: map[string]string{"cpu": "1", "memory": "1Gi"}}, wanted: `claude.kubernetes.resource_profiles contains unsupported task type "wechat"`},
+		{name: "missing memory request", key: "wechat-article", value: KubernetesResourceConfig{Requests: map[string]string{"cpu": "500m"}, Limits: map[string]string{"cpu": "1", "memory": "1Gi"}}, wanted: "resource_profiles.wechat-article.requests.memory is required"},
+		{name: "missing cpu limit", key: "wechat-article", value: KubernetesResourceConfig{Requests: map[string]string{"cpu": "500m", "memory": "512Mi"}, Limits: map[string]string{"memory": "1Gi"}}, wanted: "resource_profiles.wechat-article.limits.cpu is required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := baseKubernetesConfigForTest()
+			cfg.Claude.Kubernetes.ResourceProfiles[tc.key] = tc.value
+			err := cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), tc.wanted) {
+				t.Fatalf("Validate() error = %v, want %q", err, tc.wanted)
 			}
 		})
 	}

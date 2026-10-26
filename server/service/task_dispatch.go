@@ -450,7 +450,7 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 		if err := txRepo.TaskExecutions().Create(ctx, execution); err != nil {
 			return fmt.Errorf("create task execution: %w", err)
 		}
-		if dispatchTask.TaskKind == model.TaskKindFeedbackAnalysis || dispatchTask.Type == model.TaskKindFeedbackAnalysis {
+		if dispatchTask.TaskKind == model.TaskKindFeedbackAnalysis || dispatchTask.Type == model.TaskTypeFeedbackAnalysis {
 			input := dispatchTask.AgentInput.Data()
 			jobID, _ := input["feedback_job_id"].(string)
 			jobID = strings.TrimSpace(jobID)
@@ -532,7 +532,7 @@ func (s *TaskService) validateFrozenTaskImageCapability(ctx context.Context, tas
 
 func taskUsesFrozenImageCapability(taskType string) bool {
 	trimmed := strings.TrimSpace(taskType)
-	return !model.IsContentPlanningTask(trimmed) && trimmed != model.TaskTypeViralAnalysis && trimmed != model.TaskTypeProfileAnalysis && trimmed != model.TaskKindFeedbackAnalysis && trimmed != model.PlatformLocalLife
+	return !model.IsContentPlanningTask(trimmed) && trimmed != model.TaskTypeViralAnalysis && trimmed != model.TaskTypeProfileAnalysis && trimmed != model.TaskTypeFeedbackAnalysis && trimmed != model.PlatformLocalLife
 }
 
 func resumeExecutionLineage(ctx context.Context, repo repository.Repository, task *model.Task) (*model.TaskExecution, string, bool, error) {

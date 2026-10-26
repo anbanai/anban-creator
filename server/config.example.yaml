@@ -568,33 +568,50 @@ claude:
     completion_grace_seconds: 30
     # 已完成 Job 的自动清理时间，单位秒。
     ttl_seconds_after_finished: 600
-    resources:
-      # 未配置专属档位的任务使用此默认资源。
-      requests:
-        cpu: "1"
-        memory: "2Gi"
-      limits:
-        cpu: "2"
-        memory: "4Gi"
     resource_profiles:
-      moments:
-        requests: { cpu: "500m", memory: "1Gi" }
-        limits: { cpu: "1", memory: "2Gi" }
-      wechat:
+      # 每个键必须是实际持久化的 Task.Type；没有默认资源回退。
+      wechat-article:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
+      wechat-picture:
         requests: { cpu: "1", memory: "2Gi" }
         limits: { cpu: "2", memory: "4Gi" }
       seednote:
         requests: { cpu: "1", memory: "2Gi" }
         limits: { cpu: "2", memory: "4Gi" }
-      ecommerce:
+      viral-analysis:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
+      montage:
+        requests: { cpu: "2", memory: "4Gi" }
+        limits: { cpu: "4", memory: "7Gi" }
+      video-edit:
         requests: { cpu: "1", memory: "2Gi" }
         limits: { cpu: "2", memory: "4Gi" }
       hypit:
         requests: { cpu: "4", memory: "8Gi" }
         limits: { cpu: "4", memory: "8Gi" }
-      montage:
-        requests: { cpu: "2", memory: "4Gi" }
-        limits: { cpu: "4", memory: "7Gi" }
+      local-life:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
+      whiteboard-animation:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
+      profile-analysis:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
+      feedback-analysis:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
+      content-research:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
+      content-validation:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
+      content-script:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
   # Agent 执行日志目录。生产建议挂载持久卷，便于失败诊断和审计。
   task_log_dir: "./data/logs/tasks"
 

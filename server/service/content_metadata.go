@@ -494,7 +494,7 @@ func isContentTask(task *model.Task, execution *model.TaskExecution) bool {
 		return false
 	}
 	switch strings.TrimSpace(task.Type) {
-	case model.TaskTypeViralAnalysis, model.TaskTypeProfileAnalysis, model.TaskKindFeedbackAnalysis:
+	case model.TaskTypeViralAnalysis, model.TaskTypeProfileAnalysis, model.TaskTypeFeedbackAnalysis:
 		return false
 	}
 	// Future content Packs are identified by the frozen Server-owned tagging

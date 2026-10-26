@@ -443,7 +443,7 @@ func TestCreateViralAnalysisTaskUsesStandardManagedLifecycle(t *testing.T) {
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
 
-	body := `{"project_id":"` + project.ID + `","type":"viral_analysis","prompt":"https://www.xiaohongshu.com/explore/note-1","agent_id":"seednote","channel":"seednote","task_kind":"viral_analysis","execution_profile":"effective","quantity":1}`
+	body := `{"project_id":"` + project.ID + `","type":"viral-analysis","prompt":"https://www.xiaohongshu.com/explore/note-1","agent_id":"seednote","channel":"seednote","task_kind":"viral_analysis","execution_profile":"effective","quantity":1}`
 	resp := postJSON(t, app, "/tasks", body)
 	defer resp.Body.Close()
 	if resp.StatusCode != fiber.StatusOK {

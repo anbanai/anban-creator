@@ -263,7 +263,7 @@ const managedPack = (id: string, displayName: string, options: {
   description: `${displayName} workflow`,
   agent: { name: id, max_turns: 20 },
   channel: id,
-  bindings: { task_kinds: options.surfaces?.includes('plan') ? ['content_generation', ...options.taskTypes.filter((kind) => kind === 'viral_analysis')] : options.taskTypes },
+  bindings: { task_kinds: options.surfaces?.includes('plan') ? ['content_generation', ...options.taskTypes.filter((type) => type === 'viral-analysis').map(() => 'viral_analysis')] : options.taskTypes.map((type) => type === 'viral-analysis' ? 'viral_analysis' : type) },
   runtime: { profile: id === 'montage' ? 'montage' : 'wechat', adapter: id === 'montage' ? 'openmontage' : 'standard' },
   surfaces: options.surfaces ?? ['plugin', 'task'],
   plan_task_kind: options.surfaces?.includes('plan') ? 'content_generation' : undefined,
@@ -280,7 +280,7 @@ export const mockAgentPackCatalog: AgentPackCatalog = {
     managedPack('montage', '视频生成', { projectPlatforms: ['montage'], taskTypes: ['montage'] }),
     managedPack('hypit', '视频复刻', { projectPlatforms: ['hypit'], taskTypes: ['hypit'] }),
     managedPack('whiteboard-animation', '白板动画', { projectPlatforms: ['whiteboard-animation'], taskTypes: ['whiteboard-animation'] }),
-    managedPack('seednote', '种草笔记', { projectPlatforms: ['seednote'], taskTypes: ['seednote', 'viral_analysis'], surfaces: ['plugin', 'task', 'plan'] }),
+    managedPack('seednote', '种草笔记', { projectPlatforms: ['seednote'], taskTypes: ['seednote', 'viral-analysis'], surfaces: ['plugin', 'task', 'plan'] }),
   ],
 }
 

@@ -38,10 +38,19 @@ func taskExecutionIdentity(task *model.Task) (agentID, channel, taskKind string)
 			agentID = model.AgentIDHypit
 		case model.PlatformWhiteboardAnimation:
 			agentID = model.AgentIDWhiteboard
+		case model.TaskTypeProfileAnalysis:
+			agentID = model.AgentIDProfileAnalysis
+		case model.TaskTypeFeedbackAnalysis:
+			agentID = model.AgentIDFeedbackAnalysis
+		case model.TaskTypeContentResearch, model.TaskTypeContentValidation, model.TaskTypeContentScript:
+			agentID = model.AgentIDContentPlanning
 		}
 	}
 	if channel == "" {
 		channel, _ = model.AgentChannel(agentID)
+	}
+	if taskKind == "" {
+		taskKind = model.TaskKindForTaskType(task.Type)
 	}
 	switch taskKind {
 	case "":
@@ -97,7 +106,7 @@ func applyAgentPackIdentity(execution *model.TaskExecution, agentID string) erro
 			execution.TaskKind = model.TaskKindVideoEdit
 		case model.AgentIDSeednote:
 			if requestedKind == model.TaskTypeViralAnalysis {
-				execution.TaskKind = model.TaskTypeViralAnalysis
+				execution.TaskKind = model.TaskKindViralAnalysis
 			} else {
 				execution.TaskKind = model.TaskKindContentGeneration
 			}
@@ -106,21 +115,24 @@ func applyAgentPackIdentity(execution *model.TaskExecution, agentID string) erro
 		case model.AgentIDWhiteboard:
 			execution.TaskKind = model.PlatformWhiteboardAnimation
 		case model.AgentIDContentPlanning:
-			if !model.IsContentPlanningTask(requestedKind) {
+			if !model.IsContentPlanningTask(model.TaskTypeForTaskKind(requestedKind)) {
 				return fmt.Errorf("planning task kind required")
 			}
-			execution.TaskKind = requestedKind
+			execution.TaskKind = model.TaskKindForTaskType(requestedKind)
 		case model.AgentIDProfileAnalysis:
 			execution.TaskKind = model.TaskKindProfileAnalysis
 		default:
 			execution.TaskKind = model.TaskKindContentGeneration
 		}
 	}
+	if agentID == model.AgentIDContentPlanning {
+		execution.TaskKind = model.TaskKindForTaskType(execution.TaskKind)
+	}
 	execution.AgentPackVersion = pack.Version
 	execution.AgentPackDigest = pack.Digest
 	taskKind := ""
 	if execution != nil {
-		taskKind = execution.TaskKind
+		taskKind = model.TaskKindForTaskType(execution.TaskKind)
 	}
 	deliveryContract, err := json.Marshal(pack.DeliveryForTaskKind(taskKind))
 	if err != nil {
@@ -217,7 +229,7 @@ func hasCompleteAgentPackIdentity(execution *model.TaskExecution) bool {
 
 func isContentTaskKind(taskKind string) bool {
 	switch strings.TrimSpace(taskKind) {
-	case model.TaskTypeContentResearch, model.TaskTypeContentValidation, model.TaskTypeContentScript, model.TaskTypeViralAnalysis, model.TaskKindProfileAnalysis, model.TaskKindFeedbackAnalysis:
+	case model.TaskKindContentResearch, model.TaskKindContentValidation, model.TaskKindContentScript, model.TaskKindViralAnalysis, model.TaskKindProfileAnalysis, model.TaskKindFeedbackAnalysis:
 		return false
 	default:
 		return strings.TrimSpace(taskKind) != ""

@@ -430,7 +430,7 @@ func (r *contentAssetRepository) BindResearchJobTask(ctx context.Context, task *
 	if err := r.db.WithContext(ctx).Where("id = ?", task.ResearchJobID).First(&job).Error; err != nil {
 		return err
 	}
-	if task.Type != model.TaskTypeContentResearch || task.TaskKind != model.TaskTypeContentResearch || task.UserID != job.UserID || task.ProjectID != job.ProjectID || job.Status != model.ContentStageQueued || job.TaskID != nil {
+	if task.Type != model.TaskTypeContentResearch || task.TaskKind != model.TaskKindContentResearch || task.UserID != job.UserID || task.ProjectID != job.ProjectID || job.Status != model.ContentStageQueued || job.TaskID != nil {
 		return ErrContentReuseRunConflict
 	}
 	previous := job.Version

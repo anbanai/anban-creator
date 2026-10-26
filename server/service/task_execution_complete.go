@@ -122,9 +122,10 @@ func (s *TaskService) validateArticleImageHTML(ctx context.Context, task *model.
 		}
 		seen[url] = true
 	}
-	if uploadedImages == 0 {
-		return nil
-	}
+	// A requested article image slot must be represented by a mode-matched URL
+	// in the final HTML. Do not treat generated-but-unuploaded image files as a
+	// complete visual delivery; validateRequiredArticleImageSlots will report
+	// the missing slot even when uploadedImages is zero.
 	if err := s.validateRequiredArticleImageSlots(ctx, task, files, string(articleHTML)); err != nil {
 		return err
 	}
@@ -959,6 +960,7 @@ func (s *TaskService) finalizeArticlePublication(ctx context.Context, task *mode
 	coverImageURLs := make(map[string]struct{})
 	contentImageURLs := make(map[string]struct{})
 	coverMediaIDs := make(map[string]struct{})
+	coverMediaIDsByPath := make(map[string]map[string]struct{})
 	coverMediaIDsByURL := make(map[string]map[string]struct{})
 	for _, file := range files {
 		if file == nil || file.ExecutionID != execution.ID || file.TaskID != task.ID {
@@ -974,6 +976,10 @@ func (s *TaskService) finalizeArticlePublication(ctx context.Context, task *mode
 		if isCover {
 			if mediaID := strings.TrimSpace(file.MediaID); mediaID != "" {
 				coverMediaIDs[mediaID] = struct{}{}
+				if coverMediaIDsByPath[file.FilePath] == nil {
+					coverMediaIDsByPath[file.FilePath] = make(map[string]struct{})
+				}
+				coverMediaIDsByPath[file.FilePath][mediaID] = struct{}{}
 				if wechatURL != "" {
 					if coverMediaIDsByURL[wechatURL] == nil {
 						coverMediaIDsByURL[wechatURL] = make(map[string]struct{})
@@ -1097,7 +1103,11 @@ func (s *TaskService) finalizeArticlePublication(ctx context.Context, task *mode
 		return block("content_images_missing", "retry_visuals")
 	}
 	selectedCoverMediaIDs := coverMediaIDs
-	if len(imageSources) > 0 {
+	if wideCoverMediaIDs := coverMediaIDsByPath["output/cover.png"]; len(wideCoverMediaIDs) > 0 {
+		// The fixed dual-cover contract makes the wide variant the article
+		// thumbnail. Prefer it even when the HTML has no cover image slot.
+		selectedCoverMediaIDs = wideCoverMediaIDs
+	} else if len(imageSources) > 0 {
 		if _, heroIsCover := coverImageURLs[imageSources[0]]; heroIsCover {
 			selectedCoverMediaIDs = coverMediaIDsByURL[imageSources[0]]
 		}
@@ -1325,6 +1335,9 @@ func isConcretePictureContentPath(path string) bool {
 }
 
 func (s *TaskService) finalizePicturePublication(ctx context.Context, task *model.Task, execution *model.TaskExecution) (string, []byte, error) {
+	if pictureTaskDraftDisabled(task) {
+		return model.TaskExecutionDraftDeliveryNotRequested, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryNotRequested, "draft_disabled", false, ""), nil
+	}
 	if decision := wechatDeliveryDecision(task); decision.IsUserAssisted() {
 		evidence, _ := json.Marshal(map[string]any{
 			"source": "server_finalizer", "status": model.TaskExecutionDraftDeliveryNotRequested,
@@ -1345,11 +1358,6 @@ func (s *TaskService) finalizePicturePublication(ctx context.Context, task *mode
 	}
 	if !publicationPolicy.DraftEnabled {
 		return model.TaskExecutionDraftDeliveryNotRequested, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryNotRequested, "draft_disabled", false, ""), nil
-	}
-	if input := task.AgentInput.Data(); input != nil {
-		if publish, ok := input["picture_publish_draft"].(bool); ok && !publish {
-			return model.TaskExecutionDraftDeliveryNotRequested, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryNotRequested, "draft_disabled", false, ""), nil
-		}
 	}
 	body, found, err := s.readExecutionArtifact(ctx, execution.ID, "output/publish-package.json", maxTaskDeliveryJSONBytes)
 	if err != nil {

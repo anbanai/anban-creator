@@ -3,6 +3,8 @@ package agentpack
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 const (
@@ -164,19 +166,36 @@ type Catalog struct {
 // DeliveryForTaskType returns the task-type-specific delivery contract when
 // one is declared, otherwise the Pack-wide contract.
 func (m Manifest) DeliveryForTaskType(taskType string) []DeliverySpec {
-	if delivery, ok := m.DeliveryByTaskType[taskType]; ok {
+	if delivery, ok := m.DeliveryByTaskType[strings.TrimSpace(taskType)]; ok {
+		return delivery
+	}
+	taskKind := model.TaskKindForTaskType(taskType)
+	if model.TaskTypeForTaskKind(taskKind) != taskType {
+		return m.Delivery
+	}
+	if delivery, ok := m.DeliveryByTaskType[taskKind]; ok {
 		return delivery
 	}
 	return m.Delivery
 }
 
 func (m Manifest) DeliveryForTaskKind(taskKind string) []DeliverySpec {
-	return m.DeliveryForTaskType(taskKind)
+	if delivery, ok := m.DeliveryByTaskType[strings.TrimSpace(taskKind)]; ok {
+		return delivery
+	}
+	return m.Delivery
 }
 
 // ArtifactsForTaskType returns a complete task-type override when present.
 func (m Manifest) ArtifactsForTaskType(taskType string) []ArtifactSpec {
-	if artifacts, ok := m.ArtifactsByTaskType[taskType]; ok {
+	if artifacts, ok := m.ArtifactsByTaskType[strings.TrimSpace(taskType)]; ok {
+		return artifacts
+	}
+	taskKind := model.TaskKindForTaskType(taskType)
+	if model.TaskTypeForTaskKind(taskKind) != taskType {
+		return m.Artifacts
+	}
+	if artifacts, ok := m.ArtifactsByTaskType[taskKind]; ok {
 		return artifacts
 	}
 	return m.Artifacts
@@ -195,7 +214,21 @@ func (m Manifest) RequiredArtifactsForTaskType(taskType string) ([]ArtifactSpec,
 }
 
 func (m Manifest) RequiredArtifactsForTaskKind(taskKind string) ([]ArtifactSpec, error) {
-	return m.RequiredArtifactsForTaskType(taskKind)
+	required := make([]ArtifactSpec, 0)
+	for _, artifact := range m.ArtifactsByTaskType[strings.TrimSpace(taskKind)] {
+		if artifact.Required {
+			required = append(required, artifact)
+		}
+	}
+	if len(required) > 0 {
+		return required, nil
+	}
+	for _, artifact := range m.Artifacts {
+		if artifact.Required {
+			required = append(required, artifact)
+		}
+	}
+	return required, nil
 }
 
 func (c *Catalog) Pack(id string) (Manifest, bool) {
@@ -287,20 +320,18 @@ func (c *Catalog) ForTaskType(taskType string) (Manifest, bool) {
 	case "wechat-picture":
 		return c.ForAgent("wechat-picture")
 	}
-	if pack, ok := c.ForTaskKind(taskType); ok {
-		return pack, true
+	canonicalType := strings.TrimSpace(taskType)
+	taskKind := model.TaskKindForTaskType(canonicalType)
+	if model.TaskTypeForTaskKind(taskKind) == canonicalType {
+		if pack, ok := c.ForTaskKind(taskKind); ok {
+			return pack, true
+		}
 	}
 	if pack, ok := c.Pack(taskType); ok {
 		if pack.Interaction != nil && pack.Interaction.UserQuestions {
 			return Manifest{}, false
 		}
 		return pack, true
-	}
-	if taskType == "viral_analysis" {
-		return c.Pack("seednote")
-	}
-	if taskType == "profile_analysis" {
-		return c.Pack("profile-analysis")
 	}
 	return c.ForChannel(taskType)
 }
@@ -310,7 +341,7 @@ func (c *Catalog) BillingOperation(taskType string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	if operation := strings.TrimSpace(pack.BillingOperations[taskType]); operation != "" {
+	if operation := strings.TrimSpace(pack.BillingOperations[model.TaskKindForTaskType(taskType)]); operation != "" {
 		return operation, true
 	}
 	// Content-generation task types use the channel identity. A Pack may also
