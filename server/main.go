@@ -748,6 +748,7 @@ func main() {
 			planHandler.SetRepository(repo)
 		}
 	}
+	var assistantInteractionFactory service.RuntimeFactory
 	interactiveSvc := service.NewInteractiveService(repo)
 	if projectSvc != nil {
 		interactiveSvc.SetProjectService(projectSvc)
@@ -759,6 +760,7 @@ func main() {
 			ServerInstanceID: cfg.Dsh.ServerInstanceID, Provider: route.Provider, API: route.API,
 			BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL,
 		}
+		assistantInteractionFactory = dshFactory
 		runtimeReady := true
 		if err := dshFactory.CleanupOrphans(context.Background()); err != nil {
 			log.Warn().Err(err).Msg("failed to clean orphaned interactive DSH containers")
@@ -791,6 +793,7 @@ func main() {
 			ServerInstanceID: cfg.Dsh.ServerInstanceID, Provider: route.Provider, API: route.API,
 			BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL, Logger: log,
 		}
+		assistantInteractionFactory = dshFactory
 		runtimeReady := true
 		if err := dshFactory.CleanupOrphans(context.Background()); err != nil {
 			log.Warn().Err(err).Msg("failed to clean orphaned interactive DSH jobs")
@@ -810,7 +813,7 @@ func main() {
 		interactiveSvc.SetEnabled(runtimeReady)
 	} else if cfg.Dsh.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Dsh.Executor), "process") && strings.TrimSpace(cfg.Dsh.BridgeCommand) != "" {
 		route := cfg.Dsh.Routes[cfg.Dsh.Route]
-		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, service.ExecRuntimeFactory{
+		execFactory := service.ExecRuntimeFactory{
 			Command:  cfg.Dsh.BridgeCommand,
 			Args:     cfg.Dsh.BridgeArgs,
 			Dir:      cfg.Dsh.BridgeDir,
@@ -821,7 +824,9 @@ func main() {
 			APIKey:   route.APIKey,
 			Model:    route.Model,
 			MCPURL:   cfg.Dsh.MCPURL,
-		})
+		}
+		assistantInteractionFactory = execFactory
+		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, execFactory)
 		if projectSvc != nil {
 			interactiveSvc.SetProjectService(projectSvc)
 		}
@@ -904,7 +909,8 @@ func main() {
 		}
 		agentProjectProfileSvc := service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), cfg.Montage, imageCapabilityResolver, repo)
 		agentProjectProfileSvc.SetVideoEditConfig(cfg.VideoEdit)
-		assistantInteractionSvc := service.NewAssistantInteractionService(repo, nil, nil)
+		assistantInteractionSvc := service.NewAssistantInteractionService(repo, assistantInteractionFactory, nil)
+		assistantInteractionSvc.SetTaskService(taskSvc)
 		mcp.SetServices(&mcp.Services{
 			ProjectSvc:             projectSvc,
 			TaskSvc:                taskSvc,
@@ -1032,6 +1038,7 @@ func main() {
 
 	interactiveHandler := handler.NewInteractiveHandler(interactiveSvc)
 	assistantHandler := handler.NewAssistantHandler(interactiveSvc, taskSvc, repo)
+	assistantHandler.SetInteractionService(assistantInteractionSvc)
 
 	// 16. Build Services struct.
 	svcs := &router.Services{

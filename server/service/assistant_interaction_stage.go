@@ -70,7 +70,8 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 		}
 		return InteractionStageResult{}, errors.Join(ErrInteractivePersistence, err)
 	}
-	if sequence := uint64(time.Now().UnixNano()); s.repo.AssistantInteractions().CreateEvent(ctx, &model.AssistantInteractionEvent{ID: uuid.NewString(), InteractionID: in.InteractionID, Sequence: sequence, Type: "draft.ready", Data: json.RawMessage(`{"durable":true}`), CreatedAt: now}) != nil {
+	sequence, sequenceErr := s.repo.AssistantInteractions().NextEventSequence(ctx, in.InteractionID)
+	if sequenceErr != nil || s.repo.AssistantInteractions().CreateEvent(ctx, &model.AssistantInteractionEvent{ID: uuid.NewString(), InteractionID: in.InteractionID, Sequence: sequence, Type: "draft.ready", Data: json.RawMessage(`{"durable":true}`), CreatedAt: now}) != nil {
 		return InteractionStageResult{}, errors.Join(ErrInteractivePersistence, errors.New("interaction event persistence failed"))
 	}
 	if in.Ready {

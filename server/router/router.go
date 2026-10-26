@@ -254,6 +254,12 @@ func NewRouter(svc *Services) *fiber.App {
 	}
 	if svc.AssistantHandler != nil {
 		assistant := apiV1.Group("/assistant")
+		assistant.Post("/interactions", svc.AssistantHandler.InteractionCreate)
+		assistant.Get("/interactions/:id", svc.AssistantHandler.InteractionSnapshot)
+		assistant.Post("/interactions/:id/messages", svc.AssistantHandler.InteractionMessage)
+		assistant.Post("/interactions/:id/questions/:callId/answers", svc.AssistantHandler.InteractionAnswer)
+		assistant.Get("/interactions/:id/events", svc.AssistantHandler.InteractionEvents)
+		assistant.Post("/interactions/:id/commit", svc.AssistantHandler.InteractionCommit)
 		assistant.Get("/bootstrap", svc.AssistantHandler.Bootstrap)
 		assistant.Get("/projects/:projectId/works", svc.AssistantHandler.Works)
 		assistant.Get("/checkpoint", svc.AssistantHandler.LatestCheckpoint)

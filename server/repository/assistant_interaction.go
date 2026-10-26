@@ -27,7 +27,10 @@ type AssistantInteractionRepository interface {
 	CreateDraftIfAttemptNew(context.Context, *model.AssistantInteractionDraft, *model.AssistantInteractionAttempt) (*model.AssistantInteractionDraft, bool, error)
 	FindDraftForUser(context.Context, string, string) (*model.AssistantInteractionDraft, error)
 	FindLatestDraft(context.Context, string, string, string) (*model.AssistantInteractionDraft, error)
+	ListDrafts(context.Context, string, string) ([]*model.AssistantInteractionDraft, error)
+	UpdateDraftState(context.Context, string, string, time.Time) error
 	CreateEvent(context.Context, *model.AssistantInteractionEvent) error
+	NextEventSequence(context.Context, string) (uint64, error)
 	ListEventsAfter(context.Context, string, uint64, int) ([]*model.AssistantInteractionEvent, error)
 	CreateAttempt(context.Context, *model.AssistantInteractionAttempt) error
 	FindAttempt(context.Context, string, string) (*model.AssistantInteractionAttempt, error)
@@ -170,8 +173,38 @@ func (r *assistantInteractionRepository) FindLatestDraft(ctx context.Context, us
 	}
 	return &value, nil
 }
+func (r *assistantInteractionRepository) ListDrafts(ctx context.Context, userID, interactionID string) ([]*model.AssistantInteractionDraft, error) {
+	var values []*model.AssistantInteractionDraft
+	err := r.db.WithContext(ctx).Table("assistant_interaction_drafts").
+		Joins("JOIN assistant_interactions ON assistant_interactions.id = assistant_interaction_drafts.interaction_id").
+		Where("assistant_interactions.user_id = ? AND assistant_interaction_drafts.interaction_id = ?", userID, interactionID).
+		Order("assistant_interaction_drafts.mode_id ASC, assistant_interaction_drafts.revision DESC").Find(&values).Error
+	return values, err
+}
+func (r *assistantInteractionRepository) UpdateDraftState(ctx context.Context, id, state string, at time.Time) error {
+	return r.db.WithContext(ctx).Model(&model.AssistantInteractionDraft{}).Where("id = ?", id).Updates(map[string]any{"confirmation_state": state, "updated_at": at}).Error
+}
 func (r *assistantInteractionRepository) CreateEvent(ctx context.Context, value *model.AssistantInteractionEvent) error {
 	return r.db.WithContext(ctx).Create(value).Error
+}
+func (r *assistantInteractionRepository) NextEventSequence(ctx context.Context, interactionID string) (uint64, error) {
+	tx := r.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return 0, tx.Error
+	}
+	if err := tx.Model(&model.AssistantInteraction{}).Where("id = ?", interactionID).UpdateColumn("command_sequence", gorm.Expr("command_sequence + 1")).Error; err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+	var value model.AssistantInteraction
+	if err := tx.Select("command_sequence").Where("id = ?", interactionID).First(&value).Error; err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+	if err := tx.Commit().Error; err != nil {
+		return 0, err
+	}
+	return value.CommandSequence, nil
 }
 func (r *assistantInteractionRepository) ListEventsAfter(ctx context.Context, interactionID string, after uint64, limit int) ([]*model.AssistantInteractionEvent, error) {
 	if limit <= 0 {

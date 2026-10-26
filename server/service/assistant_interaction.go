@@ -34,6 +34,7 @@ type RuntimeBindingView struct {
 type AssistantInteractionService struct {
 	repo    repository.Repository
 	factory RuntimeFactory
+	taskSvc *TaskService
 	clock   func() time.Time
 	mu      sync.Mutex
 	locks   map[string]*sync.Mutex
@@ -92,7 +93,21 @@ func (s *AssistantInteractionService) Snapshot(ctx context.Context, userID, inte
 		}
 		return InteractionSnapshot{}, err
 	}
-	return s.snapshotFromInteraction(interaction), nil
+	snapshot := s.snapshotFromInteraction(interaction)
+	if drafts, draftErr := s.repo.AssistantInteractions().ListDrafts(ctx, userID, interactionID); draftErr == nil {
+		snapshot.Drafts = make([]InteractionDraftView, 0, len(drafts))
+		for _, draft := range drafts {
+			snapshot.Drafts = append(snapshot.Drafts, InteractionDraftView{ID: draft.ID, ModeID: draft.ModeID, Revision: draft.Revision, Payload: draft.Payload, PayloadDigest: draft.PayloadDigest, Ready: draft.Ready, ConfirmationState: draft.ConfirmationState})
+		}
+	}
+	return snapshot, nil
+}
+
+func (s *AssistantInteractionService) Events(ctx context.Context, userID, interactionID string, after uint64) ([]*model.AssistantInteractionEvent, error) {
+	if _, err := s.Snapshot(ctx, userID, interactionID); err != nil {
+		return nil, err
+	}
+	return s.repo.AssistantInteractions().ListEventsAfter(ctx, interactionID, after, 200)
 }
 
 func (s *AssistantInteractionService) EnsureRuntime(ctx context.Context, userID, interactionID string, expectedGeneration int64) (RuntimeBindingView, error) {
@@ -204,7 +219,10 @@ func (s *AssistantInteractionService) AcceptRuntimeEvent(interactionID string, g
 	if err != nil {
 		return false
 	}
-	sequence := uint64(s.clock().UnixNano())
+	sequence, sequenceErr := s.repo.AssistantInteractions().NextEventSequence(context.Background(), interactionID)
+	if sequenceErr != nil {
+		return false
+	}
 	if err := s.repo.AssistantInteractions().CreateEvent(context.Background(), &model.AssistantInteractionEvent{ID: uuid.NewString(), InteractionID: interactionID, Sequence: sequence, Type: eventType, Data: encoded, CreatedAt: s.clock()}); err != nil {
 		return false
 	}
@@ -216,5 +234,12 @@ func (s *AssistantInteractionService) RuntimeBindingForTest(ctx context.Context,
 }
 
 func (s *AssistantInteractionService) snapshotFromInteraction(value *model.AssistantInteraction) InteractionSnapshot {
-	return InteractionSnapshot{ID: value.ID, ModeID: value.ModeID, ProjectID: value.ProjectID, ContentID: value.ContentID, Lifecycle: value.Lifecycle, Generation: value.Generation, RuntimeStatus: InteractionRuntimeRunning, ExpiresAt: value.ExpiresAt.UTC().Format(time.RFC3339Nano), LastActivityAt: value.LastActivityAt.UTC().Format(time.RFC3339Nano), AvailableActions: []string{"send_message", "restart"}}
+	actions := []string{"send_message", "restart"}
+	if value.Lifecycle == model.AssistantInteractionNeedsConfirmation {
+		actions = []string{"confirm_draft", "continue_editing", "restart"}
+	}
+	if value.Lifecycle == model.AssistantInteractionCompleted {
+		actions = []string{"view_task", "restart"}
+	}
+	return InteractionSnapshot{ID: value.ID, ModeID: value.ModeID, ProjectID: value.ProjectID, ContentID: value.ContentID, Lifecycle: value.Lifecycle, Generation: value.Generation, RuntimeStatus: InteractionRuntimeRunning, ExpiresAt: value.ExpiresAt.UTC().Format(time.RFC3339Nano), LastActivityAt: value.LastActivityAt.UTC().Format(time.RFC3339Nano), AvailableActions: actions}
 }

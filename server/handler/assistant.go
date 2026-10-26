@@ -13,14 +13,19 @@ import (
 // AssistantHandler exposes mode-oriented routes without allowing the browser
 // to select an Agent or DSH preset.
 type AssistantHandler struct {
-	svc         *service.InteractiveService
-	interactive *InteractiveHandler
-	tasks       *service.TaskService
-	repo        repository.Repository
+	svc            *service.InteractiveService
+	interactive    *InteractiveHandler
+	tasks          *service.TaskService
+	repo           repository.Repository
+	interactionSvc *service.AssistantInteractionService
 }
 
 func NewAssistantHandler(svc *service.InteractiveService, tasks *service.TaskService, repo repository.Repository) *AssistantHandler {
 	return &AssistantHandler{svc: svc, interactive: NewInteractiveHandler(svc), tasks: tasks, repo: repo}
+}
+
+func (h *AssistantHandler) SetInteractionService(svc *service.AssistantInteractionService) {
+	h.interactionSvc = svc
 }
 
 func (h *AssistantHandler) Bootstrap(c fiber.Ctx) error {
