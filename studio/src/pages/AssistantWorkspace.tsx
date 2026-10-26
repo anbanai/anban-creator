@@ -295,20 +295,22 @@ export default function AssistantWorkspace() {
     attachments,
     onAttachmentsChange: setAttachments,
   })
-  const completeProjects = projects.map((project) => {
-    const full = projectsQuery.data?.find((candidate) => candidate.id === project.id)
-    return full ? {
+  const completeProjects: AssistantProject[] = (projectsQuery.isError ? [] : projectsQuery.data ?? []).map((project) => {
+    const metadata = projects.find((candidate) => candidate.id === project.id)
+    return {
+      ...metadata,
       ...project,
-      avatar_url: full.avatar_url,
-      description: full.description,
-      image_ratio: full.image_ratio,
-      portrait_reference_image: full.portrait_reference_image,
-    } : project
+      profileRevision: metadata?.profileRevision ?? project.profile?.version ?? 0,
+      profileReady: metadata?.profileReady ?? true,
+      works: metadata?.works ?? [],
+    }
   })
-  const readyProjects = completeProjects.filter((project) => project.profileReady)
   const selectionMode = pendingMode ?? mode
-  const selectableProjects = selectionMode === 'profile' ? completeProjects : readyProjects
-  const selectedProject = selectableProjects.find((project) => project.id === projectId) ?? (selectionMode !== 'profile' && selectableProjects.length === 1 ? selectableProjects[0] : undefined)
+  const selectableProjects = completeProjects
+  const lockedProjectId = workspace && !pendingMode ? workspace.project_id : undefined
+  const selectedProject = selectableProjects.find((project) => project.id === (lockedProjectId ?? projectId))
+    ?? (lockedProjectId ? projects.find((project) => project.id === lockedProjectId) : undefined)
+    ?? (!workspace && !projectId && !newProfile && selectionMode !== 'profile' ? selectableProjects[0] : undefined)
   const creationTypes = CREATION_TYPES[selectedProject?.platform ?? ''] ?? []
   const selectedCreationType = creationTypes.some((item) => item.value === creationType) ? creationType : creationTypes[0]?.value ?? ''
   const isVideoEditCreation = mode === 'creation' && selectedCreationType === 'video-edit'
@@ -341,8 +343,13 @@ export default function AssistantWorkspace() {
   const pendingQuestions = activeQuestions.filter((question) => !question.answers)
   const activeDraft = draftByMode[mode]
   const draftPending = Boolean(activeDraft)
-  const activeMode = bootstrap?.modes.find((candidate) => candidate.id === mode)
-  const isRuntimeUnavailable = activeMode?.disabledReason === '助手运行环境暂不可用，请稍后重试'
+  const bootstrapMode = bootstrap?.modes.find((candidate) => candidate.id === mode)
+  const isRuntimeUnavailable = bootstrapMode?.disabledReason === '助手运行环境暂不可用，请稍后重试'
+  const activeMode = bootstrapMode && !isRuntimeUnavailable && mode === 'creation'
+    ? { ...bootstrapMode, available: Boolean(selectedProject || completeProjects.length), disabledReason: bootstrapMode.disabledReason ?? '先创建一个人设，之后即可澄清创作需求' }
+    : bootstrapMode && !isRuntimeUnavailable && mode === 'review' && selectedWork
+      ? { ...bootstrapMode, available: true }
+      : bootstrapMode
   const modePrerequisiteBlocked = Boolean(activeMode && !activeMode.available && activeMode.disabledReason && !isRuntimeUnavailable)
   const missingContextInstruction = activeMode?.available
     ? mode === 'creation' && !selectedProject
@@ -355,7 +362,8 @@ export default function AssistantWorkspace() {
           ? '先选择作品后即可输入消息'
           : undefined
     : undefined
-  const composerBlocked = modePrerequisiteBlocked || Boolean(missingContextInstruction) || Boolean(activeMode && !activeMode.available)
+  const staleProjectSelection = !workspace && Boolean(projectId) && !selectedProject
+  const composerBlocked = staleProjectSelection || modePrerequisiteBlocked || Boolean(missingContextInstruction) || Boolean(activeMode && !activeMode.available)
   const composerPlaceholder = modePrerequisiteBlocked
     ? mode === 'creation' ? '先完成新人设创建后即可输入消息' : '先完成当前模式所需条件后即可输入消息'
     : missingContextInstruction ?? modePlaceholder(mode)
@@ -367,7 +375,8 @@ export default function AssistantWorkspace() {
     : undefined
   const profilePlatform = selectedProject?.platform ?? stringValue(draftProject?.platform)
   const isVideoEditProfile = mode === 'profile' && profilePlatform === 'video-edit'
-  const canSend = Boolean(composer.trim()) && Boolean(activeMode?.available) && (mode === 'profile' || Boolean(selectedProject)) && (mode !== 'review' || Boolean(selectedWork)) && !sending && !responding && !committing && !composerBlocked && !draftPending
+  const projectContextReady = Boolean(workspace) || (projectsQuery.isSuccess && !projectsQuery.isFetching)
+  const canSend = projectContextReady && Boolean(composer.trim()) && Boolean(activeMode?.available) && (mode === 'profile' || Boolean(selectedProject)) && (mode !== 'review' || Boolean(selectedWork)) && !sending && !responding && !committing && !composerBlocked && !draftPending
 
   const resetExpiredWorkspace = (preservedComposer?: string) => {
     workspaceResetVersion.current += 1
@@ -383,14 +392,14 @@ export default function AssistantWorkspace() {
   }
 
   useEffect(() => {
-    if (!bootstrap || routeState.modeId || persisted?.workspace?.mode_id || workspace || newProfile || projectId || readyProjects.length === 0) return
-    setProjectId(readyProjects[0].id)
-  }, [bootstrap, persisted?.workspace?.mode_id, projectId, readyProjects, routeState.modeId, newProfile, workspace])
+    if (!bootstrap || routeState.modeId || persisted?.workspace?.mode_id || workspace || newProfile || projectId || completeProjects.length === 0) return
+    setProjectId(completeProjects[0].id)
+  }, [bootstrap, persisted?.workspace?.mode_id, projectId, completeProjects, routeState.modeId, newProfile, workspace])
 
   useEffect(() => {
-    if (!bootstrap || routeState.modeId || persisted?.workspace?.mode_id || workspace || !isMode(bootstrap.defaultModeId)) return
-    setMode(bootstrap.defaultModeId)
-  }, [bootstrap, persisted?.workspace?.mode_id, routeState.modeId, workspace])
+    if (!bootstrap || routeState.modeId || persisted?.workspace?.mode_id || workspace || newProfile || !isMode(bootstrap.defaultModeId)) return
+    setMode(bootstrap.defaultModeId === 'profile' && completeProjects.length > 0 ? 'creation' : bootstrap.defaultModeId)
+  }, [bootstrap, completeProjects.length, persisted?.workspace?.mode_id, routeState.modeId, workspace])
 
   useEffect(() => {
     if (executionProfile || executionProfilesQuery.isLoading) return
@@ -765,6 +774,7 @@ export default function AssistantWorkspace() {
         setWorkspace((current) => current ? { ...current, project_id: committedProjectID, content_id: '' } : current)
         queryClient.setQueryData<{ projects: AssistantProject[] } | undefined>(['assistant-bootstrap'], (current) => current ? { ...current, projects: [...current.projects.filter((project) => project.id !== committedProjectID), committedProject] } : current)
         void queryClient.invalidateQueries({ queryKey: ['assistant-bootstrap'] })
+        void queryClient.invalidateQueries({ queryKey: ['projects'] })
       }
       if (mode !== 'creation') setAttachments([])
       const committedTaskID = stringValue(result.task?.id)
@@ -800,7 +810,7 @@ export default function AssistantWorkspace() {
     const nextValue = value ?? ''
     setProjectId(nextValue)
     setContentId('')
-    setVideoEditDefaults(projects.find((project) => project.id === nextValue)?.video_edit_defaults ?? {})
+    setVideoEditDefaults(completeProjects.find((project) => project.id === nextValue)?.video_edit_defaults ?? {})
     setCreationType('')
     setVideoEditAssets([])
     setVideoEditBrief('')
@@ -930,8 +940,8 @@ export default function AssistantWorkspace() {
       phase="locked"
       mode={mode}
       modes={bootstrap?.modes ?? []}
-      projects={completeProjects}
-      projectId={selectedProject?.id ?? (newProfile ? '' : projectId)}
+      projects={selectedProject && !completeProjects.some((project) => project.id === selectedProject.id) ? [...completeProjects, selectedProject] : completeProjects}
+      projectId={selectedProject?.id ?? ''}
       works={works}
       contentId={selectedWork?.id ?? contentId}
       creationType={selectedCreationType}
@@ -945,8 +955,8 @@ export default function AssistantWorkspace() {
 
   const personaRail = bootstrap ? (
     <PersonaRail
-      projects={readyProjects}
-      selectedProjectId={selectedProject?.id ?? (newProfile ? '' : projectId)}
+      projects={completeProjects}
+      selectedProjectId={selectedProject?.id ?? ''}
       onSelect={selectPersona}
       onCreate={startNewProfile}
       onViewWorks={viewPersonaWorks}
@@ -967,13 +977,14 @@ export default function AssistantWorkspace() {
     <AgentPromptDropProvider>
       <main data-testid="assistant-workspace" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
       {!workspace ? (
-        <section className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col px-4 pb-3 md:px-8">
-          <div data-testid="assistant-conversation" className="assistant-scroll min-h-0 flex flex-1 flex-col overflow-y-auto pb-1 pt-5 md:pb-2 md:pt-8">
-            <HomeStage project={selectedProject} hasReadyPersona={readyProjects.length > 0} />
+        <section className="assistant-scroll mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col overflow-y-auto px-4 pb-6 md:px-8">
+          <div data-testid="assistant-conversation" className="flex shrink-0 flex-col pb-4 pt-8 md:pb-6 md:pt-14">
+            <HomeStage project={selectedProject} hasPersona={completeProjects.length > 0} />
             {personaRail}
             {routeHasContext && mode === 'review' && <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} onProject={resetCreationProject} onContent={setContentId} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />}
             {!activeMode?.available && activeMode?.disabledReason && !isRuntimeUnavailable && <div className="mx-auto mt-4 flex w-full max-w-2xl flex-col items-center gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3 sm:flex-row sm:justify-between"><p role="status" className="text-left text-sm leading-6 text-muted-foreground">{activeMode.disabledReason}</p><Button type="button" variant="outline" size="sm" className="shrink-0" onClick={selectModePrerequisiteAction}>{modePrerequisiteAction.label}</Button></div>}
             {bootstrapQuery.isError && <div className="mt-3 flex flex-wrap items-center justify-center gap-3"><p role="alert" className="text-sm text-destructive">首页暂时无法加载，请稍后重试。</p><Button type="button" variant="outline" size="sm" disabled={bootstrapQuery.isFetching} onClick={() => void bootstrapQuery.refetch()}>{bootstrapQuery.isFetching ? <Loader2 className="size-4 animate-spin" /> : '重试加载'}</Button></div>}
+            {projectsQuery.isError && <div className="mt-3 flex flex-wrap items-center justify-center gap-3"><p role="alert" className="text-sm text-destructive">人设暂时无法加载，请稍后重试。</p><Button type="button" variant="outline" size="sm" disabled={projectsQuery.isFetching} onClick={() => void projectsQuery.refetch()}>重试加载人设</Button></div>}
             {bootstrapQuery.isLoading && <p role="status" className="sr-only">正在加载首页</p>}
             {isVideoEditProfile && <VideoEditProjectDefaultsPanel value={videoEditDefaults} onChange={setVideoEditDefaults} />}
             {error && <p role="alert" className="mt-4 text-center text-sm text-destructive">{error}</p>}
@@ -1027,10 +1038,10 @@ function platformIntroduction(platform: string) {
   return profileLabAgents.find((agent) => agent.id === agentID)?.detail ?? `${platformDisplayName(platform, '创作')}内容创作`
 }
 
-function HomeStage({ project, hasReadyPersona }: { project?: AssistantProject; hasReadyPersona: boolean }) {
+function HomeStage({ project, hasPersona }: { project?: AssistantProject; hasPersona: boolean }) {
   const imageURL = personaImageURL(project)
   const meta = platformMeta(project?.platform ?? '')
-  return <section aria-label="当前人设" className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-end px-2 pb-8 pt-6 text-left md:pb-10">
+  return <section aria-label="当前人设" className="mx-auto flex w-full max-w-xl flex-col px-2 pb-8 text-left md:pb-10">
     <div className="flex shrink-0 items-center justify-center gap-4 sm:gap-6">
     <div className="relative flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-muted/60 shadow-sm sm:size-28">
       {imageURL ? <SignedImage src={imageURL} alt={`${project?.name ?? '当前人设'}形象`} className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-10 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-12 text-muted-foreground" />}
@@ -1038,7 +1049,7 @@ function HomeStage({ project, hasReadyPersona }: { project?: AssistantProject; h
     <div className="min-w-0">
       <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{project ? '当前人设' : '准备开始'}</p>
       <h1 className="mt-2 text-xl font-semibold tracking-tight sm:text-2xl">{project?.name ?? '神秘人'}</h1>
-      <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{project?.description || (hasReadyPersona ? '选择一个人设，开始你的下一次创作。' : '为了创建更好的作品，需要先创建您的人设')}</p>
+      <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{project?.description || (hasPersona ? '选择一个人设，开始你的下一次创作。' : '为了创建更好的作品，需要先创建您的人设')}</p>
       {project && <span className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><AgentIconStack agentIds={[meta.agentID]} maxVisible={1} compact />{meta.label}</span>}
     </div>
     </div>
@@ -1077,7 +1088,7 @@ function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWo
     }
   }, [projects.length])
 
-  return <section aria-label="首页人设选择" className="mx-auto mt-auto w-full max-w-5xl shrink-0 pb-1">
+  return <section aria-label="首页人设选择" className="mx-auto w-full max-w-5xl shrink-0 pb-1">
     <div data-testid="persona-rail-header" className="mb-3 flex items-center gap-2 px-1">
       <p className="text-sm font-medium">选择人设</p>
       <span className="text-xs text-muted-foreground">{projects.length ? `${projects.length} 个可用人设` : '还没有可用人设'}</span>
