@@ -47,11 +47,11 @@ func (s *TaskService) validateContentPlanningArtifacts(ctx context.Context, task
 			return err
 		}
 		var identity model.PlanningIdentity
-		if json.Unmarshal(body, &identity) != nil || identity.SchemaVersion != "1.0" || identity.TaskID != task.ID || identity.ExecutionID != execution.ID || identity.TaskKind != task.Type || (identity.Status != "ready" && !(task.Type == model.TaskTypeContentResearch && identity.Status == "data_insufficient")) {
+		if json.Unmarshal(body, &identity) != nil || identity.SchemaVersion != "1.0" || identity.TaskID != task.ID || identity.ExecutionID != execution.ID || identity.TaskKind != task.TaskKind || (identity.Status != "ready" && !(task.Type == model.TaskTypeContentResearch && identity.Status == "data_insufficient")) {
 			return fmt.Errorf("planning artifact identity/readiness mismatch: %s", spec.Path)
 		}
 	}
-	input, err := decodePlanningInput(task.Type, task.AgentInput.Data())
+	input, err := decodePlanningInput(task.TaskKind, task.AgentInput.Data())
 	if err != nil {
 		return err
 	}

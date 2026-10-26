@@ -94,7 +94,7 @@ func (s *FeedbackAttributionService) EnsureManagedTask(ctx context.Context, job 
 		return nil, err
 	}
 	input := map[string]any{"feedback_job_id": job.ID, "operation": job.Operation, "target_content_id": job.TargetContentID, "analytics_revision": job.AnalyticsRevision, "profile_revision": job.ProfileRevision, "attribution_direction": job.AttributionDirection, "performance_metric": job.PerformanceMetric, "performance_metric_basis": job.PerformanceMetricBasis, "performance_score": job.PerformanceScore, "performance_percentile": job.PerformancePercentile, "period_start": job.PeriodStart, "period_end": job.PeriodEnd, "fingerprint": job.Fingerprint}
-	task := &model.Task{ID: uuid.NewString(), UserID: job.UserID, ProjectID: job.ProjectID, AgentID: model.AgentIDFeedbackAnalysis, Channel: model.ChannelFeedbackAnalysis, TaskKind: model.TaskKindFeedbackAnalysis, Type: model.TaskKindFeedbackAnalysis, Status: model.TaskStatusPending, Prompt: "Run the frozen feedback analysis job.", ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint}
+	task := &model.Task{ID: uuid.NewString(), UserID: job.UserID, ProjectID: job.ProjectID, AgentID: model.AgentIDFeedbackAnalysis, Channel: model.ChannelFeedbackAnalysis, TaskKind: model.TaskKindFeedbackAnalysis, Type: model.TaskTypeFeedbackAnalysis, Status: model.TaskStatusPending, Prompt: "Run the frozen feedback analysis job.", ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint}
 	task.SetAgentInput(input)
 	var claimed bool
 	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {

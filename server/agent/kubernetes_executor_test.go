@@ -77,7 +77,7 @@ func TestServerDeploymentRBACAllowsJobActivationUpdate(t *testing.T) {
 }
 
 func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
-	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	spec := job.Spec.Template.Spec
 	if job.Spec.Suspend == nil || !*job.Spec.Suspend {
 		t.Fatalf("suspend = %#v, want true until runtime identity is persisted", job.Spec.Suspend)
@@ -193,14 +193,14 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 func TestRuntimeMemoryMountUsesFrozenAdapterCWD(t *testing.T) {
 	for _, tc := range []struct{ adapter, taskType, want string }{
 		{agentpack.AdapterStandard, model.PlatformMontage, "/workspace/.claude/agent-memory"},
-		{agentpack.AdapterOpenMontage, model.PlatformWechat, "/workspace/openmontage/.claude/agent-memory"},
+		{agentpack.AdapterOpenMontage, model.TaskTypeWechatArticle, "/workspace/openmontage/.claude/agent-memory"},
 	} {
 		t.Run(tc.adapter, func(t *testing.T) {
 			execution := testExecution()
 			execution.RuntimeAdapter = tc.adapter
 			task := testTask()
 			task.Type = tc.taskType
-			job := buildKubernetesJob(testJobConfig(), execution, task)
+			job := mustBuildKubernetesJob(testJobConfig(), execution, task)
 			assertMount(t, job.Spec.Template.Spec.Containers[0], kubernetesMemoryMountName, tc.want, false)
 			assertMountSubPath(t, job.Spec.Template.Spec.Containers[0], kubernetesMemoryMountName, "projects/"+task.ProjectID)
 			spec := buildDockerRuntimeSpec(dockerRuntimeConfig{ProjectMemoryVolume: "project-memory"}, execution, task)
@@ -269,7 +269,7 @@ func TestMontageWorkspaceInitPreparesClaudeDirectory(t *testing.T) {
 }
 
 func TestKubernetesWorkspaceInitPreservesServerOwnedProjectMemoryPermissions(t *testing.T) {
-	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	init := job.Spec.Template.Spec.InitContainers[0]
 	if strings.Contains(kubernetesWorkspaceInitScript("standard"), "/.claude/agent-memory") {
 		t.Fatal("workspace init script must not chmod or chown the Server-owned project memory directory")
@@ -443,7 +443,7 @@ func TestBuildKubernetesJobCopiesCompleteMontageWorkspaceWithoutRevisionMarker(t
 	execution.RuntimeProfile = model.PlatformMontage
 	execution.RuntimeImage = "registry.example.com/montage@sha256:run"
 	execution.RuntimeAdapter = agentpack.AdapterOpenMontage
-	job := buildKubernetesJob(testJobConfig(), execution, task)
+	job := mustBuildKubernetesJob(testJobConfig(), execution, task)
 	script := strings.Join(job.Spec.Template.Spec.InitContainers[0].Args, " ")
 	for _, want := range []string{"/opt/montage-template", "/workspace/openmontage", `cp -a "$template/."`} {
 		if !strings.Contains(script, want) {
@@ -460,7 +460,7 @@ func TestBuildKubernetesJobCopiesCompleteMontageWorkspaceWithoutRevisionMarker(t
 func TestBuildKubernetesJobUsesFrozenRuntimeAdapter(t *testing.T) {
 	execution := testExecution()
 	execution.RuntimeAdapter = agentpack.AdapterOpenMontage
-	job := buildKubernetesJob(testJobConfig(), execution, testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), execution, testTask())
 	script := strings.Join(job.Spec.Template.Spec.InitContainers[0].Args, " ")
 	if !strings.Contains(script, "runtime=/workspace/openmontage") {
 		t.Fatalf("frozen OpenMontage adapter was ignored: %s", script)
@@ -532,22 +532,21 @@ func TestBuildTaskWorkspacePVCUsesTaskIdentityAndNASStorageClass(t *testing.T) {
 func TestBuildKubernetesJobUsesTaskResourceProfile(t *testing.T) {
 	cfg := testJobConfig()
 	cfg.ResourceProfiles = map[string]srvconfig.KubernetesResourceConfig{
-		model.PlatformWechat: {
+		model.TaskTypeWechatArticle: {
 			Requests: map[string]string{"cpu": "2", "memory": "4Gi"},
 			Limits:   map[string]string{"cpu": "4", "memory": "7Gi"},
 		},
 	}
 	task := testTask()
-	task.Type = model.PlatformWechat
-	resources := buildKubernetesJob(cfg, testExecution(), task).Spec.Template.Spec.Containers[0].Resources
+	task.Type = model.TaskTypeWechatArticle
+	resources := mustBuildKubernetesJob(cfg, testExecution(), task).Spec.Template.Spec.Containers[0].Resources
 	if resources.Requests.Cpu().String() != "2" || resources.Requests.Memory().String() != "4Gi" || resources.Limits.Cpu().String() != "4" || resources.Limits.Memory().String() != "7Gi" {
 		t.Fatalf("article resources = %#v, want task profile", resources)
 	}
 
-	task.Type = "future-task"
-	resources = buildKubernetesJob(cfg, testExecution(), task).Spec.Template.Spec.Containers[0].Resources
-	if resources.Requests.Cpu().String() != "500m" || resources.Limits.Memory().String() != "2Gi" {
-		t.Fatalf("fallback resources = %#v, want defaults", resources)
+	task.Type = model.PlatformWechat
+	if _, ok := cfg.ResourceProfiles[task.Type]; ok {
+		t.Fatal("unexpected platform alias profile in test config")
 	}
 }
 
@@ -555,7 +554,7 @@ func TestBuildKubernetesJobUsesPersistedRuntimeImage(t *testing.T) {
 	execution := testExecution()
 	execution.RuntimeProfile = model.PlatformMontage
 	execution.RuntimeImage = "registry.example.com/montage@sha256:run"
-	job := buildKubernetesJob(testJobConfig(), execution, testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), execution, testTask())
 	if job.Spec.Template.Spec.InitContainers[0].Image != execution.RuntimeImage ||
 		job.Spec.Template.Spec.Containers[0].Image != execution.RuntimeImage {
 		t.Fatalf("job did not use persisted runtime image: init=%q main=%q", job.Spec.Template.Spec.InitContainers[0].Image, job.Spec.Template.Spec.Containers[0].Image)
@@ -563,7 +562,7 @@ func TestBuildKubernetesJobUsesPersistedRuntimeImage(t *testing.T) {
 }
 
 func TestBuildKubernetesJobCatalogDigestLabelFitsKubernetes(t *testing.T) {
-	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	value := job.Labels[kubernetesCatalogDigestLabel]
 	if errs := validation.IsValidLabelValue(value); len(errs) != 0 {
 		t.Fatalf("Catalog digest label %q is invalid: %v", value, errs)
@@ -578,8 +577,8 @@ func TestBuildKubernetesJobConfigHashIncludesPersistedRuntimeImage(t *testing.T)
 	first.RuntimeImage = "registry.example.com/content@sha256:first"
 	second := *first
 	second.RuntimeImage = "registry.example.com/content@sha256:second"
-	firstJob := buildKubernetesJob(testJobConfig(), first, testTask())
-	secondJob := buildKubernetesJob(testJobConfig(), &second, testTask())
+	firstJob := mustBuildKubernetesJob(testJobConfig(), first, testTask())
+	secondJob := mustBuildKubernetesJob(testJobConfig(), &second, testTask())
 	if firstJob.Annotations[kubernetesObjectConfigHashLabel] == secondJob.Annotations[kubernetesObjectConfigHashLabel] {
 		t.Fatal("persisted runtime image did not affect Kubernetes Job config hash")
 	}
@@ -626,6 +625,21 @@ func TestKubernetesDispatcherScope(t *testing.T) {
 	}
 }
 
+func TestKubernetesDispatcherRejectsMissingResourceProfileBeforeCreatingObjects(t *testing.T) {
+	cfg := testJobConfig()
+	delete(cfg.ResourceProfiles, model.TaskTypeWechatArticle)
+	client := fake.NewSimpleClientset()
+	dispatcher := &kubernetesJobDispatcher{config: cfg, kube: client, memory: &testProjectMemoryStore{}}
+
+	_, err := dispatcher.Prepare(context.Background(), testExecution(), testTask())
+	if err == nil || !IsPermanentDispatchError(err) || !strings.Contains(err.Error(), "resource_profiles.wechat-article is required") {
+		t.Fatalf("Prepare() error = %v, want permanent missing profile error", err)
+	}
+	if actions := client.Actions(); len(actions) != 0 {
+		t.Fatalf("Kubernetes actions = %#v, want no PVC or Job creation before resource validation", actions)
+	}
+}
+
 func TestKubernetesJobAndPVCNamesAreDeterministicDNSSafeAndCollisionAware(t *testing.T) {
 	for _, tc := range []struct {
 		nameA string
@@ -650,7 +664,7 @@ func TestKubernetesJobAndPVCNamesAreDeterministicDNSSafeAndCollisionAware(t *tes
 
 func TestKubernetesJobLabelsPreserveExecutionIdentity(t *testing.T) {
 	execution := testExecution()
-	job := buildKubernetesJob(testJobConfig(), execution, testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), execution, testTask())
 	if job.Labels[kubernetesExecutionIDLabel] != execution.ID {
 		t.Fatalf("execution label = %q, want %q", job.Labels[kubernetesExecutionIDLabel], execution.ID)
 	}
@@ -713,7 +727,7 @@ func TestKubernetesDispatcherResolvePreparedIsLookupOnlyAndUIDFenced(t *testing.
 	ctx := context.Background()
 	execution := testExecution()
 	task := testTask()
-	job := buildKubernetesJob(testJobConfig(), execution, task)
+	job := mustBuildKubernetesJob(testJobConfig(), execution, task)
 	job.UID = types.UID("prepared-job-uid")
 	client := fake.NewSimpleClientset(job.DeepCopy())
 	dispatcher := testDispatcher(client)
@@ -806,7 +820,7 @@ func TestKubernetesDispatcherPublicationRecoveryUsesIsolatedWorkspace(t *testing
 }
 
 func TestVerifyKubernetesJobRejectsSecurityAndRuntimeSpecMutation(t *testing.T) {
-	desired := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	desired := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	for _, tc := range []struct {
 		name   string
 		mutate func(*batchv1.Job)
@@ -950,7 +964,7 @@ func TestKubernetesActivationValidatesPersistedIdentityAndNeverCreates(t *testin
 func TestKubernetesRuntimeOperationsRejectReplacementJobUID(t *testing.T) {
 	ctx := context.Background()
 	originalUID := "prepared-job-uid"
-	replacement := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	replacement := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	replacement.UID = types.UID("replacement-job-uid")
 	execution := testExecution()
 	execution.RuntimeInstanceID = originalUID
@@ -990,7 +1004,7 @@ func TestKubernetesRuntimeOperationsRejectReplacementJobUID(t *testing.T) {
 func TestKubernetesActivationRetriesUpdateConflict(t *testing.T) {
 	ctx := context.Background()
 	execution := testExecution()
-	job := buildKubernetesJob(testJobConfig(), execution, testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), execution, testTask())
 	job.UID = types.UID("job-uid-1")
 	execution.RuntimeInstanceID = string(job.UID)
 	client := fake.NewSimpleClientset(job)
@@ -1015,7 +1029,7 @@ func TestKubernetesActivationRetriesUpdateConflict(t *testing.T) {
 }
 
 func TestVerifyKubernetesJobIgnoresSafeAPIServerDefaults(t *testing.T) {
-	desired := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	desired := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	existing := desired.DeepCopy()
 	existing.Annotations[kubernetesObjectConfigHashLabel] = "stale-diagnostic-hash"
 	existing.UID = types.UID("job-uid-1")
@@ -1053,7 +1067,7 @@ func TestVerifyKubernetesJobIgnoresSafeAPIServerDefaults(t *testing.T) {
 }
 
 func TestVerifyKubernetesJobNormalizesSecretVolumeDefaultMode(t *testing.T) {
-	desired := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	desired := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	existing := desired.DeepCopy()
 	desiredServerCA := requireTestVolume(t, desired, kubernetesServerCAVolumeName).Secret
 	existingServerCA := requireTestVolume(t, existing, kubernetesServerCAVolumeName).Secret
@@ -1066,7 +1080,7 @@ func TestVerifyKubernetesJobNormalizesSecretVolumeDefaultMode(t *testing.T) {
 }
 
 func TestVerifyKubernetesJobReportsDifferingFields(t *testing.T) {
-	desired := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	desired := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	existing := desired.DeepCopy()
 	existing.Spec.Template.Spec.Containers[0].Image = "foreign/image"
 
@@ -1108,7 +1122,7 @@ func TestVerifyTaskWorkspacePVCAcceptsEqualOrLargerAndRejectsSmaller(t *testing.
 
 func TestKubernetesDispatcherRejectsMissingOrMismatchedRequiredLabels(t *testing.T) {
 	ctx := context.Background()
-	desiredJob := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	desiredJob := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	desiredPVC := buildTaskWorkspacePVC(testJobConfig(), testTask())
 	for _, object := range []struct {
 		name   string
@@ -1261,7 +1275,7 @@ func TestKubernetesDispatcherLeavesPostAlreadyExistsNotFoundRetryable(t *testing
 
 func TestKubernetesDispatcherDeleteUsesForegroundPropagation(t *testing.T) {
 	ctx := context.Background()
-	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	job.UID = types.UID("job-uid-1")
 	client := fake.NewSimpleClientset(job)
 	d := testDispatcher(client)
@@ -1286,7 +1300,7 @@ func TestKubernetesDispatcherDeleteUsesForegroundPropagation(t *testing.T) {
 }
 
 func TestKubernetesDispatcherDeleteRejectsForeignJob(t *testing.T) {
-	desired := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	desired := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	desired.UID = types.UID("job-uid-1")
 	for _, label := range []string{
 		"app.kubernetes.io/name",
@@ -1379,7 +1393,7 @@ func TestKubernetesDispatcherDeleteTaskWorkspaceIsGuardedAndIdempotent(t *testin
 
 func TestKubernetesDispatcherInspectMapsJobAndPodTermination(t *testing.T) {
 	execution := testExecution()
-	job := buildKubernetesJob(testJobConfig(), execution, testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), execution, testTask())
 	job.UID = types.UID("job-uid-1")
 	execution.RuntimeInstanceID = string(job.UID)
 	job.Status.Conditions = []batchv1.JobCondition{{
@@ -1437,7 +1451,7 @@ func TestKubernetesDispatcherInspectMapsPendingAndCompleteJobs(t *testing.T) {
 		{name: "failed active", condition: &batchv1.JobCondition{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: "Failed"}, active: 1, want: RuntimePhaseFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+			job := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 			job.UID = types.UID("job-uid-1")
 			job.Status.Active = tc.active
 			if tc.condition != nil {
@@ -1452,7 +1466,7 @@ func TestKubernetesDispatcherInspectMapsPendingAndCompleteJobs(t *testing.T) {
 }
 
 func TestKubernetesDispatcherInspectMapsPodTerminationBeforeJobCondition(t *testing.T) {
-	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	job.UID = types.UID("job-uid-1")
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1479,7 +1493,7 @@ func TestKubernetesDispatcherInspectMapsPodTerminationBeforeJobCondition(t *test
 }
 
 func TestKubernetesDispatcherInspectMapsWorkspaceInitTermination(t *testing.T) {
-	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	job.UID = types.UID("job-uid-1")
 	job.Status.Conditions = []batchv1.JobCondition{{
 		Type: batchv1.JobFailed, Status: corev1.ConditionTrue,
@@ -1511,7 +1525,7 @@ func TestKubernetesDispatcherInspectMapsWorkspaceInitTermination(t *testing.T) {
 }
 
 func TestKubernetesDispatcherInspectPrefersWorkspaceInitFailureOverAgentWaiting(t *testing.T) {
-	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	job.UID = types.UID("job-uid-1")
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1548,7 +1562,7 @@ func TestKubernetesDispatcherInspectPrefersWorkspaceInitFailureOverAgentWaiting(
 }
 
 func TestKubernetesDispatcherInspectPreservesJobDiagnosticsWhenInitDetailsAreEmpty(t *testing.T) {
-	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	job.UID = types.UID("job-uid-1")
 	job.Status.Conditions = []batchv1.JobCondition{{
 		Type: batchv1.JobFailed, Status: corev1.ConditionTrue,
@@ -1578,7 +1592,7 @@ func TestKubernetesDispatcherInspectPreservesJobDiagnosticsWhenInitDetailsAreEmp
 }
 
 func TestKubernetesDispatcherInspectDoesNotInterpretWorkspaceInitReservedExitCodes(t *testing.T) {
-	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	job.UID = types.UID("job-uid-1")
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1601,7 +1615,7 @@ func TestKubernetesDispatcherInspectDoesNotInterpretWorkspaceInitReservedExitCod
 }
 
 func TestKubernetesDispatcherInspectIgnoresSuccessfulWorkspaceInitTermination(t *testing.T) {
-	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	job.UID = types.UID("job-uid-1")
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1629,7 +1643,7 @@ func TestKubernetesDispatcherInspectIgnoresSuccessfulWorkspaceInitTermination(t 
 }
 
 func TestKubernetesDispatcherInspectPreservesSchedulingFailureDiagnostics(t *testing.T) {
-	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	job.UID = types.UID("job-uid-1")
 	job.Status.Active = 1
 	pod := &corev1.Pod{
@@ -1659,7 +1673,7 @@ func TestKubernetesDispatcherInspectPreservesSchedulingFailureDiagnostics(t *tes
 }
 
 func TestKubernetesDispatcherInspectKeepsRunningPodRunning(t *testing.T) {
-	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	job.UID = types.UID("job-uid-1")
 	job.Status.Active = 1
 	pod := &corev1.Pod{
@@ -1686,7 +1700,7 @@ func TestKubernetesDispatcherInspectKeepsRunningPodRunning(t *testing.T) {
 func TestKubernetesDispatcherInspectMapsContainerWaitingDiagnostics(t *testing.T) {
 	for _, reason := range []string{"ImagePullBackOff", "ErrImagePull", "CreateContainerConfigError"} {
 		t.Run(reason, func(t *testing.T) {
-			job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+			job := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 			job.UID = types.UID("job-uid-1")
 			job.Status.Active = 1
 			pod := &corev1.Pod{
@@ -1709,7 +1723,7 @@ func TestKubernetesDispatcherInspectMapsContainerWaitingDiagnostics(t *testing.T
 }
 
 func TestKubernetesDispatcherInspectPreservesTerminalJobDiagnosticsFromWaitingPod(t *testing.T) {
-	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	job.UID = types.UID("job-uid-1")
 	job.Status.Active = 1
 	job.Status.Conditions = []batchv1.JobCondition{{
@@ -1739,7 +1753,7 @@ func TestKubernetesDispatcherInspectPreservesTerminalJobDiagnosticsFromWaitingPo
 }
 
 func TestKubernetesDispatcherInspectIgnoresSpoofedOrStalePods(t *testing.T) {
-	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	job := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	job.UID = types.UID("job-uid-current")
 	owned := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 		Name: "owned", Namespace: "anban", UID: types.UID("owned-uid"),
@@ -1803,7 +1817,7 @@ func TestKubernetesDispatcherStopsWhenPVCProvisioningFails(t *testing.T) {
 
 func TestKubernetesDispatcherRecoversFromPVCCreateAlreadyExistsRace(t *testing.T) {
 	desiredPVC := buildTaskWorkspacePVC(testJobConfig(), testTask())
-	desiredJob := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	desiredJob := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	client := fake.NewSimpleClientset(desiredJob)
 	gets := 0
 	client.PrependReactor("get", "persistentvolumeclaims", func(action ktesting.Action) (bool, runtime.Object, error) {
@@ -1832,7 +1846,7 @@ func TestKubernetesDispatcherRecoversFromPVCCreateAlreadyExistsRace(t *testing.T
 
 func TestKubernetesDispatcherRecoversFromJobCreateAlreadyExistsRace(t *testing.T) {
 	desiredPVC := buildTaskWorkspacePVC(testJobConfig(), testTask())
-	desiredJob := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	desiredJob := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	client := fake.NewSimpleClientset(desiredPVC)
 	gets := 0
 	client.PrependReactor("get", "jobs", func(ktesting.Action) (bool, runtime.Object, error) {
@@ -1866,10 +1880,7 @@ func testJobConfig() kubernetesJobConfig {
 			ActiveDeadlineSeconds:   900,
 			TTLSecondsAfterFinished: 120,
 			CompletionGraceSeconds:  30,
-			Resources: srvconfig.KubernetesResourceConfig{
-				Requests: map[string]string{"cpu": "500m", "memory": "1Gi"},
-				Limits:   map[string]string{"cpu": "2", "memory": "2Gi"},
-			},
+			ResourceProfiles:        testResourceProfiles(),
 		},
 		RuntimeImages: srvconfig.RuntimeImages{
 			"wechat-article":                  "registry.example.com/creator-agent-wechat-article:v2",
@@ -1885,6 +1896,17 @@ func testJobConfig() kubernetesJobConfig {
 		},
 		ServerURL: "https://creator-server:8443",
 	}
+}
+
+func testResourceProfiles() map[string]srvconfig.KubernetesResourceConfig {
+	profiles := make(map[string]srvconfig.KubernetesResourceConfig)
+	for _, taskType := range srvconfig.KubernetesTaskTypes() {
+		profiles[taskType] = srvconfig.KubernetesResourceConfig{
+			Requests: map[string]string{"cpu": "500m", "memory": "1Gi"},
+			Limits:   map[string]string{"cpu": "2", "memory": "2Gi"},
+		}
+	}
+	return profiles
 }
 
 func testExecution() *model.TaskExecution {
@@ -1904,6 +1926,14 @@ func persistedKubernetesTestExecution(job *batchv1.Job) *model.TaskExecution {
 
 func testTask() *model.Task {
 	return &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle, Prompt: "never put this prompt in a Job"}
+}
+
+func mustBuildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution, task *model.Task) *batchv1.Job {
+	job, err := buildKubernetesJob(cfg, execution, task)
+	if err != nil {
+		panic(err)
+	}
+	return job
 }
 
 func testDispatcher(client kubeclient.Interface) *kubernetesJobDispatcher {
@@ -1987,7 +2017,7 @@ func stringPtr(value string) *string { return &value }
 
 func TestKubernetesRecoveryUsesFrozenIdentityAfterConfigDrift(t *testing.T) {
 	execution, task := testExecution(), testTask()
-	job := buildKubernetesJob(testJobConfig(), execution, task)
+	job := mustBuildKubernetesJob(testJobConfig(), execution, task)
 	job.UID = types.UID("historical-job")
 	execution.RuntimeScope = job.Namespace
 	client := fake.NewSimpleClientset(job)
@@ -2015,7 +2045,7 @@ func TestKubernetesRecoveryWithoutScopeRequiresExistingVerifiedJob(t *testing.T)
 		t.Run(fmt.Sprintf("current_namespace_job=%t", found), func(t *testing.T) {
 			execution, task := testExecution(), testTask()
 			execution.RuntimeScope, execution.RuntimeWorkload = "", ""
-			job := buildKubernetesJob(testJobConfig(), execution, task)
+			job := mustBuildKubernetesJob(testJobConfig(), execution, task)
 			job.UID = types.UID("historical-job")
 			client := fake.NewSimpleClientset(job)
 			dispatcher := testDispatcher(client)
@@ -2051,7 +2081,7 @@ func TestKubernetesRecoveryRejectsForeignOwnershipAndImage(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			execution, task := testExecution(), testTask()
-			job := buildKubernetesJob(testJobConfig(), execution, task)
+			job := mustBuildKubernetesJob(testJobConfig(), execution, task)
 			job.UID = types.UID("original")
 			tc.mutate(job)
 			client := fake.NewSimpleClientset(job)
@@ -2083,7 +2113,7 @@ func TestKubernetesCleanupClassifiesProviderErrors(t *testing.T) {
 			{"missing", apierrors.NewNotFound(resource, "job"), false, true},
 		} {
 			t.Run(stage+"/"+tc.name, func(t *testing.T) {
-				job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+				job := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 				job.UID = types.UID("original")
 				client := fake.NewSimpleClientset(job)
 				client.PrependReactor(stage, "jobs", func(ktesting.Action) (bool, runtime.Object, error) { return true, nil, tc.err })

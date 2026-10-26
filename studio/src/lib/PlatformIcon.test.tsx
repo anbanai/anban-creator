@@ -139,7 +139,7 @@ describe('video platform identity', () => {
   })
 
   it('gives every content agent its own glyph', () => {
-    const types = ['wechat-article', 'wechat-picture', 'seednote', 'viral_analysis', 'moments', 'ecommerce']
+    const types = ['wechat-article', 'wechat-picture', 'seednote', 'viral-analysis', 'moments', 'ecommerce']
     const seen = new Map<string, string>()
     const { container, rerender } = render(<>{renderPlatformIcon(types[0])}</>)
     for (const type of types) {

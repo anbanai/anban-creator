@@ -161,12 +161,12 @@ func (s *ContentAssetService) dispatchDiscoveredResearch(ctx context.Context, us
 			}
 			input := map[string]any{
 				"schema_version":     "1.0",
-				"task_kind":          model.TaskTypeContentResearch,
+				"task_kind":          model.TaskKindContentResearch,
 				"candidates":         []map[string]any{{"asset_id": asset.ID, "title": asset.Title, "source_refs": []string{item.SourceID}}},
 				"accepted_artifacts": []any{},
 				"internal_sources":   []map[string]any{{"project_id": projectID, "content_id": item.SourceKind + ":" + item.SourceID, "analytics_revision": revision}},
 			}
-			tasks, err := s.taskSvc.CreateManual(ctx, CreateManualParams{UserID: userID, ProjectID: projectID, AgentID: model.AgentIDContentPlanning, Channel: model.ChannelContentPlanning, TaskKind: model.TaskTypeContentResearch, RequestedTaskType: model.TaskTypeContentResearch, ExecutionProfile: "effective", Prompt: "research discovered published content", ContentAssetID: asset.ID, ResearchJobID: job.ID, AgentInput: input})
+			tasks, err := s.taskSvc.CreateManual(ctx, CreateManualParams{UserID: userID, ProjectID: projectID, AgentID: model.AgentIDContentPlanning, Channel: model.ChannelContentPlanning, TaskKind: model.TaskKindContentResearch, RequestedTaskType: model.TaskTypeContentResearch, ExecutionProfile: "effective", Prompt: "research discovered published content", ContentAssetID: asset.ID, ResearchJobID: job.ID, AgentInput: input})
 			if err != nil {
 				return err
 			}

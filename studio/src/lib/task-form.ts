@@ -19,8 +19,19 @@ export interface TaskFormDefaults extends CreateTaskFormValues {
 function taskIdentity(type: TaskType): { agent_id: string; channel: NonNullable<CreateTaskRequest['channel']>; task_kind: string } {
   switch (type) {
     case 'seednote':
-    case 'viral_analysis':
-      return { agent_id: 'seednote', channel: 'seednote', task_kind: type === 'viral_analysis' ? 'viral_analysis' : 'content_generation' }
+      return { agent_id: 'seednote', channel: 'seednote', task_kind: 'content_generation' }
+    case 'viral-analysis':
+      return { agent_id: 'seednote', channel: 'seednote', task_kind: 'viral_analysis' }
+    case 'profile-analysis':
+      return { agent_id: 'profile-analysis', channel: 'profile-analysis', task_kind: 'profile_analysis' }
+    case 'feedback-analysis':
+      return { agent_id: 'feedback-analysis', channel: 'feedback-analysis', task_kind: 'feedback_analysis' }
+    case 'content-research':
+      return { agent_id: 'content-planning', channel: 'content-planning', task_kind: 'content_research' }
+    case 'content-validation':
+      return { agent_id: 'content-planning', channel: 'content-planning', task_kind: 'content_validation' }
+    case 'content-script':
+      return { agent_id: 'content-planning', channel: 'content-planning', task_kind: 'content_script' }
     case 'wechat-picture':
       return { agent_id: 'wechat-picture', channel: 'wechat-picture', task_kind: 'content_generation' }
     case 'whiteboard-animation':
@@ -108,7 +119,7 @@ export function switchTaskFormDefaults(
   current: TaskFormDefaults,
   project?: Project | null,
 ): TaskFormDefaults {
-  if (project && ((project.platform === 'wechat' && (current.type === 'wechat-article' || current.type === 'wechat-picture')) || current.type === project.platform || (current.type === 'viral_analysis'))) {
+  if (project && ((project.platform === 'wechat' && (current.type === 'wechat-article' || current.type === 'wechat-picture')) || current.type === project.platform || current.type === 'viral-analysis')) {
     const defaults = createTaskFormDefaults(project)
     const switched = {
       ...cloneValue(current),
@@ -245,7 +256,7 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
 export function taskFormValuesToRequest(values: TaskFormDefaults, hypitDefaults?: HypitDefaults): CreateTaskRequest {
   const prompt = values.prompt?.trim() || undefined
   const identity = taskIdentity(values.type)
-  if (values.type === 'viral_analysis') {
+  if (values.type === 'viral-analysis') {
     return {
       ...identity,
       type: values.type,

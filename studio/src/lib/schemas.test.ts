@@ -146,7 +146,7 @@ describe('createTaskSchema', () => {
   it('rejects viral analysis without a seednote project', () => {
     const result = createTaskSchema.safeParse({
       project_id: '',
-      type: 'viral_analysis',
+      type: 'viral-analysis',
       prompt: '帮我拆解这篇 http://xhslink.com/a1b2c3',
     })
     expect(result.success).toBe(false)
@@ -155,7 +155,7 @@ describe('createTaskSchema', () => {
   it('accepts viral analysis with a seednote project and note URL', () => {
     const result = createTaskSchema.safeParse({
       project_id: 'seednote-project',
-      type: 'viral_analysis',
+      type: 'viral-analysis',
       prompt: '帮我拆解这篇 http://xhslink.com/a1b2c3',
     })
     expect(result.success).toBe(true)
@@ -164,7 +164,7 @@ describe('createTaskSchema', () => {
   it('rejects viral analysis without a URL in prompt', () => {
     const result = createTaskSchema.safeParse({
       project_id: '',
-      type: 'viral_analysis',
+      type: 'viral-analysis',
       prompt: '帮我拆解这篇爆款笔记',
     })
     expect(result.success).toBe(false)
@@ -207,11 +207,11 @@ describe('createTaskSchema', () => {
   })
 
   it('accepts all valid content types', () => {
-    for (const type of ['seednote', 'wechat-article', 'moments', 'viral_analysis'] as const) {
+    for (const type of ['seednote', 'wechat-article', 'moments', 'viral-analysis'] as const) {
       expect(createTaskSchema.safeParse({
-        project_id: type === 'viral_analysis' ? 'seednote-project' : 'ch-1',
+        project_id: type === 'viral-analysis' ? 'seednote-project' : 'ch-1',
         type,
-        prompt: type === 'viral_analysis' ? 'https://www.xiaohongshu.com/explore/mock' : '测试',
+        prompt: type === 'viral-analysis' ? 'https://www.xiaohongshu.com/explore/mock' : '测试',
       }).success).toBe(true)
     }
   })

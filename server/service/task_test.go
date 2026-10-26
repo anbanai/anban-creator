@@ -252,6 +252,21 @@ func TestTaskTypeForIdentityMapsVideoEditInternalKindToPublicType(t *testing.T) 
 	}
 }
 
+func TestTaskTypeForIdentityUsesKebabCaseForInternalWorkflowKinds(t *testing.T) {
+	for _, test := range []struct{ taskKind, want string }{
+		{model.TaskKindViralAnalysis, model.TaskTypeViralAnalysis},
+		{model.TaskKindProfileAnalysis, model.TaskTypeProfileAnalysis},
+		{model.TaskKindContentResearch, model.TaskTypeContentResearch},
+		{model.TaskKindContentValidation, model.TaskTypeContentValidation},
+		{model.TaskKindContentScript, model.TaskTypeContentScript},
+		{model.TaskKindFeedbackAnalysis, model.TaskTypeFeedbackAnalysis},
+	} {
+		if got := taskTypeForIdentity(model.AgentIDContentPlanning, model.ChannelContentPlanning, test.taskKind); got != test.want {
+			t.Errorf("taskTypeForIdentity(%q) = %q, want %q", test.taskKind, got, test.want)
+		}
+	}
+}
+
 func TestTaskServiceCreateManualRejectsAgentInputWhenPackHasNoSchema(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.NewString()
