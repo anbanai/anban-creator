@@ -122,6 +122,50 @@ func TestInteractiveClosedErrorIncludesStableCode(t *testing.T) {
 	}
 }
 
+func TestInteractionErrorIncludesRecoveryActions(t *testing.T) {
+	err := service.NewInteractionError(service.InteractionErrorRestartRequired, fiber.StatusGone, "当前连接已结束，已保留可恢复内容", "restore_draft", "restart")
+	app := fiber.New()
+	app.Post("/", func(c fiber.Ctx) error { return interactiveError(c, err) })
+	resp, requestErr := app.Test(httptest.NewRequest(http.MethodPost, "/", nil))
+	if requestErr != nil {
+		t.Fatal(requestErr)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		ErrorCode        string   `json:"error_code"`
+		AvailableActions []string `json:"available_actions"`
+	}
+	if decodeErr := json.NewDecoder(resp.Body).Decode(&body); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if resp.StatusCode != fiber.StatusGone || body.ErrorCode != service.InteractionErrorRestartRequired {
+		t.Fatalf("status/error_code = %d/%q", resp.StatusCode, body.ErrorCode)
+	}
+	if strings.Join(body.AvailableActions, ",") != "restore_draft,restart" {
+		t.Fatalf("available_actions = %v", body.AvailableActions)
+	}
+}
+
+func TestInteractiveSessionNotFoundIsUserSafe(t *testing.T) {
+	app := fiber.New()
+	app.Post("/", func(c fiber.Ctx) error { return interactiveError(c, service.ErrInteractiveSessionNotFound) })
+	resp, requestErr := app.Test(httptest.NewRequest(http.MethodPost, "/", nil))
+	if requestErr != nil {
+		t.Fatal(requestErr)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		ErrorCode string `json:"error_code"`
+		Msg       string `json:"msg"`
+	}
+	if decodeErr := json.NewDecoder(resp.Body).Decode(&body); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if body.ErrorCode != service.InteractionErrorRestartRequired || strings.Contains(strings.ToLower(body.Msg), "session") {
+		t.Fatalf("unsafe response: %#v", body)
+	}
+}
+
 type handlerInteractiveRuntime struct{}
 
 func (handlerInteractiveRuntime) Command(context.Context, string, any) error { return nil }

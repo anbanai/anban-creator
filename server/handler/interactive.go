@@ -255,6 +255,22 @@ func (h *InteractiveHandler) Delete(c fiber.Ctx) error {
 	return Success(c, nil)
 }
 func interactiveError(c fiber.Ctx, err error) error {
+	if interactionErr := service.NormalizeInteractionError(err); interactionErr != nil {
+		var structuredErr *service.InteractionError
+		if errors.Is(err, service.ErrInteractiveSessionNotFound) || errors.As(err, &structuredErr) {
+			status := interactionErr.Status
+			if status < 400 {
+				status = fiber.StatusInternalServerError
+			}
+			return c.Status(status).JSON(Response{
+				Code:             status * 100,
+				Msg:              interactionErr.Message,
+				ErrorCode:        interactionErr.Code,
+				AvailableActions: interactionErr.AvailableActions,
+				Data:             interactionErr.Snapshot,
+			})
+		}
+	}
 	switch {
 	case errors.Is(err, service.ErrAssistantCheckpointNotFound):
 		return Error(c, 404, err.Error())
