@@ -16,8 +16,9 @@ var ErrInteractionAttemptConflict = errors.New("assistant interaction attempt pa
 
 type AssistantInteractionRepository interface {
 	Create(context.Context, *model.AssistantInteraction) error
+	FindByID(context.Context, string) (*model.AssistantInteraction, error)
 	FindByIDForUser(context.Context, string, string) (*model.AssistantInteraction, error)
-	FindByScopeForUpdate(context.Context, string, string, string) (*model.AssistantInteraction, error)
+	FindByScopeForUpdate(context.Context, string, string, string, string) (*model.AssistantInteraction, error)
 	UpdateLifecycle(context.Context, string, string, time.Time) error
 	CompareAndSwapGeneration(context.Context, string, int64, int64, time.Time) (bool, error)
 	CreateRuntimeBinding(context.Context, *model.AssistantInteractionRuntime) error
@@ -59,9 +60,16 @@ func (r *assistantInteractionRepository) FindByIDForUser(ctx context.Context, us
 	}
 	return &value, nil
 }
-func (r *assistantInteractionRepository) FindByScopeForUpdate(ctx context.Context, userID, projectID, contentID string) (*model.AssistantInteraction, error) {
+func (r *assistantInteractionRepository) FindByID(ctx context.Context, id string) (*model.AssistantInteraction, error) {
 	var value model.AssistantInteraction
-	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND project_id = ? AND content_id = ? AND closed_at IS NULL", userID, projectID, contentID).Where("lifecycle IN ?", []string{model.AssistantInteractionActive, model.AssistantInteractionReconnecting, model.AssistantInteractionNeedsConfirmation}).Order("updated_at DESC").First(&value).Error
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&value).Error; err != nil {
+		return nil, err
+	}
+	return &value, nil
+}
+func (r *assistantInteractionRepository) FindByScopeForUpdate(ctx context.Context, userID, modeID, projectID, contentID string) (*model.AssistantInteraction, error) {
+	var value model.AssistantInteraction
+	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND mode_id = ? AND project_id = ? AND content_id = ? AND closed_at IS NULL", userID, modeID, projectID, contentID).Where("lifecycle IN ?", []string{model.AssistantInteractionActive, model.AssistantInteractionReconnecting, model.AssistantInteractionNeedsConfirmation}).Order("updated_at DESC").First(&value).Error
 	if err != nil {
 		return nil, err
 	}
