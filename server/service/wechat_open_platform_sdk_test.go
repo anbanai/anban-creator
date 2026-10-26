@@ -74,8 +74,8 @@ func TestOpenPlatformSDKTicketSurvivesComponentTokenExpiration(t *testing.T) {
 	if createdAt, err := cache.client.HGet(ctx, wechatComponentTicketCacheKey("component"), "created_at").Result(); err != nil || createdAt != "200" {
 		t.Fatalf("ticket timestamp after stale update = %q, %v", createdAt, err)
 	}
-	if legacy, err := cache.client.Get(ctx, "wechat:component:ticket:component").Result(); err != nil || legacy != "legacy-string-ticket" {
-		t.Fatalf("legacy ticket cache key changed = %q, %v", legacy, err)
+	if legacy, err := cache.client.Get(ctx, "wechat:component:ticket:component").Result(); err != nil || legacy != "ticket" {
+		t.Fatalf("legacy ticket cache key was not synchronized = %q, %v", legacy, err)
 	}
 	if _, err := client.AuthorizationURL(context.Background(), "https://example.com/callback"); err != nil {
 		t.Fatal(err)

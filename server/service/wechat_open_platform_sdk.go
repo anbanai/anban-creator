@@ -229,15 +229,33 @@ func (c *wechatSDKOpenPlatformClient) SetComponentVerifyTicket(ctx context.Conte
 		return ErrWechatOpenPlatformEventInvalid
 	}
 	key := wechatComponentTicketCacheKey(c.platform.AppID)
-	_, err := c.cache.client.Eval(ctx, `
+	legacyKey := wechatLegacyComponentTicketCacheKey(c.platform.AppID)
+	accepted, err := c.cache.client.Eval(ctx, `
 local current = redis.call('hget', KEYS[1], 'created_at')
 if current and tonumber(current) >= tonumber(ARGV[1]) then
   return 0
 end
 redis.call('hset', KEYS[1], 'ticket', ARGV[2], 'created_at', ARGV[1])
 return 1
-`, []string{key}, createdAt, ticket).Result()
-	return err
+`, []string{key}, createdAt, ticket).Int()
+	if err != nil {
+		return err
+	}
+	canonicalTicket := ticket
+	if accepted == 0 {
+		// A retry after a partial dual-write must repair the legacy key from the
+		// canonical value, even though the v2 timestamp makes the event a no-op.
+		canonicalTicket, err = c.cache.client.HGet(ctx, key, "ticket").Result()
+		if err != nil {
+			return err
+		}
+	}
+	// Keep the pre-v2 string key in sync while older instances are still
+	// running during a rolling deployment. The v2 hash remains canonical.
+	if err := c.cache.client.Set(ctx, legacyKey, canonicalTicket, 0).Err(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func wechatComponentTicketCacheKey(appID string) string {
