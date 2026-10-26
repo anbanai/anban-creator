@@ -51,9 +51,9 @@ func TestProjectAPIResponsePreservesLegacyProfileURLInSetup(t *testing.T) {
 	}
 }
 
-func TestProfileAgentInputIncludesSetupAndConfirmedProfileProvenance(t *testing.T) {
+func TestProfileAgentInputIncludesSetupAndSavedDraftProfileProvenance(t *testing.T) {
 	profile := model.NewProjectProfile()
-	profile.Status = model.ProfileStatusConfirmed
+	profile.Status = model.ProfileStatusDraft
 	profile.InitializationStatus = model.ProfileInitializationReady
 	profile.Version = 7
 	profile.AnalysisTaskID = "previous-analysis"
@@ -74,14 +74,14 @@ func TestProfileAgentInputIncludesSetupAndConfirmedProfileProvenance(t *testing.
 		t.Fatal(err)
 	}
 	if decoded["current_profile"] == nil {
-		t.Fatalf("current_profile = %#v, want confirmed project profile", decoded["current_profile"])
+		t.Fatalf("current_profile = %#v, want saved draft project profile", decoded["current_profile"])
 	}
 	if decoded["expected_revision"] != float64(7) {
 		t.Fatalf("expected_revision = %#v, want frozen revision 7", decoded["expected_revision"])
 	}
 	current := decoded["current_profile"].(map[string]any)
-	if current["version"] != float64(7) || current["status"] != model.ProfileStatusConfirmed {
-		t.Fatalf("current profile metadata = %#v, want confirmed version 7", current)
+	if current["version"] != float64(7) || current["status"] != model.ProfileStatusDraft {
+		t.Fatalf("current profile metadata = %#v, want draft version 7", current)
 	}
 	identity := current["dimensions"].(map[string]any)["identity"].(map[string]any)
 	if len(identity["sources"].([]any)) != 2 || identity["evidence"].([]any)[0] != "公开主页简介" {
@@ -93,5 +93,13 @@ func TestProfileAgentInputIncludesSetupAndConfirmedProfileProvenance(t *testing.
 	}
 	if decoded["profile_setup"] == nil || decoded["profile_url"] != project.ProfileURL {
 		t.Fatalf("analysis setup and compatibility URL = %#v/%#v", decoded["profile_setup"], decoded["profile_url"])
+	}
+}
+
+func TestProfileAgentInputNormalizesAbsentProfile(t *testing.T) {
+	input := profileAgentInput(&model.Project{ID: "project-1", Platform: model.PlatformWechat}, nil, nil)
+	current, ok := input["current_profile"].(map[string]any)
+	if !ok || current["schema_version"] != float64(1) || current["status"] != model.ProfileStatusDraft || current["initialization_status"] != model.ProfileInitializationNotStarted || input["expected_revision"] != float64(0) {
+		t.Fatalf("absent profile input = %#v", input)
 	}
 }

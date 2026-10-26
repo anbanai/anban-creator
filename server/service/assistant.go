@@ -669,36 +669,33 @@ func (s *InteractiveService) AssistantBootstrap(ctx context.Context, userID stri
 		},
 		Projects: make([]AssistantProject, 0, len(projects)),
 	}
-	confirmedProjectIDs := make([]string, 0, len(projects))
+	activeProjectIDs := make([]string, 0, len(projects))
 	for _, project := range projects {
 		profile := projectProfileFor(project)
-		profileReady := profile.IsConfirmed()
-		if profileReady {
-			confirmedProjectIDs = append(confirmedProjectIDs, project.ID)
-		}
-		projectItem := AssistantProject{ID: project.ID, Name: project.Name, Platform: project.Platform, ProfileReady: profileReady, ProfileRevision: profile.Version, Works: []AssistantWork{}}
+		activeProjectIDs = append(activeProjectIDs, project.ID)
+		projectItem := AssistantProject{ID: project.ID, Name: project.Name, Platform: project.Platform, ProfileReady: true, ProfileRevision: profile.Version, Works: []AssistantWork{}}
 		if model.IsVideoEditPlatform(project.Platform) {
 			defaults := project.VideoEditDefaults.Data()
 			projectItem.VideoEditDefaults = &defaults
 		}
 		out.Projects = append(out.Projects, projectItem)
 	}
-	if len(confirmedProjectIDs) > 0 {
+	if len(activeProjectIDs) > 0 {
 		out.DefaultModeID = AssistantModeCreation
 		out.Modes[1].Available = true
 	} else {
 		out.DefaultModeID = AssistantModeProfile
-		out.Modes[1].DisabledReason = "先完成人设初始化，之后即可澄清创作需求"
+		out.Modes[1].DisabledReason = "先创建一个人设，之后即可澄清创作需求"
 	}
-	hasCompletedWork, err := s.repo.Tasks().HasCompletedWorkInProjects(ctx, userID, confirmedProjectIDs)
+	hasCompletedWork, err := s.repo.Tasks().HasCompletedWorkInProjects(ctx, userID, activeProjectIDs)
 	if err != nil {
 		return nil, errors.Join(ErrInteractivePersistence, err)
 	}
 	if hasCompletedWork {
 		out.Modes[2].Available = true
 	} else {
-		if len(confirmedProjectIDs) == 0 {
-			out.Modes[2].DisabledReason = "先完成人设初始化并完成一件作品，之后即可复盘"
+		if len(activeProjectIDs) == 0 {
+			out.Modes[2].DisabledReason = "先创建一个人设并完成一件作品，之后即可复盘"
 		} else {
 			out.Modes[2].DisabledReason = "先通过创作模式创建并完成一件作品"
 		}
@@ -734,9 +731,6 @@ func (s *InteractiveService) AssistantWorks(ctx context.Context, userID, project
 	}
 	if project.UserID != userID || project.Status != model.ProjectStatusActive {
 		return nil, ErrInteractiveSessionOwner
-	}
-	if !projectProfileFor(project).IsConfirmed() {
-		return nil, ErrAssistantModeUnavailable
 	}
 	var tasks []*model.Task
 	if cursor == nil {
@@ -1064,9 +1058,6 @@ func (s *InteractiveService) LatestAssistantCheckpoint(ctx context.Context, user
 		if project.UserID != userID || project.Status != model.ProjectStatusActive {
 			return nil, ErrInteractiveSessionOwner
 		}
-		if modeID != AssistantModeProfile && !projectProfileFor(project).IsConfirmed() {
-			return nil, ErrAssistantModeUnavailable
-		}
 	}
 	if modeID == AssistantModeReview {
 		task, err := s.repo.Tasks().FindByID(ctx, contentID)
@@ -1303,9 +1294,6 @@ func (s *InteractiveService) CreateAssistantSessionWithIdempotency(ctx context.C
 	}
 	if projectID != "" && selectedProject == nil {
 		return nil, ErrInteractiveSessionOwner
-	}
-	if selectedProject != nil && input.ModeID != AssistantModeProfile && !selectedProject.ProfileReady {
-		return nil, ErrAssistantModeUnavailable
 	}
 	var selectedWork *AssistantWork
 	if input.ModeID == AssistantModeReview {

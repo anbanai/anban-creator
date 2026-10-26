@@ -140,18 +140,20 @@ func TestAssistantBootstrapReturnsAllModesAndServerDefaults(t *testing.T) {
 		}
 	})
 
-	t.Run("unconfirmed profiles do not unlock creation", func(t *testing.T) {
+	t.Run("unconfirmed profiles unlock creation", func(t *testing.T) {
 		repo := newAssistantTestRepo(t)
 		project := &model.Project{ID: uuid.NewString(), UserID: "user-1", Platform: "wechat", Name: "待确认画像", Status: model.ProjectStatusActive, Profile: datatypes.NewJSONType(model.NewProjectProfile())}
 		if err := repo.Projects().Create(context.Background(), project); err != nil {
 			t.Fatal(err)
 		}
-		bootstrap, err := NewInteractiveServiceWithRuntime(repo, interactiveTestRuntimeFactory{}).AssistantBootstrap(context.Background(), "user-1")
+		svc := NewInteractiveServiceWithRuntime(repo, interactiveTestRuntimeFactory{})
+		svc.SetEnabled(true)
+		bootstrap, err := svc.AssistantBootstrap(context.Background(), "user-1")
 		if err != nil {
 			t.Fatalf("AssistantBootstrap() error = %v", err)
 		}
-		if bootstrap.DefaultModeID != AssistantModeProfile || bootstrap.Modes[1].Available || bootstrap.Projects[0].ProfileReady {
-			t.Fatalf("unconfirmed bootstrap = %#v; want profile default and creation locked", bootstrap)
+		if bootstrap.DefaultModeID != AssistantModeCreation || !bootstrap.Modes[1].Available || !bootstrap.Projects[0].ProfileReady {
+			t.Fatalf("unconfirmed bootstrap = %#v; want creation default and ready persona", bootstrap)
 		}
 	})
 
@@ -176,6 +178,158 @@ func TestAssistantBootstrapReturnsAllModesAndServerDefaults(t *testing.T) {
 			t.Fatalf("AssistantWorks() = %#v, %v; want one work", page, err)
 		}
 	})
+}
+
+func TestAssistantActivePersonasAdmitCreationReviewAndWorkspaceRecovery(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		status         string
+		initialization string
+		version        int64
+		absent         bool
+	}{
+		{name: "draft ready", status: model.ProfileStatusDraft, initialization: model.ProfileInitializationReady, version: 7},
+		{name: "draft uninitialized", status: model.ProfileStatusDraft, initialization: model.ProfileInitializationNotStarted},
+		{name: "empty profile"},
+		{name: "absent profile", absent: true},
+		{name: "confirmed zero revision", status: model.ProfileStatusConfirmed, initialization: model.ProfileInitializationReady},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := newAssistantTestRepo(t)
+			project := &model.Project{ID: uuid.NewString(), UserID: "user-1", Name: tc.name, Platform: model.PlatformWechat, Status: model.ProjectStatusActive}
+			if !tc.absent {
+				profile := model.NewProjectProfile()
+				profile.Status, profile.InitializationStatus, profile.Version = tc.status, tc.initialization, tc.version
+				project.Profile = datatypes.NewJSONType(profile)
+			}
+			if err := repo.Projects().Create(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			work := &model.Task{ID: uuid.NewString(), UserID: "user-1", ProjectID: project.ID, Type: "article", Status: model.TaskStatusCompleted, Title: "Saved work"}
+			if err := repo.Tasks().Create(ctx, work); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := NewAnalyticsService(repo).Apply(ctx, AnalyticsWriteRequest{ProjectID: project.ID, Observations: []AnalyticsObservationInput{{
+				Content:     model.AnalyticsContent{ID: "task:" + work.ID, ProjectID: project.ID, Platform: model.PlatformWechat, TaskID: work.ID, Title: work.Title, ContentType: "article"},
+				Observation: model.AnalyticsObservation{ID: "observation-" + work.ID, ProjectID: project.ID, ContentID: "task:" + work.ID, StatDate: time.Now().UTC().Format("2006-01-02"), MetricBasis: "cumulative", Source: "test", EffectiveAt: time.Now().UTC(), ReceivedAt: time.Now().UTC()},
+			}}}); err != nil {
+				t.Fatal(err)
+			}
+			svc := newAssistantWorkspaceTestService(repo)
+			logger := zerolog.Nop()
+			tasks := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
+			svc.SetTaskService(tasks)
+			bootstrap, err := svc.AssistantBootstrap(ctx, "user-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(bootstrap.Projects) != 1 || bootstrap.Projects[0].ID != project.ID || !bootstrap.Projects[0].ProfileReady || bootstrap.Projects[0].ProfileRevision != tc.version || bootstrap.DefaultModeID != AssistantModeCreation || !bootstrap.Modes[1].Available || !bootstrap.Modes[2].Available {
+				t.Fatalf("active persona bootstrap = %#v", bootstrap)
+			}
+			works, err := svc.AssistantWorks(ctx, "user-1", project.ID, nil, 10)
+			if err != nil || len(works.Items) != 1 || works.Items[0].ID != work.ID {
+				t.Fatalf("completed works = %#v, %v", works, err)
+			}
+			workspace, err := svc.CreateAssistantWorkspace(ctx, "user-1", AssistantWorkspaceInput{ModeID: AssistantModeCreation, ProjectID: project.ID}, "active-persona")
+			if err != nil {
+				t.Fatalf("creation admission: %v", err)
+			}
+			t.Cleanup(func() { _ = svc.CloseAssistantWorkspace(ctx, "user-1", workspace.ID) })
+			for _, checkpoint := range []*model.AssistantCheckpoint{
+				{ID: "creation-checkpoint", UserID: "user-1", ModeID: AssistantModeCreation, ProjectID: project.ID, SourceSessionID: workspace.Sessions[AssistantModeCreation], Status: model.AssistantCheckpointDraft, SchemaVersion: "1.0", Payload: json.RawMessage(`{"plan":{"topic":"saved topic"}}`), BaseProfileRevision: tc.version, ExpiresAt: time.Now().Add(time.Hour)},
+				{ID: "review-checkpoint", UserID: "user-1", ModeID: AssistantModeReview, ProjectID: project.ID, ContentID: work.ID, SourceSessionID: "previous-review", Status: model.AssistantCheckpointDraft, SchemaVersion: "1.0", Payload: json.RawMessage(`{"review":{"findings":[]}}`), BaseProfileRevision: tc.version, BaseContentRevision: work.UpdatedAt.UTC().UnixNano(), BaseAnalyticsRevision: 1, ExpiresAt: time.Now().Add(time.Hour)},
+			} {
+				if err := repo.AssistantCheckpoints().UpsertBySourceSession(ctx, checkpoint); err != nil {
+					t.Fatal(err)
+				}
+			}
+			checkpoint, err := svc.LatestAssistantCheckpoint(ctx, "user-1", AssistantModeCreation, project.ID, "")
+			if err != nil || checkpoint == nil {
+				t.Fatalf("creation checkpoint = %#v, %v", checkpoint, err)
+			}
+			review, err := svc.SwitchAssistantWorkspaceModeWithContext(ctx, "user-1", workspace.ID, AssistantWorkspaceInput{ModeID: AssistantModeReview, ContentID: work.ID})
+			if err != nil || review.Sessions[AssistantModeReview] == "" {
+				t.Fatalf("review admission = %#v, %v", review, err)
+			}
+			if checkpoint, err = svc.LatestAssistantCheckpoint(ctx, "user-1", AssistantModeReview, project.ID, work.ID); err != nil || checkpoint == nil {
+				t.Fatalf("review checkpoint = %#v, %v", checkpoint, err)
+			}
+			if err := repo.AssistantSessions().InterruptActive(ctx, time.Now().UTC()); err != nil {
+				t.Fatal(err)
+			}
+			restarted := newAssistantWorkspaceTestService(repo)
+			restarted.SetTaskService(tasks)
+			t.Cleanup(func() { _ = restarted.CloseAssistantWorkspace(ctx, "user-1", workspace.ID) })
+			recovered, err := restarted.WorkspaceState(ctx, "user-1", workspace.ID)
+			if err != nil || recovered.Sessions[AssistantModeReview] == review.Sessions[AssistantModeReview] {
+				t.Fatalf("review recovery = %#v, %v", recovered, err)
+			}
+			if _, err := restarted.SwitchAssistantWorkspaceMode(ctx, "user-1", workspace.ID, AssistantModeCreation); err != nil {
+				t.Fatalf("creation recovery: %v", err)
+			}
+			stored, err := repo.Projects().FindByID(ctx, project.ID)
+			if err != nil || !reflect.DeepEqual(stored.Profile.Data(), project.Profile.Data()) {
+				t.Fatalf("admission mutated saved profile: %#v, %v", stored, err)
+			}
+		})
+	}
+}
+
+func TestAssistantPersonaAccessRetainsOwnershipStatusAndCompletedWorkBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name, owner, status, workOwner, workStatus string
+		excluded                                   bool
+	}{
+		{"archived", "user-1", model.ProjectStatusArchived, "user-1", model.TaskStatusCompleted, true},
+		{"wrong owner", "user-2", model.ProjectStatusActive, "user-2", model.TaskStatusCompleted, true},
+		{"unfinished work", "user-1", model.ProjectStatusActive, "user-1", model.TaskStatusRunning, false},
+		{"unowned work", "user-1", model.ProjectStatusActive, "user-2", model.TaskStatusCompleted, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := newAssistantTestRepo(t)
+			project := createAssistantProject(t, repo, tc.owner, tc.name)
+			project.Status = tc.status
+			if err := repo.Projects().Update(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			// Keep a separate eligible work so review mode availability cannot mask access checks.
+			eligible := createAssistantProject(t, repo, "user-1", "eligible")
+			for _, work := range []*model.Task{
+				{ID: "eligible-work", UserID: "user-1", ProjectID: eligible.ID, Status: model.TaskStatusCompleted},
+				{ID: "selected-work", UserID: tc.workOwner, ProjectID: project.ID, Status: tc.workStatus},
+			} {
+				if err := repo.Tasks().Create(ctx, work); err != nil {
+					t.Fatal(err)
+				}
+			}
+			svc := newAssistantWorkspaceTestService(repo)
+			bootstrap, err := svc.AssistantBootstrap(ctx, "user-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, p := range bootstrap.Projects {
+				if tc.excluded && p.ID == project.ID {
+					t.Fatalf("excluded persona returned: %#v", p)
+				}
+			}
+			works, err := svc.AssistantWorks(ctx, "user-1", project.ID, nil, 10)
+			if tc.excluded {
+				if !errors.Is(err, ErrInteractiveSessionOwner) {
+					t.Fatalf("excluded works error = %v", err)
+				}
+			} else if err != nil || len(works.Items) != 0 {
+				t.Fatalf("ineligible works = %#v, %v", works, err)
+			}
+			if _, err := svc.LatestAssistantCheckpoint(ctx, "user-1", AssistantModeReview, project.ID, "selected-work"); !errors.Is(err, ErrInteractiveSessionOwner) {
+				t.Fatalf("checkpoint access error = %v", err)
+			}
+			if _, err := svc.CreateAssistantSessionWithIdempotency(ctx, "user-1", AssistantSessionInput{ModeID: AssistantModeReview, ProjectID: project.ID, ContentID: "selected-work"}, "denied"); !errors.Is(err, ErrInteractiveSessionOwner) {
+				t.Fatalf("review access error = %v", err)
+			}
+		})
+	}
 }
 
 func TestAssistantWorkspaceKeepsModeSessionsAndRejectsBusySwitch(t *testing.T) {
