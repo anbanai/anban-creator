@@ -30,6 +30,7 @@ type Repository interface {
 	AssistantCheckpoints() AssistantCheckpointRepository
 	AssistantSessions() AssistantSessionRepository
 	AssistantWorkspaces() AssistantWorkspaceRepository
+	AssistantInteractions() AssistantInteractionRepository
 	ProjectChannelConfigs() ProjectChannelConfigRepository
 	APIKeys() APIKeyRepository
 	Feedbacks() FeedbackRepository
@@ -656,6 +657,7 @@ type repository struct {
 	assistantCheckpoints      AssistantCheckpointRepository
 	assistantSessions         AssistantSessionRepository
 	assistantWorkspaces       AssistantWorkspaceRepository
+	assistantInteractions     AssistantInteractionRepository
 	interactiveCommitReceipts InteractiveCommitReceiptRepository
 	projectChannelConfigs     ProjectChannelConfigRepository
 	apiKeys                   APIKeyRepository
@@ -754,6 +756,7 @@ func New(db *gorm.DB) Repository {
 		assistantCheckpoints:      newAssistantCheckpointRepository(db),
 		assistantSessions:         newAssistantSessionRepository(db),
 		assistantWorkspaces:       newAssistantWorkspaceRepository(db),
+		assistantInteractions:     newAssistantInteractionRepository(db),
 		interactiveCommitReceipts: newInteractiveCommitReceiptRepository(db),
 		projectChannelConfigs:     projectChannelConfigs,
 		apiKeys:                   apiKeys,
@@ -816,6 +819,7 @@ func (r *repository) AssistantCheckpoints() AssistantCheckpointRepository {
 }
 func (r *repository) AssistantSessions() AssistantSessionRepository     { return r.assistantSessions }
 func (r *repository) AssistantWorkspaces() AssistantWorkspaceRepository { return r.assistantWorkspaces }
+func (r *repository) AssistantInteractions() AssistantInteractionRepository { return r.assistantInteractions }
 func (r *repository) ProjectChannelConfigs() ProjectChannelConfigRepository {
 	return r.projectChannelConfigs
 }
@@ -908,6 +912,7 @@ type txRepository struct {
 	assistantCheckpoints    AssistantCheckpointRepository
 	assistantSessions       AssistantSessionRepository
 	assistantWorkspaces     AssistantWorkspaceRepository
+	assistantInteractions   AssistantInteractionRepository
 	projectProfileStates    ProjectProfileStateRepository
 	projectChannelConfigs   ProjectChannelConfigRepository
 	apiKeys                 APIKeyRepository
@@ -961,6 +966,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		assistantCheckpoints:    newAssistantCheckpointRepository(tx),
 		assistantSessions:       newAssistantSessionRepository(tx),
 		assistantWorkspaces:     newAssistantWorkspaceRepository(tx),
+		assistantInteractions:   newAssistantInteractionRepository(tx),
 		projectProfileStates:    newProjectProfileStateRepository(tx),
 		projectChannelConfigs:   newProjectChannelConfigRepository(tx),
 		apiKeys:                 newAPIKeyRepository(tx),
@@ -1025,6 +1031,7 @@ func (r *txRepository) AssistantSessions() AssistantSessionRepository { return r
 func (r *txRepository) AssistantWorkspaces() AssistantWorkspaceRepository {
 	return r.assistantWorkspaces
 }
+func (r *txRepository) AssistantInteractions() AssistantInteractionRepository { return r.assistantInteractions }
 func (r *txRepository) ProjectChannelConfigs() ProjectChannelConfigRepository {
 	return r.projectChannelConfigs
 }

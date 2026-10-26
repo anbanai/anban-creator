@@ -1,0 +1,110 @@
+package repository
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/google/uuid"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+)
+
+func newAssistantInteractionTestRepository(t *testing.T) (Repository, *gorm.DB) {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.AssistantInteraction{}, &model.AssistantInteractionRuntime{}, &model.AssistantInteractionDraft{}, &model.AssistantInteractionEvent{}, &model.AssistantInteractionAttempt{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sqlDB, _ := db.DB(); _ = sqlDB.Close() })
+	return New(db), db
+}
+
+func TestAssistantInteractionRepositoryCASAndRuntime(t *testing.T) {
+	repo, _ := newAssistantInteractionTestRepository(t)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	interaction := &model.AssistantInteraction{ID: "interaction-1", UserID: "user-1", ModeID: "creation", ProjectID: "project-1", Lifecycle: model.AssistantInteractionActive, Generation: 1, ExpiresAt: now.Add(time.Hour), LastActivityAt: now, CreatedAt: now, UpdatedAt: now}
+	if err := repo.AssistantInteractions().Create(context.Background(), interaction); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := repo.AssistantInteractions().CompareAndSwapGeneration(context.Background(), interaction.ID, 1, 2, now); err != nil || !ok {
+		t.Fatalf("CAS = %v, %v", ok, err)
+	}
+	if ok, err := repo.AssistantInteractions().CompareAndSwapGeneration(context.Background(), interaction.ID, 1, 3, now); err != nil || ok {
+		t.Fatalf("stale CAS = %v, %v", ok, err)
+	}
+	runtime := &model.AssistantInteractionRuntime{ID: "runtime-1", InteractionID: interaction.ID, Generation: 2, ServerInstance: "server-1", RuntimeID: "runtime-1", LogicalSession: "logical-1", TokenHash: "hash", Status: model.AssistantInteractionRuntimeRunning, StartedAt: now, CreatedAt: now, UpdatedAt: now}
+	if err := repo.AssistantInteractions().CreateRuntimeBinding(context.Background(), runtime); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.AssistantInteractions().FindCurrentRuntime(context.Background(), interaction.ID, 2)
+	if err != nil || got.ID != runtime.ID {
+		t.Fatalf("runtime = %#v, %v", got, err)
+	}
+}
+
+func TestAssistantInteractionRepositoryAllowsOnlyOneActiveScope(t *testing.T) {
+	repo, _ := newAssistantInteractionTestRepository(t)
+	now := time.Now().UTC()
+	first := &model.AssistantInteraction{ID: "scope-1", UserID: "user-1", ModeID: "creation", ProjectID: "project-1", Lifecycle: model.AssistantInteractionActive, Generation: 1, ExpiresAt: now.Add(time.Hour), LastActivityAt: now, CreatedAt: now, UpdatedAt: now}
+	if err := repo.AssistantInteractions().Create(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	second := *first
+	second.ID = "scope-2"
+	if err := repo.AssistantInteractions().Create(context.Background(), &second); err == nil {
+		t.Fatal("duplicate active scope was accepted")
+	}
+	if err := repo.AssistantInteractions().UpdateLifecycle(context.Background(), first.ID, model.AssistantInteractionAbandoned, now); err != nil {
+		t.Fatal(err)
+	}
+	second.ID = "scope-2"
+	if err := repo.AssistantInteractions().Create(context.Background(), &second); err != nil {
+		t.Fatalf("new scope after abandonment: %v", err)
+	}
+}
+
+func TestAssistantInteractionRepositoryDraftAttemptIsIdempotent(t *testing.T) {
+	repo, _ := newAssistantInteractionTestRepository(t)
+	now := time.Now().UTC()
+	draft := &model.AssistantInteractionDraft{ID: "draft-1", InteractionID: "interaction-1", ModeID: "creation", Revision: 1, Payload: json.RawMessage(`{"plan":{"goal":"write"}}`), PayloadDigest: "digest-1", Ready: true, ConfirmationState: model.AssistantInteractionDraftPending, SourceGeneration: 1, ExpiresAt: now.Add(30 * 24 * time.Hour), CreatedAt: now, UpdatedAt: now}
+	attempt := &model.AssistantInteractionAttempt{ID: "attempt-row-1", InteractionID: draft.InteractionID, AttemptID: "attempt-1", Operation: "stage", Generation: 1, PayloadDigest: draft.PayloadDigest, Result: json.RawMessage(`{"draft_id":"draft-1"}`), CreatedAt: now, ExpiresAt: now.Add(24 * time.Hour)}
+	first, created, err := repo.AssistantInteractions().CreateDraftIfAttemptNew(context.Background(), draft, attempt)
+	if err != nil || !created || first.ID != draft.ID {
+		t.Fatalf("first stage = %#v, %v, %v", first, created, err)
+	}
+	replay, created, err := repo.AssistantInteractions().CreateDraftIfAttemptNew(context.Background(), draft, attempt)
+	if err != nil || created || replay.ID != draft.ID {
+		t.Fatalf("replay = %#v, %v, %v", replay, created, err)
+	}
+	conflict := *attempt
+	conflict.ID = "attempt-row-2"
+	conflict.PayloadDigest = "different"
+	if _, _, err := repo.AssistantInteractions().CreateDraftIfAttemptNew(context.Background(), draft, &conflict); !errors.Is(err, ErrInteractionAttemptConflict) {
+		t.Fatalf("conflict error = %v", err)
+	}
+}
+
+func TestAssistantInteractionRepositoryRetention(t *testing.T) {
+	repo, _ := newAssistantInteractionTestRepository(t)
+	now := time.Now().UTC()
+	old := now.Add(-48 * time.Hour)
+	if err := repo.AssistantInteractions().CreateEvent(context.Background(), &model.AssistantInteractionEvent{ID: "event-old", InteractionID: "interaction-1", Sequence: 1, Type: "message", Data: json.RawMessage(`{}`), CreatedAt: old}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AssistantInteractions().CreateAttempt(context.Background(), &model.AssistantInteractionAttempt{ID: "attempt-old", InteractionID: "interaction-1", AttemptID: "old", Operation: "message", PayloadDigest: "digest", CreatedAt: old, ExpiresAt: old}); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := repo.AssistantInteractions().ExpireEvents(context.Background(), now.Add(-24*time.Hour)); err != nil || count != 1 {
+		t.Fatalf("events expired = %d, %v", count, err)
+	}
+	if count, err := repo.AssistantInteractions().ExpireAttempts(context.Background(), now.Add(-24*time.Hour)); err != nil || count != 1 {
+		t.Fatalf("attempts expired = %d, %v", count, err)
+	}
+}
