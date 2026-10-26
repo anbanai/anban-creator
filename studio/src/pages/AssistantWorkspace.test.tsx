@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   works: vi.fn(),
   createWorkspace: vi.fn(),
   workspaceMessage: vi.fn(),
+  workspaceAnswer: vi.fn(),
   switchWorkspaceMode: vi.fn(),
   closeWorkspace: vi.fn(),
   workspaceCommit: vi.fn(),
@@ -48,7 +49,7 @@ vi.mock('@/lib/interactive-events', () => ({
     const terminalStream = mocks.streamEvents.some((event) => ['session.expired', 'expired'].includes(event.event))
     if (!terminalStream) {
       yield { event: 'assistant.message', id: `event-${sessionId}-1`, data: JSON.stringify({ session_id: sessionId, text: '收到，我开始处理。' }) }
-      if (sessionId === 'session-1') yield { event: 'draft.ready', id: `event-${sessionId}-2`, data: JSON.stringify({ session_id: sessionId, confirmation_token: 'token-1', ready: true, project: { platform: 'video-edit' } }) }
+      if (sessionId === 'session-1' && !mocks.streamEvents.some((event) => event.event === 'question.opened')) yield { event: 'draft.ready', id: `event-${sessionId}-2`, data: JSON.stringify({ session_id: sessionId, confirmation_token: 'token-1', ready: true, project: { platform: 'video-edit' } }) }
       yield { event: 'turn.end', id: `event-${sessionId}-end`, data: JSON.stringify({ session_id: sessionId }) }
     }
     for (const event of mocks.streamEvents) yield event
@@ -94,6 +95,7 @@ describe('AssistantWorkspace', () => {
     mocks.works.mockResolvedValue({ items: [], has_more: false })
     mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'profile', session_id: 'session-1', sessions: { profile: 'session-1' }, runtime_status: 'starting', expires_at: '' })
     mocks.workspaceMessage.mockResolvedValue(undefined)
+    mocks.workspaceAnswer.mockResolvedValue(undefined)
     mocks.closeWorkspace.mockResolvedValue(undefined)
     mocks.workspaceCommit.mockResolvedValue({ mode_id: 'profile', status: 'committed', project: { id: 'project-new', name: '新画像', platform: 'wechat' } })
     mocks.workspaceCheckpoint.mockResolvedValue({ id: 'checkpoint-1', payload_digest: 'digest-1' })
@@ -551,6 +553,23 @@ describe('AssistantWorkspace', () => {
     expect(entries[1].compareDocumentPosition(entries[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(entries[2].compareDocumentPosition(entries[3]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(conversation.parentElement).toHaveClass('max-w-6xl')
+  })
+
+  it('removes answered question cards from the home conversation', async () => {
+    mocks.streamEvents = [
+      { event: 'question.opened', id: 'event-question-1', data: JSON.stringify({ session_id: 'session-1', call_id: 'call-1', questions: [{ id: 'q1', question: '先确定作品主题？', options: [{ label: '主题一' }] }] }) },
+    ]
+    renderPage()
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    const conversation = await screen.findByTestId('assistant-conversation')
+    expect(await within(conversation).findByRole('heading', { name: '先确定作品主题？' })).toBeInTheDocument()
+    fireEvent.click(within(conversation).getByRole('radio', { name: '主题一' }))
+    fireEvent.click(within(conversation).getByRole('button', { name: '提交回答' }))
+
+    await waitFor(() => expect(mocks.workspaceAnswer).toHaveBeenCalledWith('workspace-1', 'profile', 'call-1', [{ id: 'q1', selected: ['主题一'] }]))
+    await waitFor(() => expect(within(conversation).queryByRole('heading', { name: '先确定作品主题？' })).not.toBeInTheDocument())
   })
 
   it('opens profile setup from the create persona card before starting a workspace', async () => {
