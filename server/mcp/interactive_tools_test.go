@@ -170,6 +170,11 @@ func TestStageAssistantDraftToolSchema(t *testing.T) {
 		if tool.Name != "stage_assistant_draft" {
 			continue
 		}
+		for _, phrase := range []string{"topic", "expression_form", "profile_context", "temporary_overrides", "using []"} {
+			if !strings.Contains(tool.Description, phrase) {
+				t.Errorf("assistant draft description %q missing %q", tool.Description, phrase)
+			}
+		}
 		schema, ok := tool.InputSchema.(map[string]any)
 		if !ok || schema["additionalProperties"] != false {
 			t.Fatalf("assistant draft schema = %#v, want closed object", tool.InputSchema)
@@ -184,12 +189,22 @@ func TestStageAssistantDraftToolSchema(t *testing.T) {
 		}
 		planSchema := payloadSchema["properties"].(map[string]any)["plan"].(map[string]any)
 		planProperties := planSchema["properties"].(map[string]any)
-		for _, field := range []string{"goal", "content_type", "expected_result", "requirements", "constraints", "assets", "missing_inputs", "agent_decisions", "target_audience", "angle", "outline", "style_constraints", "asset_plan", "acceptance_criteria", "cost_estimate", "execution_options"} {
+		for _, field := range []string{"goal", "content_type", "topic", "angle", "expression_form", "expected_result", "requirements", "constraints", "assets", "missing_inputs", "agent_decisions", "target_audience", "profile_context", "temporary_overrides", "outline", "style_constraints", "asset_plan", "acceptance_criteria", "cost_estimate", "execution_options"} {
 			if _, ok := planProperties[field]; !ok {
 				t.Fatalf("assistant plan schema missing %q: %#v", field, planSchema)
 			}
 		}
-		for _, field := range []string{"account", "platform", "column", "topic", "visual_plan", "success_criteria"} {
+		for _, field := range []string{"profile_context", "temporary_overrides"} {
+			fieldSchema, ok := planProperties[field].(map[string]any)
+			if !ok || fieldSchema["type"] != "array" {
+				t.Fatalf("assistant plan schema %s = %#v, want string array", field, planProperties[field])
+			}
+			items, ok := fieldSchema["items"].(map[string]any)
+			if !ok || items["type"] != "string" {
+				t.Fatalf("assistant plan schema %s items = %#v, want string", field, fieldSchema["items"])
+			}
+		}
+		for _, field := range []string{"account", "platform", "column", "visual_plan", "success_criteria"} {
 			if _, ok := planProperties[field]; ok {
 				t.Fatalf("assistant plan schema still exposes unsupported %q", field)
 			}
@@ -216,7 +231,7 @@ func TestStageAssistantDraftUsesProtectedSessionMode(t *testing.T) {
 	svcs = &Services{InteractiveSvc: svc}
 	t.Cleanup(func() { svcs = old })
 	payload := map[string]any{"plan": map[string]any{
-		"goal": "发布新品", "content_type": "公众号文章", "target_audience": "潜在客户", "angle": "真实使用问题",
+		"goal": "发布新品", "content_type": "公众号文章", "topic": "新品的真实使用场景", "target_audience": "潜在客户", "angle": "真实使用问题", "expression_form": "案例型", "profile_context": []string{}, "temporary_overrides": []string{},
 		"outline": []string{"问题", "方案"}, "style_constraints": "具体", "asset_plan": "产品图",
 		"acceptance_criteria": "事实准确", "cost_estimate": "低", "execution_options": []string{"生成完整初稿"},
 	}}

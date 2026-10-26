@@ -14,7 +14,7 @@ import (
 func registerInteractiveTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "stage_assistant_draft",
-		Description: "Stage a structured creation plan or postmortem review draft for the authenticated Assistant session. For creation, send payload.plan with only the documented fields: goal, content_type, expected_result, requirements, constraints, assets, missing_inputs, agent_decisions, target_audience, angle, outline (string array), style_constraints, asset_plan, acceptance_criteria, cost_estimate, execution_options, and optional image/video fields. Keep all metadata inside plan; do not invent nested objects or fields.",
+		Description: "Stage a structured creation plan or postmortem review draft for the authenticated Assistant session. For creation, send payload.plan with only the documented fields: goal, content_type, topic, angle, expression_form, expected_result, requirements, constraints, assets, missing_inputs, agent_decisions, target_audience, profile_context, temporary_overrides, outline (string array), style_constraints, asset_plan, acceptance_criteria, cost_estimate, execution_options, and optional image/video fields. A ready creation plan must include profile_context and temporary_overrides as string arrays, using [] when there is nothing to record. Keep all metadata inside plan; do not invent nested objects or fields.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
@@ -63,11 +63,13 @@ func assistantDraftPayloadSchema() map[string]any {
 	}}
 	plan := map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
 		"goal": map[string]any{"type": "string"}, "content_type": map[string]any{"type": "string"},
+		"topic": map[string]any{"type": "string"}, "expression_form": map[string]any{"type": "string"},
 		"execution_profile": map[string]any{"type": "string"}, "image_ratio": map[string]any{"type": "string"},
 		"image_capability_key": map[string]any{"type": "string"}, "expected_result": map[string]any{"type": "string"},
 		"requirements": stringArray, "constraints": stringArray, "assets": map[string]any{"type": "array", "items": map[string]any{"oneOf": []any{asset, map[string]any{"type": "string"}}}},
 		"video_edit_brief": map[string]any{"type": "string"}, "video_edit_preferences": map[string]any{"type": "object"},
 		"missing_inputs": stringArray, "agent_decisions": stringArray, "target_audience": map[string]any{"type": "string"},
+		"profile_context": stringArray, "temporary_overrides": stringArray,
 		"angle": map[string]any{"type": "string"}, "outline": stringArray, "style_constraints": map[string]any{"type": "string"},
 		"asset_plan": map[string]any{"type": "string"}, "acceptance_criteria": map[string]any{"type": "string"},
 		"cost_estimate": map[string]any{"type": "string"}, "execution_options": stringArray,

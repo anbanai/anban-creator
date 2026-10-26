@@ -109,10 +109,7 @@ export function DshQuestionComposer({
 }) {
   const [drafts, setDrafts] = useState<DraftAnswer[]>(() => questions.map((question) => ({
     selected: answers.find((answer) => answer.id === question.id)?.selected
-      ?? (() => {
-        const recommended = question.options?.find((option) => optionDisplay(option).recommended)
-        return recommended ? [recommended.label] : []
-      })(),
+      ?? [],
     custom: answers.find((answer) => answer.id === question.id)?.custom ?? '',
     skipped: answers.some((answer) => answer.id === question.id && answer.selected.length === 0 && !answer.custom),
   })))

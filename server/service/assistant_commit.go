@@ -270,6 +270,8 @@ func validateAssistantCommitScope(ctx context.Context, repo repository.Repositor
 type assistantCreationPlan struct {
 	Goal                 string                      `json:"goal"`
 	ContentType          string                      `json:"content_type"`
+	Topic                string                      `json:"topic"`
+	ExpressionForm       string                      `json:"expression_form"`
 	ExecutionProfile     string                      `json:"execution_profile,omitempty"`
 	ImageRatio           string                      `json:"image_ratio,omitempty"`
 	ImageCapabilityKey   string                      `json:"image_capability_key,omitempty"`
@@ -282,6 +284,8 @@ type assistantCreationPlan struct {
 	MissingInputs        []string                    `json:"missing_inputs,omitempty"`
 	AgentDecisions       []string                    `json:"agent_decisions,omitempty"`
 	TargetAudience       string                      `json:"target_audience,omitempty"`
+	ProfileContext       []string                    `json:"profile_context"`
+	TemporaryOverrides   []string                    `json:"temporary_overrides"`
 	Angle                string                      `json:"angle,omitempty"`
 	Outline              []string                    `json:"outline,omitempty"`
 	StyleConstraints     string                      `json:"style_constraints,omitempty"`
@@ -321,31 +325,36 @@ func (asset *assistantCreationAsset) UnmarshalJSON(data []byte) error {
 }
 
 func decodeAssistantCreationPlan(payload []byte) (assistantCreationPlan, []byte, error) {
-	var envelope map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &envelope); err != nil {
-		return assistantCreationPlan{}, nil, ErrAssistantCheckpointInvalid
+	plan, err := decodeAssistantCreationPlanFields(payload)
+	if err != nil {
+		return assistantCreationPlan{}, nil, err
 	}
-	raw := json.RawMessage(payload)
-	if nested, ok := envelope["plan"]; ok {
-		raw = nested
-	}
-	var plan assistantCreationPlan
-	decoder := json.NewDecoder(strings.NewReader(string(raw)))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&plan); err != nil {
-		return assistantCreationPlan{}, nil, fmt.Errorf("%w: plan: %v", ErrAssistantCheckpointInvalid, err)
-	}
-	if strings.TrimSpace(plan.Goal) == "" || strings.TrimSpace(plan.ContentType) == "" {
-		missing := make([]string, 0, 2)
+	if strings.TrimSpace(plan.Goal) == "" || strings.TrimSpace(plan.ContentType) == "" || strings.TrimSpace(plan.Topic) == "" || strings.TrimSpace(plan.Angle) == "" || strings.TrimSpace(plan.ExpressionForm) == "" || plan.ProfileContext == nil || plan.TemporaryOverrides == nil {
+		missing := make([]string, 0, 7)
 		if strings.TrimSpace(plan.Goal) == "" {
 			missing = append(missing, "plan.goal")
 		}
 		if strings.TrimSpace(plan.ContentType) == "" {
 			missing = append(missing, "plan.content_type")
 		}
+		if strings.TrimSpace(plan.Topic) == "" {
+			missing = append(missing, "plan.topic")
+		}
+		if strings.TrimSpace(plan.Angle) == "" {
+			missing = append(missing, "plan.angle")
+		}
+		if strings.TrimSpace(plan.ExpressionForm) == "" {
+			missing = append(missing, "plan.expression_form")
+		}
+		if plan.ProfileContext == nil {
+			missing = append(missing, "plan.profile_context")
+		}
+		if plan.TemporaryOverrides == nil {
+			missing = append(missing, "plan.temporary_overrides")
+		}
 		return assistantCreationPlan{}, nil, fmt.Errorf("%w: missing required fields: %s", ErrAssistantCheckpointInvalid, strings.Join(missing, ", "))
 	}
-	for _, list := range [][]string{plan.Requirements, plan.Constraints, plan.MissingInputs, plan.AgentDecisions, plan.Outline, plan.ExecutionOptions} {
+	for _, list := range [][]string{plan.Requirements, plan.Constraints, plan.MissingInputs, plan.AgentDecisions, plan.ProfileContext, plan.TemporaryOverrides, plan.Outline, plan.ExecutionOptions} {
 		for _, value := range list {
 			if strings.TrimSpace(value) == "" {
 				return assistantCreationPlan{}, nil, ErrAssistantCheckpointInvalid
@@ -374,6 +383,29 @@ func decodeAssistantCreationPlan(payload []byte) (assistantCreationPlan, []byte,
 		return assistantCreationPlan{}, nil, ErrAssistantCheckpointInvalid
 	}
 	return plan, canonical, nil
+}
+
+func decodeAssistantCreationPlanFields(payload []byte) (assistantCreationPlan, error) {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		return assistantCreationPlan{}, ErrAssistantCheckpointInvalid
+	}
+	raw := json.RawMessage(payload)
+	if nested, ok := envelope["plan"]; ok {
+		for key := range envelope {
+			if key != "plan" {
+				return assistantCreationPlan{}, fmt.Errorf("%w: unknown assistant draft field %q", ErrAssistantCheckpointInvalid, key)
+			}
+		}
+		raw = nested
+	}
+	var plan assistantCreationPlan
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&plan); err != nil {
+		return assistantCreationPlan{}, fmt.Errorf("%w: plan: %v", ErrAssistantCheckpointInvalid, err)
+	}
+	return plan, nil
 }
 
 type assistantReviewDraft struct {

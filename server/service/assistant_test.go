@@ -793,6 +793,25 @@ func TestAssistantCheckpointRequiresOwnedProjectAndWork(t *testing.T) {
 	}
 }
 
+func TestAssistantReadyCreationCheckpointRequiresQualityContract(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	project := createAssistantProject(t, repo, "user-1", "创作画像")
+	svc := NewInteractiveService(repo)
+	session := &InteractiveSession{
+		ID: uuid.NewString(), UserID: "user-1", ModeID: AssistantModeCreation, AgentID: "creation-planner",
+		ProjectID: project.ID, ExpiresAt: time.Now().Add(time.Hour),
+	}
+	svc.sessions[session.ID] = session
+
+	_, err := svc.SaveAssistantCheckpoint(context.Background(), "user-1", session.ID, AssistantCheckpointInput{
+		SchemaVersion: "1.0", Status: model.AssistantCheckpointReady, Summary: "创作计划",
+		Payload: json.RawMessage(`{"plan":{"goal":"介绍新茶","content_type":"wechat-article","topic":"冲泡方法","angle":"问题拆解","expression_form":"清单"}}`),
+	})
+	if !errors.Is(err, ErrAssistantCheckpointInvalid) {
+		t.Fatalf("ready creation checkpoint error = %v, want quality contract validation", err)
+	}
+}
+
 func TestAssistantCheckpointExpiresAndUsesKnownStatuses(t *testing.T) {
 	if !assistantCheckpointStatusAllowed(model.AssistantCheckpointReady) || assistantCheckpointStatusAllowed("anything") {
 		t.Fatal("checkpoint status allowlist does not match expected lifecycle")
@@ -991,7 +1010,7 @@ func TestAssistantCreationCommitPropagatesTaskLookupErrors(t *testing.T) {
 	}
 	checkpoint := &model.AssistantCheckpoint{
 		ID: uuid.NewString(), UserID: "user-1", ModeID: AssistantModeCreation, ProjectID: project.ID,
-		Payload: json.RawMessage(`{"plan":{"goal":"写文章","content_type":"公众号文章","target_audience":"读者","angle":"从问题切入","outline":["开头"],"style_constraints":"清晰","asset_plan":"无","acceptance_criteria":"准确","cost_estimate":"未知","execution_options":["完整初稿"]}}`),
+		Payload: json.RawMessage(`{"plan":{"goal":"写文章","content_type":"公众号文章","topic":"新手常见问题","target_audience":"读者","angle":"从问题切入","expression_form":"问题拆解","profile_context":[],"temporary_overrides":[],"outline":["开头"],"style_constraints":"清晰","asset_plan":"无","acceptance_criteria":"准确","cost_estimate":"未知","execution_options":["完整初稿"]}}`),
 	}
 
 	_, err := commitAssistantCreation(context.Background(), "user-1", checkpoint, &TaskService{repo: baseRepo}, repo)
@@ -1009,7 +1028,7 @@ func TestAssistantDraftStagingIsModeScopedAndProducesConfirmableDraftEvents(t *t
 		ID: sessionID, UserID: "user-1", ModeID: AssistantModeCreation, AgentID: "creation-planner",
 		ProjectID: project.ID, ExpiresAt: time.Now().Add(time.Hour), watchers: map[*interactiveWatcher]struct{}{},
 	}
-	payload := json.RawMessage(`{"plan":{"goal":"发布春季新品","content_type":"公众号文章","target_audience":"潜在客户","angle":"从实际使用痛点切入","outline":["问题","方案"],"style_constraints":"克制、具体","asset_plan":"产品实拍","acceptance_criteria":"事实准确","cost_estimate":"低","execution_options":["生成完整初稿"]}}`)
+	payload := json.RawMessage(`{"plan":{"goal":"发布春季新品","content_type":"公众号文章","topic":"春季新品的真实使用场景","target_audience":"潜在客户","angle":"从实际使用痛点切入","expression_form":"案例型","profile_context":[],"temporary_overrides":[],"outline":["问题","方案"],"style_constraints":"克制、具体","asset_plan":"产品实拍","acceptance_criteria":"事实准确","cost_estimate":"低","execution_options":["生成完整初稿"]}}`)
 	err := svc.StageAssistantDraftForSession(sessionID, AssistantDraftStageInput{Name: "春季新品计划", Payload: payload, Ready: true})
 	if err != nil {
 		t.Fatalf("StageAssistantDraftForSession() error = %v", err)
@@ -1029,11 +1048,18 @@ func TestAssistantDraftStagingIsModeScopedAndProducesConfirmableDraftEvents(t *t
 		t.Fatalf("draft events = %#v, want updated and ready", draftEvents)
 	}
 	draft, ok := draftEvents[1].Data.(InteractiveDraft)
-	if !ok || !draft.Ready || draft.Name != "春季新品计划" || draft.Fields["goal"] != "发布春季新品" || string(draft.Payload) != string(payload) {
+	if !ok || !draft.Ready || draft.Name != "春季新品计划" || draft.Fields["goal"] != "发布春季新品" {
 		t.Fatalf("ready draft = %#v, want structured creation plan", events[1].Data)
 	}
+	var originalPlan, stagedPlan map[string]any
+	if err := json.Unmarshal(payload, &originalPlan); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(draft.Payload, &stagedPlan); err != nil || !reflect.DeepEqual(stagedPlan, originalPlan) {
+		t.Fatalf("staged plan = %s, want semantic plan %s (decode error: %v)", draft.Payload, payload, err)
+	}
 	checkpoint, err := NewInteractiveService(repo).LatestAssistantCheckpoint(context.Background(), "user-1", AssistantModeCreation, project.ID, "")
-	if err != nil || checkpoint == nil || checkpoint.ID != sessionID || checkpoint.Status != model.AssistantCheckpointReady || string(checkpoint.Payload) != string(payload) {
+	if err != nil || checkpoint == nil || checkpoint.ID != sessionID || checkpoint.Status != model.AssistantCheckpointReady || string(checkpoint.Payload) != string(draft.Payload) {
 		t.Fatalf("staged plan checkpoint = %#v, %v; want durable ready payload", checkpoint, err)
 	}
 
@@ -1047,28 +1073,28 @@ func TestAssistantDraftStagingIsModeScopedAndProducesConfirmableDraftEvents(t *t
 	}
 }
 
-func TestCreationRequestNeedsOnlyGoalAndContentType(t *testing.T) {
-	payload := []byte(`{"goal":"介绍新茶","content_type":"wechat-article","expected_result":"让读者了解冲泡方法","requirements":[],"constraints":[],"assets":[],"missing_inputs":[],"agent_decisions":["标题和文章结构"]}`)
+func TestCreationRequestRequiresCoreQualityDecisions(t *testing.T) {
+	payload := []byte(`{"goal":"介绍新茶","content_type":"wechat-article","topic":"第一次泡茶最容易犯的三个错误","angle":"从真实使用痛点切入","expression_form":"步骤教程","profile_context":[],"temporary_overrides":[],"expected_result":"让读者了解冲泡方法","requirements":[],"constraints":[],"assets":[],"missing_inputs":[],"agent_decisions":["标题和文章结构"]}`)
 	request, canonical, err := decodeAssistantCreationPlan(payload)
 	if err != nil {
 		t.Fatalf("decode request without production details: %v", err)
 	}
-	if request.Goal != "介绍新茶" || request.ContentType != "wechat-article" || len(canonical) == 0 {
+	if request.Goal != "介绍新茶" || request.ContentType != "wechat-article" || request.Topic == "" || request.Angle == "" || request.ExpressionForm == "" || len(canonical) == 0 {
 		t.Fatalf("decoded request = %#v, canonical=%s", request, canonical)
 	}
-	request, _, err = decodeAssistantCreationPlan([]byte(`{"goal":"介绍新茶","content_type":"wechat-article","image_ratio":"16:9","image_capability_key":"standard"}`))
+	request, _, err = decodeAssistantCreationPlan([]byte(`{"goal":"介绍新茶","content_type":"wechat-article","topic":"冲泡方法","angle":"问题拆解","expression_form":"清单","profile_context":[],"temporary_overrides":[],"image_ratio":"16:9","image_capability_key":"standard"}`))
 	if err != nil || request.ImageRatio != "16:9" || request.ImageCapabilityKey != "standard" {
 		t.Fatalf("decode image settings = %#v, %v", request, err)
 	}
-	request, _, err = decodeAssistantCreationPlan([]byte(`{"goal":"介绍新茶","content_type":"wechat-article","assets":["参考链接：https://example.com/source"]}`))
+	request, _, err = decodeAssistantCreationPlan([]byte(`{"goal":"介绍新茶","content_type":"wechat-article","topic":"冲泡方法","angle":"问题拆解","expression_form":"清单","profile_context":[],"temporary_overrides":[],"assets":["参考链接：https://example.com/source"]}`))
 	if err != nil || len(request.Assets) != 1 || request.Assets[0].Type != "text" || request.Assets[0].Text != "参考链接：https://example.com/source" {
 		t.Fatalf("decode string asset = %#v, %v", request.Assets, err)
 	}
-	otherType := `{"goal":"介绍新茶","content_type":"wechat-article","assets":[{"type":"image"},{"type":"image"},{"type":"image"},{"type":"image"},{"type":"image"},{"type":"image"}]}`
+	otherType := `{"goal":"介绍新茶","content_type":"wechat-article","topic":"冲泡方法","angle":"问题拆解","expression_form":"清单","profile_context":[],"temporary_overrides":[],"assets":[{"type":"image"},{"type":"image"},{"type":"image"},{"type":"image"},{"type":"image"},{"type":"image"}]}`
 	if _, _, err := decodeAssistantCreationPlan([]byte(otherType)); !errors.Is(err, ErrAssistantCheckpointInvalid) {
 		t.Fatalf("non-video plan over five assets error = %v, want invalid checkpoint", err)
 	}
-	videoEditType := `{"goal":"剪辑访谈","content_type":"video-edit","assets":[{"type":"video","upload_id":"1"},{"type":"video","upload_id":"2"},{"type":"video","upload_id":"3"},{"type":"video","upload_id":"4"},{"type":"video","upload_id":"5"},{"type":"video","upload_id":"6"}]}`
+	videoEditType := `{"goal":"剪辑访谈","content_type":"video-edit","topic":"访谈中的关键问答","angle":"保留真实对话转折","expression_form":"短视频精剪","profile_context":[],"temporary_overrides":[],"assets":[{"type":"video","upload_id":"1"},{"type":"video","upload_id":"2"},{"type":"video","upload_id":"3"},{"type":"video","upload_id":"4"},{"type":"video","upload_id":"5"},{"type":"video","upload_id":"6"}]}`
 	if plan, _, err := decodeAssistantCreationPlan([]byte(videoEditType)); err != nil || len(plan.Assets) != 6 {
 		t.Fatalf("video-edit plan with six uploaded assets = %#v, %v", plan, err)
 	}
@@ -1076,10 +1102,56 @@ func TestCreationRequestNeedsOnlyGoalAndContentType(t *testing.T) {
 	for _, invalid := range []string{
 		`{"content_type":"video"}`,
 		`{"goal":"做视频"}`,
+		`{"goal":"做视频","content_type":"video","topic":"访谈"}`,
+		`{"goal":"做视频","content_type":"video","topic":"访谈","angle":"问题拆解"}`,
 		`{"goal":"做视频","content_type":"video","unexpected":true}`,
 	} {
 		if _, _, err := decodeAssistantCreationPlan([]byte(invalid)); !errors.Is(err, ErrAssistantCheckpointInvalid) {
 			t.Errorf("decode %s error = %v, want invalid checkpoint", invalid, err)
+		}
+	}
+}
+
+func TestCreationReadyDraftRequiresAttributionArrays(t *testing.T) {
+	valid := `{"goal":"介绍新茶","content_type":"wechat-article","topic":"冲泡方法","angle":"问题拆解","expression_form":"清单","profile_context":[],"temporary_overrides":[]}`
+	_, canonical, err := decodeAssistantCreationPlan([]byte(valid))
+	if err != nil {
+		t.Fatalf("decode plan with empty attribution arrays: %v", err)
+	}
+	var normalized map[string]json.RawMessage
+	if err := json.Unmarshal(canonical, &normalized); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"profile_context", "temporary_overrides"} {
+		if got := string(normalized[field]); got != "[]" {
+			t.Errorf("normalized %s = %s, want []", field, got)
+		}
+	}
+
+	for _, invalid := range []string{
+		`{"goal":"介绍新茶","content_type":"wechat-article","topic":"冲泡方法","angle":"问题拆解","expression_form":"清单","temporary_overrides":[]}`,
+		`{"goal":"介绍新茶","content_type":"wechat-article","topic":"冲泡方法","angle":"问题拆解","expression_form":"清单","profile_context":[]}`,
+		`{"goal":"介绍新茶","content_type":"wechat-article","topic":"冲泡方法","angle":"问题拆解","expression_form":"清单","profile_context":null,"temporary_overrides":[]}`,
+		`{"goal":"介绍新茶","content_type":"wechat-article","topic":"冲泡方法","angle":"问题拆解","expression_form":"清单","profile_context":[],"temporary_overrides":null}`,
+	} {
+		if _, _, err := decodeAssistantCreationPlan([]byte(invalid)); !errors.Is(err, ErrAssistantCheckpointInvalid) {
+			t.Errorf("decode %s error = %v, want invalid checkpoint", invalid, err)
+		}
+	}
+}
+
+func TestCreationCommitRequiresAttributionArrays(t *testing.T) {
+	validCorePlanWithoutAttribution := `{"goal":"介绍新茶","content_type":"wechat-article","topic":"冲泡方法","angle":"问题拆解","expression_form":"清单"}`
+	if _, _, err := decodeAssistantCreationPlan([]byte(validCorePlanWithoutAttribution)); !errors.Is(err, ErrAssistantCheckpointInvalid) {
+		t.Fatalf("commit draft without attribution arrays error = %v, want invalid checkpoint", err)
+	}
+
+	for _, invalid := range []string{
+		`{"goal":"介绍新茶","content_type":"wechat-article","topic":"冲泡方法","angle":"问题拆解","expression_form":"清单","temporary_overrides":[]}`,
+		`{"goal":"介绍新茶","content_type":"wechat-article","topic":"冲泡方法","angle":"问题拆解","expression_form":"清单","profile_context":[]}`,
+	} {
+		if _, _, err := decodeAssistantCreationPlan([]byte(invalid)); !errors.Is(err, ErrAssistantCheckpointInvalid) {
+			t.Errorf("commit draft %s error = %v, want invalid checkpoint", invalid, err)
 		}
 	}
 }
@@ -1126,6 +1198,9 @@ func TestAssistantCreationCommitCreatesVideoEditTaskFromOwnedUpload(t *testing.T
 		t.Fatal(err)
 	}
 	project := createAssistantProject(t, repo, userID, "视频剪辑")
+	profileBefore := projectProfileFor(project)
+	profileBefore.Dimensions.Style.Content["summary"] = "项目默认表达风格：克制"
+	project.Profile = datatypes.NewJSONType(profileBefore)
 	project.Platform = model.PlatformVideoEdit
 	project.AgentIDs = []string{model.AgentIDVideoEdit}
 	project.AgentIDsSet = true
@@ -1147,8 +1222,8 @@ func TestAssistantCreationCommitCreatesVideoEditTaskFromOwnedUpload(t *testing.T
 	tasks.SetVideoEditConfig(serverconfig.VideoEditConfig{ElevenLabsAPIKey: "server-managed-key", TimeoutMinutes: 42})
 	checkpoint := &model.AssistantCheckpoint{
 		ID: uuid.NewString(), UserID: userID, ModeID: AssistantModeCreation, ProjectID: project.ID,
-		BaseProfileRevision: 1, Status: model.AssistantCheckpointReady, ExpiresAt: time.Now().Add(time.Hour),
-		Payload: json.RawMessage(`{"plan":{"goal":"剪成访谈短片","content_type":"video-edit","video_edit_brief":"保留关键问答，剪成 60 秒短片","video_edit_preferences":{"quality_tier":"balanced","subtitle_mode":"required","style":"克制快剪","max_duration_seconds":60},"assets":[{"type":"video","asset_id":"assistant-clip"}]}}`),
+		BaseProfileRevision: profileBefore.Version, Status: model.AssistantCheckpointReady, ExpiresAt: time.Now().Add(time.Hour),
+		Payload: json.RawMessage(`{"plan":{"goal":"剪成访谈短片","content_type":"video-edit","topic":"访谈中的关键问答","angle":"保留真实对话转折","expression_form":"短视频精剪","profile_context":["项目默认表达风格：克制"],"temporary_overrides":["本次作品临时采用更轻快的表达"],"video_edit_brief":"保留关键问答，剪成 60 秒短片","video_edit_preferences":{"quality_tier":"balanced","subtitle_mode":"required","style":"克制快剪","max_duration_seconds":60},"assets":[{"type":"video","asset_id":"assistant-clip"}]}}`),
 	}
 	result, err := commitAssistantCreation(context.Background(), userID, checkpoint, tasks, repo)
 	if err != nil {
@@ -1166,6 +1241,16 @@ func TestAssistantCreationCommitCreatesVideoEditTaskFromOwnedUpload(t *testing.T
 	}
 	if created.VideoEditTimeoutMinutes != 42 {
 		t.Fatalf("frozen video-edit timeout = %d minutes, want 42", created.VideoEditTimeoutMinutes)
+	}
+	if !strings.Contains(created.Prompt, "本次作品临时采用更轻快的表达") {
+		t.Fatalf("creation task prompt omitted the temporary override: %s", created.Prompt)
+	}
+	updatedProject, err := repo.Projects().FindByID(context.Background(), project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := projectProfileFor(updatedProject); !reflect.DeepEqual(got, profileBefore) {
+		t.Fatalf("temporary creation override changed the project profile: got=%#v want=%#v", got, profileBefore)
 	}
 	input := created.VideoEditInput.Data()
 	if len(input.SourceAssets) != 1 || input.SourceAssets[0].AssetID != asset.ID || input.SourceAssets[0].FileName != asset.FileName ||
@@ -1275,7 +1360,7 @@ func TestEveryAssistantCreationTypeHasBusinessReference(t *testing.T) {
 
 func TestAssistantCreationCommitRejectsMissingRequiredInputs(t *testing.T) {
 	repo := newAssistantTestRepo(t)
-	checkpoint := &model.AssistantCheckpoint{Payload: json.RawMessage(`{"plan":{"goal":"做视频","content_type":"video","missing_inputs":["用户需要先上传视频"]}}`)}
+	checkpoint := &model.AssistantCheckpoint{Payload: json.RawMessage(`{"plan":{"goal":"做视频","content_type":"video","topic":"访谈重点","angle":"围绕关键观点展开","expression_form":"短视频精剪","profile_context":[],"temporary_overrides":[],"missing_inputs":["用户需要先上传视频"]}}`)}
 	_, err := commitAssistantCreation(context.Background(), "user-1", checkpoint, &TaskService{}, repo)
 	if !errors.Is(err, ErrAssistantCreationInputsMissing) {
 		t.Fatalf("commit error = %v, want missing-input error", err)
@@ -1337,6 +1422,77 @@ func TestAssistantReadyDraftReportsUnsupportedPlanField(t *testing.T) {
 	})
 	if !errors.Is(err, ErrAssistantCheckpointInvalid) || !strings.Contains(err.Error(), `plan: json: unknown field "account"`) {
 		t.Fatalf("unsupported plan field error = %v, want field path", err)
+	}
+}
+
+func TestAssistantDraftRejectsUnsupportedPlanFieldBeforeReady(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	project := createAssistantProject(t, repo, "user-1", "画像")
+	svc := NewInteractiveService(repo)
+	sessionID := uuid.NewString()
+	svc.sessions[sessionID] = &InteractiveSession{
+		ID: sessionID, UserID: "user-1", ModeID: AssistantModeCreation, AgentID: "creation-planner",
+		ProjectID: project.ID, ExpiresAt: time.Now().Add(time.Hour), watchers: map[*interactiveWatcher]struct{}{},
+	}
+	err := svc.StageAssistantDraftForSession(sessionID, AssistantDraftStageInput{
+		Payload: json.RawMessage(`{"plan":{"goal":"先整理需求","unexpected":"不应进入合同"}}`),
+		Ready:   false,
+	})
+	if !errors.Is(err, ErrAssistantCheckpointInvalid) || !strings.Contains(err.Error(), `plan: json: unknown field "unexpected"`) {
+		t.Fatalf("draft error = %v, want unsupported plan field", err)
+	}
+}
+
+func TestAssistantDraftAllowsIncompleteCreationPlanUntilReady(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	project := createAssistantProject(t, repo, "user-1", "画像")
+	svc := NewInteractiveService(repo)
+	sessionID := uuid.NewString()
+	svc.sessions[sessionID] = &InteractiveSession{
+		ID: sessionID, UserID: "user-1", ModeID: AssistantModeCreation, AgentID: "creation-planner",
+		ProjectID: project.ID, ExpiresAt: time.Now().Add(time.Hour), watchers: map[*interactiveWatcher]struct{}{},
+	}
+	err := svc.StageAssistantDraftForSession(sessionID, AssistantDraftStageInput{
+		Payload: json.RawMessage(`{"plan":{"goal":"先明确本次目标"}}`),
+	})
+	if err != nil {
+		t.Fatalf("incomplete draft error = %v, want a valid non-ready draft", err)
+	}
+	if svc.sessions[sessionID].Draft.Ready {
+		t.Fatal("incomplete creation draft must remain non-ready")
+	}
+}
+
+func TestCreationSessionReceivesConfirmedProjectProfileContext(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	project := createAssistantProject(t, repo, "user-1", "创作画像")
+	profile := projectProfileFor(project)
+	dimensions := map[string]*model.ProfileDimension{
+		"identity": &profile.Dimensions.Identity, "style": &profile.Dimensions.Style,
+		"audience": &profile.Dimensions.Audience, "platforms": &profile.Dimensions.Platforms,
+		"preferences": &profile.Dimensions.Preferences, "memory": &profile.Dimensions.Memory,
+	}
+	for name, dimension := range dimensions {
+		dimension.Content["summary"] = "继承画像信息：" + name
+	}
+	project.Profile = datatypes.NewJSONType(profile)
+	if err := repo.Projects().Update(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewInteractiveServiceWithRuntime(repo, interactiveTestRuntimeFactory{})
+	svc.SetEnabled(true)
+	session, err := svc.CreateAssistantSessionWithIdempotency(context.Background(), "user-1", AssistantSessionInput{
+		ModeID: AssistantModeCreation, ProjectID: project.ID,
+	}, "creation-profile-context")
+	if err != nil {
+		t.Fatalf("CreateAssistantSessionWithIdempotency() error = %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close("user-1", session.ID) })
+	for name := range dimensions {
+		if !strings.Contains(session.initialContext, "继承画像信息："+name) {
+			t.Errorf("creation context omitted confirmed %s profile dimension: %s", name, session.initialContext)
+		}
 	}
 }
 
@@ -1516,7 +1672,7 @@ func TestAssistantAdmittedTaskCannotConsumeChangedPlan(t *testing.T) {
 	svc := NewInteractiveService(repo)
 	svc.sessions[sid] = &InteractiveSession{ID: sid, UserID: "user-1", ModeID: AssistantModeCreation, AgentID: "creation-planner", ProjectID: project.ID, ProfileVersion: 1, ExpiresAt: time.Now().Add(time.Hour)}
 	payload := func(goal string) json.RawMessage {
-		return json.RawMessage(fmt.Sprintf(`{"plan":{"goal":%q,"content_type":"article","target_audience":"audience","angle":"angle","outline":["intro"],"style_constraints":"clear","asset_plan":"none","acceptance_criteria":"correct","cost_estimate":"low","execution_options":["draft"]}}`, goal))
+		return json.RawMessage(fmt.Sprintf(`{"plan":{"goal":%q,"content_type":"article","topic":"topic","target_audience":"audience","angle":"angle","expression_form":"article","profile_context":[],"temporary_overrides":[],"outline":["intro"],"style_constraints":"clear","asset_plan":"none","acceptance_criteria":"correct","cost_estimate":"low","execution_options":["draft"]}}`, goal))
 	}
 	cp, err := svc.SaveAssistantCheckpoint(context.Background(), "user-1", sid, AssistantCheckpointInput{SchemaVersion: "1.0", Status: model.AssistantCheckpointReady, Payload: payload("approved-A")})
 	if err != nil {

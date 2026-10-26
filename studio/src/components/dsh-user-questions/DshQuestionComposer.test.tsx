@@ -37,6 +37,7 @@ describe('DshQuestionComposer', () => {
     expect(screen.getByText('选择一个主平台')).toBeInTheDocument()
     expect(screen.queryByText('希望采用什么风格？')).not.toBeInTheDocument()
 
+    fireEvent.click(screen.getByRole('radio', { name: '微信公众号' }))
     fireEvent.click(screen.getAllByRole('button', { name: '下一题' })[0])
     expect(screen.getByRole('heading', { name: '希望采用什么风格？' })).toBeInTheDocument()
     expect(screen.getByText('2 / 2')).toBeInTheDocument()
@@ -60,7 +61,7 @@ describe('DshQuestionComposer', () => {
     expect(screen.getByText('已回答')).toBeInTheDocument()
   })
 
-  it('defaults to a structured recommendation while keeping it editable', () => {
+  it('marks a structured recommendation without selecting it for the user', () => {
     render(<DshQuestionComposer questions={[{
       id: 'platform',
       question: '选择主平台',
@@ -70,9 +71,10 @@ describe('DshQuestionComposer', () => {
       ],
     }]} onSubmit={vi.fn()} />)
 
-    expect(screen.getByRole('radio', { name: '公众号' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: '公众号' })).toHaveAttribute('aria-checked', 'false')
     expect(screen.getByText('推荐')).toBeInTheDocument()
     expect(screen.getByText('适合沉淀深度内容')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '提交回答' })).toBeDisabled()
   })
 
   it('makes a custom single-select answer mutually exclusive', async () => {

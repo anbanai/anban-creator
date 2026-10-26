@@ -1301,7 +1301,7 @@
     },
     {
       "id": "creation-planner",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "kind": "managed",
       "display_name": "创作模式",
       "description": "通过持续对话澄清本次作品需求，并在用户确认后交给 Server 创建正式创作任务。",
@@ -1334,7 +1334,7 @@
         "interactive-creation-clarification"
       ],
       "ui": {},
-      "digest": "94fd634c9b3e57bc9e1af85635346650a503a59475efdd0da4d33b8da13e130c"
+      "digest": "069beff7132cd3b6e8ba27ecd99bbde59fbae7e5615716dbf911e1bcc0965ffb"
     },
     {
       "id": "feedback-analysis",
@@ -2042,7 +2042,7 @@
     },
     {
       "id": "postmortem-review",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "kind": "managed",
       "display_name": "复盘模式",
       "description": "围绕已完成作品和只读分析证据进行交互式复盘，形成等待独立数据验证的画像改进候选。",
@@ -2075,7 +2075,7 @@
         "interactive-postmortem-review"
       ],
       "ui": {},
-      "digest": "cfde65a8a15b81e0d6e4ec2bf781d552436e1d5e19d3042355c1f6fd313a706d"
+      "digest": "320efb3e8e3f9666f02ca66e0ca4f1186e2e4b162070b51c802e01ceac8c7624"
     },
     {
       "id": "profile-analysis",
@@ -2385,7 +2385,7 @@
     },
     {
       "id": "project-creator",
-      "version": "1.0.6",
+      "version": "1.0.7",
       "kind": "managed",
       "display_name": "画像模式",
       "description": "通过中文对话判断 Anban 项目适配性，选择内容类型并创建或更新六维项目画像。",
@@ -2653,7 +2653,7 @@
       "ui": {
         "renderer": "custom:project-creator"
       },
-      "digest": "7f36d87caff7c670b4358847be2f3952087b10275ac17dce1bad83fb11c5b862"
+      "digest": "518f94383a4efe9216e06a07522153991c8be609860a21cdd6c88a01a5800c81"
     },
     {
       "id": "seednote",
