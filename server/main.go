@@ -1416,7 +1416,7 @@ func requireAssistantInteractionSchema(db *gorm.DB) error {
 		{&model.AssistantInteractionRuntime{}, "assistant_interaction_runtimes", []string{"ID", "InteractionID", "Generation", "Status", "TokenHash"}},
 		{&model.AssistantInteractionDraft{}, "assistant_interaction_drafts", []string{"ID", "InteractionID", "ModeID", "Revision", "Payload", "PayloadDigest", "Ready", "SourceGeneration", "ExpiresAt"}},
 		{&model.AssistantInteractionEvent{}, "assistant_interaction_events", []string{"ID", "InteractionID", "Generation", "Sequence", "Type", "Data", "CreatedAt"}},
-		{&model.AssistantInteractionAttempt{}, "assistant_interaction_attempts", []string{"ID", "InteractionID", "AttemptID", "Operation", "Generation", "PayloadDigest", "Status", "Result", "ErrorCode", "ExpiresAt"}},
+		{&model.AssistantInteractionAttempt{}, "assistant_interaction_attempts", []string{"ID", "InteractionID", "UserID", "AttemptID", "Operation", "Generation", "PayloadDigest", "Status", "Result", "ErrorCode", "ExpiresAt"}},
 	}
 
 	hasInteractionTable := false
@@ -1443,6 +1443,9 @@ func requireAssistantInteractionSchema(db *gorm.DB) error {
 				return fmt.Errorf("existing database requires server/migrations/20261026_assistant_interactions.sql before startup (missing %s.%s)", item.name, column)
 			}
 		}
+	}
+	if !db.Migrator().HasIndex(&model.AssistantInteractionAttempt{}, "idx_assistant_interaction_attempt_user_key") {
+		return fmt.Errorf("existing database requires server/migrations/20261026_assistant_interactions.sql before startup (missing assistant_interaction_attempts user idempotency index)")
 	}
 	legacyMigration := &model.AssistantInteractionLegacyMigration{}
 	if !db.Migrator().HasColumn(legacyMigration, "LegacySessionID") ||

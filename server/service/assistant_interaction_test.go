@@ -420,6 +420,37 @@ func TestAssistantInteractionCreateOrResumeReusesScope(t *testing.T) {
 	}
 }
 
+func TestAssistantInteractionCreateOrResumeReplaysIdempotencyAfterCompletion(t *testing.T) {
+	svc, _ := newAssistantInteractionServiceTest(t)
+	input := AssistantInteractionInput{ModeID: AssistantModeCreation, ProjectID: "project-1", ContentID: "content-1"}
+	first, err := svc.CreateOrResume(context.Background(), "user-1", input, "stable-create")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.repo.AssistantInteractions().UpdateLifecycle(context.Background(), first.ID, model.AssistantInteractionCompleted, svc.clock()); err != nil {
+		t.Fatal(err)
+	}
+
+	replay, err := svc.CreateOrResume(context.Background(), "user-1", input, "stable-create")
+	if err != nil {
+		t.Fatalf("idempotent create replay = %v", err)
+	}
+	if replay.ID != first.ID {
+		t.Fatalf("idempotent create replay id = %q, want %q", replay.ID, first.ID)
+	}
+}
+
+func TestAssistantInteractionCreateOrResumeRejectsIdempotencyKeyReuseWithDifferentInput(t *testing.T) {
+	svc, _ := newAssistantInteractionServiceTest(t)
+	if _, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation, ProjectID: "project-1"}, "stable-create"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation, ProjectID: "project-2"}, "stable-create")
+	if !errors.Is(err, ErrInteractiveIdempotency) {
+		t.Fatalf("idempotency key reuse error = %v, want ErrInteractiveIdempotency", err)
+	}
+}
+
 func TestAssistantInteractionCreateOrResumeRejectsUnknownMode(t *testing.T) {
 	svc, _ := newAssistantInteractionServiceTest(t)
 	_, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: "unknown"}, "unknown-mode")

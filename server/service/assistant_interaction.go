@@ -111,8 +111,32 @@ func (s *AssistantInteractionService) CreateOrResume(ctx context.Context, userID
 	default:
 		return InteractionSnapshot{}, NewInteractionError(InteractionErrorMessageNotAccepted, 400, "当前模式不受支持，请重新选择", "restart")
 	}
-	if strings.TrimSpace(idempotencyKey) != "" && len(strings.TrimSpace(idempotencyKey)) > 128 {
+	normalizedIdempotencyKey := strings.TrimSpace(idempotencyKey)
+	if normalizedIdempotencyKey != "" && len(normalizedIdempotencyKey) > 128 {
 		return InteractionSnapshot{}, NewInteractionError(InteractionErrorMessageNotAccepted, 400, "请求标识过长，请重试", "retry_message")
+	}
+	createAttemptID := ""
+	createPayloadDigest := ""
+	if normalizedIdempotencyKey != "" && strings.TrimSpace(in.ResumeInteractionID) == "" {
+		createAttemptID = interactionCreateAttemptID(normalizedIdempotencyKey)
+		createPayloadDigest = interactionCreatePayloadDigest(in)
+		if previous, findErr := s.repo.AssistantInteractions().FindCreateAttempt(ctx, userID, createAttemptID); findErr == nil {
+			if previous.PayloadDigest != createPayloadDigest {
+				return InteractionSnapshot{}, ErrInteractiveIdempotency
+			}
+			var receipt struct {
+				InteractionID string `json:"interaction_id"`
+			}
+			if err := json.Unmarshal(previous.Result, &receipt); err != nil || strings.TrimSpace(receipt.InteractionID) == "" {
+				return InteractionSnapshot{}, errors.Join(ErrInteractivePersistence, err)
+			}
+			// Replaying a create request must still repair a missing runtime
+			// binding, while completed interactions remain terminal and simply
+			// return their durable snapshot.
+			return s.Snapshot(ctx, userID, receipt.InteractionID)
+		} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
+			return InteractionSnapshot{}, errors.Join(ErrInteractivePersistence, findErr)
+		}
 	}
 	lockKey := userID + ":" + in.ProjectID + ":" + in.ContentID
 	if strings.TrimSpace(in.ResumeInteractionID) != "" {
@@ -151,6 +175,43 @@ func (s *AssistantInteractionService) CreateOrResume(ctx context.Context, userID
 		interaction.UpdatedAt = now
 		if err := s.repo.AssistantInteractions().UpdateMode(ctx, interaction.ID, in.ModeID, now); err != nil {
 			return InteractionSnapshot{}, err
+		}
+	}
+	if createAttemptID != "" {
+		receipt, marshalErr := json.Marshal(struct {
+			InteractionID string `json:"interaction_id"`
+		}{InteractionID: interaction.ID})
+		if marshalErr != nil {
+			return InteractionSnapshot{}, errors.Join(ErrInteractivePersistence, marshalErr)
+		}
+		attempt := &model.AssistantInteractionAttempt{
+			ID:            uuid.NewString(),
+			InteractionID: interaction.ID,
+			UserID:        userID,
+			AttemptID:     createAttemptID,
+			Operation:     string(InteractionOperationCreate),
+			Generation:    interaction.Generation,
+			PayloadDigest: createPayloadDigest,
+			Status:        model.AssistantInteractionAttemptCompleted,
+			Result:        receipt,
+			CreatedAt:     now,
+			ExpiresAt:     now.Add(InteractionDraftRetention),
+		}
+		if createErr := s.repo.AssistantInteractions().CreateAttempt(ctx, attempt); createErr != nil {
+			if previous, findErr := s.repo.AssistantInteractions().FindCreateAttempt(ctx, userID, createAttemptID); findErr == nil {
+				if previous.PayloadDigest != createPayloadDigest {
+					_ = s.repo.AssistantInteractions().UpdateLifecycle(ctx, interaction.ID, model.AssistantInteractionAbandoned, now)
+					return InteractionSnapshot{}, ErrInteractiveIdempotency
+				}
+				var replay struct {
+					InteractionID string `json:"interaction_id"`
+				}
+				if unmarshalErr := json.Unmarshal(previous.Result, &replay); unmarshalErr != nil || replay.InteractionID == "" {
+					return InteractionSnapshot{}, errors.Join(ErrInteractivePersistence, unmarshalErr)
+				}
+				return s.Snapshot(ctx, userID, replay.InteractionID)
+			}
+			return InteractionSnapshot{}, errors.Join(ErrInteractivePersistence, createErr)
 		}
 	}
 	if _, ensureErr := s.ensureRuntimeLocked(ctx, userID, interaction); ensureErr != nil {

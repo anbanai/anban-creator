@@ -98,8 +98,9 @@ func (AssistantInteractionEvent) TableName() string { return "assistant_interact
 type AssistantInteractionAttempt struct {
 	ID            string          `gorm:"type:char(36);primaryKey" json:"id"`
 	InteractionID string          `gorm:"type:char(36);uniqueIndex:idx_assistant_interaction_attempt_key,priority:1;index:idx_assistant_interaction_attempt,priority:1;not null" json:"interaction_id"`
-	AttemptID     string          `gorm:"type:varchar(128);uniqueIndex:idx_assistant_interaction_attempt_key,priority:2;index:idx_assistant_interaction_attempt,priority:2;not null" json:"attempt_id"`
-	Operation     string          `gorm:"type:varchar(24);not null" json:"operation"`
+	UserID        string          `gorm:"type:char(36);index:idx_assistant_interaction_attempt_user_key,priority:1;not null;default:''" json:"-"`
+	AttemptID     string          `gorm:"type:varchar(128);uniqueIndex:idx_assistant_interaction_attempt_key,priority:2;index:idx_assistant_interaction_attempt,priority:2;uniqueIndex:idx_assistant_interaction_attempt_user_key,priority:3;not null" json:"attempt_id"`
+	Operation     string          `gorm:"type:varchar(24);uniqueIndex:idx_assistant_interaction_attempt_user_key,priority:2;not null" json:"operation"`
 	Generation    int64           `gorm:"not null" json:"generation"`
 	PayloadDigest string          `gorm:"type:char(64);not null" json:"payload_digest"`
 	Status        string          `gorm:"type:varchar(24);not null;default:'pending'" json:"status"`

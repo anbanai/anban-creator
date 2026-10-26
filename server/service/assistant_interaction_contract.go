@@ -50,12 +50,29 @@ const (
 type InteractionOperation string
 
 const (
+	InteractionOperationCreate  InteractionOperation = "create"
 	InteractionOperationMessage InteractionOperation = "message"
 	InteractionOperationAnswer  InteractionOperation = "answer"
 	InteractionOperationStage   InteractionOperation = "stage"
 	InteractionOperationEvents  InteractionOperation = "events"
 	InteractionOperationCommit  InteractionOperation = "commit"
 )
+
+func interactionCreateAttemptID(idempotencyKey string) string {
+	digest := sha256.Sum256([]byte(strings.TrimSpace(idempotencyKey)))
+	return "create:" + hex.EncodeToString(digest[:])
+}
+
+func interactionCreatePayloadDigest(input AssistantInteractionInput) string {
+	return interactionCommandDigest("assistant_interaction_create", "", map[string]any{
+		"mode_id":               input.ModeID,
+		"project_id":            input.ProjectID,
+		"content_id":            input.ContentID,
+		"resume_interaction_id": input.ResumeInteractionID,
+		"agent_id":              input.AgentID,
+		"intent":                input.Intent,
+	})
+}
 
 // InteractionError is safe to serialize to the client. Internal causes are
 // retained through Unwrap but are never included in JSON.

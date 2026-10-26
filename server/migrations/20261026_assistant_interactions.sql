@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS assistant_interaction_events (
 CREATE TABLE IF NOT EXISTS assistant_interaction_attempts (
   id char(36) NOT NULL PRIMARY KEY,
   interaction_id char(36) NOT NULL,
+  user_id char(36) NOT NULL DEFAULT '',
   attempt_id varchar(128) NOT NULL,
   operation varchar(24) NOT NULL,
   generation bigint NOT NULL,
@@ -117,5 +118,6 @@ CREATE TABLE IF NOT EXISTS assistant_interaction_attempts (
   created_at datetime(6) NOT NULL,
   expires_at datetime(6) NOT NULL,
   UNIQUE KEY idx_assistant_interaction_attempt_key (interaction_id, attempt_id),
+  UNIQUE KEY idx_assistant_interaction_attempt_user_key (user_id, operation, attempt_id),
   KEY idx_assistant_interaction_attempt_expiry (expires_at)
 );

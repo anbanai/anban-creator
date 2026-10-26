@@ -44,6 +44,7 @@ type AssistantInteractionRepository interface {
 	ListEventsAfter(context.Context, string, int64, uint64, int) ([]*model.AssistantInteractionEvent, error)
 	CreateAttempt(context.Context, *model.AssistantInteractionAttempt) error
 	FindAttempt(context.Context, string, string) (*model.AssistantInteractionAttempt, error)
+	FindCreateAttempt(context.Context, string, string) (*model.AssistantInteractionAttempt, error)
 	UpdateAttempt(context.Context, string, string, string, json.RawMessage, string) error
 	FindLatestCommitAttempt(context.Context, string) (*model.AssistantInteractionAttempt, error)
 	ExpireAttempts(context.Context, time.Time) (int64, error)
@@ -398,6 +399,23 @@ func (r *assistantInteractionRepository) CreateAttempt(ctx context.Context, valu
 func (r *assistantInteractionRepository) FindAttempt(ctx context.Context, interactionID, attemptID string) (*model.AssistantInteractionAttempt, error) {
 	var value model.AssistantInteractionAttempt
 	if err := r.db.WithContext(ctx).Where("interaction_id = ? AND attempt_id = ?", interactionID, attemptID).First(&value).Error; err != nil {
+		return nil, err
+	}
+	return &value, nil
+}
+
+// FindCreateAttempt resolves the create idempotency receipt by user rather
+// than interaction. The interaction ID is not known until the first create
+// request wins the active-scope race, so this lookup is the durable boundary
+// that also covers completed interactions whose active scope is nullable.
+func (r *assistantInteractionRepository) FindCreateAttempt(ctx context.Context, userID, attemptID string) (*model.AssistantInteractionAttempt, error) {
+	var value model.AssistantInteractionAttempt
+	err := r.db.WithContext(ctx).
+		Table("assistant_interaction_attempts").
+		Joins("JOIN assistant_interactions ON assistant_interactions.id = assistant_interaction_attempts.interaction_id").
+		Where("assistant_interactions.user_id = ? AND assistant_interaction_attempts.attempt_id = ? AND assistant_interaction_attempts.operation = ?", userID, attemptID, "create").
+		First(&value).Error
+	if err != nil {
 		return nil, err
 	}
 	return &value, nil

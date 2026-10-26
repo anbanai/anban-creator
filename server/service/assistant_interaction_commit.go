@@ -94,7 +94,7 @@ func (s *AssistantInteractionService) runRuntimeCommand(ctx context.Context, use
 		}
 	} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
 		return errors.Join(ErrInteractivePersistence, findErr)
-	} else if err := s.repo.AssistantInteractions().CreateAttempt(ctx, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: interactionID, AttemptID: attemptID, Operation: string(operation), Generation: generation, PayloadDigest: payloadDigest, Status: model.AssistantInteractionAttemptPending, CreatedAt: s.clock(), ExpiresAt: s.clock().Add(InteractionAttemptRetention)}); err != nil {
+	} else if err := s.repo.AssistantInteractions().CreateAttempt(ctx, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: interactionID, UserID: userID, AttemptID: attemptID, Operation: string(operation), Generation: generation, PayloadDigest: payloadDigest, Status: model.AssistantInteractionAttemptPending, CreatedAt: s.clock(), ExpiresAt: s.clock().Add(InteractionAttemptRetention)}); err != nil {
 		if existing, findErr := s.repo.AssistantInteractions().FindAttempt(ctx, interactionID, attemptID); findErr == nil {
 			if existing.PayloadDigest != payloadDigest {
 				return ErrInteractiveIdempotency
@@ -241,7 +241,7 @@ func (s *AssistantInteractionService) CommitInteraction(ctx context.Context, use
 		if errors.Is(err, ErrAssistantCheckpointInvalid) || errors.Is(err, ErrAssistantCreationInputsMissing) || errors.Is(err, ErrAssistantCheckpointConflict) {
 			code = InteractionErrorDraftRevisionConflict
 		}
-		_ = s.repo.AssistantInteractions().CreateAttempt(ctx, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: interactionID, AttemptID: attemptID, Operation: string(InteractionOperationCommit), Generation: interaction.Generation, PayloadDigest: digest, ErrorCode: code, CreatedAt: s.clock(), ExpiresAt: s.clock().Add(InteractionCommitReceiptRetention)})
+		_ = s.repo.AssistantInteractions().CreateAttempt(ctx, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: interactionID, UserID: userID, AttemptID: attemptID, Operation: string(InteractionOperationCommit), Generation: interaction.Generation, PayloadDigest: digest, ErrorCode: code, CreatedAt: s.clock(), ExpiresAt: s.clock().Add(InteractionCommitReceiptRetention)})
 		if code == InteractionErrorDraftRevisionConflict {
 			return InteractionCommitResult{}, NewInteractionError(code, 409, "计划当前不可确认，请恢复最新计划", "reload_snapshot", "restore_draft")
 		}
@@ -252,7 +252,7 @@ func (s *AssistantInteractionService) CommitInteraction(ctx context.Context, use
 		return InteractionCommitResult{}, errors.Join(ErrInteractivePersistence, err)
 	}
 	final := InteractionCommitResult{Status: InteractionCommitCreated, TaskID: assistantCommitTaskID(result), Result: mustAssistantCommitJSON(result)}
-	if err := s.repo.AssistantInteractions().CreateAttempt(ctx, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: interactionID, AttemptID: attemptID, Operation: string(InteractionOperationCommit), Generation: interaction.Generation, PayloadDigest: digest, Result: raw, CreatedAt: s.clock(), ExpiresAt: s.clock().Add(InteractionCommitReceiptRetention)}); err != nil {
+	if err := s.repo.AssistantInteractions().CreateAttempt(ctx, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: interactionID, UserID: userID, AttemptID: attemptID, Operation: string(InteractionOperationCommit), Generation: interaction.Generation, PayloadDigest: digest, Result: raw, CreatedAt: s.clock(), ExpiresAt: s.clock().Add(InteractionCommitReceiptRetention)}); err != nil {
 		if existing, findErr := s.repo.AssistantInteractions().FindAttempt(ctx, interactionID, attemptID); findErr == nil && existing.PayloadDigest == digest && len(existing.Result) > 0 {
 			s.metrics.observeCommitDuplicate()
 			return final, nil
@@ -407,7 +407,7 @@ func (s *AssistantInteractionService) commitProfileInteraction(ctx context.Conte
 			return errors.Join(ErrInteractivePersistence, err)
 		}
 		now := s.clock()
-		if err := tx.AssistantInteractions().CreateAttempt(ctx, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: interactionID, AttemptID: attemptID, Operation: string(InteractionOperationCommit), Generation: generation, PayloadDigest: digest, Result: receiptJSON, CreatedAt: now, ExpiresAt: now.Add(InteractionCommitReceiptRetention)}); err != nil {
+		if err := tx.AssistantInteractions().CreateAttempt(ctx, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: interactionID, UserID: userID, AttemptID: attemptID, Operation: string(InteractionOperationCommit), Generation: generation, PayloadDigest: digest, Result: receiptJSON, CreatedAt: now, ExpiresAt: now.Add(InteractionCommitReceiptRetention)}); err != nil {
 			return errors.Join(ErrInteractivePersistence, err)
 		}
 		if err := tx.AssistantInteractions().UpdateDraftState(ctx, draft.ID, model.AssistantInteractionDraftConsumed, now); err != nil {
