@@ -3068,7 +3068,7 @@
     },
     {
       "id": "viral-ip-video-editor",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "kind": "plugin",
       "display_name": "爆款 IP 视频剪辑",
       "description": "基于 Montage 运行时处理真人 IP 口播素材，完成留存导向的剪辑规划、制作指导和成片质量复核。",
@@ -3232,6 +3232,12 @@
           "required": false
         },
         {
+          "role": "cover_reference_prompts",
+          "path": "output/cover-prompts.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
           "role": "cover_review",
           "path": "output/cover-quality.json",
           "mime_type": "application/json",
@@ -3269,7 +3275,7 @@
         }
       ],
       "ui": {},
-      "digest": "7e882936f5109151e147a6be00ed667d4d10d3b85ea8bcedb63a2b38d8c07d46"
+      "digest": "2139fffda2fd09efb67822d3c061477067c3f8d5cfdc0d7277ca8a9bd6612526"
     },
     {
       "id": "wechat-article",
