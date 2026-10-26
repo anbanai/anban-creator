@@ -35,11 +35,12 @@ import type { Task, TaskFile } from '@/types'
 import type { ImageRatio } from '@/lib/schemas'
 import { platformDisplayName } from '@/lib/labels'
 import { profileLabAgents } from '@/lib/project-capabilities'
+import type { AssistantRouteState } from '@/lib/assistant-navigation'
 
 type Message = { id: string; role: 'user' | 'assistant'; text: string; order: number }
 type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers']; order: number }
 type Draft = Record<string, unknown>
-type RouteState = { modeId?: AssistantModeID; projectId?: string; contentId?: string; checkpointId?: string; initialMessage?: string }
+type RouteState = AssistantRouteState
 type PersistedWorkspace = {
   workspace: AssistantWorkspaceState | null
   lastEventIds: Record<string, string | undefined>

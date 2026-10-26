@@ -17,6 +17,7 @@ import { api } from '@/lib/api'
 import { projectsReturnHref } from '@/lib/command-center'
 import { cheapestAvailableExecutionProfile, taskCostFor } from '@/lib/pricing'
 import { queryKeys } from '@/lib/query-keys'
+import { hotTrendCreationState } from '@/lib/assistant-navigation'
 import { normalizeImageRatio, type ImageRatio } from '@/lib/schemas'
 import { buildDashboardBlocker } from '@/lib/studio-ux'
 import type { AgentExecutionProfileID } from '@/types'
@@ -417,7 +418,7 @@ export default function DashboardPage() {
             <div><p className="text-sm font-medium">今日热点</p><p className="mt-1 text-xs text-muted-foreground">微博、抖音各 3 条 · {dashboardTrendsQuery.data?.items.some((item) => item.stale) ? '部分数据已过期' : '自动保持新鲜'}</p></div>
             <Link to="/trends" className="text-xs font-medium text-primary hover:underline">查看热点雷达</Link>
           </div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">{(dashboardTrendsQuery.data?.items || []).map((group) => <div key={group.platform}><p className="mb-1 text-xs font-medium text-muted-foreground">{group.label}{group.stale ? ' · stale' : ''}</p>{group.items.map((item) => <button key={item.title} type="button" className="block w-full truncate rounded px-2 py-1 text-left text-sm hover:bg-muted" onClick={() => navigate('/', { state: { project_id: selectedProjectId, trend_title: item.title, trend_url: item.url, content_origin: 'hot_search' } })}>{item.rank}. {item.title}</button>)}</div>)}</div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">{(dashboardTrendsQuery.data?.items || []).map((group) => <div key={group.platform}><p className="mb-1 text-xs font-medium text-muted-foreground">{group.label}{group.stale ? ' · stale' : ''}</p>{group.items.map((item) => <button key={item.title} type="button" className="block w-full truncate rounded px-2 py-1 text-left text-sm hover:bg-muted" onClick={() => navigate('/', { state: hotTrendCreationState(selectedProjectId ?? undefined, item.title, item.url) })}>{item.rank}. {item.title}</button>)}</div>)}</div>
         </section>
 
         {reusableAssetsQuery.data?.items.length ? <section aria-label="值得继续复用的选题" className="mx-auto w-full max-w-3xl rounded-xl border border-border bg-card p-4">

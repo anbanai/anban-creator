@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -15,7 +15,11 @@ const setup = { account_status: 'existing' as const, platform_accounts: [{ platf
 const project = { ...mockProjects[0], id: 'owner', name: '钢厂老板', platform: 'wechat' as const, profile, profile_setup: setup }
 function page() {
   const cache = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(<QueryClientProvider client={cache}><MemoryRouter initialEntries={['/portraits/owner']}><TooltipProvider><Routes><Route path="/portraits/:projectId" element={<PortraitDetailPage />} /></Routes></TooltipProvider></MemoryRouter></QueryClientProvider>)
+  return render(<QueryClientProvider client={cache}><MemoryRouter initialEntries={['/portraits/owner']}><TooltipProvider><Routes><Route path="/portraits/:projectId" element={<PortraitDetailPage />} /><Route path="/" element={<AssistantRouteProbe />} /></Routes></TooltipProvider></MemoryRouter></QueryClientProvider>)
+}
+function AssistantRouteProbe() {
+  const location = useLocation()
+  return <output data-testid="assistant-route">{JSON.stringify({ pathname: location.pathname, state: location.state })}</output>
 }
 beforeEach(() => {
   vi.clearAllMocks()
@@ -59,4 +63,11 @@ it('keeps creation and filtered work-list destinations distinct', async () => {
   page()
   expect(await screen.findByRole('link', { name: '用此画像创作' })).toHaveAttribute('href', '/tasks/new?project_id=owner')
   expect(screen.getByRole('link', { name: '查看此人设的作品' })).toHaveAttribute('href', '/tasks?project_id=owner')
+})
+
+it('continues the interview in profile mode for the selected identity', async () => {
+  page()
+  fireEvent.click(await screen.findByRole('link', { name: '继续访谈' }))
+
+  expect(await screen.findByTestId('assistant-route')).toHaveTextContent('{"pathname":"/","state":{"modeId":"profile","projectId":"owner"}}')
 })

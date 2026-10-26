@@ -4,7 +4,8 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowRight, Plus, Users } from 'lucide-react'
 import { api } from '@/lib/api'
 import { supportsProfileLab } from '@/lib/project-capabilities'
-import { accountPlatformLabels, portraitProgress, portraitStatus, portraitSummary, updatePortraitHref } from '@/lib/portrait-library'
+import { accountPlatformLabels, portraitProgress, portraitStatus, portraitSummary } from '@/lib/portrait-library'
+import { profileInterviewLinkProps } from '@/lib/assistant-navigation'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 
@@ -32,7 +33,7 @@ export default function PortraitLibraryPage() {
         <p className="mt-3 line-clamp-3 text-sm leading-6 text-muted-foreground">{portraitSummary(project)}</p>
         <div className="mt-4 space-y-2"><div className="flex justify-between text-xs"><span>{portraitStatus(project.profile)}</span><span>已填写 {progress.count}/6 项</span></div><div className="h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={`${project.name}画像完善度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent}><div className="h-full bg-primary" style={{ width: `${progress.percent}%` }} /></div></div>
         <p className="my-4 text-xs leading-5 text-muted-foreground">{accounts.length ? accounts.map(a => `${accountPlatformLabels[a.platform] ?? a.platform}${a.account_name ? ` · ${a.account_name}` : ''}`).join(' / ') : '尚未添加平台账号 · 可先完善画像'}</p>
-        <div className="mt-auto flex flex-wrap gap-3 border-t pt-4 text-sm"><Link className="inline-flex min-h-10 items-center gap-1 font-medium text-primary" to={`/portraits/${project.id}`}>查看与修改<ArrowRight className="size-4" /></Link><Link className="inline-flex min-h-10 items-center text-muted-foreground hover:text-foreground" to={updatePortraitHref(project.id)}>继续访谈</Link></div>
+        <div className="mt-auto flex flex-wrap gap-3 border-t pt-4 text-sm"><Link className="inline-flex min-h-10 items-center gap-1 font-medium text-primary" to={`/portraits/${project.id}`}>查看与修改<ArrowRight className="size-4" /></Link><Link {...profileInterviewLinkProps(project.id)} className="inline-flex min-h-10 items-center text-muted-foreground hover:text-foreground">继续访谈</Link></div>
       </article>
     })}</div>}
     <p className="text-xs leading-5 text-muted-foreground">现有人设的画像已经列在这里，无需重新录入。归档只表示暂停使用，画像仍会保留。</p>

@@ -6,7 +6,8 @@ import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
 import { normalizeProjectProfile, PROJECT_PROFILE_DIMENSIONS } from '@/lib/project-profile'
-import { portraitLabels, portraitProgress, portraitStatus, updatePortraitHref } from '@/lib/portrait-library'
+import { portraitLabels, portraitProgress, portraitStatus } from '@/lib/portrait-library'
+import { profileInterviewLinkProps } from '@/lib/assistant-navigation'
 import { createTaskPageHref } from '@/lib/command-center'
 import { profileLabAgents, projectAgentIDs, supportsProfileLab } from '@/lib/project-capabilities'
 import { ProfileDimensionCard } from '@/components/projects/ProfileDimensionCard'
@@ -67,7 +68,7 @@ function PortraitDetail({ projectId }: { projectId: string }) {
   const progress = portraitProgress(profile)
   return <section className="mx-auto max-w-5xl space-y-6 p-4 md:p-8">
     <Link className="inline-flex min-h-10 items-center gap-2 text-sm text-muted-foreground" to="/projects"><ArrowLeft className="size-4" />返回人设</Link>
-    <header className="flex flex-wrap items-start justify-between gap-4"><div><p className="mb-2 text-sm text-muted-foreground">创作身份{project.status === 'archived' ? ' · 已归档' : ''}</p><h1 className="text-2xl font-semibold">{project.name}</h1><p className="mt-2 text-sm text-muted-foreground">同一份画像用于该身份的不同平台账号。修改后会用于后续创作，已有作品不会被改写。</p></div><div className="flex flex-wrap gap-2"><Link className="inline-flex min-h-11 items-center gap-2 rounded-md border px-4 text-sm" to={updatePortraitHref(projectId)}><MessageCircle className="size-4" />继续访谈</Link><Link className="inline-flex min-h-11 items-center rounded-md border px-4 text-sm" to={`/tasks?project_id=${encodeURIComponent(projectId)}`}>查看此人设的作品</Link>{project.status !== 'archived' && <Link className="inline-flex min-h-11 items-center rounded-md bg-primary px-4 text-sm text-primary-foreground" to={createTaskPageHref(projectId)}>用此画像创作</Link>}</div></header>
+    <header className="flex flex-wrap items-start justify-between gap-4"><div><p className="mb-2 text-sm text-muted-foreground">创作身份{project.status === 'archived' ? ' · 已归档' : ''}</p><h1 className="text-2xl font-semibold">{project.name}</h1><p className="mt-2 text-sm text-muted-foreground">同一份画像用于该身份的不同平台账号。修改后会用于后续创作，已有作品不会被改写。</p></div><div className="flex flex-wrap gap-2"><Link {...profileInterviewLinkProps(projectId)} className="inline-flex min-h-11 items-center gap-2 rounded-md border px-4 text-sm"><MessageCircle className="size-4" />继续访谈</Link><Link className="inline-flex min-h-11 items-center rounded-md border px-4 text-sm" to={`/tasks?project_id=${encodeURIComponent(projectId)}`}>查看此人设的作品</Link>{project.status !== 'archived' && <Link className="inline-flex min-h-11 items-center rounded-md bg-primary px-4 text-sm text-primary-foreground" to={createTaskPageHref(projectId)}>用此画像创作</Link>}</div></header>
     {project.status === 'archived' && <p className="rounded-lg bg-muted p-3 text-sm">画像仍可查看和修改；如需继续创作，请先到人设页取消归档该人设。<Link className="ml-2 underline" to="/projects">前往人设</Link></p>}
     {dirty && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">有未保存的修改，请保存对应资料后再离开或继续访谈。</p>}
     {notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}

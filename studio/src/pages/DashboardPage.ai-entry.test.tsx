@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import DashboardPage from './DashboardPage'
 import { api } from '@/lib/api'
@@ -269,6 +269,8 @@ async function expectParameterSummary(...parts: string[]) {
 }
 
 describe('DashboardPage AI entry', () => {
+  afterEach(() => vi.restoreAllMocks())
+
   beforeEach(() => {
     navigateMock.mockClear()
     toastSuccessMock.mockClear()
@@ -298,6 +300,25 @@ describe('DashboardPage AI entry', () => {
       contentType: file.type,
       size: file.size,
     }))
+  })
+
+  it('opens a dashboard hot trend in creation mode with the selected project and prompt', async () => {
+    vi.spyOn(api.trends, 'list').mockResolvedValue({
+      requested_at: '2026-10-26T00:00:00.000Z',
+      ttl_seconds: 300,
+      items: [{ platform: 'weibo', label: '微博', stale: false, items: [{ title: '今日热点', hot: '1000', url: 'https://example.com/trend', rank: 1 }] }],
+    })
+    render(<DashboardPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '1. 今日热点' }))
+
+    expect(navigateMock).toHaveBeenCalledWith('/', {
+      state: {
+        modeId: 'creation',
+        projectId: 'project-1',
+        initialMessage: '围绕当前热点「今日热点」：先判断它是否适合我的账号赛道；若合适，给出 2-3 个差异化的二创角度，并把最推荐的一条写成可直接发布的文案初稿。\n来源：https://example.com/trend',
+      },
+    })
   })
 
   it('renders ordered composer parameters and submits explicit selections', async () => {

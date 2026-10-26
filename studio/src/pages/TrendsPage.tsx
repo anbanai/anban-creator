@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { api } from "@/lib/api"
 import { queryKeys } from "@/lib/query-keys"
+import { hotTrendCreationState } from "@/lib/assistant-navigation"
 import type { TrendPlatformResult } from "@/types"
 
 const platforms = ["weibo", "douyin", "zhihu", "bilibili", "baidu", "toutiao"]
@@ -75,7 +76,7 @@ export default function TrendsPage() {
   const groups = useMemo(() => trendsQuery.data?.items || [], [trendsQuery.data?.items])
 
   function useContent(item: TrendPlatformResult["items"][number]) {
-    navigate("/", { state: { project_id: projectId || undefined, trend_title: item.title, trend_url: item.url, content_origin: "hot_search" } })
+    navigate("/", { state: hotTrendCreationState(projectId || undefined, item.title, item.url) })
   }
 
   return <div className="mx-auto w-full max-w-6xl space-y-6 pb-10">

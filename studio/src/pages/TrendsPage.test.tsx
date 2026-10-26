@@ -101,10 +101,9 @@ describe('TrendsPage', () => {
 
     expect(navigateMock).toHaveBeenCalledWith('/', {
       state: {
-        project_id: undefined,
-        trend_title: '热点标题',
-        trend_url: 'https://example.com/trend',
-        content_origin: 'hot_search',
+        modeId: 'creation',
+        projectId: undefined,
+        initialMessage: '围绕当前热点「热点标题」：先判断它是否适合我的账号赛道；若合适，给出 2-3 个差异化的二创角度，并把最推荐的一条写成可直接发布的文案初稿。\n来源：https://example.com/trend',
       },
     })
   })

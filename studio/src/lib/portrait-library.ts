@@ -28,7 +28,3 @@ export function portraitStatus(raw: ProjectProfile | undefined | null) {
 export function portraitSummary(project: Project) {
   return portraitText(project.profile?.dimensions?.identity?.content) || project.instructions || project.positioning || '还没有定位，聊几句就能开始完善。'
 }
-
-export function updatePortraitHref(id: string) {
-  return { pathname: '/', state: { modeId: 'profile' as const, projectId: id } }
-}
