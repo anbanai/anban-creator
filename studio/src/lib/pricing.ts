@@ -8,6 +8,12 @@ export function taskOperation(type: string) {
   if (type === 'wechat-picture') return 'task.wechat_picture'
   if (type === 'local-life') return 'task.local_life'
   if (type === 'video-edit') return 'task.video_edit'
+  if (type === 'viral-analysis') return 'task.viral_analysis'
+  if (type === 'profile-analysis') return 'task.profile_analysis'
+  if (type === 'feedback-analysis') return 'task.feedback_analysis'
+  if (type === 'content-research') return 'task.content_research'
+  if (type === 'content-validation') return 'task.content_validation'
+  if (type === 'content-script') return 'task.content_script'
   return `task.${type}`
 }
 

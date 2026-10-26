@@ -40,7 +40,15 @@ type kubernetesJobConfig struct {
 	ServerURL     string
 }
 
-func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution, task *model.Task) *batchv1.Job {
+func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution, task *model.Task) (*batchv1.Job, error) {
+	resources, err := cfg.ResourcesForTask(taskType(task))
+	if err != nil {
+		return nil, err
+	}
+	return buildKubernetesJobWithResources(cfg, execution, task, resources), nil
+}
+
+func buildKubernetesJobWithResources(cfg kubernetesJobConfig, execution *model.TaskExecution, task *model.Task, resources srvconfig.KubernetesResourceConfig) *batchv1.Job {
 	backoffLimit := int32(0)
 	activeDeadline := cfg.ActiveDeadlineSeconds
 	if task != nil && model.IsHypitPlatform(task.Type) {
@@ -62,7 +70,6 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 	readOnlyRoot := true
 	allowPrivilegeEscalation := false
 	tokenExpiration := projectedTokenExpiration(activeDeadline)
-	resources := cfg.ResourcesForTask(taskType(task))
 	runtimeImage := strings.TrimSpace(execution.RuntimeImage)
 
 	var nodeSelector map[string]string

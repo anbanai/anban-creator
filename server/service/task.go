@@ -1611,7 +1611,7 @@ func taskTypeForIdentity(agentID, channel, taskKind string) string {
 		return model.PlatformVideoEdit
 	}
 	if taskKind != model.TaskKindContentGeneration {
-		return taskKind
+		return model.TaskTypeForTaskKind(taskKind)
 	}
 	switch agentID {
 	case model.AgentIDArticle:

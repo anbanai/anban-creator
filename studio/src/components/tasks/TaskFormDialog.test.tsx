@@ -547,7 +547,7 @@ describe('TaskFormDialog', () => {
 
   it('creates viral analysis using a neutral shared project', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([{ ...fixtures.seednoteProject, platform: '', agent_ids: ['seednote'] }])
-    renderDialog({ initialProjectId: undefined, initialType: 'viral_analysis' })
+    renderDialog({ initialProjectId: undefined, initialType: 'viral-analysis' })
     const dialog = await screen.findByRole('dialog', { name: '创作' })
 
     const projectControl = within(dialog).getByRole('combobox', { name: /^人设/ })
@@ -585,7 +585,7 @@ describe('TaskFormDialog', () => {
 
     await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith({
       agent_id: 'seednote', channel: 'seednote', task_kind: 'viral_analysis',
-      type: 'viral_analysis',
+      type: 'viral-analysis',
       execution_profile: 'effective',
       prompt: 'https://www.xiaohongshu.com/explore/note-1',
       project_id: 'seednote-project',
@@ -601,7 +601,7 @@ describe('TaskFormDialog', () => {
       initialProjectId: undefined,
       sourceTask: {
         ...fixtures.sourceTask,
-        type: 'viral_analysis',
+        type: 'viral-analysis',
         project_id: fixtures.seednoteProject.id,
         prompt: 'https://www.xiaohongshu.com/explore/source-note',
         input_attachments: [],
@@ -1373,7 +1373,7 @@ describe('task creation type selection', () => {
 
   it('does not honor viral analysis when the selected project has no seednote capability', async () => {
     vi.mocked(api.projects.list).mockResolvedValueOnce([{ ...fixtures.articleProject, agent_ids: ['wechat-article'] }])
-    renderDialog({ initialType: 'viral_analysis' })
+    renderDialog({ initialType: 'viral-analysis' })
     const dialog = await screen.findByRole('dialog', { name: '创作' })
     expect(await within(dialog).findByLabelText('已匹配输出方式：公众号文章')).toBeInTheDocument()
     expect(within(dialog).queryByRole('textbox', { name: '源笔记链接或分享文本' })).not.toBeInTheDocument()

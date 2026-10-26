@@ -155,24 +155,24 @@ describe('task form mapping', () => {
     expect(taskFormValuesToRequest(values).agent_input).toMatchObject({ picture_image_count_mode: 'up_to' })
   })
 
-  it('keeps viral_analysis when selecting a seednote project', () => {
+  it('keeps viral-analysis when selecting a seednote project', () => {
     const seednoteProject = project({ id: 'seednote-project', platform: 'seednote' })
     const current = {
       ...createTaskFormDefaults(seednoteProject),
-      type: 'viral_analysis' as const,
+      type: 'viral-analysis' as const,
       prompt: 'https://www.xiaohongshu.com/explore/note-1',
     }
 
     const result = switchTaskFormDefaults(current, seednoteProject)
 
-    expect(result.type).toBe('viral_analysis')
+    expect(result.type).toBe('viral-analysis')
     expect(result.project_id).toBe(seednoteProject.id)
   })
 
   it('does not send image options for viral analysis tasks', () => {
     const values = {
       ...createTaskFormDefaults(project()),
-      type: 'viral_analysis' as const,
+      type: 'viral-analysis' as const,
       execution_profile: 'effective' as const,
       prompt: 'https://www.xiaohongshu.com/explore/note-1',
       image_ratio: '3:4' as const,
@@ -184,7 +184,7 @@ describe('task form mapping', () => {
 
     expect(taskFormValuesToRequest(values)).toEqual({
       agent_id: 'seednote', channel: 'seednote', task_kind: 'viral_analysis',
-      type: 'viral_analysis',
+      type: 'viral-analysis',
       execution_profile: 'effective',
       prompt: 'https://www.xiaohongshu.com/explore/note-1',
       project_id: 'project-1',
@@ -203,15 +203,16 @@ describe('task form mapping', () => {
   })
 
   it.each([
-    ['wechat-article', 'wechat-article'],
-    ['seednote', 'seednote'],
-    ['wechat-picture', 'wechat-picture'],
-  ] as const)('freezes the selected Agent and its single channel for %s', (type, channel) => {
+    ['wechat-article', 'wechat-article', 'content_generation'],
+    ['seednote', 'seednote', 'content_generation'],
+    ['viral-analysis', 'seednote', 'viral_analysis'],
+    ['wechat-picture', 'wechat-picture', 'content_generation'],
+  ] as const)('freezes the selected Agent and its single channel for %s', (type, channel, taskKind) => {
     const values = { ...createTaskFormDefaults(project()), type, execution_profile: 'balanced' as const }
     expect(taskFormValuesToRequest(values)).toMatchObject({
       agent_id: channel,
       channel,
-      task_kind: 'content_generation',
+      task_kind: taskKind,
     })
   })
 
@@ -849,7 +850,7 @@ describe('task form mapping', () => {
     expect(cloneTaskFormDefaults(task({ type: platform === 'wechat' ? 'wechat-article' : platform, cover_use_portrait: true })).cover_use_portrait).toBe(true)
   })
 
-  it.each(['viral_analysis', 'ecommerce', 'moments'] as const)('omits portrait selection for unsupported %s tasks', (type) => {
+  it.each(['viral-analysis', 'ecommerce', 'moments'] as const)('omits portrait selection for unsupported %s tasks', (type) => {
     expect(taskFormValuesToRequest({ ...createTaskFormDefaults(), type, cover_use_portrait: true })).not.toHaveProperty('cover_use_portrait')
   })
 

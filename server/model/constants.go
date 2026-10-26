@@ -95,15 +95,59 @@ const (
 	TaskKindVideoEdit         = "video_edit"
 )
 
-// Managed task types that are not project platforms (legacy aliases retained
-// for historical rows and migration readers).
+// Task types are public, persisted execution identities and use kebab-case.
+// Task kinds remain internal workflow identities and may use snake_case.
 const (
-	TaskTypeViralAnalysis     = "viral_analysis"
-	TaskTypeProfileAnalysis   = "profile_analysis"
-	TaskTypeContentResearch   = TaskKindContentResearch
-	TaskTypeContentValidation = TaskKindContentValidation
-	TaskTypeContentScript     = TaskKindContentScript
+	TaskTypeViralAnalysis     = "viral-analysis"
+	TaskTypeProfileAnalysis   = "profile-analysis"
+	TaskTypeFeedbackAnalysis  = "feedback-analysis"
+	TaskTypeContentResearch   = "content-research"
+	TaskTypeContentValidation = "content-validation"
+	TaskTypeContentScript     = "content-script"
 )
+
+// TaskKindForTaskType resolves the internal workflow kind for task types whose
+// canonical public spelling differs from the kind stored on executions.
+func TaskKindForTaskType(taskType string) string {
+	switch taskType {
+	case TaskTypeViralAnalysis:
+		return TaskKindViralAnalysis
+	case TaskTypeProfileAnalysis:
+		return TaskKindProfileAnalysis
+	case TaskTypeFeedbackAnalysis:
+		return TaskKindFeedbackAnalysis
+	case TaskTypeContentResearch:
+		return TaskKindContentResearch
+	case TaskTypeContentValidation:
+		return TaskKindContentValidation
+	case TaskTypeContentScript:
+		return TaskKindContentScript
+	default:
+		return taskType
+	}
+}
+
+// TaskTypeForTaskKind converts a workflow kind to its public persisted type.
+func TaskTypeForTaskKind(taskKind string) string {
+	switch taskKind {
+	case TaskKindViralAnalysis:
+		return TaskTypeViralAnalysis
+	case TaskKindProfileAnalysis:
+		return TaskTypeProfileAnalysis
+	case TaskKindFeedbackAnalysis:
+		return TaskTypeFeedbackAnalysis
+	case TaskKindContentResearch:
+		return TaskTypeContentResearch
+	case TaskKindContentValidation:
+		return TaskTypeContentValidation
+	case TaskKindContentScript:
+		return TaskTypeContentScript
+	case TaskKindVideoEdit:
+		return PlatformVideoEdit
+	default:
+		return taskKind
+	}
+}
 
 func IsChannel(value string) bool {
 	switch value {
@@ -277,7 +321,7 @@ func IsAdminOnlyProjectPlatform(value string) bool {
 
 // IsTaskType reports whether value is an explicitly implemented task type.
 func IsTaskType(value string) bool {
-	return IsContentPlanningTask(value) || value == TaskTypeWechatArticle || value == TaskTypeWechatPicture || IsProjectPlatform(value) || value == TaskTypeViralAnalysis || value == TaskTypeProfileAnalysis
+	return IsContentPlanningTask(value) || value == TaskTypeWechatArticle || value == TaskTypeWechatPicture || IsProjectPlatform(value) || value == TaskTypeViralAnalysis || value == TaskTypeProfileAnalysis || value == TaskTypeFeedbackAnalysis
 }
 
 func IsMontagePlatform(platform string) bool {

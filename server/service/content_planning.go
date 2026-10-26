@@ -26,7 +26,7 @@ func (s *TaskService) ContentPlanningAvailable() error {
 	if s == nil || s.runtimeDispatcher == nil {
 		return ErrContentPlanningUnavailable
 	}
-	runtime := s.runtimeDispatcher.ResolveRuntime(model.TaskTypeContentResearch)
+	runtime := s.runtimeDispatcher.ResolveRuntime(model.AgentIDContentPlanning)
 	if runtime.Profile != model.AgentIDContentPlanning || strings.TrimSpace(runtime.Image) == "" {
 		return ErrContentPlanningUnavailable
 	}
@@ -49,6 +49,7 @@ func decodePlanningInput(taskKind string, input map[string]any) (model.ContentPl
 }
 
 func (s *TaskService) validatePlanningAdmission(ctx context.Context, p CreateManualParams, project *model.Project, taskKind string, input map[string]any) error {
+	taskKind = model.TaskKindForTaskType(taskKind)
 	if err := s.ContentPlanningAvailable(); err != nil {
 		return err
 	}
@@ -74,14 +75,14 @@ func (s *TaskService) validatePlanningAdmission(ctx context.Context, p CreateMan
 	}
 	required := map[string]bool{}
 	switch taskKind {
-	case model.TaskTypeContentResearch:
+	case model.TaskKindContentResearch:
 		if len(value.AcceptedArtifacts) > 0 {
 			return fmt.Errorf("%w: research cannot import arbitrary prior stages", ErrInvalidAgentInput)
 		}
-	case model.TaskTypeContentValidation:
+	case model.TaskKindContentValidation:
 		required["output/content-research.json"] = false
 		required["output/research-evidence.json"] = false
-	case model.TaskTypeContentScript:
+	case model.TaskKindContentScript:
 		required["output/content-research.json"] = false
 		required["output/research-evidence.json"] = false
 		required["output/validation-article.md"] = false
@@ -168,7 +169,7 @@ func planningAcceptedArtifact(ctx context.Context, repo repository.Repository, s
 		}
 		if strings.HasSuffix(ref.Path, ".json") {
 			var identity model.PlanningIdentity
-			if json.Unmarshal(body, &identity) != nil || identity.SchemaVersion != "1.0" || identity.TaskID != source.ID || identity.ExecutionID != ref.ExecutionID || identity.TaskKind != source.Type || identity.Status != "ready" {
+			if json.Unmarshal(body, &identity) != nil || identity.SchemaVersion != "1.0" || identity.TaskID != source.ID || identity.ExecutionID != ref.ExecutionID || identity.TaskKind != source.TaskKind || identity.Status != "ready" {
 				return fail()
 			}
 		}
@@ -181,7 +182,7 @@ func (s *AgentBootstrapService) buildContentPlanningFiles(ctx context.Context, e
 	if !model.IsContentPlanningTask(task.Type) {
 		return nil, nil
 	}
-	input, err := decodePlanningInput(task.Type, task.AgentInput.Data())
+	input, err := decodePlanningInput(task.TaskKind, task.AgentInput.Data())
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +203,7 @@ func (s *AgentBootstrapService) buildContentPlanningFiles(ctx context.Context, e
 		files = append(files, BootstrapFile{Path: name, DownloadURL: signed, ContentSHA256: ref.ContentSHA256, ExpectedSize: file.FileSize, MaxBytes: 2 << 20, Mode: 0444})
 		accepted = append(accepted, map[string]any{"reference": ref, "local_path": name})
 	}
-	body, err := json.Marshal(map[string]any{"schema_version": "1.0", "task_id": task.ID, "execution_id": execution.ID, "project_id": task.ProjectID, "task_kind": task.Type, "profile": snapshot.Profile, "input": input, "accepted_files": accepted})
+	body, err := json.Marshal(map[string]any{"schema_version": "1.0", "task_id": task.ID, "execution_id": execution.ID, "project_id": task.ProjectID, "task_kind": task.TaskKind, "profile": snapshot.Profile, "input": input, "accepted_files": accepted})
 	if err != nil {
 		return nil, err
 	}

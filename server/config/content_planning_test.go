@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/anbanai/anban-creator/server/model"
+)
 
 func TestContentPlanningRuntimeIsOptionalAndMapped(t *testing.T) {
 	cfg := validClaudeConfigForTest()
@@ -12,10 +16,10 @@ func TestContentPlanningRuntimeIsOptionalAndMapped(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("planning config: %v", err)
 	}
-	for _, kind := range []string{"content_research", "content_validation", "content_script"} {
-		got := cfg.RuntimeImages.ForTask(kind)
+	for _, taskType := range []string{model.TaskTypeContentResearch, model.TaskTypeContentValidation, model.TaskTypeContentScript} {
+		got := cfg.RuntimeImages.ForTask(taskType)
 		if got.Profile != "content-planning" || got.Image != "creator-agent-content-planning:test" {
-			t.Fatalf("runtime %s: %+v", kind, got)
+			t.Fatalf("runtime %s: %+v", taskType, got)
 		}
 	}
 }

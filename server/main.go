@@ -134,6 +134,9 @@ func main() {
 		} else {
 			log.Info().Msg("database migration completed")
 		}
+		if err := service.MigratePersistedTaskTypes(context.Background(), mysqlDB); err != nil {
+			log.Fatal().Err(err).Msg("failed to canonicalize persisted task types")
+		}
 		if err := service.MigrateTopicPoolToContentAssets(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate topic pool content assets")
 		}

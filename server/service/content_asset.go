@@ -903,7 +903,7 @@ func (s *ContentAssetService) ProcessReuseRun(ctx context.Context, runID string)
 	if s.contentReusePlanningEnabled(run) && run.Stage == model.ContentReuseStageResearch {
 		input := map[string]any{
 			"schema_version":     "1.0",
-			"task_kind":          model.TaskTypeContentResearch,
+			"task_kind":          model.TaskKindContentResearch,
 			"candidates":         []map[string]any{{"asset_id": run.AssetID, "title": assetTitleForRun(ctx, s.repo, run)}},
 			"accepted_artifacts": []any{},
 		}
@@ -911,7 +911,7 @@ func (s *ContentAssetService) ProcessReuseRun(ctx context.Context, runID string)
 		if ensureErr != nil {
 			return ensureErr
 		}
-		tasks, createErr := s.CreatePlanningStageTask(ctx, run.UserID, run.ID, stage.ID, model.TaskTypeContentResearch, input)
+		tasks, createErr := s.CreatePlanningStageTask(ctx, run.UserID, run.ID, stage.ID, model.TaskKindContentResearch, input)
 		if createErr != nil {
 			return createErr
 		}
@@ -1461,9 +1461,9 @@ func (s *ContentAssetService) advancePlanningStage(ctx context.Context, userID, 
 	var nextStage, nextKind string
 	switch completed.Stage {
 	case model.ContentReuseStageResearch:
-		nextStage, nextKind = model.ContentReuseStageScoring, model.TaskTypeContentValidation
+		nextStage, nextKind = model.ContentReuseStageScoring, model.TaskKindContentValidation
 	case model.ContentReuseStageScoring:
-		nextStage, nextKind = model.ContentReuseStageProduce, model.TaskTypeContentScript
+		nextStage, nextKind = model.ContentReuseStageProduce, model.TaskKindContentScript
 	case model.ContentReuseStageProduce:
 		return s.advanceProductionStages(ctx, userID, run, completed)
 	default:

@@ -65,7 +65,7 @@ func TestFinalizeResearchTaskPersistsTerminalJobFromCurrentExecution(t *testing.
 		t.Fatal(err)
 	}
 	executionID := "research-finalizer-execution"
-	task := &model.Task{ID: "research-finalizer-task", UserID: job.UserID, ProjectID: job.ProjectID, Type: model.TaskTypeContentResearch, TaskKind: model.TaskTypeContentResearch, Status: model.TaskStatusFailed, ResearchJobID: job.ID, CurrentExecutionID: &executionID, ErrorMessage: "provider unavailable"}
+	task := &model.Task{ID: "research-finalizer-task", UserID: job.UserID, ProjectID: job.ProjectID, Type: model.TaskTypeContentResearch, TaskKind: model.TaskKindContentResearch, Status: model.TaskStatusFailed, ResearchJobID: job.ID, CurrentExecutionID: &executionID, ErrorMessage: "provider unavailable"}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestApplyResearchResultMergesAssetsAndDeduplicatesEvidence(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	result := model.PlanningResearchResult{PlanningIdentity: model.PlanningIdentity{SchemaVersion: "1.0", TaskID: "research-task", ExecutionID: "research-execution", TaskKind: model.TaskTypeContentResearch, Status: "ready"}, Candidates: []model.PlanningProposal{{ID: "proposal-1", Title: "Canonical title", SemanticKernel: "The durable question", MergeAssetIDs: []string{merged.ID}, TargetFit: model.PlanningAssessment{Score: 80, Rationale: "fit", SourceRefs: []string{"source-1"}}, Transferability: model.PlanningAssessment{Score: 70, Rationale: "transfer", SourceRefs: []string{"source-1"}}, Angles: []string{"angle"}, ProductionCost: "low", MaterialRisk: "low", ComplianceRisk: "check"}}}
+	result := model.PlanningResearchResult{PlanningIdentity: model.PlanningIdentity{SchemaVersion: "1.0", TaskID: "research-task", ExecutionID: "research-execution", TaskKind: model.TaskKindContentResearch, Status: "ready"}, Candidates: []model.PlanningProposal{{ID: "proposal-1", Title: "Canonical title", SemanticKernel: "The durable question", MergeAssetIDs: []string{merged.ID}, TargetFit: model.PlanningAssessment{Score: 80, Rationale: "fit", SourceRefs: []string{"source-1"}}, Transferability: model.PlanningAssessment{Score: 70, Rationale: "transfer", SourceRefs: []string{"source-1"}}, Angles: []string{"angle"}, ProductionCost: "low", MaterialRisk: "low", ComplianceRisk: "check"}}}
 	evidence := model.PlanningResearchEvidence{PlanningIdentity: result.PlanningIdentity, Sources: []model.PlanningSource{{ID: "source-1", URL: "https://example.com/source", FetchedAt: "2026-10-21T00:00:00Z", Facts: []string{"fact"}}}}
 	apply := func() error {
 		return repo.WithTx(ctx, func(tx repository.Repository) error {
@@ -301,7 +301,7 @@ func TestCompleteReuseStageAcceptsOnlyFrozenDeliveredArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	executionID := "stage-execution"
-	task := &model.Task{ID: taskID, UserID: run.UserID, ProjectID: run.TargetProjectID, Type: model.TaskTypeContentResearch, TaskKind: model.TaskTypeContentResearch, Status: model.TaskStatusCompleted, ContentAssetID: run.AssetID, ReuseRunID: run.ID, ReuseStageID: stage.ID, CurrentExecutionID: &executionID}
+	task := &model.Task{ID: taskID, UserID: run.UserID, ProjectID: run.TargetProjectID, Type: model.TaskTypeContentResearch, TaskKind: model.TaskKindContentResearch, Status: model.TaskStatusCompleted, ContentAssetID: run.AssetID, ReuseRunID: run.ID, ReuseStageID: stage.ID, CurrentExecutionID: &executionID}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}

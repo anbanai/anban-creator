@@ -1186,7 +1186,6 @@ type KubernetesConfig struct {
 	CompletionGraceSeconds  int                                 `yaml:"completion_grace_seconds"`
 	completionGraceSet      bool                                `yaml:"-"`
 	TTLSecondsAfterFinished int32                               `yaml:"ttl_seconds_after_finished"`
-	Resources               KubernetesResourceConfig            `yaml:"resources"`
 	ResourceProfiles        map[string]KubernetesResourceConfig `yaml:"resource_profiles"`
 }
 
@@ -1251,7 +1250,7 @@ func (c *KubernetesConfig) UnmarshalYAML(value *yaml.Node) error {
 		"project_memory_claim": true, "task_workspace_size": true,
 		"active_deadline_seconds": true, "heartbeat_timeout_seconds": true,
 		"completion_grace_seconds": true, "ttl_seconds_after_finished": true,
-		"resources": true, "resource_profiles": true,
+		"resource_profiles": true,
 	}
 	if value.Kind != yaml.MappingNode {
 		return fmt.Errorf("claude.kubernetes config must be a mapping")
@@ -1293,34 +1292,6 @@ func (c *KubernetesResourceConfig) UnmarshalYAML(value *yaml.Node) error {
 	}
 	type plain KubernetesResourceConfig
 	return value.Decode((*plain)(c))
-}
-
-// ResourcesForTask returns a copy of the default resource contract overlaid by
-// the task-specific profile. Profiles may override individual resource keys.
-func (c KubernetesConfig) ResourcesForTask(taskType string) KubernetesResourceConfig {
-	profile := c.ResourceProfiles[strings.TrimSpace(taskType)]
-	if model.IsHypitPlatform(taskType) {
-		profile.Requests = mergeKubernetesResourceValues(map[string]string{"cpu": "4", "memory": "8Gi"}, profile.Requests)
-		profile.Limits = mergeKubernetesResourceValues(map[string]string{"cpu": "4", "memory": "8Gi"}, profile.Limits)
-	}
-	return KubernetesResourceConfig{
-		Requests: mergeKubernetesResourceValues(c.Resources.Requests, profile.Requests),
-		Limits:   mergeKubernetesResourceValues(c.Resources.Limits, profile.Limits),
-	}
-}
-
-func mergeKubernetesResourceValues(base, override map[string]string) map[string]string {
-	if len(base) == 0 && len(override) == 0 {
-		return nil
-	}
-	merged := make(map[string]string, len(base)+len(override))
-	for name, value := range base {
-		merged[name] = value
-	}
-	for name, value := range override {
-		merged[name] = value
-	}
-	return merged
 }
 
 // ProjectMemoryConfig bounds the shared project-memory filesystem and preview API.
@@ -2624,14 +2595,8 @@ func (c *Config) Validate() error {
 		if c.Claude.Kubernetes.CompletionGraceSeconds < 0 {
 			errs = append(errs, "claude.kubernetes.completion_grace_seconds must not be negative")
 		}
-		errs = append(errs, validateKubernetesResourceConfig("claude.kubernetes.resources", c.Claude.Kubernetes.Resources)...)
-		for taskType := range c.Claude.Kubernetes.ResourceProfiles {
-			if strings.TrimSpace(taskType) == "" {
-				errs = append(errs, "claude.kubernetes.resource_profiles contains an empty task type")
-				continue
-			}
-			effective := c.Claude.Kubernetes.ResourcesForTask(taskType)
-			errs = append(errs, validateKubernetesResourceConfig("claude.kubernetes.resource_profiles."+taskType, effective)...)
+		if err := c.Claude.Kubernetes.ValidateResourceProfiles(); err != nil {
+			errs = append(errs, err.Error())
 		}
 	}
 	if (strings.TrimSpace(c.Server.TLSCertFile) == "") != (strings.TrimSpace(c.Server.TLSKeyFile) == "") {
