@@ -57,3 +57,8 @@ Collect a production baseline before changing resource requests or adding a
 prewarm pool. This release intentionally provides no shared persistent Agent
 process, prewarm pool, or multiple Server replicas. A future prewarm pool must
 bind each clean runtime to one session only and destroy it after use.
+Home Assistant draft staging is interaction-scoped. The MCP call carries
+`interaction_id`, `generation`, `attempt_id`, `mode_id`, `payload_digest`, and
+`ready`; the Server persists the draft receipt before returning success. A
+logical runtime session or MCP transport session is not the durable identity,
+and retrying the same attempt returns the original draft receipt.

@@ -48,8 +48,9 @@ func (r *assistantInteractionRepository) Create(ctx context.Context, value *mode
 	if strings.TrimSpace(value.Scope) == "" {
 		value.Scope = value.UserID + ":" + value.ModeID + ":" + value.ProjectID + ":" + value.ContentID
 	}
-	if value.ActiveScope == "" && value.Lifecycle != model.AssistantInteractionAbandoned && value.Lifecycle != model.AssistantInteractionCompleted {
-		value.ActiveScope = value.Scope
+	if value.ActiveScope == nil && value.Lifecycle != model.AssistantInteractionAbandoned && value.Lifecycle != model.AssistantInteractionCompleted {
+		scope := value.Scope
+		value.ActiveScope = &scope
 	}
 	return r.db.WithContext(ctx).Create(value).Error
 }
@@ -80,9 +81,9 @@ func (r *assistantInteractionRepository) UpdateLifecycle(ctx context.Context, id
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&value).Error; err != nil {
 		return err
 	}
-	activeScope := ""
+	var activeScope *string
 	if lifecycle != model.AssistantInteractionAbandoned && lifecycle != model.AssistantInteractionCompleted {
-		activeScope = value.Scope
+		activeScope = &value.Scope
 	}
 	return r.db.WithContext(ctx).Model(&model.AssistantInteraction{}).Where("id = ?", id).Updates(map[string]any{"lifecycle": lifecycle, "active_scope": activeScope, "last_activity_at": at, "updated_at": at}).Error
 }

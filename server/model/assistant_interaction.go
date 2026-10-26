@@ -25,13 +25,15 @@ const (
 // Runtime/session identifiers are execution details and are intentionally not
 // exposed through this model's JSON contract.
 type AssistantInteraction struct {
-	ID              string     `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID          string     `gorm:"type:char(36);index;not null" json:"-"`
-	ModeID          string     `gorm:"type:varchar(20);not null" json:"mode_id"`
-	ProjectID       string     `gorm:"type:char(36);index;not null;default:''" json:"project_id,omitempty"`
-	ContentID       string     `gorm:"type:char(36);index;not null;default:''" json:"content_id,omitempty"`
-	Scope           string     `gorm:"type:varchar(192);not null;default:''" json:"-"`
-	ActiveScope     string     `gorm:"type:varchar(192);uniqueIndex;not null;default:''" json:"-"`
+	ID        string `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID    string `gorm:"type:char(36);index;not null" json:"-"`
+	ModeID    string `gorm:"type:varchar(20);not null" json:"mode_id"`
+	ProjectID string `gorm:"type:char(36);index;not null;default:''" json:"project_id,omitempty"`
+	ContentID string `gorm:"type:char(36);index;not null;default:''" json:"content_id,omitempty"`
+	Scope     string `gorm:"type:varchar(192);not null;default:''" json:"-"`
+	// Nullable keeps completed/abandoned interactions outside the unique active
+	// scope constraint. MySQL permits multiple NULLs in a unique index.
+	ActiveScope     *string    `gorm:"type:varchar(192);uniqueIndex" json:"-"`
 	Lifecycle       string     `gorm:"type:varchar(32);index;not null" json:"lifecycle"`
 	Generation      int64      `gorm:"not null;default:1" json:"generation"`
 	CommandSequence uint64     `gorm:"not null;default:0" json:"-"`

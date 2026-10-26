@@ -904,6 +904,7 @@ func main() {
 		}
 		agentProjectProfileSvc := service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), cfg.Montage, imageCapabilityResolver, repo)
 		agentProjectProfileSvc.SetVideoEditConfig(cfg.VideoEdit)
+		assistantInteractionSvc := service.NewAssistantInteractionService(repo, nil, nil)
 		mcp.SetServices(&mcp.Services{
 			ProjectSvc:             projectSvc,
 			TaskSvc:                taskSvc,
@@ -934,6 +935,7 @@ func main() {
 				UnderstandingModel:    cfg.VideoUnderstanding.Model,
 			}, log),
 			InteractiveSvc: interactiveSvc,
+			InteractionSvc: assistantInteractionSvc,
 			SearchSvc:      searchSvc,
 			FetchSvc:       fetchSvc,
 			ImageSearchSvc: imageSearchSvc,

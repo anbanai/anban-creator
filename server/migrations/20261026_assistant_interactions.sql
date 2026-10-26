@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS assistant_interactions (
   project_id char(36) NOT NULL DEFAULT '',
   content_id char(36) NOT NULL DEFAULT '',
   scope varchar(192) NOT NULL DEFAULT '',
-  active_scope varchar(192) NOT NULL DEFAULT '',
+  active_scope varchar(192) NULL,
   lifecycle varchar(32) NOT NULL,
   generation bigint NOT NULL DEFAULT 1,
   command_sequence bigint unsigned NOT NULL DEFAULT 0,

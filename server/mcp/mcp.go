@@ -202,14 +202,25 @@ func requestIdentityMiddleware(next mcp.MethodHandler) mcp.MethodHandler {
 			executionID, _ = info.Extra["execution_id"].(string)
 		}
 		var interactiveSessionID string
+		var interactionID string
+		var interactionGeneration int64
 		if slices.Contains(info.Scopes, "interactive") {
 			interactiveSessionID, _ = info.Extra["interactive_session_id"].(string)
+			interactionID, _ = info.Extra["assistant_interaction_id"].(string)
+			interactionGeneration, _ = info.Extra["assistant_interaction_generation"].(int64)
+			if interactionGeneration == 0 {
+				if raw, ok := info.Extra["assistant_interaction_generation"].(float64); ok { interactionGeneration = int64(raw) }
+			}
 		}
 		// Empty values intentionally shadow any identity from session setup when
 		// this request uses a user/API-key credential instead of an execution JWT.
 		ctx = withMCPExecutionIdentity(ctx, info.UserID, projectID, taskID, executionID)
 		interactiveProjectID, _ := info.Extra["project_id"].(string)
-		ctx = withMCPInteractiveIdentity(ctx, info.UserID, interactiveSessionID, interactiveProjectID)
+		if interactionID != "" {
+			ctx = withMCPInteractionCapability(ctx, info.UserID, interactionID, interactionGeneration, interactiveProjectID)
+		} else {
+			ctx = withMCPInteractiveIdentity(ctx, info.UserID, interactiveSessionID, interactiveProjectID)
+		}
 		return next(ctx, method, req)
 	}
 }
@@ -703,9 +714,11 @@ type mcpExecutionIdentity struct {
 }
 
 type mcpInteractiveIdentity struct {
-	UserID    string
-	SessionID string
-	ProjectID string
+	UserID        string
+	SessionID     string
+	ProjectID     string
+	InteractionID string
+	Generation    int64
 }
 
 func withMCPUserID(ctx context.Context, userID string) context.Context {
@@ -741,9 +754,17 @@ func withMCPInteractiveIdentity(ctx context.Context, userID, sessionID string, p
 	return context.WithValue(ctx, mcpInteractiveIdentityContextKey{}, identity)
 }
 
+func withMCPInteractionCapability(ctx context.Context, userID, interactionID string, generation int64, projectID ...string) context.Context {
+	identity := mcpInteractiveIdentity{UserID: strings.TrimSpace(userID), InteractionID: strings.TrimSpace(interactionID), Generation: generation}
+	if len(projectID) > 0 {
+		identity.ProjectID = strings.TrimSpace(projectID[0])
+	}
+	return context.WithValue(ctx, mcpInteractiveIdentityContextKey{}, identity)
+}
+
 func getMCPInteractiveIdentity(ctx context.Context) (mcpInteractiveIdentity, bool) {
 	identity, ok := ctx.Value(mcpInteractiveIdentityContextKey{}).(mcpInteractiveIdentity)
-	if !ok || identity.SessionID == "" {
+	if !ok || (identity.SessionID == "" && identity.InteractionID == "") {
 		return mcpInteractiveIdentity{}, false
 	}
 	return identity, true

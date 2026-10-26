@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -18,6 +20,37 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestStageAssistantDraftUsesInteractionCapabilityAndReturnsDurableReceipt(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.AssistantInteraction{}, &model.AssistantInteractionRuntime{}, &model.AssistantInteractionDraft{}, &model.AssistantInteractionEvent{}, &model.AssistantInteractionAttempt{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	interactionSvc := service.NewAssistantInteractionService(repo, nil, nil)
+	snapshot, err := interactionSvc.CreateOrResume(context.Background(), "user-1", service.AssistantInteractionInput{ModeID: service.AssistantModeCreation}, "create-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := json.RawMessage(`{"plan":{"goal":"write"}}`)
+	digest := sha256.Sum256(payload)
+	old := svcs
+	svcs = &Services{InteractionSvc: interactionSvc}
+	t.Cleanup(func() { svcs = old })
+	result, err := stageAssistantDraftHandler(withMCPInteractionCapability(context.Background(), "user-1", snapshot.ID, snapshot.Generation), interactiveMCPRequest(t, map[string]any{
+		"interaction_id": snapshot.ID, "generation": snapshot.Generation, "attempt_id": "attempt-1", "mode_id": service.AssistantModeCreation,
+		"payload": json.RawMessage(payload), "payload_digest": hex.EncodeToString(digest[:]), "ready": true,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || result.IsError || !strings.Contains(toolResultText(result), `"durable":true`) || strings.Contains(toolResultText(result), "session_id") {
+		t.Fatalf("interaction stage result = %#v", result)
+	}
+}
 
 type interactiveMCPRuntime struct{}
 

@@ -70,6 +70,16 @@ func TestAssistantInteractionRepositoryAllowsOnlyOneActiveScope(t *testing.T) {
 	}
 }
 
+func TestAssistantInteractionRepositoryAllowsMultipleClosedScopes(t *testing.T) {
+	repo, _ := newAssistantInteractionTestRepository(t)
+	now := time.Now().UTC()
+	for _, id := range []string{"closed-1", "closed-2"} {
+		if err := repo.AssistantInteractions().Create(context.Background(), &model.AssistantInteraction{ID: id, UserID: "user-1", ModeID: "creation", ProjectID: "project-1", Lifecycle: model.AssistantInteractionCompleted, Generation: 1, ExpiresAt: now.Add(time.Hour), LastActivityAt: now, CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatalf("create closed interaction %s: %v", id, err)
+		}
+	}
+}
+
 func TestAssistantInteractionRepositoryDraftAttemptIsIdempotent(t *testing.T) {
 	repo, _ := newAssistantInteractionTestRepository(t)
 	now := time.Now().UTC()
