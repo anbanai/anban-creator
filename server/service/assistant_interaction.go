@@ -65,7 +65,7 @@ func (s *AssistantInteractionService) CreateOrResume(ctx context.Context, userID
 	if userID == "" || in.ModeID == "" {
 		return InteractionSnapshot{}, NewInteractionError(InteractionErrorMessageNotAccepted, 400, "当前对话信息不完整", "retry_message")
 	}
-	lock := s.lockFor(userID + ":" + in.ModeID + ":" + in.ProjectID + ":" + in.ContentID)
+	lock := s.lockFor(userID + ":" + in.ProjectID + ":" + in.ContentID)
 	lock.Lock()
 	defer lock.Unlock()
 	now := s.clock()
@@ -76,6 +76,11 @@ func (s *AssistantInteractionService) CreateOrResume(ctx context.Context, userID
 			return InteractionSnapshot{}, createErr
 		}
 	} else if err != nil {
+		return InteractionSnapshot{}, err
+	}
+	interaction.ModeID = in.ModeID
+	interaction.UpdatedAt = now
+	if err := s.repo.AssistantInteractions().UpdateMode(ctx, interaction.ID, in.ModeID, now); err != nil {
 		return InteractionSnapshot{}, err
 	}
 	_ = idempotencyKey
@@ -108,6 +113,14 @@ func (s *AssistantInteractionService) Events(ctx context.Context, userID, intera
 		return nil, err
 	}
 	return s.repo.AssistantInteractions().ListEventsAfter(ctx, interactionID, after, 200)
+}
+
+func (s *AssistantInteractionService) Abandon(ctx context.Context, userID, interactionID string) error {
+	interaction, err := s.repo.AssistantInteractions().FindByIDForUser(ctx, userID, interactionID)
+	if err != nil {
+		return err
+	}
+	return s.repo.AssistantInteractions().UpdateLifecycle(ctx, interaction.ID, model.AssistantInteractionAbandoned, s.clock())
 }
 
 func (s *AssistantInteractionService) EnsureRuntime(ctx context.Context, userID, interactionID string, expectedGeneration int64) (RuntimeBindingView, error) {

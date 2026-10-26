@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Bot, Check, ChevronDown, Library, Loader2, Plus, Upload, UserRound } from 'lucide-react'
 import { Streamdown } from 'streamdown'
@@ -26,6 +26,8 @@ import { AssistantVideoEditInputs } from '@/components/video-edit/AssistantVideo
 import { VideoEditProjectDefaultsPanel } from '@/components/video-edit/VideoEditProjectDefaultsPanel'
 import { TaskResults } from '@/components/tasks/TaskResults'
 import { AssistantDraftSummary } from '@/components/assistant/AssistantDraftSummary'
+import { AssistantRecoveryBanner } from '@/components/assistant/AssistantRecoveryBanner'
+import { assistantInteractionReducer, initialAssistantInteractionState } from '@/lib/assistant-interaction-state'
 import { SignedImage } from '@/components/ui/SignedImage'
 import type { InputAttachment, PromptAttachment } from '@/types/input-attachment'
 import type { UserMediaAsset } from '@/lib/api/user-media'
@@ -263,6 +265,7 @@ export default function AssistantWorkspace() {
   const [questionsByMode, setQuestionsByMode] = useState<Record<string, QuestionBatch[]>>(persisted?.questionsByMode ?? {})
   const [draftByMode, setDraftByMode] = useState<Record<string, Draft | null>>(persisted?.draftByMode ?? {})
   const [error, setError] = useState<string | null>(null)
+  const [interactionState, dispatchInteraction] = useReducer(assistantInteractionReducer, initialAssistantInteractionState)
   const [sending, setSending] = useState(false)
   const [responding, setResponding] = useState(false)
   const [switching, setSwitching] = useState(false)
@@ -277,6 +280,14 @@ export default function AssistantWorkspace() {
   const sendInFlight = useRef(false)
   const imageRatioContextKey = useRef<string | null>(null)
   const conversationOrder = useRef<Record<string, number>>({})
+
+  useEffect(() => {
+    if (workspace) dispatchInteraction({ type: 'snapshot', snapshot: { interaction_id: workspace.id, mode_id: workspace.mode_id, project_id: workspace.project_id, content_id: workspace.content_id, lifecycle: 'active', generation: workspace.generation ?? 1, runtime_status: workspace.runtime_status, expires_at: workspace.expires_at, last_activity_at: '', available_actions: ['send_message', 'restart'], drafts: [] } })
+  }, [workspace?.id, workspace?.generation, workspace?.mode_id, workspace?.project_id, workspace?.content_id, workspace?.runtime_status, workspace?.expires_at])
+
+  useEffect(() => {
+    if (error) dispatchInteraction({ type: 'error', code: error.includes('计划') ? 'assistant_draft_saved_retryable' : 'assistant_message_not_accepted' })
+  }, [error])
 
   const nextConversationOrder = (conversationMode: AssistantModeID) => {
     const next = (conversationOrder.current[conversationMode] ?? 0) + 1
@@ -471,6 +482,7 @@ export default function AssistantWorkspace() {
     const stream = streamAssistantWorkspace(workspace.id, token, controller.signal, {
       lastEventId: lastEventIds[mode],
       expectedSessionId: workspace.sessions[mode],
+      generation: workspace.generation,
     })
     void (async () => {
       try {
@@ -1041,6 +1053,13 @@ export default function AssistantWorkspace() {
   return (
     <AgentPromptDropProvider>
       <main data-testid="assistant-workspace" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
+      <AssistantRecoveryBanner
+        state={interactionState}
+        onRetry={() => setError(null)}
+        onRestoreDraft={() => setError(null)}
+        onRestart={() => resetExpiredWorkspace()}
+        onViewTask={() => { if (interactionState.taskId) navigate(`/tasks/${encodeURIComponent(interactionState.taskId)}`) }}
+      />
       {!workspace ? (
         <section className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col px-4 pb-3 md:px-8">
           <div data-testid="assistant-conversation" className="assistant-scroll min-h-0 flex flex-1 flex-col overflow-y-auto pb-1 pt-5 md:pb-2 md:pt-8">

@@ -77,3 +77,71 @@ export const interactiveApi = {
     }, { timeout: INTERACTIVE_COMMAND_TIMEOUT_MS })),
   close: (sessionId: string) => http.delete(`/interactive/sessions/${sessionId}`),
 }
+
+export interface InteractionEventStreamOptions {
+  generation?: number
+  lastEventId?: string
+  onGenerationChanged?: (generation: number) => void
+  onEvent?: (event: { event: string; id?: string; data: string }) => void
+}
+
+export interface AssistantInteractionEvent {
+  event: string
+  id?: string
+  data: string
+}
+
+export function streamAssistantInteraction(interactionId: string, token: string, signal?: AbortSignal, options: InteractionEventStreamOptions = {}): AsyncGenerator<AssistantInteractionEvent> {
+  return (async function* () {
+    let cursor = options.lastEventId
+    let generation = options.generation ?? 1
+    while (!signal?.aborted) {
+      const response = await fetch(`/api/v1/assistant/interactions/${encodeURIComponent(interactionId)}/events`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream', ...(cursor ? { 'Last-Event-ID': cursor } : {}) },
+        signal,
+      })
+      if (!response.ok) throw new Error(`interaction stream failed: ${response.status}`)
+      if (!response.body) return
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const chunks = buffer.split('\n\n')
+          buffer = chunks.pop() ?? ''
+          for (const chunk of chunks) {
+            const event = parseInteractionSSE(chunk)
+            if (!event) continue
+            if (event.id) cursor = event.id
+            const data = parseInteractionData(event.data)
+            const nextGeneration = typeof data.generation === 'number' ? data.generation : generation
+            if (nextGeneration !== generation) {
+              generation = nextGeneration
+              cursor = undefined
+              options.onGenerationChanged?.(generation)
+            }
+            options.onEvent?.(event)
+            yield event
+          }
+        }
+      } finally { reader.releaseLock() }
+      if (signal?.aborted) return
+      cursor = undefined
+    }
+  })()
+}
+
+function parseInteractionSSE(chunk: string): AssistantInteractionEvent | undefined {
+  const lines = chunk.split(/\r?\n/)
+  const event = lines.find((line) => line.startsWith('event:'))?.slice(6).trim()
+  if (!event) return undefined
+  return { event, id: lines.find((line) => line.startsWith('id:'))?.slice(3).trim(), data: lines.filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim()).join('\n') }
+}
+
+function parseInteractionData(data: string | undefined): Record<string, unknown> {
+  if (!data) return {}
+  try { const value: unknown = JSON.parse(data); return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {} } catch { return {} }
+}

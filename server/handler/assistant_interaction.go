@@ -124,6 +124,20 @@ func (h *AssistantHandler) InteractionCommit(c fiber.Ctx) error {
 	return Success(c, result)
 }
 
+func (h *AssistantHandler) InteractionDelete(c fiber.Ctx) error {
+	uid := GetUserID(c)
+	if uid == "" {
+		return Error(c, 401, "unauthorized")
+	}
+	if h.interactionSvc == nil {
+		return Error(c, 503, "assistant unavailable")
+	}
+	if err := h.interactionSvc.Abandon(c.Context(), uid, c.Params("id")); err != nil {
+		return interactiveError(c, err)
+	}
+	return Success(c, nil)
+}
+
 func (h *AssistantHandler) InteractionEvents(c fiber.Ctx) error {
 	uid := GetUserID(c)
 	if uid == "" {

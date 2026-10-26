@@ -73,6 +73,24 @@ func TestAssistantInteractionCreateOrResumeReusesScope(t *testing.T) {
 	}
 }
 
+func TestAssistantInteractionModesShareOneInteraction(t *testing.T) {
+	svc, _ := newAssistantInteractionServiceTest(t)
+	first, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation, ProjectID: "project-1"}, "create")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeReview, ProjectID: "project-1"}, "review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("mode switch created a second interaction: %s vs %s", first.ID, second.ID)
+	}
+	if second.ModeID != AssistantModeReview {
+		t.Fatalf("current mode = %q", second.ModeID)
+	}
+}
+
 func TestAssistantInteractionGenerationRejectsStaleCommand(t *testing.T) {
 	svc, _ := newAssistantInteractionServiceTest(t)
 	input := AssistantInteractionInput{ModeID: "creation", AgentID: "project-creator", Intent: "create"}

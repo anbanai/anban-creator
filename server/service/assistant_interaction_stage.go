@@ -71,7 +71,8 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 		return InteractionStageResult{}, errors.Join(ErrInteractivePersistence, err)
 	}
 	sequence, sequenceErr := s.repo.AssistantInteractions().NextEventSequence(ctx, in.InteractionID)
-	if sequenceErr != nil || s.repo.AssistantInteractions().CreateEvent(ctx, &model.AssistantInteractionEvent{ID: uuid.NewString(), InteractionID: in.InteractionID, Sequence: sequence, Type: "draft.ready", Data: json.RawMessage(`{"durable":true}`), CreatedAt: now}) != nil {
+	eventData, _ := json.Marshal(map[string]any{"durable": true, "draft_id": persisted.ID, "revision": persisted.Revision, "mode_id": persisted.ModeID, "ready": persisted.Ready, "payload_digest": persisted.PayloadDigest})
+	if sequenceErr != nil || s.repo.AssistantInteractions().CreateEvent(ctx, &model.AssistantInteractionEvent{ID: uuid.NewString(), InteractionID: in.InteractionID, Sequence: sequence, Type: "draft.ready", Data: eventData, CreatedAt: now}) != nil {
 		return InteractionStageResult{}, errors.Join(ErrInteractivePersistence, errors.New("interaction event persistence failed"))
 	}
 	if in.Ready {

@@ -20,6 +20,7 @@ type AssistantInteractionRepository interface {
 	FindByIDForUser(context.Context, string, string) (*model.AssistantInteraction, error)
 	FindByScopeForUpdate(context.Context, string, string, string, string) (*model.AssistantInteraction, error)
 	UpdateLifecycle(context.Context, string, string, time.Time) error
+	UpdateMode(context.Context, string, string, time.Time) error
 	CompareAndSwapGeneration(context.Context, string, int64, int64, time.Time) (bool, error)
 	CreateRuntimeBinding(context.Context, *model.AssistantInteractionRuntime) error
 	FindCurrentRuntime(context.Context, string, int64) (*model.AssistantInteractionRuntime, error)
@@ -49,7 +50,7 @@ func (r *assistantInteractionRepository) Create(ctx context.Context, value *mode
 		return errors.New("assistant interaction identity is required")
 	}
 	if strings.TrimSpace(value.Scope) == "" {
-		value.Scope = value.UserID + ":" + value.ModeID + ":" + value.ProjectID + ":" + value.ContentID
+		value.Scope = value.UserID + ":" + value.ProjectID + ":" + value.ContentID
 	}
 	if value.ActiveScope == nil && value.Lifecycle != model.AssistantInteractionAbandoned && value.Lifecycle != model.AssistantInteractionCompleted {
 		scope := value.Scope
@@ -73,7 +74,7 @@ func (r *assistantInteractionRepository) FindByID(ctx context.Context, id string
 }
 func (r *assistantInteractionRepository) FindByScopeForUpdate(ctx context.Context, userID, modeID, projectID, contentID string) (*model.AssistantInteraction, error) {
 	var value model.AssistantInteraction
-	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND mode_id = ? AND project_id = ? AND content_id = ? AND closed_at IS NULL", userID, modeID, projectID, contentID).Where("lifecycle IN ?", []string{model.AssistantInteractionActive, model.AssistantInteractionReconnecting, model.AssistantInteractionNeedsConfirmation}).Order("updated_at DESC").First(&value).Error
+	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND project_id = ? AND content_id = ? AND closed_at IS NULL", userID, projectID, contentID).Where("lifecycle IN ?", []string{model.AssistantInteractionActive, model.AssistantInteractionReconnecting, model.AssistantInteractionNeedsConfirmation}).Order("updated_at DESC").First(&value).Error
 	if err != nil {
 		return nil, err
 	}
@@ -89,6 +90,9 @@ func (r *assistantInteractionRepository) UpdateLifecycle(ctx context.Context, id
 		activeScope = &value.Scope
 	}
 	return r.db.WithContext(ctx).Model(&model.AssistantInteraction{}).Where("id = ?", id).Updates(map[string]any{"lifecycle": lifecycle, "active_scope": activeScope, "last_activity_at": at, "updated_at": at}).Error
+}
+func (r *assistantInteractionRepository) UpdateMode(ctx context.Context, id, mode string, at time.Time) error {
+	return r.db.WithContext(ctx).Model(&model.AssistantInteraction{}).Where("id = ?", id).Updates(map[string]any{"mode_id": mode, "last_activity_at": at, "updated_at": at}).Error
 }
 func (r *assistantInteractionRepository) CompareAndSwapGeneration(ctx context.Context, id string, expected, next int64, at time.Time) (bool, error) {
 	result := r.db.WithContext(ctx).Model(&model.AssistantInteraction{}).Where("id = ? AND generation = ? AND closed_at IS NULL", id, expected).Updates(map[string]any{"generation": next, "last_activity_at": at, "updated_at": at})
