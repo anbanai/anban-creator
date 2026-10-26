@@ -28,8 +28,14 @@ const DSH_RETRY_POLICY = [
 
 export interface InteractiveCommand {
   id?: string | number;
-  method: "session/start" | "session/prompt" | "session/answer" | "shutdown";
+  method: "session/start" | "session/prompt" | "session/answer" | "interaction/capability-refresh" | "shutdown";
   params: JsonRecord;
+}
+
+export interface InteractionCapability {
+  interaction_id: string;
+  generation: number;
+  capability?: string;
 }
 
 export interface StableBridgeEvent {
@@ -199,7 +205,7 @@ export function parseInteractiveCommand(line: string): InteractiveCommand {
   if (!isRecord(value) || typeof value.method !== "string") {
     throw new Error("DSH bridge command requires a method");
   }
-  const methods = new Set(["session/start", "session/prompt", "session/answer", "shutdown"]);
+  const methods = new Set(["session/start", "session/prompt", "session/answer", "interaction/capability-refresh", "shutdown"]);
   if (!methods.has(value.method)) {
     throw new Error(`unsupported DSH bridge method: ${value.method}`);
   }
@@ -230,7 +236,23 @@ function normalizeQuestion(value: unknown): unknown {
   return normalized;
 }
 
-export function mapHarnessNotification(notification: HarnessNotification, rootSessionId?: string): StableBridgeEvent[] {
+export function mapHarnessNotification(notification: HarnessNotification, rootSessionId?: string, capability?: InteractionCapability): StableBridgeEvent[] {
+  const eventGeneration = typeof notification.params.generation === "number" ? notification.params.generation : undefined;
+  if (capability && eventGeneration !== undefined && eventGeneration !== capability.generation) return [];
+  const events = mapHarnessNotificationBase(notification, rootSessionId);
+  if (!capability) return events;
+  return events.map((event) => {
+    if (!isRecord(event.data)) return event;
+    const data: JsonRecord = { ...event.data, generation: eventGeneration ?? capability.generation };
+    if (typeof data.message === "string" && (data.code === "SESSION_NOT_FOUND" || /interactive session not found|session not found/i.test(data.message))) {
+      data.code = "assistant_interaction_restart_required";
+      data.message = "the interaction can be restored";
+    }
+    return { ...event, data };
+  });
+}
+
+function mapHarnessNotificationBase(notification: HarnessNotification, rootSessionId?: string): StableBridgeEvent[] {
   const params = notification.params;
   if (notification.method === "session.ready") {
     if (rootSessionId !== undefined && params.sessionId !== rootSessionId) return [];
@@ -386,6 +408,7 @@ export class DshBridge {
   private readonly presetId: string;
   private readonly workspaceId: string;
   private readonly allowedPresets: readonly InteractivePresetId[];
+  private capability: InteractionCapability | undefined;
 
   constructor(
     private readonly write: (event: StableBridgeEvent) => void,
@@ -401,6 +424,9 @@ export class DshBridge {
     this.allowedPresets = configuredPresets.length > 0
       ? configuredPresets.map(validateInteractivePresetId)
       : [this.presetId as InteractivePresetId];
+    const interactionId = process.env.ANBAN_DSH_BRIDGE_INTERACTION_ID?.trim() ?? "";
+    const generation = Number(process.env.ANBAN_DSH_BRIDGE_GENERATION ?? "");
+    if (interactionId && Number.isSafeInteger(generation) && generation > 0) this.capability = { interaction_id: interactionId, generation };
     this.route = route ?? (clientFactory ? {
       provider: "deepseek-official", model: "deepseek-flash", api: "deepseek-messages",
       baseURL: "https://api.deepseek.com/anthropic",
@@ -470,7 +496,7 @@ export class DshBridge {
     try {
       for (;;) {
         const notification = await subscription.next();
-        for (const event of mapHarnessNotification(notification, sessionId)) this.write(this.redactEvent(event));
+        for (const event of mapHarnessNotification(notification, sessionId, this.capability)) this.write(this.redactEvent(event));
       }
     } catch (error) {
       if (!this.closed) {
@@ -482,8 +508,18 @@ export class DshBridge {
   private validateCommand(command: InteractiveCommand): void {
     if (!this.rootSessionId) throw new Error("ANBAN_DSH_BRIDGE_SESSION_ID is required");
     if (command.method === "shutdown") return;
+    if (command.method === "interaction/capability-refresh") {
+      if (typeof command.params.interaction_id !== "string" || !Number.isSafeInteger(command.params.generation) || Number(command.params.generation) < 1) {
+        throw new Error("interaction/capability-refresh requires interaction_id and generation");
+      }
+      return;
+    }
     const sessionId = command.params.sessionId;
     if (typeof sessionId !== "string" || sessionId.trim() === "") throw new Error(`${command.method} requires a session id`);
+    if (this.capability) {
+      if (command.params.interaction_id !== this.capability.interaction_id) throw new Error("command interaction capability does not match the configured interaction");
+      if (Number(command.params.generation) !== this.capability.generation) throw new Error("command interaction generation is stale");
+    }
     if (command.method === "session/start") {
       if (typeof command.params.presetId !== "string") {
         throw new Error("session/start requires the configured interactive preset");
@@ -532,11 +568,23 @@ export class DshBridge {
       this.write({ event: "session.closed", data: {} });
       return {};
     }
+    if (command.method === "interaction/capability-refresh") {
+      this.capability = {
+        interaction_id: String(command.params.interaction_id),
+        generation: Number(command.params.generation),
+        ...(typeof command.params.capability === "string" ? { capability: command.params.capability } : {}),
+      };
+      return { interaction_id: this.capability.interaction_id, generation: this.capability.generation };
+    }
     this.validateCommand(command);
     await this.ensureRuntime();
     const client = this.client;
     if (!client) throw new Error("interactive runtime is unavailable");
-    const result = await client.request(command.method, command.params);
+    const runtimeParams = { ...command.params };
+    delete runtimeParams.interaction_id;
+    delete runtimeParams.generation;
+    delete runtimeParams.capability;
+    const result = await client.request(command.method, runtimeParams);
     if (command.method === "session/start") {
       const sessionId = String(command.params.sessionId);
       const presetId = validateInteractivePresetId(String(command.params.presetId));

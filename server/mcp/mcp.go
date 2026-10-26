@@ -31,6 +31,7 @@ type mcpHandlerConfig struct {
 	executionTokens     *serverauth.ExecutionTokenService
 	executionAuthorizer ExecutionAccessAuthorizer
 	interactiveSvc      *service.InteractiveService
+	interactionSvc      *service.AssistantInteractionService
 }
 
 // MCPHandlerOption configures optional MCP authentication modes.
@@ -53,6 +54,14 @@ func WithInteractiveAuthentication(svc *service.InteractiveService) MCPHandlerOp
 	return func(cfg *mcpHandlerConfig) {
 		cfg.interactiveSvc = svc
 	}
+}
+
+// WithInteractionAuthentication authenticates the short-lived runtime
+// capability issued for a durable assistant interaction. It is separate from
+// the legacy logical-session resolver so a restart never revives old session
+// identity as the source of truth.
+func WithInteractionAuthentication(svc *service.AssistantInteractionService) MCPHandlerOption {
+	return func(cfg *mcpHandlerConfig) { cfg.interactionSvc = svc }
 }
 
 // statusWriter wraps http.ResponseWriter to capture the status code.
@@ -174,7 +183,7 @@ func NewMCPHandler(apiKeySvc *service.APIKeyService, staticKey string, zlog *zer
 	)
 
 	// Auth middleware: validate bearer token via per-user API keys or static key.
-	verifier := newTokenVerifier(apiKeySvc, staticKey, cfg.executionTokens, cfg.executionAuthorizer, cfg.interactiveSvc, zlog)
+	verifier := newTokenVerifier(apiKeySvc, staticKey, cfg.executionTokens, cfg.executionAuthorizer, cfg.interactiveSvc, cfg.interactionSvc, zlog)
 	scoped := interactiveScopeMiddleware(executionScopeMiddleware(mcpHTTP, cfg.executionAuthorizer))
 	protected := mcpauth.RequireBearerToken(verifier, nil)(scoped)
 
@@ -202,20 +211,34 @@ func requestIdentityMiddleware(next mcp.MethodHandler) mcp.MethodHandler {
 			executionID, _ = info.Extra["execution_id"].(string)
 		}
 		var interactiveSessionID string
+		var interactionID string
+		var interactionGeneration int64
 		if slices.Contains(info.Scopes, "interactive") {
 			interactiveSessionID, _ = info.Extra["interactive_session_id"].(string)
+			interactionID, _ = info.Extra["assistant_interaction_id"].(string)
+			interactionGeneration, _ = info.Extra["assistant_interaction_generation"].(int64)
+			if interactionGeneration == 0 {
+				if raw, ok := info.Extra["assistant_interaction_generation"].(float64); ok {
+					interactionGeneration = int64(raw)
+				}
+			}
 		}
 		// Empty values intentionally shadow any identity from session setup when
 		// this request uses a user/API-key credential instead of an execution JWT.
 		ctx = withMCPExecutionIdentity(ctx, info.UserID, projectID, taskID, executionID)
 		interactiveProjectID, _ := info.Extra["project_id"].(string)
-		ctx = withMCPInteractiveIdentity(ctx, info.UserID, interactiveSessionID, interactiveProjectID)
+		if interactionID != "" {
+			modeID, _ := info.Extra["assistant_mode_id"].(string)
+			ctx = withMCPInteractionCapabilityMode(ctx, info.UserID, interactionID, interactionGeneration, modeID, interactiveProjectID)
+		} else {
+			ctx = withMCPInteractiveIdentity(ctx, info.UserID, interactiveSessionID, interactiveProjectID)
+		}
 		return next(ctx, method, req)
 	}
 }
 
 // tokenVerifier validates execution JWTs and per-user API keys, with static key fallback.
-func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, executionTokens *serverauth.ExecutionTokenService, executionAuthorizer ExecutionAccessAuthorizer, interactiveSvc *service.InteractiveService, zlog *zerolog.Logger) mcpauth.TokenVerifier {
+func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, executionTokens *serverauth.ExecutionTokenService, executionAuthorizer ExecutionAccessAuthorizer, interactiveSvc *service.InteractiveService, interactionSvc *service.AssistantInteractionService, zlog *zerolog.Logger) mcpauth.TokenVerifier {
 	return func(ctx context.Context, token string, r *http.Request) (*mcpauth.TokenInfo, error) {
 		if token == "" {
 			if zlog != nil {
@@ -244,7 +267,25 @@ func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, execut
 			}
 		}
 
-		// Interactive runtime tokens are opaque, short-lived session credentials.
+		// Durable interaction runtime capabilities are opaque, short-lived
+		// credentials. Resolve them before legacy logical-session credentials.
+		if interactionSvc != nil {
+			if userID, interactionID, modeID, projectID, generation, expiresAt, err := interactionSvc.ResolveRuntimeCapability(token); err == nil {
+				return &mcpauth.TokenInfo{
+					UserID:     userID,
+					Scopes:     []string{"mcp", "interactive"},
+					Expiration: expiresAt,
+					Extra: map[string]any{
+						"assistant_interaction_id":         interactionID,
+						"assistant_interaction_generation": generation,
+						"assistant_mode_id":                modeID,
+						"project_id":                       projectID,
+					},
+				}, nil
+			}
+		}
+
+		// Legacy interactive runtime tokens are opaque, short-lived session credentials.
 		// Resolve them before user API keys and retain only the protected session
 		// identity in MCP context.
 		if interactiveSvc != nil {
@@ -428,10 +469,19 @@ func interactiveScopeMiddleware(next http.Handler) http.Handler {
 		for _, request := range requests {
 			if request.Method == "tools/call" {
 				modeID, _ := info.Extra["assistant_mode_id"].(string)
+				interactionID, _ := info.Extra["assistant_interaction_id"].(string)
+				interactionScoped := strings.TrimSpace(interactionID) != ""
 				toolName := strings.TrimSpace(request.Params.Name)
 				creationMediaSearch := modeID == service.AssistantModeCreation && toolName == "search_user_media_assets"
-				if (modeID == service.AssistantModeCreation || modeID == service.AssistantModeReview) && toolName != "stage_assistant_draft" && !creationMediaSearch {
+				stageTool := toolName == "stage_assistant_draft" || toolName == "stage_project_creator_draft"
+				if interactionScoped && (modeID == service.AssistantModeCreation || modeID == service.AssistantModeReview || modeID == service.AssistantModeProfile) && !stageTool && !creationMediaSearch {
 					http.Error(w, "Assistant runtime credential cannot read outside its frozen context", http.StatusForbidden)
+					return
+				}
+				// Keep the legacy logical-session scope unchanged while new
+				// interaction capabilities use the frozen-context rule above.
+				if !interactionScoped && (modeID == service.AssistantModeCreation || modeID == service.AssistantModeReview) && toolName != "stage_assistant_draft" && !creationMediaSearch {
+					http.Error(w, "interactive runtime credential cannot call this MCP tool", http.StatusForbidden)
 					return
 				}
 				if creationMediaSearch {
@@ -703,9 +753,12 @@ type mcpExecutionIdentity struct {
 }
 
 type mcpInteractiveIdentity struct {
-	UserID    string
-	SessionID string
-	ProjectID string
+	UserID        string
+	SessionID     string
+	ProjectID     string
+	InteractionID string
+	Generation    int64
+	ModeID        string
 }
 
 func withMCPUserID(ctx context.Context, userID string) context.Context {
@@ -741,9 +794,25 @@ func withMCPInteractiveIdentity(ctx context.Context, userID, sessionID string, p
 	return context.WithValue(ctx, mcpInteractiveIdentityContextKey{}, identity)
 }
 
+func withMCPInteractionCapability(ctx context.Context, userID, interactionID string, generation int64, projectID ...string) context.Context {
+	identity := mcpInteractiveIdentity{UserID: strings.TrimSpace(userID), InteractionID: strings.TrimSpace(interactionID), Generation: generation}
+	if len(projectID) > 0 {
+		identity.ProjectID = strings.TrimSpace(projectID[0])
+	}
+	return context.WithValue(ctx, mcpInteractiveIdentityContextKey{}, identity)
+}
+
+func withMCPInteractionCapabilityMode(ctx context.Context, userID, interactionID string, generation int64, modeID string, projectID ...string) context.Context {
+	identity := mcpInteractiveIdentity{UserID: strings.TrimSpace(userID), InteractionID: strings.TrimSpace(interactionID), Generation: generation, ModeID: strings.TrimSpace(modeID)}
+	if len(projectID) > 0 {
+		identity.ProjectID = strings.TrimSpace(projectID[0])
+	}
+	return context.WithValue(ctx, mcpInteractiveIdentityContextKey{}, identity)
+}
+
 func getMCPInteractiveIdentity(ctx context.Context) (mcpInteractiveIdentity, bool) {
 	identity, ok := ctx.Value(mcpInteractiveIdentityContextKey{}).(mcpInteractiveIdentity)
-	if !ok || identity.SessionID == "" {
+	if !ok || (identity.SessionID == "" && identity.InteractionID == "") {
 		return mcpInteractiveIdentity{}, false
 	}
 	return identity, true

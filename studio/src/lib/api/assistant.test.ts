@@ -61,3 +61,33 @@ it('loads completed works by page and retrieves only the selected scope checkpoi
   expect(page.items[0]?.id).toBe('work-26')
   expect(checkpoint?.id).toBe('checkpoint-1')
 })
+
+it('creates and commits from a durable interaction draft receipt', async () => {
+  vi.mocked(http.post)
+    .mockResolvedValueOnce({ data: { data: { interaction_id: 'interaction-1', generation: 3, lifecycle: 'needs_confirmation', available_actions: [], drafts: [] } } })
+    .mockResolvedValueOnce({ data: { data: { status: 'already_created', task_id: 'task-1' } } })
+
+  const interaction = await assistantApi.createInteraction({ mode_id: 'creation' }, 'interaction-key')
+  const result = await assistantApi.commitInteraction(interaction.interaction_id, { draft_id: 'draft-1', revision: 2, idempotency_key: 'commit-1' })
+
+  expect(http.post).toHaveBeenNthCalledWith(1, '/assistant/interactions', { mode_id: 'creation' }, { headers: { 'Idempotency-Key': 'interaction-key' } })
+  expect(http.post).toHaveBeenNthCalledWith(2, '/assistant/interactions/interaction-1/commit', { draft_id: 'draft-1', revision: 2, idempotency_key: 'commit-1' }, { timeout: 15 * 60 * 1000 })
+  expect(result.status).toBe('already_created')
+})
+
+it('answers an interaction using the interaction-scoped answer endpoint', async () => {
+  vi.mocked(http.post).mockResolvedValue({ data: { data: { accepted: true } } })
+
+  await assistantApi.answerInteractionQuestion('interaction-1', 'call-1', {
+    generation: 3,
+    attempt_id: 'answer-1',
+    answers: [{ id: 'choice', selected: ['yes'] }],
+  })
+
+  expect(http.post).toHaveBeenCalledWith('/assistant/interactions/interaction-1/answers', {
+    call_id: 'call-1',
+    generation: 3,
+    attempt_id: 'answer-1',
+    answers: [{ id: 'choice', selected: ['yes'] }],
+  }, { timeout: 15 * 60 * 1000 })
+})

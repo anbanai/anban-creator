@@ -632,7 +632,7 @@ describe('AssistantWorkspace', () => {
     expect(secondKey).toBe(firstKey)
   })
 
-  it('keeps the unsent message and offers a fresh session after workspace expiry', async () => {
+  it('keeps the unsent message and retries the durable interaction after expiry', async () => {
     const expired = Object.assign(new Error('expired'), { response: { data: { error_code: 'assistant_workspace_expired' } } })
     mocks.workspaceMessage.mockRejectedValueOnce(expired).mockResolvedValueOnce(undefined)
     renderPage()
@@ -643,7 +643,7 @@ describe('AssistantWorkspace', () => {
     expect(screen.queryByText(/对话已过期/)).not.toBeInTheDocument()
     expect(screen.queryByText(/SSE connection failed/)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledTimes(2))
     expect(mocks.workspaceMessage).toHaveBeenLastCalledWith('workspace-1', 'profile', '继续完善画像')
   })
@@ -660,6 +660,20 @@ describe('AssistantWorkspace', () => {
     expect(screen.queryByText(/对话已过期/)).not.toBeInTheDocument()
     expect(screen.queryByText(/SSE connection failed/)).not.toBeInTheDocument()
     await waitFor(() => expect(screen.getAllByRole('textbox', { name: '发送消息' }).map((item) => (item as HTMLTextAreaElement).value)).toContain('保留这段需求'))
+  })
+
+  it('abandons the current interaction before starting over from recovery state', async () => {
+    mocks.streamEvents = [{ event: 'session.expired', id: 'event-session-expired', data: JSON.stringify({ status: 'expired' }) }]
+    renderPage()
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '这段内容需要保留到恢复' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await screen.findByRole('button', { name: '重新开始' })
+
+    fireEvent.click(screen.getByRole('button', { name: '重新开始' }))
+    await waitFor(() => expect(mocks.closeWorkspace).toHaveBeenCalledWith('workspace-1'))
+    expect(screen.queryByRole('button', { name: '重新开始' })).not.toBeInTheDocument()
   })
 
   it('restores the conversation and confirmation card after a page refresh', async () => {

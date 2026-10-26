@@ -1,4 +1,5 @@
 import { parseSSE, type SSEEvent } from '@/lib/sse'
+import { streamAssistantInteraction } from '@/lib/api/interactive'
 
 export interface InteractiveStreamEvent extends SSEEvent {
   event: string
@@ -6,9 +7,10 @@ export interface InteractiveStreamEvent extends SSEEvent {
 
 export interface InteractiveStreamOptions {
   lastEventId?: string
-  expectedSessionId?: string
+  generation?: number
   onConnected?: () => void
   onEvent?: (event: InteractiveStreamEvent) => void
+  onGenerationChanged?: (generation: number) => void
   endpoint?: string
 }
 
@@ -73,7 +75,6 @@ export async function* streamInteractiveSession(sessionId: string, token: string
           Authorization: `Bearer ${token}`,
           Accept: 'text/event-stream',
           ...(lastEventId ? { 'Last-Event-ID': lastEventId } : {}),
-          ...(options.expectedSessionId ? { 'X-Assistant-Session-ID': options.expectedSessionId } : {}),
         },
         signal,
       })
@@ -161,8 +162,7 @@ export async function* streamInteractiveSession(sessionId: string, token: string
 }
 
 export function streamAssistantWorkspace(workspaceId: string, token: string, signal?: AbortSignal, options: Omit<InteractiveStreamOptions, 'endpoint'> = {}) {
-  return streamInteractiveSession(workspaceId, token, signal, {
-    ...options,
-    endpoint: `/api/v1/assistant/workspaces/${encodeURIComponent(workspaceId)}/events`,
-  })
+  return (async function* () {
+    for await (const event of streamAssistantInteraction(workspaceId, token, signal, options)) yield event as InteractiveStreamEvent
+  })()
 }

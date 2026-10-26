@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { streamInteractiveSession } from './interactive-events'
+import { streamAssistantWorkspace, streamInteractiveSession } from './interactive-events'
 
 function response(body: string) {
   return new Response(body, { headers: { 'Content-Type': 'text/event-stream' } })
@@ -154,5 +154,34 @@ describe('streamInteractiveSession', () => {
     expect(fetchMock).toHaveBeenCalledTimes(7)
     controller.abort()
     await nextEvent.catch(() => undefined)
+  })
+})
+
+describe('streamAssistantWorkspace', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('always uses the interaction event stream even when a stale session hint is supplied', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response('event:session.closed\ndata:{}\n\n'))
+    const stream = streamAssistantWorkspace('interaction-1', 'token', undefined, { expectedSessionId: 'legacy-session' } as never)
+
+    await expect(stream.next()).resolves.toMatchObject({ value: { event: 'session.closed' }, done: false })
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/assistant/interactions/interaction-1/events', expect.anything())
+  })
+
+  it('reopens an interaction stream without the stale cursor after an event gap', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response('event:assistant.message\nid:7\ndata:{"text":"已收到"}\n\n'))
+      .mockResolvedValueOnce(response('event:assistant.message\nid:9\ndata:{"text":"跳过了一个事件"}\n\n'))
+      .mockResolvedValueOnce(response('event:assistant.message\nid:8\ndata:{"text":"补齐"}\n\nevent:assistant.message\nid:9\ndata:{"text":"继续"}\n\n'))
+    const stream = streamAssistantWorkspace('interaction-1', 'token')
+
+    await expect(stream.next()).resolves.toMatchObject({ value: { id: '7' }, done: false })
+    const nextEvent = stream.next()
+    await vi.advanceTimersByTimeAsync(250)
+    await expect(nextEvent).resolves.toMatchObject({ value: { id: '8' }, done: false })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/v1/assistant/interactions/interaction-1/events', expect.objectContaining({
+      headers: { Authorization: 'Bearer token', Accept: 'text/event-stream' },
+    }))
   })
 })

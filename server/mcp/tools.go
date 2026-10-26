@@ -62,6 +62,7 @@ type Services struct {
 	TaskImageOperationsSvc TaskImageOperations
 	TaskVideoOperationsSvc TaskVideoAnalyzer
 	InteractiveSvc         *service.InteractiveService
+	InteractionSvc         *service.AssistantInteractionService
 	SearchSvc              *service.SearchService
 	FetchSvc               *service.FetchService
 	ImageSearchSvc         *service.ImageSearchService

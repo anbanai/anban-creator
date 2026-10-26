@@ -782,6 +782,7 @@ func main() {
 			planHandler.SetRepository(repo)
 		}
 	}
+	var assistantInteractionFactory service.RuntimeFactory
 	interactiveSvc := service.NewInteractiveService(repo)
 	if projectSvc != nil {
 		interactiveSvc.SetProjectService(projectSvc)
@@ -793,6 +794,7 @@ func main() {
 			ServerInstanceID: cfg.Dsh.ServerInstanceID, Provider: route.Provider, API: route.API,
 			BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL,
 		}
+		assistantInteractionFactory = dshFactory
 		runtimeReady := true
 		if err := dshFactory.CleanupOrphans(context.Background()); err != nil {
 			log.Warn().Err(err).Msg("failed to clean orphaned interactive DSH containers")
@@ -825,6 +827,7 @@ func main() {
 			ServerInstanceID: cfg.Dsh.ServerInstanceID, Provider: route.Provider, API: route.API,
 			BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL, Logger: log,
 		}
+		assistantInteractionFactory = dshFactory
 		runtimeReady := true
 		if err := dshFactory.CleanupOrphans(context.Background()); err != nil {
 			log.Warn().Err(err).Msg("failed to clean orphaned interactive DSH jobs")
@@ -844,7 +847,7 @@ func main() {
 		interactiveSvc.SetEnabled(runtimeReady)
 	} else if cfg.Dsh.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Dsh.Executor), "process") && strings.TrimSpace(cfg.Dsh.BridgeCommand) != "" {
 		route := cfg.Dsh.Routes[cfg.Dsh.Route]
-		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, service.ExecRuntimeFactory{
+		execFactory := service.ExecRuntimeFactory{
 			Command:  cfg.Dsh.BridgeCommand,
 			Args:     cfg.Dsh.BridgeArgs,
 			Dir:      cfg.Dsh.BridgeDir,
@@ -855,7 +858,9 @@ func main() {
 			APIKey:   route.APIKey,
 			Model:    route.Model,
 			MCPURL:   cfg.Dsh.MCPURL,
-		})
+		}
+		assistantInteractionFactory = execFactory
+		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, execFactory)
 		if projectSvc != nil {
 			interactiveSvc.SetProjectService(projectSvc)
 		}
@@ -894,6 +899,8 @@ func main() {
 	}
 
 	// 14.1. Create MCP handler (using official MCP Go SDK).
+	assistantInteractionSvc := service.NewAssistantInteractionService(repo, assistantInteractionFactory, nil)
+	assistantInteractionSvc.SetTaskService(taskSvc)
 	var mcpHandler http.Handler
 	if projectSvc != nil && taskSvc != nil && planSvc != nil {
 		// Create AI operation services for MCP tools.
@@ -968,6 +975,7 @@ func main() {
 				UnderstandingModel:    cfg.VideoUnderstanding.Model,
 			}, log),
 			InteractiveSvc: interactiveSvc,
+			InteractionSvc: assistantInteractionSvc,
 			SearchSvc:      searchSvc,
 			FetchSvc:       fetchSvc,
 			ImageSearchSvc: imageSearchSvc,
@@ -975,7 +983,7 @@ func main() {
 		})
 		mcp.SetBillingServices(imageCapabilityResolver, cfg)
 		mcp.SetLogger(log)
-		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log, mcp.WithExecutionAuthentication(executionTokens, taskSvc), mcp.WithInteractiveAuthentication(interactiveSvc))
+		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log, mcp.WithExecutionAuthentication(executionTokens, taskSvc), mcp.WithInteractiveAuthentication(interactiveSvc), mcp.WithInteractionAuthentication(assistantInteractionSvc))
 		log.Info().
 			Bool("mcp_static_key_set", cfg.MCP.APIKey != "").
 			Bool("image_tools", imageSvc != nil).
@@ -986,7 +994,7 @@ func main() {
 			Bool("publishing_tools", publishingSvc != nil).
 			Msg("MCP handler initialized with tools (official SDK)")
 	} else {
-		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log, mcp.WithExecutionAuthentication(executionTokens, taskSvc), mcp.WithInteractiveAuthentication(interactiveSvc))
+		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log, mcp.WithExecutionAuthentication(executionTokens, taskSvc), mcp.WithInteractiveAuthentication(interactiveSvc), mcp.WithInteractionAuthentication(assistantInteractionSvc))
 		log.Info().Msg("MCP handler initialized (no tools, services unavailable)")
 	}
 
@@ -1040,6 +1048,9 @@ func main() {
 		cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
 		defer cleanupCancel()
 		go startPeriodicArtifactCleanup(cleanupCtx, taskSvc, posterSvc, log)
+		if assistantInteractionSvc != nil {
+			go startAssistantInteractionCleanup(cleanupCtx, assistantInteractionSvc, log)
+		}
 	}
 
 	if repo != nil && store != nil {
@@ -1064,6 +1075,7 @@ func main() {
 
 	interactiveHandler := handler.NewInteractiveHandler(interactiveSvc)
 	assistantHandler := handler.NewAssistantHandler(interactiveSvc, taskSvc, repo)
+	assistantHandler.SetInteractionService(assistantInteractionSvc)
 
 	// 16. Build Services struct.
 	svcs := &router.Services{
@@ -1941,6 +1953,35 @@ func startPeriodicArtifactCleanup(ctx context.Context, taskSvc *service.TaskServ
 			return
 		case <-ticker.C:
 			cleanup()
+		}
+	}
+}
+
+func startAssistantInteractionCleanup(ctx context.Context, interactions *service.AssistantInteractionService, log *zerolog.Logger) {
+	if interactions == nil {
+		return
+	}
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	run := func() {
+		result, err := interactions.CleanupExpired(ctx, time.Now().UTC())
+		if err != nil {
+			if ctx.Err() == nil {
+				log.Error().Err(err).Msg("assistant interaction retention cleanup failed")
+			}
+			return
+		}
+		if result.Drafts > 0 || result.Events > 0 || result.Attempts > 0 {
+			log.Info().Int64("drafts", result.Drafts).Int64("events", result.Events).Int64("attempts", result.Attempts).Msg("assistant interaction retention cleanup completed")
+		}
+	}
+	run()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
 		}
 	}
 }

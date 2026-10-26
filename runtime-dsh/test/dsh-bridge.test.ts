@@ -14,6 +14,31 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 describe("DSH bridge protocol", () => {
+  test("refreshes interaction capability and filters stale generation events", async () => {
+    expect(parseInteractiveCommand(JSON.stringify({ method: "interaction/capability-refresh", params: { interaction_id: "i-1", generation: 7 } }))).toMatchObject({ method: "interaction/capability-refresh" });
+    const stale = mapHarnessNotification({ method: "session.status", params: { sessionId: "s", status: "running", generation: 6 } }, "s", { interaction_id: "i-1", generation: 7 });
+    expect(stale).toEqual([]);
+    const current = mapHarnessNotification({ method: "session.status", params: { sessionId: "s", status: "running", generation: 7 } }, "s", { interaction_id: "i-1", generation: 7 });
+    expect(current).toEqual([{ event: "session.status", data: { session_id: "s", status: "running", generation: 7 } }]);
+  });
+
+  test("normalizes session errors only for interaction-scoped notifications", () => {
+    const notification = { method: "session.event" as const, params: { sessionId: "s", generation: 2, event: { type: "tool/result", data: { message: { toolCallId: "c", isError: true, content: [{ type: "text", text: "interactive session not found" }] }, error: { code: "SESSION_NOT_FOUND" } } } } };
+    expect(mapHarnessNotification(notification, "s", { interaction_id: "i-1", generation: 2 })[0]).toMatchObject({ data: { generation: 2, code: "assistant_interaction_restart_required", message: "the interaction can be restored" } });
+  });
+
+  test("accepts capability refresh without recreating the transport client", async () => {
+    const bridge = new DshBridge(() => undefined, () => ({
+      start: () => undefined,
+      initialize: async () => ({ capabilities: { sessionStart: true, sessionAnswer: true } }),
+      request: async () => ({}),
+      subscribeSessionTree: () => ({ next: async () => new Promise<never>(() => undefined), close: () => undefined }),
+      close: async () => undefined,
+    }), "root");
+    await expect(bridge.command({ method: "interaction/capability-refresh", params: { interaction_id: "i-1", generation: 8 } })).resolves.toEqual({ interaction_id: "i-1", generation: 8 });
+    await bridge.dispose();
+  });
+
   test("forwards the runtime ready notification as the single ready event", () => {
     expect(mapHarnessNotification({
       method: "session.ready",

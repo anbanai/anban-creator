@@ -8,10 +8,11 @@ import (
 
 // Response is the standard JSON envelope for all API responses.
 type Response struct {
-	Code      int         `json:"code"`
-	Msg       string      `json:"msg"`
-	ErrorCode string      `json:"error_code,omitempty"`
-	Data      interface{} `json:"data,omitempty"`
+	Code             int         `json:"code"`
+	Msg              string      `json:"msg"`
+	ErrorCode        string      `json:"error_code,omitempty"`
+	AvailableActions []string    `json:"available_actions,omitempty"`
+	Data             interface{} `json:"data,omitempty"`
 }
 
 // Success returns a JSON response with code 0 and the given data.
