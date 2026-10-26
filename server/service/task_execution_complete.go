@@ -960,6 +960,7 @@ func (s *TaskService) finalizeArticlePublication(ctx context.Context, task *mode
 	coverImageURLs := make(map[string]struct{})
 	contentImageURLs := make(map[string]struct{})
 	coverMediaIDs := make(map[string]struct{})
+	coverMediaIDsByPath := make(map[string]map[string]struct{})
 	coverMediaIDsByURL := make(map[string]map[string]struct{})
 	for _, file := range files {
 		if file == nil || file.ExecutionID != execution.ID || file.TaskID != task.ID {
@@ -975,6 +976,10 @@ func (s *TaskService) finalizeArticlePublication(ctx context.Context, task *mode
 		if isCover {
 			if mediaID := strings.TrimSpace(file.MediaID); mediaID != "" {
 				coverMediaIDs[mediaID] = struct{}{}
+				if coverMediaIDsByPath[file.FilePath] == nil {
+					coverMediaIDsByPath[file.FilePath] = make(map[string]struct{})
+				}
+				coverMediaIDsByPath[file.FilePath][mediaID] = struct{}{}
 				if wechatURL != "" {
 					if coverMediaIDsByURL[wechatURL] == nil {
 						coverMediaIDsByURL[wechatURL] = make(map[string]struct{})
@@ -1098,7 +1103,11 @@ func (s *TaskService) finalizeArticlePublication(ctx context.Context, task *mode
 		return block("content_images_missing", "retry_visuals")
 	}
 	selectedCoverMediaIDs := coverMediaIDs
-	if len(imageSources) > 0 {
+	if wideCoverMediaIDs := coverMediaIDsByPath["output/cover.png"]; len(wideCoverMediaIDs) > 0 {
+		// The fixed dual-cover contract makes the wide variant the article
+		// thumbnail. Prefer it even when the HTML has no cover image slot.
+		selectedCoverMediaIDs = wideCoverMediaIDs
+	} else if len(imageSources) > 0 {
 		if _, heroIsCover := coverImageURLs[imageSources[0]]; heroIsCover {
 			selectedCoverMediaIDs = coverMediaIDsByURL[imageSources[0]]
 		}
