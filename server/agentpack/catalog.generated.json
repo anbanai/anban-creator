@@ -1301,7 +1301,7 @@
     },
     {
       "id": "creation-planner",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "kind": "managed",
       "display_name": "创作模式",
       "description": "通过持续对话澄清本次作品需求，并在用户确认后交给 Server 创建正式创作任务。",
@@ -1334,7 +1334,7 @@
         "interactive-creation-clarification"
       ],
       "ui": {},
-      "digest": "94fd634c9b3e57bc9e1af85635346650a503a59475efdd0da4d33b8da13e130c"
+      "digest": "04aaa0164a5eb71656012aa25cbf9b347d6975bbfffbb61b4a337a19ce44b381"
     },
     {
       "id": "feedback-analysis",
@@ -1626,7 +1626,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "c6d4d0e4b6b1b06a3b2f09dd2a485b7be0b82e38e1e7e995a02f32d57ae109d9"
+      "digest": "c2d4b5d92e2b53cd0c654346a98444b12c637f336d0b6e5c266160ca4caf4373"
     },
     {
       "id": "local-life",
@@ -2040,7 +2040,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "cbc4ef8ae6ae11331c1e32f6ef00182969e2f1f35a1b231a586ab934d872056f"
+      "digest": "9fd4719d42cd6b60f05d027363dd07d40beb32acbc29b6da18f851630066ff63"
     },
     {
       "id": "postmortem-review",
@@ -2082,7 +2082,7 @@
     {
       "id": "profile-analysis",
       "channel": "profile-analysis",
-      "version": "2.1.5",
+      "version": "2.1.6",
       "kind": "managed",
       "display_name": "账号画像分析",
       "description": "基于用户提供的公开资料和问答生成并提交六维项目账号画像。",
@@ -2386,11 +2386,11 @@
       "ui": {
         "renderer": "custom:profile-analysis"
       },
-      "digest": "7e99a3e4ac85f92a40e1a02b5663cb569776f68ca50e8b06b9c90489c98e5686"
+      "digest": "377ed343b18cd1fb65a6d3fcafbd81ecddb97c1df6c99d0a1270e914a002d0f5"
     },
     {
       "id": "project-creator",
-      "version": "1.0.6",
+      "version": "1.0.7",
       "kind": "managed",
       "display_name": "画像模式",
       "description": "通过中文对话判断 Anban 项目适配性，选择内容类型并创建或更新六维项目画像。",
@@ -2658,7 +2658,7 @@
       "ui": {
         "renderer": "custom:project-creator"
       },
-      "digest": "7f36d87caff7c670b4358847be2f3952087b10275ac17dce1bad83fb11c5b862"
+      "digest": "82221abcec6a3d8f2d1ffd0033f1979c6ec90c98ab7ae363d56aef005e9e1744"
     },
     {
       "id": "seednote",
@@ -2917,7 +2917,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "06ea6da600b7cd0941e769c4164ae8d1466cb9485ee7e2ec3ee512ea143333ca"
+      "digest": "a46a5d559e3f515325ae554d6b3bb1d0c18eeda6a7f45eaf8b8917cef25580bf"
     },
     {
       "id": "video-edit",
@@ -3071,7 +3071,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "72bc16067496811a332bbb1694990872fe9a2f8741dbb7ce7221f0d0f2fba242"
+      "digest": "e2b3965f2b66d9245376c9b99e93e7e4aa5253cdbfed0929e371f15b62189655"
     },
     {
       "id": "wechat-article",
@@ -3336,7 +3336,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "ecf6be049b290a8fcd8d344565ffbfddf6895f5196e2f83dc035eb5af07e52a9"
+      "digest": "4c7bf0d6c31b0233d43407e65170955d22609f545cd049a0c64238e1530517dd"
     },
     {
       "id": "wechat-picture",

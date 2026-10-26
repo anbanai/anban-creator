@@ -302,15 +302,10 @@ func projectProfileFor(project *model.Project) model.ProjectProfile {
 	return profile
 }
 
-// projectProfileForAgentContext exposes the currently applied project profile
-// to task bootstrap. Analysis may still be running, but the last applied
-// profile remains the active context until a successful atomic replacement.
+// projectProfileForAgentContext preserves saved dimensions and their provenance
+// for task bootstrap, including profiles still in draft or analysis.
 func projectProfileForAgentContext(project *model.Project) model.ProjectProfile {
-	profile := projectProfileFor(project)
-	if !profile.IsConfirmed() {
-		return model.NewProjectProfile()
-	}
-	return profile
+	return projectProfileFor(project)
 }
 
 func profileDimension(profile model.ProjectProfile, name string) model.ProfileDimension {

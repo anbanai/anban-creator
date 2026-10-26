@@ -1,13 +1,20 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, useLocation } from 'react-router-dom'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AssistantWorkspace from './AssistantWorkspace'
+import ProjectsPage from './ProjectsPage'
 import { createTestQueryClient } from '@/test/test-utils'
+import { mockProjects } from '@/test/mocks/handlers'
+import type { Project } from '@/types'
+import type { AssistantBootstrap } from '@/lib/api/assistant'
 
 const mocks = vi.hoisted(() => ({
   bootstrap: vi.fn(),
   projectsList: vi.fn(),
+  projectArchive: vi.fn(),
+  projectRestore: vi.fn(),
+  projectStats: vi.fn(),
   works: vi.fn(),
   createWorkspace: vi.fn(),
   workspaceMessage: vi.fn(),
@@ -34,7 +41,7 @@ vi.mock('@/lib/api', async () => {
       assistant: { ...actual.api.assistant, ...mocks },
       agentProfiles: { ...actual.api.agentProfiles, list: mocks.agentProfiles },
       imageCapabilities: { ...actual.api.imageCapabilities, list: mocks.imageCapabilities },
-      projects: { ...actual.api.projects, list: mocks.projectsList, platformConfigs: mocks.platformConfigs },
+      projects: { ...actual.api.projects, list: mocks.projectsList, platformConfigs: mocks.platformConfigs, archive: mocks.projectArchive, restore: mocks.projectRestore, stats: mocks.projectStats },
       tasks: { ...actual.api.tasks, get: mocks.taskGet, files: mocks.taskFiles },
     },
   }
@@ -65,9 +72,22 @@ function LocationProbe() {
   return <output data-testid="location">{location.pathname}{location.search}</output>
 }
 
-function renderPage(state?: Partial<{ modeId: 'profile' | 'creation' | 'review'; projectId: string; contentId: string; checkpointId: string; initialMessage: string }>) {
-  const queryClient = createTestQueryClient()
-  return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={[{ pathname: '/', state }]}><AssistantWorkspace /><LocationProbe /></MemoryRouter></QueryClientProvider>)
+function renderPage(state?: Partial<{ modeId: 'profile' | 'creation' | 'review'; projectId: string; contentId: string; checkpointId: string; initialMessage: string }>, queryClient = createTestQueryClient()) {
+  return { ...render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={[{ pathname: '/', state }]}><AssistantWorkspace /><LocationProbe /></MemoryRouter></QueryClientProvider>), queryClient }
+}
+
+function activePersona(id: string, name: string, overrides: Partial<Project> = {}): Project {
+  return { ...mockProjects[0], id, name, platform: 'wechat', image_ratio: '', status: 'active', ...overrides }
+}
+
+function setBootstrap(value: AssistantBootstrap) {
+  mocks.bootstrap.mockResolvedValue(value)
+  mocks.projectsList.mockResolvedValue(value.projects.map((project) => activePersona(project.id, project.name, { platform: project.platform as Project['platform'] })))
+}
+
+function emptyDimensions(): NonNullable<Project['profile']>['dimensions'] {
+  const dimension = { content: {}, sources: [], evidence: [], missing_fields: [] }
+  return { identity: dimension, style: dimension, audience: dimension, platforms: dimension, preferences: dimension, memory: dimension }
 }
 
 describe('AssistantWorkspace', () => {
@@ -80,7 +100,8 @@ describe('AssistantWorkspace', () => {
     mocks.streamEvents = []
     sessionStorage.clear()
     mocks.projectsList.mockResolvedValue([])
-    mocks.bootstrap.mockResolvedValue({
+    mocks.projectStats.mockResolvedValue({})
+    setBootstrap({
       defaultModeId: 'profile',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
@@ -104,6 +125,205 @@ describe('AssistantWorkspace', () => {
     mocks.agentProfiles.mockResolvedValue([{ id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-flash', description: '日常创作', min_tier: 'free', available: true }])
     mocks.imageCapabilities.mockResolvedValue({ tier: 'free', default_capability: 'standard', items: [{ key: 'standard', display_name: '标准图像', description: '适合日常配图', enabled: true, price_available: true, price_credits: 300 }] })
     mocks.platformConfigs.mockResolvedValue([{ id: 'wechat', supported_image_ratios: ['16:9', '1:1'] }])
+  })
+
+  const fivePersonas = [
+    activePersona('draft-ready', '已保存草稿', { profile: { schema_version: 1, status: 'draft', initialization_status: 'ready', version: 2, dimensions: emptyDimensions(), analysis_limits: [], follow_up_questions: [] } }),
+    activePersona('draft-empty', '空画像', { profile: undefined }),
+    activePersona('draft-zero', '未初始化画像', { profile: { schema_version: 1, status: 'draft', initialization_status: 'not_started', version: 0, dimensions: emptyDimensions(), analysis_limits: [], follow_up_questions: [] } }),
+    activePersona('confirmed', '已确认画像', { profile: { schema_version: 1, status: 'confirmed', initialization_status: 'ready', version: 1, dimensions: emptyDimensions(), analysis_limits: [], follow_up_questions: [] } }),
+    activePersona('missing-bootstrap', '新增人设'),
+  ]
+
+  function bootstrapFivePersonas() {
+    setBootstrap({ defaultModeId: 'creation', modes: [
+      { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
+      { id: 'creation', displayName: '创作模式', description: '制定计划', available: true },
+      { id: 'review', displayName: '复盘模式', description: '复盘作品', available: true },
+    ], projects: [
+      { id: 'confirmed', name: '旧名称', platform: 'seednote', profileRevision: 1, profileReady: true, works: [] },
+      { id: 'draft-zero', name: '未初始化画像', platform: 'wechat', profileRevision: 0, profileReady: false, works: [] },
+      { id: 'draft-empty', name: '空画像', platform: 'wechat', profileRevision: 0, profileReady: false, works: [] },
+      { id: 'draft-ready', name: '已保存草稿', platform: 'wechat', profileRevision: 2, profileReady: false, works: [] },
+      { id: 'archived', name: '已归档', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] },
+      { id: 'unauthorized', name: '无权访问', platform: 'seednote', profileRevision: 1, profileReady: true, works: [] },
+    ] })
+    mocks.projectsList.mockResolvedValue(fivePersonas)
+  }
+
+  it.each(fivePersonas.map(({ id, name }) => ({ id, name })))('selects and sends active persona $id regardless of profile readiness', async ({ id, name }) => {
+    bootstrapFivePersonas()
+    renderPage()
+
+    const rail = await screen.findByRole('region', { name: '首页人设选择' })
+    await waitFor(() => expect(within(rail).getByTestId('persona-rail-header')).toHaveTextContent('5 个可用人设'))
+    expect(within(rail).getAllByRole('button', { name: /^选择人设：/ }).map((button) => button.getAttribute('aria-label'))).toEqual([
+      '选择人设：已保存草稿', '选择人设：空画像', '选择人设：未初始化画像', '选择人设：已确认画像', '选择人设：新增人设',
+    ])
+    expect(within(rail).getByRole('button', { name: '选择人设：已保存草稿' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(within(rail).getByRole('button', { name: `选择人设：${name}` }))
+    expect(within(screen.getByRole('region', { name: '当前人设' })).getByRole('heading')).toHaveTextContent(name)
+    expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent(name)
+    expect(within(rail).getByRole('button', { name: `选择人设：${name}` })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'creation', project_id: id }, expect.any(String)))
+    expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '开始创作\n\n创作类型：wechat-article')
+    expect(mocks.projectsList).toHaveBeenCalledWith({ status: 'active' })
+  })
+
+  it('uses an active persona when every bootstrap profile is unready', async () => {
+    bootstrapFivePersonas()
+    const bootstrap: AssistantBootstrap = await mocks.bootstrap()
+    setBootstrap({ ...bootstrap, defaultModeId: 'profile', projects: bootstrap.projects.filter((project) => !project.profileReady) })
+    mocks.projectsList.mockResolvedValue([fivePersonas[0]])
+    renderPage()
+    expect(await screen.findByRole('button', { name: '选择人设：已保存草稿' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('当前模式：创作模式')
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
+  })
+
+  it.each(['pending', 'failed'] as const)('does not admit bootstrap-only personas while the active list is $0', async (status) => {
+    bootstrapFivePersonas()
+    mocks.projectsList.mockImplementation(() => status === 'pending' ? new Promise(() => {}) : Promise.reject(new Error('list failed')))
+    renderPage({ modeId: 'creation', projectId: 'confirmed' })
+    await screen.findByRole('region', { name: '首页人设选择' })
+    if (status === 'failed') expect(await screen.findByRole('alert')).toHaveTextContent('人设暂时无法加载')
+    expect(screen.queryByRole('button', { name: /^选择人设：/ })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '不能发送' } })
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+    expect(mocks.createWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('removes a stale selection after the active list refreshes', async () => {
+    bootstrapFivePersonas()
+    const { queryClient } = renderPage({ modeId: 'profile', projectId: 'confirmed' })
+    await screen.findByRole('button', { name: '选择人设：已确认画像' })
+    mocks.projectsList.mockResolvedValue([fivePersonas[0], fivePersonas[1]])
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: ['projects'] }) })
+    expect(screen.queryByRole('button', { name: '选择人设：已确认画像' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('assistant-context-bar')).not.toHaveTextContent('已确认画像')
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '不要更新归档人设' } })
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    expect(mocks.createWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('reconciles cached creation prerequisites with active-list archive and restore refreshes', async () => {
+    bootstrapFivePersonas()
+    const bootstrap = await mocks.bootstrap()
+    setBootstrap({ ...bootstrap, modes: bootstrap.modes.map((mode: AssistantBootstrap['modes'][number]) => mode.id === 'creation' ? { ...mode, available: false, disabledReason: '先创建一个人设，之后即可澄清创作需求' } : mode) })
+    mocks.projectsList.mockResolvedValue([])
+    const { queryClient } = renderPage({ modeId: 'creation' })
+    await screen.findByRole('button', { name: '创建新人设' })
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+    mocks.projectsList.mockResolvedValue([fivePersonas[0]])
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: ['projects'] }) })
+    fireEvent.click(screen.getByRole('button', { name: '选择人设：已保存草稿' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '恢复后创作' } })
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
+    mocks.projectsList.mockResolvedValue([])
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: ['projects'] }) })
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled())
+    expect(screen.queryByRole('button', { name: '选择人设：已保存草稿' })).not.toBeInTheDocument()
+  })
+
+  it('refreshes homepage membership after archiving and restoring on the personas page', async () => {
+    bootstrapFivePersonas()
+    let archived = false
+    mocks.projectsList.mockImplementation(async ({ status }: { status: string }) => status === 'archived'
+      ? archived ? [{ ...fivePersonas[0], status: 'archived' }] : []
+      : archived ? [] : [fivePersonas[0]])
+    mocks.projectArchive.mockImplementation(async () => { archived = true })
+    mocks.projectRestore.mockImplementation(async () => { archived = false })
+    const queryClient = createTestQueryClient()
+    queryClient.setDefaultOptions({ queries: { retry: false, gcTime: Infinity, staleTime: 30_000 } })
+    render(<QueryClientProvider client={queryClient}><MemoryRouter><nav><Link to="/">返回首页</Link><Link to="/projects">管理人设</Link></nav><Routes><Route path="/" element={<AssistantWorkspace />} /><Route path="/projects" element={<ProjectsPage />} /></Routes></MemoryRouter></QueryClientProvider>)
+
+    await screen.findByRole('button', { name: '选择人设：已保存草稿' })
+    fireEvent.click(screen.getByRole('link', { name: '管理人设' }))
+    fireEvent.click(await screen.findByRole('button', { name: '归档人设：已保存草稿' }))
+    await waitFor(() => expect(mocks.projectArchive).toHaveBeenCalledWith('draft-ready'))
+    fireEvent.click(screen.getByRole('link', { name: '返回首页' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: '选择人设：已保存草稿' })).not.toBeInTheDocument())
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '已归档不能发送' } })
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('link', { name: '管理人设' }))
+    fireEvent.click(await screen.findByRole('button', { name: '已归档' }))
+    fireEvent.click(await screen.findByRole('button', { name: '取消归档人设：已保存草稿' }))
+    await waitFor(() => expect(mocks.projectRestore).toHaveBeenCalledWith('draft-ready'))
+    fireEvent.click(screen.getByRole('link', { name: '返回首页' }))
+    expect(await screen.findByRole('button', { name: '选择人设：已保存草稿' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '恢复后继续创作' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'creation', project_id: 'draft-ready' }, expect.any(String)))
+    expect(mocks.bootstrap).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the existing workspace locked to its persona when the active list changes', async () => {
+    bootstrapFivePersonas()
+    sessionStorage.setItem('anban:assistant-workspace', JSON.stringify({
+      workspace: { id: 'locked-workspace', mode_id: 'creation', project_id: 'draft-ready', session_id: 'locked-session', sessions: { creation: 'locked-session' }, runtime_status: 'ready', expires_at: '' },
+      mode: 'creation', projectId: 'draft-ready',
+    }))
+    mocks.projectsList.mockResolvedValue([fivePersonas[3]])
+    renderPage()
+    await waitFor(() => expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('已保存草稿'))
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '继续当前对话' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('locked-workspace', 'creation', '继续当前对话\n\n创作类型：wechat-article'))
+    expect(mocks.createWorkspace).not.toHaveBeenCalled()
+    expect(mocks.switchWorkspaceMode).not.toHaveBeenCalled()
+  })
+
+  it('starts creation for a newly saved persona when cached bootstrap still describes an empty homepage', async () => {
+    setBootstrap({ defaultModeId: 'profile', modes: [
+      { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
+      { id: 'creation', displayName: '创作模式', description: '制定计划', available: false, disabledReason: '先创建一个人设，之后即可澄清创作需求' },
+    ], projects: [] })
+    mocks.projectsList.mockResolvedValue([fivePersonas[0]])
+    renderPage()
+    await screen.findByRole('button', { name: '选择人设：已保存草稿' })
+    await waitFor(() => expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('当前模式：创作模式'))
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '使用新增人设' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'creation', project_id: 'draft-ready' }, expect.any(String)))
+  })
+
+  it('can adjust a saved unready persona after starting a new profile', async () => {
+    bootstrapFivePersonas()
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: '创建新人设' }))
+    expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('当前模式：人设模式')
+    fireEvent.click(screen.getByRole('button', { name: '调整人设：已保存草稿' }))
+    expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('当前模式：人设模式')
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '更新已保存内容' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'profile', project_id: 'draft-ready' }, expect.any(String)))
+  })
+
+  it.each(['membership changes', 'failed refresh recovers'] as const)('keeps explicit profile adjustment when the active list $0', async (refresh) => {
+    bootstrapFivePersonas()
+    const { queryClient } = renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: '调整人设：已保存草稿' }))
+    const composer = screen.getByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '调整人设的表达风格' } })
+    if (refresh === 'failed refresh recovers') {
+      mocks.projectsList.mockRejectedValue(new Error('refresh failed'))
+      await act(async () => { await queryClient.invalidateQueries({ queryKey: ['projects'] }) })
+      expect(await screen.findByRole('alert')).toHaveTextContent('人设暂时无法加载')
+      expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+    }
+    mocks.projectsList.mockResolvedValue([fivePersonas[0], fivePersonas[1]])
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: ['projects'] }) })
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled())
+    expect(composer).toHaveValue('调整人设的表达风格')
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'profile', project_id: 'draft-ready' }, expect.any(String)))
+    expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'profile', '调整人设的表达风格')
   })
 
   it('allows drafting while bootstrap is pending and enables sending when it is ready', async () => {
@@ -152,18 +372,18 @@ describe('AssistantWorkspace', () => {
   })
 
   it('keeps creation unavailable until a persona exists and offers the create card', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'profile',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
-        { id: 'creation', displayName: '创作模式', description: '制定计划', available: false, disabledReason: '先完成人设初始化，之后即可澄清创作需求' },
-        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: false, disabledReason: '先完成人设初始化并完成一件作品，之后即可复盘' },
+        { id: 'creation', displayName: '创作模式', description: '制定计划', available: false, disabledReason: '先创建一个人设，之后即可澄清创作需求' },
+        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: false, disabledReason: '先创建一个人设并完成一件作品，之后即可复盘' },
       ],
       projects: [],
     })
     renderPage({ modeId: 'creation' })
 
-    expect(await screen.findByText('先完成人设初始化，之后即可澄清创作需求')).toHaveAttribute('role', 'status')
+    expect(await screen.findByText('先创建一个人设，之后即可澄清创作需求')).toHaveAttribute('role', 'status')
     expect(screen.getByRole('button', { name: '创建新人设' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '创作模式' })).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
@@ -172,18 +392,18 @@ describe('AssistantWorkspace', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '创建新人设' }))
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
-    expect(screen.queryByText('先完成人设初始化，之后即可澄清创作需求')).not.toBeInTheDocument()
+    expect(screen.queryByText('先创建一个人设，之后即可澄清创作需求')).not.toBeInTheDocument()
   })
 
   it('keeps modes disabled when the assistant runtime is unavailable', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'profile',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: false, disabledReason: '助手运行环境暂不可用，请稍后重试' },
         { id: 'creation', displayName: '创作模式', description: '制定计划', available: false, disabledReason: '助手运行环境暂不可用，请稍后重试' },
         { id: 'review', displayName: '复盘模式', description: '复盘作品', available: false, disabledReason: '助手运行环境暂不可用，请稍后重试' },
       ],
-      projects: [],
+      projects: [{ id: 'active-persona', name: '可用人设', platform: 'wechat', profileRevision: 0, profileReady: false, works: [] }],
     })
     renderPage({ modeId: 'creation' })
 
@@ -192,8 +412,8 @@ describe('AssistantWorkspace', () => {
     expect(screen.queryByRole('button', { name: '创作模式' })).not.toBeInTheDocument()
   })
 
-  it('selects the first ready persona by default for creation', async () => {
-    mocks.bootstrap.mockResolvedValue({
+  it('selects the first active persona by default for creation', async () => {
+    setBootstrap({
       defaultModeId: 'creation',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
@@ -212,7 +432,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('does not append the redundant seednote creation type to the message', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'creation',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
@@ -233,7 +453,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('uses the selected persona avatar for user messages', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'creation',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
@@ -253,7 +473,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('blocks creation when the selected persona has no supported creation type', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'creation',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
@@ -273,7 +493,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('only exposes creation parameters in creation mode', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'profile',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
@@ -282,14 +502,14 @@ describe('AssistantWorkspace', () => {
       ],
       projects: [{ id: 'project-1', name: '我的人设', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
     })
-    renderPage()
+    renderPage({ modeId: 'profile' })
 
     await screen.findByRole('button', { name: '选择人设：我的人设' })
     expect(screen.queryByRole('button', { name: /^选择参数：/ })).not.toBeInTheDocument()
   })
 
   it('only exposes attachment upload in creation mode', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'profile',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
@@ -298,14 +518,14 @@ describe('AssistantWorkspace', () => {
       ],
       projects: [{ id: 'project-1', name: '我的人设', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
     })
-    renderPage()
+    renderPage({ modeId: 'profile' })
 
     await screen.findByRole('button', { name: '选择人设：我的人设' })
     expect(screen.queryByLabelText('选择附件文件')).not.toBeInTheDocument()
   })
 
   it('blocks input until a work is selected for review', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'review',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
@@ -398,7 +618,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('keeps the creation type selector out of the composer', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'creation',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
@@ -415,7 +635,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('places model and parameter context in the composer without a persona picker', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'creation',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
@@ -453,7 +673,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('does not expose a creation type selector for WeChat personas', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'creation',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
@@ -515,6 +735,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('configures and commits video-edit defaults from a profile draft', async () => {
+    mocks.projectsList.mockResolvedValue([activePersona('project-new', '新画像', { platform: 'video-edit' })])
     mocks.bootstrap.mockReset()
     mocks.bootstrap
       .mockResolvedValueOnce({ defaultModeId: 'profile', modes: [
@@ -544,6 +765,7 @@ describe('AssistantWorkspace', () => {
     })))
     expect(screen.queryByRole('combobox', { name: '默认质量档位' })).not.toBeInTheDocument()
     expect(mocks.bootstrap).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(mocks.projectsList).toHaveBeenCalledTimes(2))
   })
 
   it('reuses the workspace creation idempotency key after a failed response', async () => {
@@ -614,8 +836,8 @@ describe('AssistantWorkspace', () => {
     secondRender.unmount()
   })
 
-  it('renders the homepage persona rail with a create card and selects the first ready persona', async () => {
-    mocks.bootstrap.mockResolvedValue({
+  it('renders the homepage persona rail with a create card and selects the first active persona', async () => {
+    setBootstrap({
       defaultModeId: 'creation',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
@@ -634,8 +856,6 @@ describe('AssistantWorkspace', () => {
     renderPage()
 
     const rail = await screen.findByRole('region', { name: '首页人设选择' })
-    expect(screen.getByRole('region', { name: '当前人设' })).toHaveClass('flex-1', 'justify-end')
-    expect(rail).toHaveClass('mt-auto')
     const railHeader = within(rail).getByTestId('persona-rail-header')
     expect(railHeader).toHaveTextContent('选择人设2 个可用人设')
     expect(railHeader.firstElementChild).toHaveTextContent('选择人设')
@@ -651,7 +871,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('uses a platform introduction when a persona has no custom description', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'creation',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
@@ -705,7 +925,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('exposes persona actions for works and profile updates', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'creation',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
@@ -722,8 +942,8 @@ describe('AssistantWorkspace', () => {
     expect(await screen.findByTestId('location')).toHaveTextContent('/tasks?project_id=project-1')
   })
 
-  it('shows the mysterious-person guidance when no ready persona exists', async () => {
-    mocks.bootstrap.mockResolvedValue({
+  it('shows the mysterious-person guidance when no active persona exists', async () => {
+    setBootstrap({
       defaultModeId: 'profile',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
@@ -740,7 +960,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('collects review context before the workspace starts', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'profile',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
@@ -762,7 +982,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('previews the selected video-edit work and exposes its delivered edit artifacts in review mode', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'profile',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
@@ -785,7 +1005,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('freezes selected video-edit type, uploaded assets, brief, and preferences into the creation checkpoint', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'creation',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
@@ -822,7 +1042,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('shows a creation confirmation card and opens the created task after approval', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'creation',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
@@ -872,7 +1092,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('uses the selected persona image ratio as the creation default', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'creation',
       modes: [{ id: 'creation', displayName: '创作模式', description: '制定计划', available: true }],
       projects: [{ id: 'project-ratio', name: '画幅人设', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
@@ -895,7 +1115,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('disables the composer while a creation confirmation is committing', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'creation',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
@@ -930,7 +1150,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('keeps uploaded composer attachments in the creation confirmation plan', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'creation',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
@@ -948,6 +1168,7 @@ describe('AssistantWorkspace', () => {
     uploadToOSSMock.mockResolvedValue({ uploadSessionId: 'upload-session-1', uploadId: 'upload-session-1', key: 'staging/brief.pdf', previewUrl: '', publicUrl: '', contentType: 'application/pdf', size: 16 })
     renderPage({ modeId: 'creation', projectId: 'project-1' })
 
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled())
     fireEvent.change(await screen.findByLabelText('选择附件文件'), { target: { files: [new File(['brief'], 'brief.pdf', { type: 'application/pdf' })] } })
     await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'ai_entry_attachment' })))
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '按照资料完成文章' } })
@@ -968,7 +1189,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('keeps persona context in the composer header without a profile-mode entry action', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'profile',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
@@ -992,7 +1213,7 @@ describe('AssistantWorkspace', () => {
   })
 
   it('synchronizes an active review persona change after selecting a work', async () => {
-    mocks.bootstrap.mockResolvedValue({
+    setBootstrap({
       defaultModeId: 'review',
       modes: [
         { id: 'profile', displayName: '画像模式', description: '建立画像', available: true },
