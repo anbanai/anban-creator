@@ -249,6 +249,7 @@ export default function AssistantWorkspace() {
   const workspaceResetVersion = useRef(0)
   const workspaceCreateKey = useRef<string | null>(null)
   const sendInFlight = useRef(false)
+  const modeChosenByUser = useRef(false)
   const imageRatioContextKey = useRef<string | null>(null)
   const conversationOrder = useRef<Record<string, number>>({})
 
@@ -397,7 +398,7 @@ export default function AssistantWorkspace() {
   }, [bootstrap, persisted?.workspace?.mode_id, projectId, completeProjects, routeState.modeId, newProfile, workspace])
 
   useEffect(() => {
-    if (!bootstrap || routeState.modeId || persisted?.workspace?.mode_id || workspace || newProfile || !isMode(bootstrap.defaultModeId)) return
+    if (!bootstrap || modeChosenByUser.current || routeState.modeId || persisted?.workspace?.mode_id || workspace || newProfile || !isMode(bootstrap.defaultModeId)) return
     setMode(bootstrap.defaultModeId === 'profile' && completeProjects.length > 0 ? 'creation' : bootstrap.defaultModeId)
   }, [bootstrap, completeProjects.length, persisted?.workspace?.mode_id, routeState.modeId, workspace])
 
@@ -616,6 +617,7 @@ export default function AssistantWorkspace() {
       setError(candidate.disabledReason)
       return
     }
+    modeChosenByUser.current = true
     setError(null)
     if (conversationPhase === 'setup') {
       setMode(nextMode)
@@ -838,6 +840,7 @@ export default function AssistantWorkspace() {
     />
   ) : null
   const selectModePrerequisiteAction = () => {
+    modeChosenByUser.current = true
     setError(null)
     setMode(modePrerequisiteAction.mode)
     setPendingMode(null)
@@ -862,6 +865,7 @@ export default function AssistantWorkspace() {
 
   const startNewProfile = async () => {
     if (switching || committing || sending || responding) return
+    modeChosenByUser.current = true
     setNewProfile(true)
     setProjectId('')
     setContentId('')
@@ -895,6 +899,7 @@ export default function AssistantWorkspace() {
   }
 
   const editPersona = (nextProjectId: string) => {
+    modeChosenByUser.current = true
     setNewProfile(false)
     setError(null)
     setContentId('')

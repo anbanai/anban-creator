@@ -305,6 +305,27 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'profile', project_id: 'draft-ready' }, expect.any(String)))
   })
 
+  it.each(['membership changes', 'failed refresh recovers'] as const)('keeps explicit profile adjustment when the active list $0', async (refresh) => {
+    bootstrapFivePersonas()
+    const { queryClient } = renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: '调整人设：已保存草稿' }))
+    const composer = screen.getByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '调整人设的表达风格' } })
+    if (refresh === 'failed refresh recovers') {
+      mocks.projectsList.mockRejectedValue(new Error('refresh failed'))
+      await act(async () => { await queryClient.invalidateQueries({ queryKey: ['projects'] }) })
+      expect(await screen.findByRole('alert')).toHaveTextContent('人设暂时无法加载')
+      expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+    }
+    mocks.projectsList.mockResolvedValue([fivePersonas[0], fivePersonas[1]])
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: ['projects'] }) })
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled())
+    expect(composer).toHaveValue('调整人设的表达风格')
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'profile', project_id: 'draft-ready' }, expect.any(String)))
+    expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'profile', '调整人设的表达风格')
+  })
+
   it('allows drafting while bootstrap is pending and enables sending when it is ready', async () => {
     let resolveBootstrap!: (value: Awaited<ReturnType<typeof mocks.bootstrap>>) => void
     mocks.bootstrap.mockReturnValue(new Promise((resolve) => { resolveBootstrap = resolve }))
