@@ -79,7 +79,7 @@ func TestHarnessAutonomyAndFailureContracts(t *testing.T) {
 func TestProjectCreatorProfileRefreshPreservesScopeAndDirectionSemantics(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	creator := readArticleContractFile(t, filepath.Join(root, "harness/skills/project-creator-client-discovery/SKILL.md"))
-	for _, term := range []string{"差异更新", "不要重复询问新建流程里的首批内容方向", "不要无限期沿用", "携带所有未变更的已确认维度"} {
+	for _, term := range []string{"差异更新", "不要重复询问新建流程里的首批内容方向", "不要无限期沿用", "携带所有未变更的已保存维度"} {
 		if !strings.Contains(creator, term) {
 			t.Fatalf("Project Creator refresh contract missing %q", term)
 		}
