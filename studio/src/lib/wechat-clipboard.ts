@@ -78,7 +78,10 @@ async function prepareArticleHTML(source: string, files: TaskFile[], _fetchFile:
   const imageURLs = new Set<string>()
   for (const image of images) {
     const src = (image.getAttribute('src') || '').trim()
-    const file = files.find((candidate) => candidate.mime_type?.startsWith('image/') && [candidate.platform_image_url, candidate.wechat_url].some((reference) => sameTaskFileReference(src, reference)))
+    const file = files.find((candidate) => candidate.state === 'delivered'
+      && (candidate.role === 'image' || candidate.role === 'cover')
+      && candidate.mime_type?.startsWith('image/')
+      && [candidate.platform_image_url, candidate.wechat_url].some((reference) => sameTaskFileReference(src, reference)))
     if (!file) throw new Error(`找不到图片素材：${src || '图片缺少来源'}`)
     if (!/^https:\/\//i.test(src)) throw new Error('公众号正文图片必须使用公开 HTTPS 地址')
     imageURLs.add(src)

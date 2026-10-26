@@ -800,6 +800,9 @@ func TestArticleManagedRuntimeFailsClosedOnProjectResolutionAndMCPCalls(t *testi
 			`"resume_from":"project_resolution"`,
 			"必需 MCP 能力调用不可用或失败",
 			"article_mcp_call_failed",
+			"history_available=false",
+			"明确的历史不可用结果",
+			"不代表没有历史",
 			"调用成功但缺少可选语义配置",
 			"Agent 默认值",
 			"只有这种成功响应中的可选字段缺失",
@@ -814,7 +817,7 @@ func TestArticleManagedRuntimeFailsClosedOnProjectResolutionAndMCPCalls(t *testi
 			}
 		}
 		if strings.Contains(path, filepath.Join("agents", "wechat-article")) {
-			for _, required := range []string{"list_resources", "get_resource", "inspect_article"} {
+			for _, required := range []string{"list_resources", "get_resource", "inspect_article", "仅从", "无法核验该来源"} {
 				if !strings.Contains(normalizedBody, required) {
 					t.Fatalf("%s missing managed Article capability %q", path, required)
 				}
@@ -833,6 +836,28 @@ func TestArticleManagedRuntimeFailsClosedOnProjectResolutionAndMCPCalls(t *testi
 		} {
 			if strings.Contains(body, forbidden) {
 				t.Fatalf("%s still contains contradictory managed Article clause %q", path, forbidden)
+			}
+		}
+	}
+}
+
+func TestArticleResearchDistinguishesUnavailableHistoryFromEmptyHistory(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	for _, path := range []string{
+		filepath.Join(root, "harness", "skills", "article-research", "SKILL.md"),
+		filepath.Join(root, "harness", "dsh", "presets", "wechat-article", "skills", "article-research", "SKILL.md"),
+	} {
+		body := readArticleContractFile(t, path)
+		for _, required := range []string{
+			"history_available",
+			"successful empty result",
+			"explicit unavailable result",
+			"must not be treated as empty history",
+			"history MCP call itself returns an error",
+			"stop before topic selection",
+		} {
+			if !strings.Contains(body, required) {
+				t.Fatalf("%s missing history availability rule %q", path, required)
 			}
 		}
 	}

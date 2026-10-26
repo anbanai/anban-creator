@@ -2062,6 +2062,29 @@ func (h *TaskHandler) PreviewHTML(c fiber.Ctx) error {
 	return c.Send(htmlContent)
 }
 
+// ManualWechatPictureHTML returns the Server-rendered complete rich document
+// for a manual WeChat picture task. Automatic picture drafts never expose a
+// copy endpoint because their delivery is owned by the publication finalizer.
+func (h *TaskHandler) ManualWechatPictureHTML(c fiber.Ctx) error {
+	taskID, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
+	}
+	if _, err := h.verifyTaskOwnership(c, taskID); err != nil {
+		return nil
+	}
+	htmlBody, err := h.service.ManualWechatPictureHTML(c.Context(), taskID)
+	if err != nil {
+		if errors.Is(err, service.ErrManualWechatPictureCopyUnavailable) {
+			return ErrorWithCode(c, fiber.StatusConflict, "wechat_picture_copy_unavailable", "完整贴图交付暂不可复制，请检查图片交付状态")
+		}
+		h.logger.Error().Err(err).Str("task_id", taskID).Msg("render manual WeChat picture HTML failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to render complete picture content")
+	}
+	c.Set(fiber.HeaderContentType, "text/html; charset=utf-8")
+	return c.SendString(htmlBody)
+}
+
 // DownloadZip handles GET /api/v1/tasks/:id/files/zip.
 // It creates a ZIP archive of all task files and sends it as a download.
 func (h *TaskHandler) DownloadZip(c fiber.Ctx) error {

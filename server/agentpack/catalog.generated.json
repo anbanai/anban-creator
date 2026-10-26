@@ -3189,7 +3189,7 @@
       "id": "wechat-article",
       "channel": "wechat-article",
       "plan_task_kind": "content_generation",
-      "version": "2.0.13",
+      "version": "2.0.15",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到文章交付物的完整创作流程。",
@@ -3447,13 +3447,13 @@
           "funnel_stage"
         ]
       },
-      "digest": "accc0233e958d484b25875b6e4c2d7eeeb8e74d5a00c189b9c29548e22006a49"
+      "digest": "73635f9005c2e9422f02af625c60f10a2be3ac4fe0a2a42a687467a678ebc16f"
     },
     {
       "id": "wechat-picture",
       "channel": "wechat-picture",
       "plan_task_kind": "content_generation",
-      "version": "1.0.7",
+      "version": "1.0.8",
       "kind": "managed",
       "display_name": "微信公众号贴图",
       "description": "研究选题、编排图片消息并生成公众号 newspic 草稿交付包。",
@@ -3625,7 +3625,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "2b863859e1072c703db8ba8bbb8b5fd20cde89a555bd9809753577c470c8c517"
+      "digest": "854afd520e50c29aa0baf7240ec128597e70ebf251cfd0e8bb7c6423ab0613dc"
     },
     {
       "id": "whiteboard-animation",

@@ -17,6 +17,7 @@ vi.mock('@/lib/api', async () => {
         fetchPreviewHTML: vi.fn(),
         downloadFileBlob: vi.fn(),
         previewFileBlob: vi.fn(),
+        fetchManualWechatPictureHTML: vi.fn(),
       },
     },
   }
@@ -103,6 +104,26 @@ describe('FilePreviewGallery', () => {
     fireEvent.click(screen.getByRole('button', { name: /预览/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent('正文配图交付未通过')
     expect(screen.queryByRole('button', { name: '复制正文（含图片）' })).not.toBeInTheDocument()
+  })
+
+  it('offers one complete rich-copy action for manual WeChat pictures', async () => {
+    vi.mocked(api.tasks.previewFileBlob).mockResolvedValue(new Blob(['<p>贴图</p>'], { type: 'text/html' }))
+    vi.mocked(api.tasks.fetchManualWechatPictureHTML).mockResolvedValue('<h1>标题</h1><img src="https://creator.anbanai.com/api/v1/article-assets/picture-1">')
+    vi.stubGlobal('Image', class {
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      set src(_value: string) { queueMicrotask(() => this.onload?.()) }
+    })
+    const picture = fileWith({
+      file_name: 'content.html',
+      mime_type: 'text/html',
+      platform_image_url: 'https://creator.anbanai.com/api/v1/article-assets/picture-1',
+    })
+    render(<FilePreviewGallery files={[picture]} taskId="task-1" taskType="wechat-picture" manualPictureCopyAvailable />)
+    fireEvent.click(screen.getByRole('button', { name: '预览 content.html' }))
+    const copyButton = await screen.findByRole('button', { name: '复制图文内容' })
+    fireEvent.click(copyButton)
+    await waitFor(() => expect(api.tasks.fetchManualWechatPictureHTML).toHaveBeenCalledWith('task-1'))
   })
 
   it('uses the file preview endpoint for HTML files when the server provides preview_url', async () => {

@@ -54,6 +54,7 @@ var (
 )
 
 var articleBodyImagePathPattern = regexp.MustCompile(`^output/img_\d+\.(png|jpe?g|webp)$`)
+var pictureCopyImagePathPattern = regexp.MustCompile(`^output/image_\d+\.png$`)
 
 type UploadTaskImageRequest struct {
 	UserID, ExecutionID, ProjectID, TaskID, FilePath string
@@ -137,9 +138,25 @@ func wechatDeliveryDecision(task *model.Task) model.WechatDeliveryDecision {
 	}
 	decision := task.ProjectSnapshot.Data().WechatDelivery
 	if decision.Mode == "" && (task.Channel == model.ChannelArticle || task.Channel == model.ChannelWechatPicture || task.Type == model.TaskTypeWechatArticle || task.Type == model.TaskTypeWechatPicture) {
-		return model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeUserAssisted, ReasonCodes: []string{model.WechatDeliveryReasonCapabilityMissing}}
+		decision = model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeUserAssisted, ReasonCodes: []string{model.WechatDeliveryReasonCapabilityMissing}}
+	}
+	if pictureTaskDraftDisabled(task) {
+		decision.Mode = model.WechatDeliveryModeUserAssisted
+		decision.ReasonCodes = append(decision.ReasonCodes, model.WechatDeliveryReasonPictureDraftDisabled)
 	}
 	return decision
+}
+
+func pictureTaskDraftDisabled(task *model.Task) bool {
+	if task == nil || task.Type != model.TaskTypeWechatPicture || !taskUsesChannel(task, model.ChannelWechatPicture) {
+		return false
+	}
+	input := task.AgentInput.Data()
+	if input == nil {
+		return false
+	}
+	publish, ok := input["picture_publish_draft"].(bool)
+	return ok && !publish
 }
 
 func (s *TaskImageOperationsService) Upload(ctx context.Context, req UploadTaskImageRequest) (*UploadImageResult, error) {
@@ -175,8 +192,12 @@ func (s *TaskImageOperationsService) Upload(ctx context.Context, req UploadTaskI
 	}
 	var result *UploadImageResult
 	if decision.IsUserAssisted() {
-		if taskFile.Role != model.FileRoleImage || !articleBodyImagePathPattern.MatchString(filepath.ToSlash(taskFile.FilePath)) {
-			return nil, errors.New("only generated article body images can be published as platform assets")
+		isArticleBody := taskFile.Role == model.FileRoleImage && articleBodyImagePathPattern.MatchString(filepath.ToSlash(taskFile.FilePath))
+		isPictureImage := (taskFile.Role == model.FileRoleImage || taskFile.Role == model.FileRoleCover) &&
+			(pictureCopyImagePathPattern.MatchString(filepath.ToSlash(taskFile.FilePath)) ||
+				(taskFile.Role == model.FileRoleCover && strings.EqualFold(filepath.Base(taskFile.FilePath), "cover.png")))
+		if !isArticleBody && !isPictureImage {
+			return nil, errors.New("only generated article or picture delivery images can be published as public assets")
 		}
 		result, err = s.publishArticleImage(ctx, req.UserID, taskFile, filePath)
 	} else {

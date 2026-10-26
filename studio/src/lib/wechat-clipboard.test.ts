@@ -34,6 +34,14 @@ describe('WeChat clipboard', () => {
     expect(html).not.toContain('data:image')
   })
 
+  it('preserves every picture image in the provided order', async () => {
+    const second = { ...imageFile, id: 'img-2', file_name: 'second.png', platform_image_url: 'https://creator.anbanai.com/api/v1/article-assets/img-2' }
+    const firstHTML = `<h1>标题</h1><p>caption</p><img src="${imageFile.platform_image_url}"><img src="${second.platform_image_url}">`
+    const html = await prepareWechatArticleHTML(firstHTML, [imageFile, second], async () => new Blob())
+    expect(html.indexOf(imageFile.platform_image_url!)).toBeLessThan(html.indexOf(second.platform_image_url!))
+    expect((html.match(/<img\b/g) || [])).toHaveLength(2)
+  })
+
   it('rejects article images without a public HTTPS URL', async () => {
     const privateURLFile = { ...imageFile, platform_image_url: '/api/v1/tasks/task-1/files/img-1/preview' }
     await expect(prepareWechatArticleHTML('<img src="/api/v1/tasks/task-1/files/img-1/preview">', [privateURLFile], async () => new Blob())).rejects.toThrow('公开 HTTPS')
@@ -56,6 +64,23 @@ describe('WeChat clipboard', () => {
 
   it('requires a structured TaskFile reference for every image', async () => {
     await expect(prepareWechatArticleHTML('<img src="/guess.png">', [imageFile], async () => new Blob())).rejects.toThrow('找不到图片素材')
+  })
+
+  it('requires each image to reference a delivered TaskFile', async () => {
+    const pendingFile = { ...imageFile, state: 'retained' as const }
+    await expect(prepareWechatArticleHTML(`<img src="${imageFile.platform_image_url}">`, [pendingFile], async () => new Blob())).rejects.toThrow('找不到图片素材')
+  })
+
+  it('rejects copy when an image never finishes loading', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('Image', class {
+      set src(_value: string) {}
+    })
+    const prepared = prepareWechatArticleHTML(`<img src="${imageFile.platform_image_url}">`, [imageFile], async () => new Blob())
+    const rejected = expect(prepared).rejects.toThrow('加载超时')
+    await vi.advanceTimersByTimeAsync(15_000)
+    await rejected
+    vi.useRealTimers()
   })
 
   it('writes HTML and plain-text clipboard representations', async () => {
