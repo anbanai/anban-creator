@@ -110,3 +110,17 @@ type AssistantInteractionAttempt struct {
 }
 
 func (AssistantInteractionAttempt) TableName() string { return "assistant_interaction_attempts" }
+
+// AssistantInteractionLegacyMigration records one-time cutovers from the
+// former homepage session transport. It is intentionally separate from the
+// interaction lifecycle so a fresh AutoMigrate database has the same startup
+// schema as a database that applied the reviewed forward migration.
+type AssistantInteractionLegacyMigration struct {
+	LegacySessionID string    `gorm:"type:char(36);primaryKey" json:"-"`
+	MigrationKey    string    `gorm:"type:varchar(64);index;not null" json:"-"`
+	MigratedAt      time.Time `gorm:"not null" json:"-"`
+}
+
+func (AssistantInteractionLegacyMigration) TableName() string {
+	return "assistant_interaction_legacy_migrations"
+}

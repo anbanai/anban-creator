@@ -120,8 +120,13 @@ func main() {
 		if err := requireWechatAccountAnalyticsSchema(mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database schema is not ready for WeChat account analytics")
 		}
+<<<<<<< HEAD
 		if err := service.MigratePersistedTaskTypes(context.Background(), mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("failed to canonicalize persisted task types")
+		}
+		if err := requireAssistantInteractionSchema(mysqlDB); err != nil {
+			log.Fatal().Err(err).Msg("database schema is not ready for homepage assistant interactions")
+		}
 		}
 		if err := service.AssertExecutableIdentityReadiness(context.Background(), mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database executable identity is not ready")
@@ -1441,6 +1446,61 @@ func requireWechatAccountAnalyticsSchema(db *gorm.DB) error {
 		if !db.Migrator().HasColumn(item.model, item.column) {
 			return fmt.Errorf("existing database requires server/migrations/20261026_wechat_account_analytics_open_platform.sql before startup (missing %s.%s)", item.name, item.column)
 		}
+	}
+	return nil
+}
+
+// requireAssistantInteractionSchema prevents the homepage from starting with
+// only part of the Server-owned interaction boundary applied. AutoMigrate
+// still creates the five interaction tables for a fresh database, while an
+// existing deployment must run the reviewed forward migration because it also
+// records the legacy homepage-session cutover.
+func requireAssistantInteractionSchema(db *gorm.DB) error {
+	if db == nil {
+		return nil
+	}
+	required := []struct {
+		model   any
+		name    string
+		columns []string
+	}{
+		{&model.AssistantInteraction{}, "assistant_interactions", []string{"ID", "UserID", "ModeID", "Lifecycle", "Generation", "ExpiresAt", "LastActivityAt"}},
+		{&model.AssistantInteractionRuntime{}, "assistant_interaction_runtimes", []string{"ID", "InteractionID", "Generation", "Status", "TokenHash"}},
+		{&model.AssistantInteractionDraft{}, "assistant_interaction_drafts", []string{"ID", "InteractionID", "ModeID", "Revision", "Payload", "PayloadDigest", "Ready", "SourceGeneration", "ExpiresAt"}},
+		{&model.AssistantInteractionEvent{}, "assistant_interaction_events", []string{"ID", "InteractionID", "Generation", "Sequence", "Type", "Data", "CreatedAt"}},
+		{&model.AssistantInteractionAttempt{}, "assistant_interaction_attempts", []string{"ID", "InteractionID", "AttemptID", "Operation", "Generation", "PayloadDigest", "Status", "Result", "ErrorCode", "ExpiresAt"}},
+	}
+
+	hasInteractionTable := false
+	for _, item := range required {
+		if db.Migrator().HasTable(item.model) {
+			hasInteractionTable = true
+			break
+		}
+	}
+	hasLegacySessions := db.Migrator().HasTable(&model.AssistantSession{})
+	hasLegacyCutover := db.Migrator().HasTable("assistant_interaction_legacy_migrations")
+	if !hasInteractionTable && !hasLegacySessions && !hasLegacyCutover {
+		return nil
+	}
+	if hasLegacySessions && !hasLegacyCutover {
+		return fmt.Errorf("existing database requires server/migrations/20261026_assistant_interactions.sql before startup (homepage_interaction_cutover is missing)")
+	}
+	for _, item := range required {
+		if !db.Migrator().HasTable(item.model) {
+			return fmt.Errorf("existing database requires server/migrations/20261026_assistant_interactions.sql before startup (missing %s)", item.name)
+		}
+		for _, column := range item.columns {
+			if !db.Migrator().HasColumn(item.model, column) {
+				return fmt.Errorf("existing database requires server/migrations/20261026_assistant_interactions.sql before startup (missing %s.%s)", item.name, column)
+			}
+		}
+	}
+	legacyMigration := &model.AssistantInteractionLegacyMigration{}
+	if !db.Migrator().HasColumn(legacyMigration, "LegacySessionID") ||
+		!db.Migrator().HasColumn(legacyMigration, "MigrationKey") ||
+		!db.Migrator().HasColumn(legacyMigration, "MigratedAt") {
+		return fmt.Errorf("existing database requires server/migrations/20261026_assistant_interactions.sql before startup (homepage_interaction_cutover schema is incomplete)")
 	}
 	return nil
 }

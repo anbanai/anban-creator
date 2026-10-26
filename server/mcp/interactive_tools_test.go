@@ -52,6 +52,48 @@ func TestStageAssistantDraftUsesInteractionCapabilityAndReturnsDurableReceipt(t 
 	}
 }
 
+func TestStageAssistantDraftFillsInteractionCapabilityMetadata(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.AssistantInteraction{}, &model.AssistantInteractionRuntime{}, &model.AssistantInteractionDraft{}, &model.AssistantInteractionEvent{}, &model.AssistantInteractionAttempt{}); err != nil {
+		t.Fatal(err)
+	}
+	svc := service.NewAssistantInteractionService(repository.New(db), nil, nil)
+	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", service.AssistantInteractionInput{ModeID: service.AssistantModeCreation}, "create-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := svcs
+	svcs = &Services{InteractionSvc: svc}
+	t.Cleanup(func() { svcs = old })
+	request := interactiveMCPRequest(t, map[string]any{
+		"payload": map[string]any{"plan": map[string]any{"goal": "write"}},
+		"ready":   true,
+	})
+	ctx := withMCPInteractionCapabilityMode(context.Background(), "user-1", snapshot.ID, snapshot.Generation, service.AssistantModeCreation)
+	first, err := stageAssistantDraftHandler(ctx, request)
+	if err != nil || first == nil || first.IsError {
+		t.Fatalf("implicit metadata stage = %#v, %v", first, err)
+	}
+	var firstResult service.InteractionStageResult
+	if err := json.Unmarshal([]byte(toolResultText(first)), &firstResult); err != nil {
+		t.Fatal(err)
+	}
+	replay, err := stageAssistantDraftHandler(ctx, request)
+	if err != nil || replay == nil || replay.IsError {
+		t.Fatalf("implicit metadata replay = %#v, %v", replay, err)
+	}
+	var replayResult service.InteractionStageResult
+	if err := json.Unmarshal([]byte(toolResultText(replay)), &replayResult); err != nil {
+		t.Fatal(err)
+	}
+	if firstResult.DraftID == "" || replayResult.DraftID != firstResult.DraftID || replayResult.Revision != firstResult.Revision {
+		t.Fatalf("implicit metadata replay = %#v then %#v, want same durable receipt", firstResult, replayResult)
+	}
+}
+
 type interactiveMCPRuntime struct{}
 
 func (interactiveMCPRuntime) Command(context.Context, string, any) error { return nil }

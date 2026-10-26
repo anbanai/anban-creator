@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -18,6 +19,9 @@ import (
 // runtime that produced it. The interaction lock makes revision allocation
 // and event ordering deterministic for concurrent tabs.
 func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Context, userID string, in InteractionStageInput) (InteractionStageResult, error) {
+	startedAt := time.Now()
+	stageOutcome := "failed"
+	defer func() { s.metrics.observeDraftStage(stageOutcome, time.Since(startedAt)) }()
 	if s.repo == nil || s.repo.AssistantInteractions() == nil {
 		return InteractionStageResult{}, ErrInteractivePersistence
 	}
@@ -40,6 +44,7 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 		return InteractionStageResult{}, err
 	}
 	if interaction.Generation != in.Generation {
+		s.metrics.observeStageRetryAfterSessionLoss()
 		return InteractionStageResult{}, NewInteractionError(InteractionErrorGenerationChanged, 409, "对话状态已更新，请加载最新内容", "reload_snapshot")
 	}
 	if terminalErr := interactionRuntimeTerminalError(interaction.Lifecycle); terminalErr != nil {
@@ -51,7 +56,7 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 	}
 	if current, findErr := s.repo.AssistantInteractions().FindAttempt(ctx, in.InteractionID, in.AttemptID); findErr == nil {
 		if current.Generation != in.Generation || current.Operation != string(InteractionOperationStage) || current.PayloadDigest != in.PayloadDigest {
-			return InteractionStageResult{}, ErrInteractiveIdempotency
+			return InteractionStageResult{}, s.stageDraftRevisionConflictError(ctx, userID, interaction, ErrInteractiveIdempotency)
 		}
 		var replay struct {
 			DraftID  string `json:"draft_id"`
@@ -63,11 +68,12 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 			return InteractionStageResult{}, errors.Join(ErrInteractivePersistence, err)
 		}
 		if replay.ModeID != in.ModeID || replay.Ready != in.Ready {
-			return InteractionStageResult{}, ErrInteractiveIdempotency
+			return InteractionStageResult{}, s.stageDraftRevisionConflictError(ctx, userID, interaction, ErrInteractiveIdempotency)
 		}
 		if replay.Ready {
 			_ = s.repo.AssistantInteractions().MarkNeedsConfirmation(ctx, in.InteractionID, s.clock())
 		}
+		stageOutcome = "replay"
 		return InteractionStageResult{DraftID: replay.DraftID, Revision: replay.Revision, ConfirmationRequired: replay.Ready, AvailableActions: []string{"confirm_draft", "continue_editing"}, Durable: true}, nil
 	} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
 		return InteractionStageResult{}, errors.Join(ErrInteractivePersistence, findErr)
@@ -82,16 +88,14 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 	persisted, created, err := s.repo.AssistantInteractions().CreateDraftIfAttemptNewAtGeneration(ctx, draft, attempt, in.Generation)
 	if err != nil {
 		if errors.Is(err, repository.ErrInteractionGenerationChanged) {
+			s.metrics.observeStageRetryAfterSessionLoss()
 			return InteractionStageResult{}, NewInteractionError(InteractionErrorGenerationChanged, 409, "对话状态已更新，请加载最新内容", "reload_snapshot")
 		}
 		if errors.Is(err, repository.ErrInteractionTerminal) {
 			return InteractionStageResult{}, interactionRuntimeTerminalError(interaction.Lifecycle)
 		}
-		if errors.Is(err, repository.ErrInteractionTerminal) {
-			return InteractionStageResult{}, interactionRuntimeTerminalError(interaction.Lifecycle)
-		}
 		if errors.Is(err, repository.ErrInteractionAttemptConflict) {
-			return InteractionStageResult{}, ErrInteractiveIdempotency
+			return InteractionStageResult{}, s.stageDraftRevisionConflictError(ctx, userID, interaction, ErrInteractiveIdempotency)
 		}
 		return InteractionStageResult{}, draftSavedRetryableError(err)
 	}
@@ -117,6 +121,7 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 	// restart, Snapshot supplies the durable draft payload instead.
 	s.cacheLiveEvent(in.InteractionID, in.Generation, durableEvent, map[string]any{
 		"durable": true,
+		"mode_id": persisted.ModeID,
 		"draft": map[string]any{
 			"draft_id": persisted.ID, "mode_id": persisted.ModeID, "revision": persisted.Revision,
 			"payload": persisted.Payload, "payload_digest": persisted.PayloadDigest,
@@ -126,7 +131,20 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 	if in.Ready {
 		_ = s.repo.AssistantInteractions().MarkNeedsConfirmation(ctx, in.InteractionID, now)
 	}
+	stageOutcome = "durable"
 	return InteractionStageResult{DraftID: persisted.ID, Revision: persisted.Revision, ConfirmationRequired: persisted.Ready, AvailableActions: []string{"confirm_draft", "continue_editing"}, Durable: true}, nil
+}
+
+func (s *AssistantInteractionService) stageDraftRevisionConflictError(ctx context.Context, userID string, interaction *model.AssistantInteraction, cause error) error {
+	structured := NewInteractionError(InteractionErrorDraftRevisionConflict, 409, "计划版本已更新，请恢复最新计划后重试", "reload_snapshot", "restore_draft")
+	structured.cause = cause
+	if interaction == nil {
+		return structured
+	}
+	if snapshot, snapshotErr := s.snapshotWithDrafts(ctx, userID, interaction); snapshotErr == nil {
+		return structured.WithSnapshot(snapshot)
+	}
+	return structured.WithSnapshot(s.snapshotFromInteraction(interaction))
 }
 
 func draftSavedRetryableError(cause error) *InteractionError {

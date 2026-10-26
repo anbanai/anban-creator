@@ -335,6 +335,26 @@ describe("DSH bridge protocol", () => {
     delete process.env.ANBAN_DSH_BRIDGE_PRESETS;
   });
 
+  test("accepts commands when workspace mode has no root session id", async () => {
+    process.env.ANBAN_DSH_BRIDGE_WORKSPACE_ID = "workspace-only";
+    const calls: Array<{ method: string; params?: object }> = [];
+    const client = {
+      start: () => undefined,
+      initialize: async () => ({ capabilities: { sessionStart: true, sessionAnswer: true } }),
+      request: async (method: string, params?: object) => { calls.push({ method, params }); return {}; },
+      subscribeSessionTree: () => ({ next: async () => new Promise<never>(() => undefined), close: () => undefined }),
+      close: async () => undefined,
+    };
+    const bridge = new DshBridge(() => undefined, () => client, "");
+    try {
+      await bridge.command({ method: "session/start", params: { sessionId: "workspace-session", presetId: "project-creator" } });
+      expect(calls).toEqual([{ method: "session/start", params: { sessionId: "workspace-session", presetId: "project-creator" } }]);
+    } finally {
+      await bridge.dispose();
+      delete process.env.ANBAN_DSH_BRIDGE_WORKSPACE_ID;
+    }
+  });
+
   test("rejects an unknown Server-injected preset before initializing DSH", () => {
     expect(() => new DshBridge(() => undefined, () => {
       throw new Error("client must not be created");

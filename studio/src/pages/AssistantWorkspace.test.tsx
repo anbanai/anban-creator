@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   workspaceAnswer: vi.fn(),
   switchWorkspaceMode: vi.fn(),
   closeWorkspace: vi.fn(),
+  getInteractionSnapshot: vi.fn(),
   workspaceCommit: vi.fn(),
   workspaceCheckpoint: vi.fn(),
   taskGet: vi.fn(),
@@ -94,6 +95,11 @@ describe('AssistantWorkspace', () => {
     })
     mocks.works.mockResolvedValue({ items: [], has_more: false })
     mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'profile', session_id: 'session-1', sessions: { profile: 'session-1' }, runtime_status: 'starting', expires_at: '' })
+    mocks.getInteractionSnapshot.mockResolvedValue({
+      interaction_id: 'workspace-1', mode_id: 'profile', lifecycle: 'needs_confirmation', generation: 1,
+      runtime_status: 'running', expires_at: '', last_activity_at: '', available_actions: ['confirm_draft'],
+      drafts: [{ draft_id: 'draft-1', mode_id: 'profile', revision: 1, payload: { project: { name: '恢复后的人设', platform: 'wechat' } }, payload_digest: 'digest-1', ready: true, confirmation_state: 'pending' }],
+    })
     mocks.workspaceMessage.mockResolvedValue(undefined)
     mocks.workspaceAnswer.mockResolvedValue(undefined)
     mocks.closeWorkspace.mockResolvedValue(undefined)
@@ -646,6 +652,22 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledTimes(2))
     expect(mocks.workspaceMessage).toHaveBeenLastCalledWith('workspace-1', 'profile', '继续完善画像')
+  })
+
+  it('applies a recovery snapshot returned with a failed command', async () => {
+    const snapshot = {
+      interaction_id: 'workspace-1', mode_id: 'profile', lifecycle: 'reconnecting', generation: 2,
+      runtime_status: 'running', expires_at: '', last_activity_at: '', available_actions: ['reload_snapshot'], drafts: [],
+    }
+    const reconnecting = Object.assign(new Error('reconnecting'), { response: { status: 409, data: { error_code: 'assistant_interaction_reconnecting', data: snapshot } } })
+    mocks.workspaceMessage.mockRejectedValueOnce(reconnecting)
+    renderPage()
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '恢复这个需求' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(await screen.findByText('正在恢复连接')).toBeInTheDocument()
+    expect(screen.queryByText(/session not found/i)).not.toBeInTheDocument()
   })
 
   it('silently returns to the home state when the event stream reports an expired session', async () => {

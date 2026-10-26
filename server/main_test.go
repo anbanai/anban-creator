@@ -147,6 +147,55 @@ func TestWechatAccountAnalyticsSchemaReadiness(t *testing.T) {
 	}
 }
 
+func TestAssistantInteractionSchemaReadiness(t *testing.T) {
+	openDB := func(t *testing.T) *gorm.DB {
+		t.Helper()
+		db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return db
+	}
+
+	fresh := openDB(t)
+	if err := requireAssistantInteractionSchema(fresh); err != nil {
+		t.Fatalf("fresh database readiness: %v", err)
+	}
+
+	partial := openDB(t)
+	for _, statement := range []string{
+		"CREATE TABLE assistant_interactions (id text primary key)",
+		"CREATE TABLE assistant_interaction_runtimes (id text primary key)",
+		"CREATE TABLE assistant_interaction_drafts (id text primary key)",
+		"CREATE TABLE assistant_interaction_events (id text primary key)",
+		"CREATE TABLE assistant_interaction_attempts (id text primary key)",
+		"CREATE TABLE assistant_interaction_legacy_migrations (legacy_session_id text primary key, migration_key text, migrated_at datetime)",
+	} {
+		if err := partial.Exec(statement).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := requireAssistantInteractionSchema(partial); err == nil || !strings.Contains(err.Error(), "20261026_assistant_interactions.sql") {
+		t.Fatalf("partial interaction schema readiness = %v, want migration instruction", err)
+	}
+
+	legacy := openDB(t)
+	if err := legacy.Exec("CREATE TABLE assistant_sessions (id text primary key, workspace_id text not null default '', status text not null, closed_at datetime, updated_at datetime)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := requireAssistantInteractionSchema(legacy); err == nil || !strings.Contains(err.Error(), "homepage_interaction_cutover") {
+		t.Fatalf("legacy homepage schema readiness = %v, want cutover instruction", err)
+	}
+
+	ready := openDB(t)
+	if err := model.AutoMigrate(ready); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireAssistantInteractionSchema(ready); err != nil {
+		t.Fatalf("current interaction schema readiness: %v", err)
+	}
+}
+
 func TestTaskBillingSchemaReadiness(t *testing.T) {
 	legacy, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -339,10 +388,11 @@ func TestMainFailsFastWhenModelMigrationFails(t *testing.T) {
 	deliveryReadiness := strings.Index(section, "requireTaskDeliverySchema(mysqlDB)")
 	publicationReadiness := strings.Index(section, "requireServerOwnedArticlePublicationSchema(mysqlDB)")
 	accountAnalyticsReadiness := strings.Index(section, "requireWechatAccountAnalyticsSchema(mysqlDB)")
+	interactionReadiness := strings.Index(section, "requireAssistantInteractionSchema(mysqlDB)")
 	autoMigrate := strings.Index(section, "migrateModels(mysqlDB, model.AutoMigrate)")
-	if readiness < 0 || deliveryReadiness < 0 || publicationReadiness < 0 || accountAnalyticsReadiness < 0 || autoMigrate < 0 ||
-		readiness >= autoMigrate || deliveryReadiness >= autoMigrate || publicationReadiness >= autoMigrate || accountAnalyticsReadiness >= autoMigrate {
-		t.Fatalf("schema readiness must run before AutoMigrate: profile=%d delivery=%d publication=%d account_analytics=%d auto_migrate=%d", readiness, deliveryReadiness, publicationReadiness, accountAnalyticsReadiness, autoMigrate)
+	if readiness < 0 || deliveryReadiness < 0 || publicationReadiness < 0 || accountAnalyticsReadiness < 0 || interactionReadiness < 0 || autoMigrate < 0 ||
+		readiness >= autoMigrate || deliveryReadiness >= autoMigrate || publicationReadiness >= autoMigrate || accountAnalyticsReadiness >= autoMigrate || interactionReadiness >= autoMigrate {
+		t.Fatalf("schema readiness must run before AutoMigrate: profile=%d delivery=%d publication=%d account_analytics=%d interaction=%d auto_migrate=%d", readiness, deliveryReadiness, publicationReadiness, accountAnalyticsReadiness, interactionReadiness, autoMigrate)
 	}
 	if !strings.Contains(section, "migrateModels(mysqlDB, model.AutoMigrate)") {
 		t.Fatal("main.go must route model migration through the tested startup helper")

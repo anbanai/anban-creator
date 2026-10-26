@@ -506,7 +506,7 @@ export class DshBridge {
   }
 
   private validateCommand(command: InteractiveCommand): void {
-    if (!this.rootSessionId) throw new Error("ANBAN_DSH_BRIDGE_SESSION_ID is required");
+    if (!this.rootSessionId && !this.workspaceId) throw new Error("ANBAN_DSH_BRIDGE_SESSION_ID or ANBAN_DSH_BRIDGE_WORKSPACE_ID is required");
     if (command.method === "shutdown") return;
     if (command.method === "interaction/capability-refresh") {
       if (typeof command.params.interaction_id !== "string" || !Number.isSafeInteger(command.params.generation) || Number(command.params.generation) < 1) {

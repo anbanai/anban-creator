@@ -43,12 +43,26 @@ func TestStageDraftForInteractionPersistsAndReplaysByAttempt(t *testing.T) {
 	if _, err := svc.StageDraftForInteraction(context.Background(), "user-1", input); !errors.Is(err, ErrInteractiveIdempotency) && !errors.Is(err, ErrInteractiveDraftInvalid) {
 		t.Fatalf("different payload error = %v", err)
 	}
+	conflictingPayload := json.RawMessage(`{"plan":{"goal":"conflict"}}`)
+	conflictingDigest := sha256.Sum256(conflictingPayload)
+	conflict := input
+	conflict.AttemptID = "stage-1"
+	conflict.Payload = conflictingPayload
+	conflict.PayloadDigest = hex.EncodeToString(conflictingDigest[:])
+	var conflictErr *InteractionError
+	if _, err := svc.StageDraftForInteraction(context.Background(), "user-1", conflict); !errors.As(err, &conflictErr) || conflictErr.Code != InteractionErrorDraftRevisionConflict {
+		t.Fatalf("same attempt different payload error = %v, want draft revision conflict", err)
+	}
 	attempt, err := svc.repo.AssistantInteractions().FindAttempt(context.Background(), snapshot.ID, "stage-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(attempt.Result), "write") || strings.Contains(string(attempt.Result), "payload") {
 		t.Fatalf("stage attempt receipt contains draft content: %s", attempt.Result)
+	}
+	metrics := svc.Metrics()
+	if metrics.DraftStage["durable"] != 1 || metrics.DraftStage["replay"] != 1 {
+		t.Fatalf("stage metrics = %#v, want one durable and one replay", metrics)
 	}
 }
 

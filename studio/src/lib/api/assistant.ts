@@ -121,6 +121,7 @@ export interface AssistantWorkspace {
   runtime_status: string
   expires_at: string
   generation?: number
+  interaction_snapshot?: AssistantInteractionSnapshot
 }
 
 export interface AssistantCheckpoint extends AssistantCheckpointRequest {
@@ -225,5 +226,5 @@ export const assistantApi = {
 }
 
 function interactionSnapshotAsWorkspace(snapshot: AssistantInteractionSnapshot): AssistantWorkspace {
-  return { id: snapshot.interaction_id, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, runtime_status: snapshot.runtime_status, expires_at: snapshot.expires_at, generation: snapshot.generation }
+  return { id: snapshot.interaction_id, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, runtime_status: snapshot.runtime_status, expires_at: snapshot.expires_at, generation: snapshot.generation, interaction_snapshot: snapshot }
 }
