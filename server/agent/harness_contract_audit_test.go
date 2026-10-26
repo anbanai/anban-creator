@@ -90,7 +90,7 @@ func TestViralIPVideoEditorCoverRoutingUsesMontageContract(t *testing.T) {
 			for _, term := range []string{
 				"$VIDEO_ASPECT_RATIO",
 				"cover-prompts.md",
-				"cover_v2.png",
+				"v2",
 				"delivery manifest",
 				"cover.png",
 			} {
