@@ -1186,6 +1186,11 @@ func (s *InteractiveService) StageAssistantDraftForSessionContext(ctx context.Co
 			}
 		}
 	} else {
+		if modeID == AssistantModeCreation {
+			if _, err := decodeAssistantCreationPlanFields(input.Payload); err != nil {
+				return err
+			}
+		}
 		if err := json.Unmarshal(input.Payload, &fields); err != nil {
 			return ErrAssistantCheckpointInvalid
 		}

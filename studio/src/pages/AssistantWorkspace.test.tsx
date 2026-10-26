@@ -928,7 +928,7 @@ describe('AssistantWorkspace', () => {
     mocks.projectsList.mockResolvedValue([{ id: 'project-ratio', name: '画幅人设', platform: 'wechat', image_ratio: '1:1', status: 'active' }])
     mocks.platformConfigs.mockResolvedValue([{ id: 'wechat', default_image_ratio: '16:9', supported_image_ratios: ['16:9', '1:1'] }])
     mocks.createWorkspace.mockResolvedValue({ id: 'workspace-ratio', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'project-ratio', runtime_status: 'starting', expires_at: '' })
-    mocks.streamEvents = [{ event: 'draft.ready', id: 'event-ratio', data: JSON.stringify({ mode_id: 'creation', session_id: 'session-1', draft: { ready: true, payload: { plan: { goal: '按人设画幅创作', content_type: 'wechat-article' } } } }) }]
+    mocks.streamEvents = [{ event: 'draft.ready', id: 'event-ratio', data: JSON.stringify({ mode_id: 'creation', session_id: 'session-1', draft: { ready: true, payload: { plan: { goal: '按人设画幅创作', content_type: 'wechat-article', topic: '春茶冲泡', angle: '新手常见问题', expression_form: '步骤教程' } } } }) }]
     renderPage({ modeId: 'creation', projectId: 'project-ratio' })
 
     fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '按人设画幅创作' } })
@@ -958,7 +958,7 @@ describe('AssistantWorkspace', () => {
     mocks.streamEvents = [{
       event: 'draft.ready',
       id: 'event-commit-lock',
-      data: JSON.stringify({ mode_id: 'creation', session_id: 'session-1', draft: { ready: true, payload: { plan: { goal: '锁定提交', content_type: 'wechat-article' } } } }),
+      data: JSON.stringify({ mode_id: 'creation', session_id: 'session-1', draft: { ready: true, payload: { plan: { goal: '锁定提交', content_type: 'wechat-article', topic: '春季内容计划', angle: '围绕真实变化展开', expression_form: '案例型' } } } }),
     }]
     renderPage({ modeId: 'creation', projectId: 'project-1' })
 
@@ -991,7 +991,7 @@ describe('AssistantWorkspace', () => {
     mocks.streamEvents = [{
       event: 'draft.ready',
       id: 'event-attachment-draft',
-      data: JSON.stringify({ mode_id: 'creation', session_id: 'session-1', draft: { ready: true, payload: { plan: { goal: '基于资料创作', content_type: 'wechat-article' } } } }),
+      data: JSON.stringify({ mode_id: 'creation', session_id: 'session-1', draft: { ready: true, payload: { plan: { goal: '基于资料创作', content_type: 'wechat-article', topic: '资料中的核心信息', angle: '用户实际问题', expression_form: '深度文章' } } } }),
     }]
     uploadToOSSMock.mockResolvedValue({ uploadSessionId: 'upload-session-1', uploadId: 'upload-session-1', key: 'staging/brief.pdf', previewUrl: '', publicUrl: '', contentType: 'application/pdf', size: 16 })
     renderPage({ modeId: 'creation', projectId: 'project-1' })
@@ -1007,6 +1007,9 @@ describe('AssistantWorkspace', () => {
       payload: { plan: {
         goal: '基于资料创作',
         content_type: 'wechat-article',
+        topic: '资料中的核心信息',
+        angle: '用户实际问题',
+        expression_form: '深度文章',
         execution_profile: 'effective',
         image_ratio: 'auto',
         image_capability_key: 'standard',
