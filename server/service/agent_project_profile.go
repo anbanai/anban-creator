@@ -24,6 +24,72 @@ type AgentProjectProfileRequest struct {
 
 type AgentProjectProfile map[string]any
 
+var ErrWechatDeliveryContextRequired = errors.New("公众号文章或贴图交付判断必须绑定当前任务上下文")
+var ErrWechatDeliveryDecisionUnavailable = errors.New("公众号任务缺少有效的冻结交付决策")
+
+func validateWechatDeliveryContext(req AgentProjectProfileRequest, task *model.Task) error {
+	scope := strings.TrimSpace(req.Scope)
+	if task == nil {
+		if scope == model.ScopeWechat || scope == "wechat-picture" {
+			return ErrWechatDeliveryContextRequired
+		}
+		return nil
+	}
+	articleTask := task.Type == model.TaskTypeWechatArticle && taskUsesChannel(task, model.ChannelArticle)
+	pictureTask := task.Type == model.TaskTypeWechatPicture && taskUsesChannel(task, model.ChannelWechatPicture)
+	hasWechatContext := task.Type == model.TaskTypeWechatArticle || task.Type == model.TaskTypeWechatPicture ||
+		taskUsesChannel(task, model.ChannelArticle) || taskUsesChannel(task, model.ChannelWechatPicture)
+	if !hasWechatContext {
+		return nil
+	}
+	if !articleTask && !pictureTask {
+		return fmt.Errorf("公众号 profile scope 与当前任务类型不匹配")
+	}
+	if scope == "wechat-picture" && !pictureTask {
+		return fmt.Errorf("公众号贴图 profile scope 与当前任务类型不匹配")
+	}
+	return nil
+}
+
+func validateWechatDeliveryDecision(task *model.Task, decision model.WechatDeliveryDecision) error {
+	if task == nil || (task.Type != model.TaskTypeWechatArticle && task.Type != model.TaskTypeWechatPicture) {
+		return nil
+	}
+	switch decision.Mode {
+	case model.WechatDeliveryModeAutomatic:
+		if !decision.AutomaticEnabled || !decision.AppIDConfigured || !decision.SecretConfigured {
+			return ErrWechatDeliveryDecisionUnavailable
+		}
+	case model.WechatDeliveryModeUserAssisted:
+	default:
+		return ErrWechatDeliveryDecisionUnavailable
+	}
+	return nil
+}
+
+// wechatDeliveryInstructions is the semantic, agent-facing rendering contract.
+// The server decides the branch from the frozen task snapshot; agents only
+// follow this instruction and must not reconstruct it from credentials.
+func wechatDeliveryInstructions(task *model.Task, decision model.WechatDeliveryDecision) string {
+	if task == nil || (task.Type != model.TaskTypeWechatArticle && task.Type != model.TaskTypeWechatPicture) {
+		return ""
+	}
+	automatic := decision.Mode == model.WechatDeliveryModeAutomatic && decision.AutomaticEnabled && decision.AppIDConfigured && decision.SecretConfigured
+	if task.Type == model.TaskTypeWechatPicture {
+		if pictureTaskDraftDisabled(task) {
+			automatic = false
+		}
+		if automatic {
+			return "当前任务是微信公众号贴图，采用自动草稿交付。请生成符合公众号官方贴图发布要求的标题、caption 和按顺序排列的图片发布包，图片以当前任务内的相对文件路径提供；Server 会上传这些图片并创建公众号贴图草稿。不要直接调用微信发布能力。任一必需图片缺失或审核未通过时，不得报告交付完成，必须保留 blocked 结果。"
+		}
+		return "当前任务是微信公众号贴图，采用手动复制交付。请生成包含标题、caption 和全部图片的完整图文内容，图片必须按视觉顺序排列并使用稳定公开的图片地址；Studio 会一次复制完整图文供用户粘贴到公众号后台。不能只交付文案，也不能要求用户逐张复制或重新组装图片。任一必需图片缺失或无法公开访问时，不得报告交付完成，必须保留 blocked 结果。"
+	}
+	if automatic {
+		return "当前任务是微信公众号文章，采用自动草稿交付。请生成包含全部必需正文配图的公众号文章 HTML，并使用微信素材图片地址；Server 会负责创建公众号草稿。不要直接调用微信发布能力。任一必需图片没有进入最终 HTML 时，不得报告交付完成，必须保留 blocked 结果。"
+	}
+	return "当前任务是微信公众号文章，采用手动复制交付。请生成包含正文和全部必需配图的完整 HTML，并使用稳定公开的 Anban 图片地址；Studio 会一次复制完整图文供用户粘贴到公众号后台。不能只交付文章文字，也不能要求用户重新上传或组装图片。任一必需图片没有进入最终 HTML 时，不得报告交付完成，必须保留 blocked 结果。"
+}
+
 type AgentProjectProfileService struct {
 	projects          *ProjectService
 	tasks             *TaskService
@@ -80,6 +146,9 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 			project = model.ProjectFromSnapshot(project, snapshot)
 			usesProjectSnapshot = true
 		}
+	}
+	if err := validateWechatDeliveryContext(req, task); err != nil {
+		return nil, err
 	}
 
 	outputType := project.Platform
@@ -165,13 +234,12 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 	}
 	if task != nil && (taskUsesChannel(task, model.ChannelArticle) || taskUsesChannel(task, model.ChannelWechatPicture)) {
 		decision := task.ProjectSnapshot.Data().WechatDelivery
-		if decision.Mode == "" {
-			// Historical tasks predate the frozen decision. Fail closed so an old
-			// task cannot trigger a new WeChat side effect without admission data.
-			disabled := false
-			decision = model.ResolveWechatDeliveryDecision("", false, &disabled).WithServerPublicationCapabilities()
+		if err := validateWechatDeliveryDecision(task, decision); err != nil {
+			return nil, err
 		}
-		profile["wechat_delivery"] = decision
+		if instructions := wechatDeliveryInstructions(task, decision); instructions != "" {
+			profile["wechat_delivery_instructions"] = instructions
+		}
 	}
 	// Server-applied profiles are usable during refreshes. Their source labels
 	// remain intact so inferred content cannot be treated as verified facts.

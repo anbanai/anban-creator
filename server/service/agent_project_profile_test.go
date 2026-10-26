@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -19,6 +20,161 @@ import (
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/resources"
 )
+
+func TestWechatDeliveryInstructionsAreSemanticAndServerResolved(t *testing.T) {
+	automatic := model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeAutomatic, AutomaticEnabled: true, AppIDConfigured: true, SecretConfigured: true}
+	manual := model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeUserAssisted, AutomaticEnabled: true, AppIDConfigured: false, SecretConfigured: false}
+	for _, tc := range []struct {
+		name      string
+		taskType  string
+		decision  model.WechatDeliveryDecision
+		input     map[string]any
+		want      string
+		forbidden string
+	}{
+		{name: "automatic article", taskType: model.TaskTypeWechatArticle, decision: automatic, want: "自动草稿交付", forbidden: "automatic_enabled"},
+		{name: "manual article", taskType: model.TaskTypeWechatArticle, decision: manual, want: "手动复制交付", forbidden: "AppID"},
+		{name: "automatic picture", taskType: model.TaskTypeWechatPicture, decision: automatic, want: "当前任务内的相对文件路径", forbidden: "picture_publish_draft"},
+		{name: "picture draft disabled", taskType: model.TaskTypeWechatPicture, decision: automatic, input: map[string]any{"picture_publish_draft": false}, want: "手动复制交付", forbidden: "微信发布能力"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &model.Task{Type: tc.taskType}
+			if tc.input != nil {
+				task.SetAgentInput(tc.input)
+			}
+			got := wechatDeliveryInstructions(task, tc.decision)
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("instructions = %q, want semantic phrase %q", got, tc.want)
+			}
+			if strings.Contains(got, tc.forbidden) {
+				t.Fatalf("instructions expose internal decision field %q: %s", tc.forbidden, got)
+			}
+		})
+	}
+}
+
+func TestWechatProfileScopeRejectsTaskTypeChannelMismatch(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		task  model.Task
+		scope string
+	}{
+		{name: "article type with picture channel", task: model.Task{Type: model.TaskTypeWechatArticle, Channel: model.ChannelWechatPicture}, scope: "wechat-picture"},
+		{name: "picture type with article channel", task: model.Task{Type: model.TaskTypeWechatPicture, Channel: model.ChannelArticle}, scope: model.ScopeWechat},
+		{name: "article mismatch without scope", task: model.Task{Type: model.TaskTypeWechatArticle, Channel: model.ChannelWechatPicture}},
+		{name: "picture mismatch without scope", task: model.Task{Type: model.TaskTypeWechatPicture, Channel: model.ChannelArticle}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateWechatDeliveryContext(AgentProjectProfileRequest{Scope: tc.scope}, &tc.task); err == nil {
+				t.Fatal("profile scope accepted a task whose type and channel disagree")
+			}
+		})
+	}
+}
+
+func TestWechatDeliveryDecisionMustBeResolvable(t *testing.T) {
+	task := &model.Task{Type: model.TaskTypeWechatArticle}
+	for _, decision := range []model.WechatDeliveryDecision{
+		{},
+		{Mode: "unexpected"},
+		{Mode: model.WechatDeliveryModeAutomatic, AutomaticEnabled: true, AppIDConfigured: true},
+	} {
+		if err := validateWechatDeliveryDecision(task, decision); !errors.Is(err, ErrWechatDeliveryDecisionUnavailable) {
+			t.Fatalf("decision %#v error = %v, want ErrWechatDeliveryDecisionUnavailable", decision, err)
+		}
+	}
+	if err := validateWechatDeliveryDecision(task, model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeUserAssisted}); err != nil {
+		t.Fatalf("explicit manual decision was rejected: %v", err)
+	}
+}
+
+func TestWechatProjectProfileRequiresTaskBoundContext(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "wechat-profile-context.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Task{}, &model.TaskFile{}, &model.Template{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	logger := zerolog.Nop()
+	projectSvc := NewProjectService(repo, &logger)
+	taskSvc := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
+	svc := NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), config.MontageConfig{}, agentProjectProfileImageCapabilityResolver())
+	userID := uuid.NewString()
+	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "公众号项目"}
+	if err := repo.Projects().Create(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range []string{model.ScopeWechat, "wechat-picture"} {
+		t.Run(scope+" without task", func(t *testing.T) {
+			if _, err := svc.Get(context.Background(), AgentProjectProfileRequest{UserID: userID, ProjectID: project.ID, Scope: scope}); err == nil {
+				t.Fatal("project-only WeChat profile unexpectedly returned a delivery decision")
+			}
+		})
+	}
+	missingDecision := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: project.ID, Type: model.TaskTypeWechatArticle, Channel: model.ChannelArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "server-owned-route"}
+	missingDecision.SetProjectSnapshot(model.ProjectSnapshot{Platform: model.PlatformWechat})
+	if err := repo.Tasks().Create(context.Background(), missingDecision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Get(context.Background(), AgentProjectProfileRequest{UserID: userID, ProjectID: project.ID, TaskID: missingDecision.ID, Scope: model.ScopeWechat}); !errors.Is(err, ErrWechatDeliveryDecisionUnavailable) {
+		t.Fatalf("profile without a frozen decision error = %v, want ErrWechatDeliveryDecisionUnavailable", err)
+	}
+	article := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: project.ID, Type: model.TaskTypeWechatArticle, Channel: model.ChannelArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "server-owned-route"}
+	article.SetProjectSnapshot(model.ProjectSnapshot{
+		Platform: model.PlatformWechat,
+		WechatDelivery: model.WechatDeliveryDecision{
+			Mode: model.WechatDeliveryModeAutomatic, AutomaticEnabled: true,
+			AppIDConfigured: true, SecretConfigured: true,
+		},
+	})
+	if err := repo.Tasks().Create(context.Background(), article); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Get(context.Background(), AgentProjectProfileRequest{UserID: userID, ProjectID: project.ID, TaskID: article.ID, Scope: "wechat-picture"}); err == nil {
+		t.Fatal("picture scope unexpectedly accepted an article task")
+	}
+	profile, err := svc.Get(context.Background(), AgentProjectProfileRequest{UserID: userID, ProjectID: project.ID, TaskID: article.ID, Scope: model.ScopeWechat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	instructions, ok := (*profile)["wechat_delivery_instructions"].(string)
+	if !ok || !strings.Contains(instructions, "自动草稿交付") {
+		t.Fatalf("wechat_delivery_instructions = %#v, want frozen automatic delivery text", (*profile)["wechat_delivery_instructions"])
+	}
+	if _, exists := (*profile)["wechat_delivery"]; exists {
+		t.Fatal("agent profile must not expose delivery flags for agent-side mode selection")
+	}
+	profileJSON, err := json.Marshal(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"automatic_enabled", "app_id_configured", "secret_configured", "wx-app-secret"} {
+		if strings.Contains(string(profileJSON), forbidden) {
+			t.Fatalf("agent profile exposed frozen delivery field %q: %s", forbidden, profileJSON)
+		}
+	}
+	picture := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: project.ID, Type: model.TaskTypeWechatPicture, Channel: model.ChannelWechatPicture, Status: model.TaskStatusPending, ImageCapabilityKey: "server-owned-route"}
+	picture.SetAgentInput(map[string]any{"picture_publish_draft": false})
+	picture.SetProjectSnapshot(model.ProjectSnapshot{
+		Platform: model.PlatformWechat,
+		WechatDelivery: model.WechatDeliveryDecision{
+			Mode: model.WechatDeliveryModeAutomatic, AutomaticEnabled: true,
+			AppIDConfigured: true, SecretConfigured: true,
+		},
+	})
+	if err := repo.Tasks().Create(context.Background(), picture); err != nil {
+		t.Fatal(err)
+	}
+	pictureProfile, err := svc.Get(context.Background(), AgentProjectProfileRequest{UserID: userID, ProjectID: project.ID, TaskID: picture.ID, Scope: model.ScopeWechat})
+	if err != nil {
+		t.Fatalf("picture task could not read shared WeChat profile scope: %v", err)
+	}
+	if got := (*pictureProfile)["wechat_delivery_instructions"]; got == nil || !strings.Contains(got.(string), "手动复制交付") {
+		t.Fatalf("picture task instructions = %#v, want user-selected manual copy despite automatic project capability", got)
+	}
+}
 
 func TestAgentProjectProfileReturnsPublicImageCapabilityMetadata(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "profile.db")), &gorm.Config{})
@@ -137,7 +293,11 @@ func TestSixCreativeObjectsReadTheSameFrozenAppliedProfile(t *testing.T) {
 	for _, taskType := range types {
 		t.Run(taskType, func(t *testing.T) {
 			task := &model.Task{ID: uuid.NewString(), UserID: project.UserID, ProjectID: project.ID, Type: taskType, Status: model.TaskStatusPending, ImageCapabilityKey: "server-owned-route"}
-			task.SetProjectSnapshot(model.SnapshotProject(project))
+			snapshot := model.SnapshotProject(project)
+			if taskType == model.TaskTypeWechatArticle || taskType == model.TaskTypeWechatPicture {
+				snapshot.WechatDelivery = model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeUserAssisted}
+			}
+			task.SetProjectSnapshot(snapshot)
 			if err := repo.Tasks().Create(t.Context(), task); err != nil {
 				t.Fatal(err)
 			}
@@ -199,6 +359,7 @@ func TestAgentProjectProfileIncludesMatchingFeedbackStrategy(t *testing.T) {
 		t.Fatal(err)
 	}
 	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: project.ID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusPending, ImageCapabilityKey: "server-owned-route"}
+	task.SetProjectSnapshot(model.ProjectSnapshot{Platform: model.PlatformWechat, WechatDelivery: model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeUserAssisted}})
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatal(err)
 	}

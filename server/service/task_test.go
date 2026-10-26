@@ -70,7 +70,7 @@ func setupTaskTestDB(t *testing.T) *gorm.DB {
 		&model.TaskFileObjectCleanup{},
 		&model.BillingSettlementOutbox{},
 		&model.TopicPool{},
-		&model.IlinkBinding{}, &model.IlinkNotification{}, &model.UploadSession{}, &model.Asset{},
+		&model.IlinkBinding{}, &model.IlinkNotification{}, &model.UploadSession{}, &model.Asset{}, &model.UserMediaAsset{},
 		&model.ProjectChannelConfig{}, &model.WechatPublicationAttempt{},
 		&model.WechatPublication{}, &model.WechatPublicationBinding{},
 		&model.WechatOpenPlatformAuthorization{}, &model.WechatOpenPlatformAuthorizationState{},
@@ -140,6 +140,35 @@ func setupTaskServiceWithEnqueuer(t *testing.T) (*TaskService, repository.Reposi
 	svc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	return svc, repo
+}
+
+func TestTaskServiceRejectsUnavailableMediaLibraryAttachment(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	asset := &model.Asset{
+		ID: uuid.NewString(), UserID: userID, Purpose: DirectUploadPurposeMediaLibrary,
+		StorageKey: "assets/users/" + userID + "/media/source.png", FileName: "source.png",
+		ContentType: "image/png", Size: 1024, ETag: "media-etag",
+	}
+	if err := repo.Assets().Create(ctx, asset); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UserMediaAssets().Create(ctx, &model.UserMediaAsset{
+		ID: uuid.NewString(), UserID: userID, AssetID: asset.ID, MediaType: "image", Status: model.UserMediaAssetStatusQueued,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.CreateManual(ctx, CreateManualParams{
+		AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
+		ExecutionProfile: "effective", UserID: userID, ProjectID: projectID,
+		InputAttachments: []model.EntryAttachment{{AssetID: asset.ID}},
+	})
+	if !errors.Is(err, ErrUserMediaUnavailable) {
+		t.Fatalf("CreateManual error = %v, want ErrUserMediaUnavailable", err)
+	}
 }
 
 func TestTaskServiceCreateManualRejectsMissingExecutionProfile(t *testing.T) {
@@ -221,6 +250,21 @@ func TestTaskTypeForIdentityMapsVideoEditInternalKindToPublicType(t *testing.T) 
 	task.Type = model.TaskKindVideoEdit
 	if err := validateTaskIdentity(task); !errors.Is(err, ErrTaskIdentityIncompatible) {
 		t.Fatalf("validateTaskIdentity(internal task kind) = %v, want identity incompatibility", err)
+	}
+}
+
+func TestTaskTypeForIdentityUsesKebabCaseForInternalWorkflowKinds(t *testing.T) {
+	for _, test := range []struct{ taskKind, want string }{
+		{model.TaskKindViralAnalysis, model.TaskTypeViralAnalysis},
+		{model.TaskKindProfileAnalysis, model.TaskTypeProfileAnalysis},
+		{model.TaskKindContentResearch, model.TaskTypeContentResearch},
+		{model.TaskKindContentValidation, model.TaskTypeContentValidation},
+		{model.TaskKindContentScript, model.TaskTypeContentScript},
+		{model.TaskKindFeedbackAnalysis, model.TaskTypeFeedbackAnalysis},
+	} {
+		if got := taskTypeForIdentity(model.AgentIDContentPlanning, model.ChannelContentPlanning, test.taskKind); got != test.want {
+			t.Errorf("taskTypeForIdentity(%q) = %q, want %q", test.taskKind, got, test.want)
+		}
 	}
 }
 

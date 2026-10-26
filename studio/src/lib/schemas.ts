@@ -166,7 +166,7 @@ export type RegisterFormValues = z.infer<typeof registerSchema>
 export const createTaskSchema = z.object({
   project_id: z.string().optional().default(""),
   execution_profile: executionProfileSchema,
-  type: z.enum(["seednote", "wechat-article", "wechat-picture", "moments", "viral_analysis", "profile_analysis", "content_research", "content_validation", "content_script", "ecommerce", "montage", "whiteboard-animation", "hypit", "local-life", "video-edit"]),
+  type: z.enum(["seednote", "wechat-article", "wechat-picture", "moments", "viral-analysis", "profile-analysis", "content-research", "content-validation", "content-script", "feedback-analysis", "ecommerce", "montage", "whiteboard-animation", "hypit", "local-life", "video-edit"]),
   topic: promptSchema.optional(),
   prompt: promptSchema.optional(),
   quantity: z.number().int().min(1).max(5).default(1),
@@ -213,7 +213,7 @@ export const createTaskSchema = z.object({
     })
   }
 
-  if (data.type === "viral_analysis") {
+  if (data.type === "viral-analysis") {
     const prompt = data.prompt?.trim() || ""
     if (!/https?:\/\/[^\s]+/.test(prompt)) {
       ctx.addIssue({

@@ -13,6 +13,7 @@ type MontageInput struct {
 
 type MontageAsset struct {
 	Type       string `json:"type"`
+	AssetID    string `json:"asset_id,omitempty"`
 	URL        string `json:"url,omitempty"`
 	TaskFileID string `json:"task_file_id,omitempty"`
 	Text       string `json:"text,omitempty"`

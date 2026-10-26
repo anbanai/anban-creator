@@ -1,22 +1,27 @@
 package agentpack
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/anbanai/anban-creator/server/model"
+)
 
 func TestContentPlanningTaskContracts(t *testing.T) {
-	for _, kind := range []string{"content_research", "content_validation", "content_script"} {
-		p, ok := Default().ForTaskType(kind)
+	for _, taskType := range []string{model.TaskTypeContentResearch, model.TaskTypeContentValidation, model.TaskTypeContentScript} {
+		p, ok := Default().ForTaskType(taskType)
 		if !ok {
-			t.Fatalf("missing typed planning Pack: %s", kind)
+			t.Fatalf("missing typed planning Pack: %s", taskType)
 		}
 		if p.Runtime.Profile != "content-planning" || p.Channel != "content-planning" {
 			t.Fatalf("wrong planning runtime: %+v", p)
 		}
-		if op, ok := Default().BillingOperation(kind); !ok || op != "task."+kind {
+		kind := model.TaskKindForTaskType(taskType)
+		if op, ok := Default().BillingOperation(taskType); !ok || op != "task."+kind {
 			t.Fatalf("wrong billing: %s", op)
 		}
-		required, _ := p.RequiredArtifactsForTaskType(kind)
+		required, _ := p.RequiredArtifactsForTaskType(taskType)
 		if len(required) < 2 {
-			t.Fatalf("incomplete artifact contract: %s", kind)
+			t.Fatalf("incomplete artifact contract: %s", taskType)
 		}
 	}
 }

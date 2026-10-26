@@ -572,6 +572,29 @@ func TestStartupIdentityChecksAreReadOnlyAndPrecedeServing(t *testing.T) {
 	}
 }
 
+func TestStartupCanonicalizesPersistedTaskTypesBeforeIdentityReadiness(t *testing.T) {
+	raw, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(raw)
+	sectionStart := strings.Index(src, "// 6. Auto-migrate models.")
+	sectionEnd := strings.Index(src, "// 7. Create repository.")
+	if sectionStart < 0 || sectionEnd <= sectionStart {
+		t.Fatal("startup migration section is missing")
+	}
+	section := src[sectionStart:sectionEnd]
+	migration := strings.Index(section, "service.MigratePersistedTaskTypes(context.Background(), mysqlDB)")
+	readiness := strings.Index(section, "service.AssertExecutableIdentityReadiness(context.Background(), mysqlDB)")
+	autoMigrate := strings.Index(section, "migrateModels(mysqlDB, model.AutoMigrate)")
+	if migration < 0 || readiness < 0 || autoMigrate < 0 || migration >= readiness || readiness >= autoMigrate {
+		t.Fatalf("persisted task type migration must precede readiness and AutoMigrate: migration=%d readiness=%d auto_migrate=%d", migration, readiness, autoMigrate)
+	}
+	if strings.Count(section, "service.MigratePersistedTaskTypes(context.Background(), mysqlDB)") != 1 {
+		t.Fatal("persisted task type migration must run exactly once during startup")
+	}
+}
+
 func TestRequireRuntimeCleanupSchema(t *testing.T) {
 	fresh, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {

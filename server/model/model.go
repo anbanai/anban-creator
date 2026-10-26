@@ -33,6 +33,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&TaskFileObjectCleanup{},
 		&UploadSession{},
 		&Asset{},
+		&UserMediaAsset{},
 		&APIKey{},
 		&Feedback{},
 		&TaskFeedback{},

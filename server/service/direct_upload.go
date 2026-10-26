@@ -32,6 +32,7 @@ const (
 	DirectUploadPurposeVideoEditAsset           = "video_edit_asset"
 	DirectUploadPurposeHypitAsset               = "hypit_asset"
 	DirectUploadPurposeAIEntryAttachment        = "ai_entry_attachment"
+	DirectUploadPurposeMediaLibrary             = "media_library"
 	DirectUploadPurposeTaskArtifact             = "task_artifact"
 	DirectUploadPurposeSeednoteImport           = "seednote_analytics_import"
 	DirectUploadPurposeWechatAnalyticsImport    = "wechat_analytics_import"
@@ -166,6 +167,7 @@ var directUploadPolicies = map[string]directUploadPurposePolicy{
 	DirectUploadPurposeMontageAsset:             {maxSize: 50 * 1024 * 1024, validate: isDirectUploadMontageAsset},
 	DirectUploadPurposeVideoEditAsset:           {maxSize: 256 * 1024 * 1024, validate: isDirectUploadMontageAsset},
 	DirectUploadPurposeAIEntryAttachment:        {maxSize: 50 * 1024 * 1024, maxSizeFor: aiEntryAttachmentMaxSize, validate: isDirectUploadAIEntryAttachment},
+	DirectUploadPurposeMediaLibrary:             {maxSize: 50 * 1024 * 1024, validate: isDirectUploadMediaLibrary},
 	DirectUploadPurposeSeednoteImport:           {maxSize: 20 * 1024 * 1024, validate: isDirectUploadSeednoteImport},
 	DirectUploadPurposeWechatAnalyticsImport:    {maxSize: 20 * 1024 * 1024, validate: isDirectUploadWechatAnalyticsImport},
 }
@@ -1072,6 +1074,11 @@ func isDirectUploadImage(contentType, ext string) bool {
 
 func isDirectUploadAIEntryAttachment(contentType, ext string) bool {
 	return aiEntryAttachmentMaxSize(contentType, ext) > 0
+}
+
+func isDirectUploadMediaLibrary(contentType, ext string) bool {
+	kind := directUploadFileKind(contentType, ext)
+	return kind == "image" || kind == "video"
 }
 
 func isDirectUploadMontageAsset(contentType, ext string) bool {

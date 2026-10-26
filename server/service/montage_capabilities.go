@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"mime"
+	"path"
 	"slices"
 	"strings"
 
@@ -299,6 +300,27 @@ func ValidateMaterializableMontageSourceTaskFiles(ctx context.Context, repo repo
 	}
 	totalBytes := int64(0)
 	for _, asset := range assets {
+		assetID := strings.TrimSpace(asset.AssetID)
+		if assetID != "" {
+			if strings.TrimSpace(asset.TaskFileID) != "" || strings.TrimSpace(asset.URL) != "" {
+				return fmt.Errorf("%w: source asset %q has multiple locators", ErrMontageInput, assetID)
+			}
+			if repo == nil {
+				return fmt.Errorf("%w: source asset %q cannot be verified", ErrMontageInput, assetID)
+			}
+			stored, err := repo.Assets().FindOwnedByID(ctx, assetID, userID)
+			if err != nil || stored == nil {
+				return fmt.Errorf("%w: source asset %q is unavailable", ErrMontageInput, assetID)
+			}
+			if err := validateMontageStoredAssetMaterializable(stored, userID, expectedStorageProvider, asset); err != nil {
+				return fmt.Errorf("%w: source asset %q %v", ErrMontageInput, assetID, err)
+			}
+			if stored.Size > montageSourceTotalMaxBytes-totalBytes {
+				return fmt.Errorf("%w: source assets cannot exceed %d bytes in total", ErrMontageInput, montageSourceTotalMaxBytes)
+			}
+			totalBytes += stored.Size
+			continue
+		}
 		fileID := strings.TrimSpace(asset.TaskFileID)
 		if fileID == "" {
 			continue
@@ -314,6 +336,31 @@ func ValidateMaterializableMontageSourceTaskFiles(ctx context.Context, repo repo
 			return fmt.Errorf("%w: task-file source assets cannot exceed %d bytes in total", ErrMontageInput, montageSourceTotalMaxBytes)
 		}
 		totalBytes += file.FileSize
+	}
+	return nil
+}
+
+func validateMontageStoredAssetMaterializable(asset *model.Asset, userID, expectedStorageProvider string, input model.MontageAsset) error {
+	if asset == nil || strings.TrimSpace(userID) == "" || asset.UserID != userID {
+		return errors.New("is not owned by the task user")
+	}
+	if expectedStorageProvider != "oss" || (asset.Purpose != DirectUploadPurposeMediaLibrary && asset.Purpose != DirectUploadPurposeMontageAsset && asset.Purpose != DirectUploadPurposeAIEntryAttachment) {
+		return errors.New("does not use an allowed finalized media storage")
+	}
+	if asset.ID == "" || asset.FileName == "" || asset.FileName == "." || asset.FileName == "/" || path.Base(asset.FileName) != asset.FileName ||
+		asset.StorageKey != path.Join("assets/users", userID, asset.ID, asset.FileName) || path.Clean(asset.StorageKey) != asset.StorageKey {
+		return errors.New("has no canonical finalized storage object")
+	}
+	if asset.Size <= 0 || asset.Size > montageSourceMaxBytes || strings.TrimSpace(asset.ETag) == "" {
+		return fmt.Errorf("must have valid integrity metadata and be between 1 and %d bytes", montageSourceMaxBytes)
+	}
+	if !montageSourceTaskFileTypeMatches(input.Type, asset.ContentType) {
+		return fmt.Errorf("does not match asset type %q", input.Type)
+	}
+	if input.FileName != "" && input.FileName != asset.FileName ||
+		input.MimeType != "" && strings.ToLower(strings.TrimSpace(input.MimeType)) != strings.ToLower(strings.TrimSpace(asset.ContentType)) ||
+		input.FileSize > 0 && input.FileSize != asset.Size {
+		return errors.New("metadata does not match the finalized asset")
 	}
 	return nil
 }
@@ -404,7 +451,7 @@ func (s *MontageCapabilityService) pipeline(key string) (MontagePipelineCapabili
 func validateMontageRequiredSources(requirement MontageSourceRequirement, assets []model.MontageAsset) error {
 	hasVideo, hasAudio := false, false
 	for _, asset := range assets {
-		if strings.TrimSpace(asset.URL) == "" && strings.TrimSpace(asset.TaskFileID) == "" {
+		if strings.TrimSpace(asset.AssetID) == "" && strings.TrimSpace(asset.URL) == "" && strings.TrimSpace(asset.TaskFileID) == "" {
 			continue
 		}
 		switch strings.TrimSpace(asset.Type) {

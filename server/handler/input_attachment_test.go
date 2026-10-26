@@ -162,6 +162,69 @@ func TestValidateInputAttachmentsRejectsInvalidAssetIdentity(t *testing.T) {
 	}
 }
 
+func TestValidateInputAttachmentsRequiresReadyMediaLibraryAsset(t *testing.T) {
+	repo := uploadRepositoryFromSessions(t)
+	statuses := []struct {
+		name   string
+		status string
+		remove bool
+	}{
+		{name: "queued", status: model.UserMediaAssetStatusQueued},
+		{name: "failed", status: model.UserMediaAssetStatusFailed},
+		{name: "removed", status: model.UserMediaAssetStatusAvailable, remove: true},
+	}
+	for _, tc := range statuses {
+		assetID := "media-" + tc.name
+		if err := repo.Assets().Create(t.Context(), &model.Asset{
+			ID: assetID, UserID: "user-1", Purpose: service.DirectUploadPurposeMediaLibrary,
+			StorageKey: "assets/users/user-1/" + assetID + "/source.png", FileName: "source.png",
+			ContentType: "image/png", Size: 1024, ETag: assetID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		row := &model.UserMediaAsset{ID: assetID, UserID: "user-1", AssetID: assetID, MediaType: "image", Status: tc.status}
+		if tc.remove {
+			removedAt := time.Now().UTC()
+			row.RemovedAt = &removedAt
+		}
+		if err := repo.UserMediaAssets().Create(t.Context(), row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ready := &model.Asset{
+		ID: "media-ready", UserID: "user-1", Purpose: service.DirectUploadPurposeMediaLibrary,
+		StorageKey: "assets/users/user-1/media-ready/source.png", FileName: "source.png",
+		ContentType: "image/png", Size: 1024, ETag: "media-ready",
+	}
+	if err := repo.Assets().Create(t.Context(), ready); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UserMediaAssets().Create(t.Context(), &model.UserMediaAsset{
+		ID: "media-ready", UserID: "user-1", AssetID: ready.ID, MediaType: "image", Status: model.UserMediaAssetStatusAvailable,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range statuses {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := validateInputAttachments(t.Context(), nil, repo, "user-1", []model.EntryAttachment{{AssetID: "media-" + tc.name}}, InputAttachmentValidationOptions{
+				AllowedTypes:         map[string]bool{"image": true},
+				AllowedAssetPurposes: []string{service.DirectUploadPurposeMediaLibrary},
+			})
+			if err == nil || !errors.Is(err, errInputAttachmentValidation) || !strings.Contains(err.Error(), "media-library asset is not available") {
+				t.Fatalf("error = %v, want unavailable media-library validation error", err)
+			}
+		})
+	}
+	got, err := validateInputAttachments(t.Context(), nil, repo, "user-1", []model.EntryAttachment{{AssetID: ready.ID}}, InputAttachmentValidationOptions{
+		AllowedTypes:         map[string]bool{"image": true},
+		AllowedAssetPurposes: []string{service.DirectUploadPurposeMediaLibrary},
+	})
+	if err != nil || len(got) != 1 || got[0].AssetID != ready.ID {
+		t.Fatalf("ready media-library asset = %#v, %v", got, err)
+	}
+}
+
 func TestValidateInputAttachmentsNormalizesAndFinalizes(t *testing.T) {
 	const key = "uploads/pending/user-1/upload-1/product.png"
 	session := &model.UploadSession{

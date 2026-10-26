@@ -7,11 +7,11 @@ import (
 )
 
 func TestHypitKubernetesPlacementMatchesRuntimeArchitecture(t *testing.T) {
-	for _, kind := range []string{model.PlatformHypit, model.PlatformWechat, model.PlatformMontage} {
+	for _, kind := range []string{model.PlatformHypit, model.TaskTypeWechatArticle, model.PlatformMontage} {
 		t.Run(kind, func(t *testing.T) {
 			task := testTask()
 			task.Type = kind
-			job := buildKubernetesJob(testJobConfig(), testExecution(), task)
+			job := mustBuildKubernetesJob(testJobConfig(), testExecution(), task)
 			selector := job.Spec.Template.Spec.NodeSelector
 			if kind == model.PlatformHypit {
 				if len(selector) != 2 || selector["kubernetes.io/os"] != "linux" || selector["kubernetes.io/arch"] != "amd64" {
@@ -28,7 +28,7 @@ func TestHypitWorkloadHonorsFrozenTimeout(t *testing.T) {
 	task := testTask()
 	task.Type = model.PlatformHypit
 	task.HypitRuntimeSnapshot = []byte(`{"limits":{"timeout_minutes":7}}`)
-	job := buildKubernetesJob(testJobConfig(), testExecution(), task)
+	job := mustBuildKubernetesJob(testJobConfig(), testExecution(), task)
 	if *job.Spec.ActiveDeadlineSeconds != 420 {
 		t.Fatalf("deadline=%d", *job.Spec.ActiveDeadlineSeconds)
 	}
@@ -45,7 +45,7 @@ func TestVideoEditWorkloadsHonorExecutionDeadline(t *testing.T) {
 	execution := testExecution()
 	execution.ActiveDeadlineSeconds = int64((90 * time.Minute).Seconds())
 
-	job := buildKubernetesJob(testJobConfig(), execution, task)
+	job := mustBuildKubernetesJob(testJobConfig(), execution, task)
 	if got := *job.Spec.ActiveDeadlineSeconds; got != 90*60 {
 		t.Fatalf("Kubernetes deadline = %d seconds, want %d", got, 90*60)
 	}

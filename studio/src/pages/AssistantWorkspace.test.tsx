@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   agentProfiles: vi.fn(),
   imageCapabilities: vi.fn(),
   platformConfigs: vi.fn(),
+  userMediaList: vi.fn(),
   streamEvents: [] as { event: string; id: string; data: string }[],
 }))
 
@@ -35,6 +36,7 @@ vi.mock('@/lib/api', async () => {
       agentProfiles: { ...actual.api.agentProfiles, list: mocks.agentProfiles },
       imageCapabilities: { ...actual.api.imageCapabilities, list: mocks.imageCapabilities },
       projects: { ...actual.api.projects, list: mocks.projectsList, platformConfigs: mocks.platformConfigs },
+      userMedia: { ...actual.api.userMedia, list: mocks.userMediaList },
       tasks: { ...actual.api.tasks, get: mocks.taskGet, files: mocks.taskFiles },
     },
   }
@@ -104,6 +106,7 @@ describe('AssistantWorkspace', () => {
     mocks.agentProfiles.mockResolvedValue([{ id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-flash', description: '日常创作', min_tier: 'free', available: true }])
     mocks.imageCapabilities.mockResolvedValue({ tier: 'free', default_capability: 'standard', items: [{ key: 'standard', display_name: '标准图像', description: '适合日常配图', enabled: true, price_available: true, price_credits: 300 }] })
     mocks.platformConfigs.mockResolvedValue([{ id: 'wechat', supported_image_ratios: ['16:9', '1:1'] }])
+    mocks.userMediaList.mockResolvedValue({ items: [], total: 0, offset: 0, limit: 30 })
   })
 
   it('allows drafting while bootstrap is pending and enables sending when it is ready', async () => {
@@ -925,7 +928,7 @@ describe('AssistantWorkspace', () => {
     mocks.projectsList.mockResolvedValue([{ id: 'project-ratio', name: '画幅人设', platform: 'wechat', image_ratio: '1:1', status: 'active' }])
     mocks.platformConfigs.mockResolvedValue([{ id: 'wechat', default_image_ratio: '16:9', supported_image_ratios: ['16:9', '1:1'] }])
     mocks.createWorkspace.mockResolvedValue({ id: 'workspace-ratio', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'project-ratio', runtime_status: 'starting', expires_at: '' })
-    mocks.streamEvents = [{ event: 'draft.ready', id: 'event-ratio', data: JSON.stringify({ mode_id: 'creation', session_id: 'session-1', draft: { ready: true, payload: { plan: { goal: '按人设画幅创作', content_type: 'wechat-article' } } } }) }]
+    mocks.streamEvents = [{ event: 'draft.ready', id: 'event-ratio', data: JSON.stringify({ mode_id: 'creation', session_id: 'session-1', draft: { ready: true, payload: { plan: { goal: '按人设画幅创作', content_type: 'wechat-article', topic: '春茶冲泡', angle: '新手常见问题', expression_form: '步骤教程' } } } }) }]
     renderPage({ modeId: 'creation', projectId: 'project-ratio' })
 
     fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '按人设画幅创作' } })
@@ -955,7 +958,7 @@ describe('AssistantWorkspace', () => {
     mocks.streamEvents = [{
       event: 'draft.ready',
       id: 'event-commit-lock',
-      data: JSON.stringify({ mode_id: 'creation', session_id: 'session-1', draft: { ready: true, payload: { plan: { goal: '锁定提交', content_type: 'wechat-article' } } } }),
+      data: JSON.stringify({ mode_id: 'creation', session_id: 'session-1', draft: { ready: true, payload: { plan: { goal: '锁定提交', content_type: 'wechat-article', topic: '春季内容计划', angle: '围绕真实变化展开', expression_form: '案例型' } } } }),
     }]
     renderPage({ modeId: 'creation', projectId: 'project-1' })
 
@@ -988,7 +991,7 @@ describe('AssistantWorkspace', () => {
     mocks.streamEvents = [{
       event: 'draft.ready',
       id: 'event-attachment-draft',
-      data: JSON.stringify({ mode_id: 'creation', session_id: 'session-1', draft: { ready: true, payload: { plan: { goal: '基于资料创作', content_type: 'wechat-article' } } } }),
+      data: JSON.stringify({ mode_id: 'creation', session_id: 'session-1', draft: { ready: true, payload: { plan: { goal: '基于资料创作', content_type: 'wechat-article', topic: '资料中的核心信息', angle: '用户实际问题', expression_form: '深度文章' } } } }),
     }]
     uploadToOSSMock.mockResolvedValue({ uploadSessionId: 'upload-session-1', uploadId: 'upload-session-1', key: 'staging/brief.pdf', previewUrl: '', publicUrl: '', contentType: 'application/pdf', size: 16 })
     renderPage({ modeId: 'creation', projectId: 'project-1' })
@@ -1004,12 +1007,34 @@ describe('AssistantWorkspace', () => {
       payload: { plan: {
         goal: '基于资料创作',
         content_type: 'wechat-article',
+        topic: '资料中的核心信息',
+        angle: '用户实际问题',
+        expression_form: '深度文章',
         execution_profile: 'effective',
         image_ratio: 'auto',
         image_capability_key: 'standard',
         assets: [{ type: 'document', upload_id: 'upload-session-1', file_name: 'brief.pdf', mime_type: 'application/pdf', file_size: 16 }],
       } },
     })))
+  })
+
+  it('offers local upload and media-library selection from the creation plus menu', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'creation',
+      modes: [{ id: 'creation', displayName: '创作模式', description: '制定计划', available: true }],
+      projects: [{ id: 'project-1', name: '我的人设', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    mocks.projectsList.mockResolvedValue([{ id: 'project-1', name: '我的人设', platform: 'wechat', status: 'active' }])
+    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'project-1', runtime_status: 'starting', expires_at: '' })
+    uploadToOSSMock.mockResolvedValue({ uploadSessionId: 'upload-1', uploadId: 'upload-1', key: 'staging/cover.png', previewUrl: '', publicUrl: '', contentType: 'image/png', size: 4 })
+    renderPage({ modeId: 'creation', projectId: 'project-1' })
+
+    fireEvent.click(await screen.findByRole('button', { name: '从素材库选择' }))
+    await waitFor(() => expect(mocks.userMediaList).toHaveBeenCalledWith({ q: undefined, status: 'available', limit: 30 }))
+    expect(screen.getByRole('button', { name: '上传素材' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '从素材库选择' })).toHaveLength(2)
+    fireEvent.change(screen.getByLabelText('上传创作素材'), { target: { files: [new File(['png'], 'cover.png', { type: 'image/png' })] } })
+    await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'ai_entry_attachment' })))
   })
 
   it('keeps persona context in the composer header without a profile-mode entry action', async () => {

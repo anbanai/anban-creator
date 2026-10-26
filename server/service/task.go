@@ -656,6 +656,26 @@ func (s *TaskService) validateTaskCreationReferences(ctx context.Context, userID
 	return nil
 }
 
+func validateUserMediaInputAttachments(ctx context.Context, repo repository.Repository, userID string, attachments []model.EntryAttachment) error {
+	if repo == nil {
+		return nil
+	}
+	for _, attachment := range attachments {
+		assetID := strings.TrimSpace(attachment.AssetID)
+		if assetID == "" {
+			continue
+		}
+		asset, err := repo.Assets().FindByID(ctx, assetID)
+		if err != nil || asset == nil || asset.Purpose != DirectUploadPurposeMediaLibrary {
+			continue
+		}
+		if err := ValidateUserMediaAssetForCreation(ctx, repo, userID, asset); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // CreateManual creates tasks without a plan and enqueues them for execution.
 // The Quantity field (1-5) determines how many tasks to create, each independently billed.
 // ImageCapabilityKey optionally selects a per-task image model (validated upstream by the handler).
@@ -713,6 +733,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		taskProjectSnapshot.PortraitReferenceImageAssetID = strings.TrimSpace(*p.PortraitReferenceImageAssetID)
 	}
 	if err := s.validateTaskCreationReferences(ctx, p.UserID, effectiveReferenceImageAssetID, project, &taskProjectSnapshot); err != nil {
+		return nil, err
+	}
+	if err := validateUserMediaInputAttachments(ctx, s.repo, p.UserID, p.InputAttachments); err != nil {
 		return nil, err
 	}
 
@@ -1475,6 +1498,9 @@ func (s *TaskService) createFromPlanWithEntryInputs(ctx context.Context, plan *m
 	if err := s.validateTaskCreationReferences(ctx, plan.UserID, effectiveReferenceImageAssetID, project, &projectSnapshot); err != nil {
 		return nil, err
 	}
+	if err := validateUserMediaInputAttachments(ctx, s.repo, plan.UserID, plan.InputAttachments.Data()); err != nil {
+		return nil, err
+	}
 	if usePortraitCover && strings.TrimSpace(projectSnapshot.PortraitReferenceImageAssetID) == "" {
 		return nil, ErrCoverPortraitUnavailable
 	}
@@ -1612,7 +1638,7 @@ func taskTypeForIdentity(agentID, channel, taskKind string) string {
 		return model.PlatformVideoEdit
 	}
 	if taskKind != model.TaskKindContentGeneration {
-		return taskKind
+		return model.TaskTypeForTaskKind(taskKind)
 	}
 	switch agentID {
 	case model.AgentIDArticle:

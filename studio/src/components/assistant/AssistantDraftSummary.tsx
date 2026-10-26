@@ -4,8 +4,9 @@ import type { AssistantModeID } from '@/lib/api/assistant'
 type DraftFields = Record<string, unknown>
 
 const CREATION_FIELDS = [
-  ['goal', '创作目标'], ['content_type', '内容类型'], ['target_audience', '目标受众'],
-  ['angle', '主题与切入角度'], ['outline', '内容结构与大纲'], ['style_constraints', '风格与约束'],
+  ['goal', '创作目标'], ['content_type', '内容类型'], ['topic', '创作话题'], ['angle', '切入角度'], ['expression_form', '表达形式'], ['target_audience', '目标受众'],
+  ['profile_context', '沿用的人设信息'], ['temporary_overrides', '本次临时调整'],
+  ['outline', '内容结构与大纲'], ['style_constraints', '风格与约束'],
   ['asset_plan', '素材与配图计划'], ['acceptance_criteria', '质量验收标准'],
   ['cost_estimate', '预计成本'], ['execution_options', '执行选项'], ['execution_profile', '执行配置'],
   ['image_ratio', '图片比例'], ['image_capability_key', '图像能力'],
@@ -63,12 +64,18 @@ function labelForDetail(key: string): string {
 
 function DraftValue({ value, label, field }: { value: unknown; label: string; field?: string }) {
   if (Array.isArray(value)) {
+    if (value.length === 0) {
+      const emptyText = field === 'profile_context' ? '无额外沿用信息' : field === 'temporary_overrides' ? '无临时调整' : '暂无'
+      return <p className="text-muted-foreground">{emptyText}</p>
+    }
     return <ul aria-label={label} className="list-disc space-y-1 pl-4">{value.map((item, index) => <li key={index}><DraftValue value={item} label={label} /></li>)}</ul>
   }
   if (isRecord(value)) {
     return <dl className="space-y-3">{Object.entries(value).map(([key, item]) => <div key={key}><dt className="text-xs text-muted-foreground">{labelForDetail(key)}</dt><dd className="mt-1"><DraftValue value={item} label={labelForDetail(key)} field={key} /></dd></div>)}</dl>
   }
-  let text = value == null || value === '' ? '待补充' : typeof value === 'boolean' ? value ? '是' : '否' : String(value)
+  let text = value == null || value === ''
+    ? field === 'profile_context' || field === 'temporary_overrides' ? '未记录' : '待补充'
+    : typeof value === 'boolean' ? value ? '是' : '否' : String(value)
   if (field === 'content_type') text = CONTENT_TYPES[text] ?? text
   if (field === 'execution_profile') text = EXECUTION_PROFILES[text] ?? text
   if (field === 'image_ratio' && text === 'auto') text = '智能适配'
@@ -80,9 +87,10 @@ function DraftValue({ value, label, field }: { value: unknown; label: string; fi
 export function AssistantDraftSummary({ draft, mode, compact = false }: { draft: InteractiveDraft | null; mode: Exclude<AssistantModeID, 'profile'>; compact?: boolean }) {
   const fields = assistantDraftFields(draft, mode)
   const definitions = mode === 'creation' ? CREATION_FIELDS : REVIEW_FIELDS
-  const visible = definitions.filter(([key]) => fields[key] !== undefined)
+  const hasCreationPlan = mode === 'creation' && Object.keys(fields).length > 0
+  const visible = definitions.filter(([key]) => fields[key] !== undefined || (hasCreationPlan && (key === 'profile_context' || key === 'temporary_overrides')))
   if (visible.length === 0) {
-    return <p className="text-sm leading-6 text-muted-foreground">{mode === 'creation' ? '讨论后，创作目标、大纲和执行选项会整理在这里。' : '讨论后，复盘发现、改进建议和支持证据会整理在这里。'}</p>
+    return <p className="text-sm leading-6 text-muted-foreground">{mode === 'creation' ? '讨论后，创作目标、话题、角度和表达形式会整理在这里。' : '讨论后，复盘发现、改进建议和支持证据会整理在这里。'}</p>
   }
   return <dl className={compact ? 'space-y-3' : 'grid gap-3 sm:grid-cols-2'}>
     {visible.map(([key, label]) => <div key={key} className={compact ? 'border-t border-border pt-3' : `rounded-md border border-border bg-background/70 p-3 ${key === 'dimension_recommendations' || key === 'evidence' || key === 'outline' ? 'sm:col-span-2' : ''}`}>

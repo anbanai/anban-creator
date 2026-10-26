@@ -21,6 +21,7 @@ type Repository interface {
 	TaskFiles() TaskFileRepository
 	UploadSessions() UploadSessionRepository
 	Assets() AssetRepository
+	UserMediaAssets() UserMediaAssetRepository
 	ImageAnalyses() ImageAnalysisRepository
 	Projects() ProjectRepository
 	ProjectProfileRevisions() ProjectProfileRevisionRepository
@@ -650,6 +651,7 @@ type repository struct {
 	files                     TaskFileRepository
 	uploadSessions            UploadSessionRepository
 	assets                    AssetRepository
+	userMediaAssets           UserMediaAssetRepository
 	imageAnalyses             ImageAnalysisRepository
 	projects                  ProjectRepository
 	projectProfileRevisions   ProjectProfileRevisionRepository
@@ -702,6 +704,7 @@ func New(db *gorm.DB) Repository {
 	files := newTaskFileRepository(db)
 	uploadSessions := newUploadSessionRepository(db)
 	assets := newAssetRepository(db)
+	userMediaAssets := newUserMediaAssetRepository(db)
 	imageAnalyses := newImageAnalysisRepository(db)
 	projects := newProjectRepository(db)
 	projectChannelConfigs := newProjectChannelConfigRepository(db)
@@ -748,6 +751,7 @@ func New(db *gorm.DB) Repository {
 		files:                     files,
 		uploadSessions:            uploadSessions,
 		assets:                    assets,
+		userMediaAssets:           userMediaAssets,
 		imageAnalyses:             imageAnalyses,
 		projects:                  projects,
 		projectProfileRevisions:   newProjectProfileRevisionRepository(db),
@@ -791,17 +795,18 @@ func New(db *gorm.DB) Repository {
 	}
 }
 
-func (r *repository) Users() UserRepository                   { return r.users }
-func (r *repository) Sessions() SessionRepository             { return r.sessions }
-func (r *repository) Plans() PlanRepository                   { return r.plans }
-func (r *repository) PlanEntries() PlanEntryRepository        { return r.planEntries }
-func (r *repository) Tasks() TaskRepository                   { return r.tasks }
-func (r *repository) TaskExecutions() TaskExecutionRepository { return r.taskExecutions }
-func (r *repository) TaskFiles() TaskFileRepository           { return r.files }
-func (r *repository) UploadSessions() UploadSessionRepository { return r.uploadSessions }
-func (r *repository) Assets() AssetRepository                 { return r.assets }
-func (r *repository) ImageAnalyses() ImageAnalysisRepository  { return r.imageAnalyses }
-func (r *repository) Projects() ProjectRepository             { return r.projects }
+func (r *repository) Users() UserRepository                     { return r.users }
+func (r *repository) Sessions() SessionRepository               { return r.sessions }
+func (r *repository) Plans() PlanRepository                     { return r.plans }
+func (r *repository) PlanEntries() PlanEntryRepository          { return r.planEntries }
+func (r *repository) Tasks() TaskRepository                     { return r.tasks }
+func (r *repository) TaskExecutions() TaskExecutionRepository   { return r.taskExecutions }
+func (r *repository) TaskFiles() TaskFileRepository             { return r.files }
+func (r *repository) UploadSessions() UploadSessionRepository   { return r.uploadSessions }
+func (r *repository) Assets() AssetRepository                   { return r.assets }
+func (r *repository) UserMediaAssets() UserMediaAssetRepository { return r.userMediaAssets }
+func (r *repository) ImageAnalyses() ImageAnalysisRepository    { return r.imageAnalyses }
+func (r *repository) Projects() ProjectRepository               { return r.projects }
 func (r *repository) ProjectProfileRevisions() ProjectProfileRevisionRepository {
 	return r.projectProfileRevisions
 }
@@ -905,6 +910,7 @@ type txRepository struct {
 	files                   TaskFileRepository
 	uploadSessions          UploadSessionRepository
 	assets                  AssetRepository
+	userMediaAssets         UserMediaAssetRepository
 	imageAnalyses           ImageAnalysisRepository
 	projects                ProjectRepository
 	projectProfileRevisions ProjectProfileRevisionRepository
@@ -958,6 +964,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		files:                   newTaskFileRepository(tx),
 		uploadSessions:          newUploadSessionRepository(tx),
 		assets:                  newAssetRepository(tx),
+		userMediaAssets:         newUserMediaAssetRepository(tx),
 		imageAnalyses:           newImageAnalysisRepository(tx),
 		projects:                newProjectRepository(tx),
 		projectProfileRevisions: newProjectProfileRevisionRepository(tx),
@@ -1000,17 +1007,18 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 	}
 }
 
-func (r *txRepository) Users() UserRepository                   { return r.users }
-func (r *txRepository) Sessions() SessionRepository             { return r.sessions }
-func (r *txRepository) Plans() PlanRepository                   { return r.plans }
-func (r *txRepository) PlanEntries() PlanEntryRepository        { return r.planEntries }
-func (r *txRepository) Tasks() TaskRepository                   { return r.tasks }
-func (r *txRepository) TaskExecutions() TaskExecutionRepository { return r.taskExecutions }
-func (r *txRepository) TaskFiles() TaskFileRepository           { return r.files }
-func (r *txRepository) UploadSessions() UploadSessionRepository { return r.uploadSessions }
-func (r *txRepository) Assets() AssetRepository                 { return r.assets }
-func (r *txRepository) ImageAnalyses() ImageAnalysisRepository  { return r.imageAnalyses }
-func (r *txRepository) Projects() ProjectRepository             { return r.projects }
+func (r *txRepository) Users() UserRepository                     { return r.users }
+func (r *txRepository) Sessions() SessionRepository               { return r.sessions }
+func (r *txRepository) Plans() PlanRepository                     { return r.plans }
+func (r *txRepository) PlanEntries() PlanEntryRepository          { return r.planEntries }
+func (r *txRepository) Tasks() TaskRepository                     { return r.tasks }
+func (r *txRepository) TaskExecutions() TaskExecutionRepository   { return r.taskExecutions }
+func (r *txRepository) TaskFiles() TaskFileRepository             { return r.files }
+func (r *txRepository) UploadSessions() UploadSessionRepository   { return r.uploadSessions }
+func (r *txRepository) Assets() AssetRepository                   { return r.assets }
+func (r *txRepository) UserMediaAssets() UserMediaAssetRepository { return r.userMediaAssets }
+func (r *txRepository) ImageAnalyses() ImageAnalysisRepository    { return r.imageAnalyses }
+func (r *txRepository) Projects() ProjectRepository               { return r.projects }
 func (r *txRepository) ProjectProfileRevisions() ProjectProfileRevisionRepository {
 	return r.projectProfileRevisions
 }

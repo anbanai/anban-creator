@@ -21,6 +21,7 @@ describe('navigation IA', () => {
       '设置',
       '内容分析',
       '选题资产',
+      '素材库',
       '热点雷达',
     ])
     expect(mvpNavItems[0]?.icon).toBe(Sparkles)
@@ -37,6 +38,7 @@ describe('navigation IA', () => {
       '/settings',
       '/content-analytics',
       '/content-assets',
+      '/media-assets',
       '/trends',
     ])
     expect(workspaceNavItems.find((item) => item.to === '/timeline')?.adminOnly).toBe(true)
@@ -62,6 +64,7 @@ describe('navigation IA', () => {
       '/settings',
       '/content-analytics',
       '/content-assets',
+      '/media-assets',
       '/trends',
       '/templates',
       '/admin/billing',

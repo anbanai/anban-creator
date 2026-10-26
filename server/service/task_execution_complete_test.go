@@ -634,6 +634,38 @@ func TestRequiredArticleImageSlotsMustResolveToUploadedImagesAndFinalHTML(t *tes
 	}
 }
 
+func TestRenderManualWechatPictureHTMLPreservesPackageOrderAndBlocksMissingImages(t *testing.T) {
+	pkg := &picturePublicationPackage{Title: "标题 <安全>", Content: "caption\n#标签一 #标签二 #标签三 #标签四 #标签五", CoverPath: "output/cover.png", ImagePaths: []string{"output/image_02.png", "output/image_01.png"}}
+	files := []*model.TaskFile{
+		{FilePath: "output/cover.png", Role: model.FileRoleCover, State: model.TaskFileStateDelivered, MimeType: "image/png", PlatformImageURL: "https://creator.anbanai.com/api/v1/article-assets/cover"},
+		{FilePath: "output/image_01.png", Role: model.FileRoleImage, State: model.TaskFileStateDelivered, MimeType: "image/png", PlatformImageURL: "https://creator.anbanai.com/api/v1/article-assets/one"},
+		{FilePath: "output/image_02.png", Role: model.FileRoleImage, State: model.TaskFileStateDelivered, MimeType: "image/png", PlatformImageURL: "https://creator.anbanai.com/api/v1/article-assets/two"},
+	}
+	htmlBody, err := renderManualWechatPictureHTML(pkg, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(htmlBody, "标题 &lt;安全&gt;") || !strings.Contains(htmlBody, "caption") {
+		t.Fatalf("rendered HTML omitted escaped title or caption: %s", htmlBody)
+	}
+	if strings.Index(htmlBody, "/cover\"") > strings.Index(htmlBody, "/two\"") || strings.Index(htmlBody, "/two\"") > strings.Index(htmlBody, "/one\"") {
+		t.Fatalf("rendered HTML did not preserve cover and package image order: %s", htmlBody)
+	}
+	if _, err := renderManualWechatPictureHTML(pkg, files[:2]); err == nil {
+		t.Fatal("renderer accepted a package image without a delivered public URL")
+	}
+	wrongCoverRole := append([]*model.TaskFile(nil), files...)
+	wrongCoverRole[0] = &model.TaskFile{FilePath: "output/cover.png", Role: model.FileRoleImage, State: model.TaskFileStateDelivered, MimeType: "image/png", PlatformImageURL: "https://creator.anbanai.com/api/v1/article-assets/cover"}
+	if _, err := renderManualWechatPictureHTML(pkg, wrongCoverRole); err == nil {
+		t.Fatal("renderer accepted a cover path backed by a content-image TaskFile")
+	}
+	wrongImageMIME := append([]*model.TaskFile(nil), files...)
+	wrongImageMIME[1] = &model.TaskFile{FilePath: "output/image_01.png", Role: model.FileRoleImage, State: model.TaskFileStateDelivered, MimeType: "text/plain", PlatformImageURL: "https://creator.anbanai.com/api/v1/article-assets/one"}
+	if _, err := renderManualWechatPictureHTML(pkg, wrongImageMIME); err == nil {
+		t.Fatal("renderer accepted a non-image TaskFile as a picture")
+	}
+}
+
 func addRequiredArticleImagePlan(t *testing.T, svc *TaskService, repo repository.Repository, task *model.Task, execution *model.TaskExecution, imageURL string) {
 	t.Helper()
 	plan := []byte(fmt.Sprintf("# Rhythm plan\n\n```json\n{\"article_type\":\"essay\",\"template_name\":\"essay\",\"slots\":[{\"slot_id\":\"section_opener\",\"section_index\":0,\"image_required\":true,\"image_url\":%q}]}\n```\n", imageURL))
@@ -738,23 +770,22 @@ func TestFinalizeArticlePublicationAllowsCurrentCoverHeroAndContentImage(t *test
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/marketing-scan.json", "application/json", scanBody)
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/final-review.md", "text/markdown", []byte("# Final review\n\nPassed.\n"))
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/viral-audit.md", "text/markdown", []byte("# Viral audit\n\nPassed.\n"))
-	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover.png", "image/png", []byte("unuploaded-cover-image"))
-	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover-exact.png", "image/png", []byte("selected-cover-image"))
-	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover-alternative.png", "image/png", []byte("alternative-cover-image"))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover.png", "image/png", []byte("wide-cover-image"))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover-square.png", "image/png", []byte("square-cover-image"))
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/img_01.png", "image/png", []byte("content-image"))
 	addRequiredArticleImagePlan(t, svc, repo, task, execution, contentURL)
 	if err := db.Model(&model.TaskFile{}).
-		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/cover-exact.png").
+		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/cover.png").
 		Updates(map[string]any{
 			"role": model.FileRoleCover, "media_id": "cover-media-id", "wechat_url": coverURL,
 		}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Model(&model.TaskFile{}).
-		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/cover-alternative.png").
+		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/cover-square.png").
 		Updates(map[string]any{
-			"role": model.FileRoleCover, "media_id": "alternative-cover-media-id",
-			"wechat_url": "https://mmbiz.qpic.cn/alternative-cover.png",
+			"role": model.FileRoleCover, "media_id": "square-cover-media-id",
+			"wechat_url": "https://mmbiz.qpic.cn/square-cover.png",
 		}).Error; err != nil {
 		t.Fatal(err)
 	}

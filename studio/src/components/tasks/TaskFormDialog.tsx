@@ -78,7 +78,7 @@ function projectTaskTypes(project?: Project | null): TaskType[] {
   const supported = projectAgentIDs(project)
     .map((id) => id === 'wechat' ? 'wechat-article' : id)
     .filter((id): id is TaskType => taskTypeLabels.has(id))
-  if (supported.includes('seednote') && !supported.includes('viral_analysis')) supported.push('viral_analysis')
+  if (supported.includes('seednote') && !supported.includes('viral-analysis')) supported.push('viral-analysis')
   return supported.filter((type, index, all) => all.indexOf(type) === index)
 }
 
@@ -231,7 +231,7 @@ export function TaskFormDialog({
   const isMontageTask = watchedType === 'montage' || watchedType === 'hypit'
   const isVideoEditTask = watchedType === 'video-edit'
   const isLocalLifeTask = watchedType === 'local-life'
-  const isViralAnalysisTask = watchedType === 'viral_analysis'
+  const isViralAnalysisTask = watchedType === 'viral-analysis'
   const usesImageSettings = !isViralAnalysisTask && watchedType !== 'hypit' && !isLocalLifeTask && !isVideoEditTask
   const { items: imageCapabilityOptions, defaultCapability, isLoading: imageCapabilitiesLoading, isError: imageCapabilitiesError } = useImageCapabilities(usesImageSettings)
   const hasIncompatibleSeednoteAttachments = watchedType === 'seednote'
@@ -274,7 +274,7 @@ export function TaskFormDialog({
     )
   const outputPlatform = watchedType === 'wechat-article' || watchedType === 'wechat-picture'
     ? 'wechat'
-    : watchedType === 'viral_analysis' ? 'seednote' : watchedType
+    : watchedType === 'viral-analysis' ? 'seednote' : watchedType
   const outputPlatformConfig = platformConfigMap.get(outputPlatform)
   const businessImageRatios = outputPlatformConfig?.supported_image_ratios ?? []
   useEffect(() => {
@@ -320,7 +320,7 @@ export function TaskFormDialog({
             project_id: sourceProject.id,
           }
         })()
-      : createInitialDefaults(project ?? (initialType === 'viral_analysis' ? firstProject : undefined), initialType)
+      : createInitialDefaults(project ?? (initialType === 'viral-analysis' ? firstProject : undefined), initialType)
     initializedKeyRef.current = initializationKey
     form.reset(defaults)
     resetAttachments(defaults.input_attachments)
@@ -413,7 +413,7 @@ export function TaskFormDialog({
       if (nextType === 'hypit' && !projectDefaults.hypit_input) projectDefaults.hypit_input = initialHypitInput(current.prompt, undefined, project.hypit_defaults)
       if (nextType === 'montage' && !projectDefaults.montage_input) projectDefaults.montage_input = initialMontageInput(current.prompt, undefined, project.montage_defaults)
     }
-    if (current.type === 'viral_analysis' && (!project || projectTaskTypes(project).includes('viral_analysis'))) projectDefaults.type = 'viral_analysis'
+    if (current.type === 'viral-analysis' && (!project || projectTaskTypes(project).includes('viral-analysis'))) projectDefaults.type = 'viral-analysis'
     const currentTypeSupported = Boolean(project && projectTaskTypes(project).includes(current.type))
     const switched = explicitTaskTypeRef.current && currentTypeSupported && projectDefaults.type !== current.type
       ? {
@@ -550,7 +550,7 @@ export function TaskFormDialog({
     />
   )
 
-  const taskTypeOptions = [...contentTypeOptions, { value: 'viral_analysis', label: '爆文拆解' }]
+  const taskTypeOptions = [...contentTypeOptions, { value: 'viral-analysis', label: '爆文拆解' }]
     .filter((option) => selectedProject && projectTaskTypes(selectedProject).includes(option.value as TaskType))
   const agentControl = selectedProject && taskTypeOptions.length > 1 ? (
     <section className="space-y-2 rounded-xl border border-border/80 bg-muted/20 p-3">

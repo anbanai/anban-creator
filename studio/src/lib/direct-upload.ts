@@ -13,6 +13,7 @@ export type DirectUploadPurpose =
   | 'hypit_asset'
   | 'seednote_analytics_import'
   | 'wechat_analytics_import'
+  | 'media_library'
 
 export interface UploadToOSSOptions {
   purpose: DirectUploadPurpose

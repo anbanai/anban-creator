@@ -78,6 +78,10 @@ func (d *kubernetesJobDispatcher) Prepare(ctx context.Context, execution *model.
 	if err := d.validateRuntime(execution, task); err != nil {
 		return nil, NewPermanentDispatchError(err)
 	}
+	resources, err := d.config.ResourcesForTask(task.Type)
+	if err != nil {
+		return nil, NewPermanentDispatchError(err)
+	}
 	resume := execution.Attempt > 1 || strings.TrimSpace(execution.ParentExecutionID) != "" || strings.TrimSpace(execution.RuntimeInstanceID) != ""
 	if err := prepareProjectMemory(ctx, d.memory, task.ProjectID, resume); err != nil {
 		return nil, fmt.Errorf("prepare Kubernetes project memory: %w", err)
@@ -88,7 +92,7 @@ func (d *kubernetesJobDispatcher) Prepare(ctx context.Context, execution *model.
 		return nil, err
 	}
 
-	desiredJob := buildKubernetesJob(d.config, execution, task)
+	desiredJob := buildKubernetesJobWithResources(d.config, execution, task, resources)
 	jobs := d.kube.BatchV1().Jobs(d.config.Namespace)
 	existingJob, err := jobs.Get(ctx, desiredJob.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {

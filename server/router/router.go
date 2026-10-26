@@ -65,6 +65,7 @@ type Services struct {
 	APIKeyHandler                       *handler.APIKeyHandler
 	FileHandler                         *handler.FileHandler
 	UploadHandler                       *handler.UploadHandler
+	UserMediaLibraryHandler             *handler.UserMediaLibraryHandler
 	AIEntryHandler                      *handler.AIEntryHandler
 	FeedbackHandler                     *handler.FeedbackHandler
 	ImageCapabilityHandler              *handler.ImageCapabilityHandler
@@ -443,6 +444,7 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/tasks/:id/files", svc.TaskHandler.GetFiles)
 		apiV1.Get("/tasks/:id/stream", svc.TaskHandler.Stream)
 		apiV1.Get("/tasks/:id/preview", svc.TaskHandler.PreviewHTML)
+		apiV1.Get("/tasks/:id/wechat-picture-copy", svc.TaskHandler.ManualWechatPictureHTML)
 		apiV1.Get("/tasks/:id/files/zip", svc.TaskHandler.DownloadZip)
 		apiV1.Get("/tasks/:id/files/retained/zip", svc.TaskHandler.DownloadRetainedZip)
 		apiV1.Get("/tasks/:id/files/:fileId/preview", svc.TaskHandler.PreviewFile)
@@ -525,6 +527,15 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Post("/uploads/prepare", svc.UploadHandler.Prepare)
 		apiV1.Post("/uploads/resolve-asset-url", svc.UploadHandler.ResolveAssetDownloadURL)
 		apiV1.Post("/uploads/resolve-download-url", svc.UploadHandler.ResolveDownloadURL)
+	}
+	if svc.UserMediaLibraryHandler != nil {
+		mediaAssets := apiV1.Group("/media-assets")
+		mediaAssets.Post("/", svc.UserMediaLibraryHandler.Create)
+		mediaAssets.Get("/", svc.UserMediaLibraryHandler.List)
+		mediaAssets.Get("/:id", svc.UserMediaLibraryHandler.Get)
+		mediaAssets.Patch("/:id", svc.UserMediaLibraryHandler.Update)
+		mediaAssets.Post("/:id/reanalyze", svc.UserMediaLibraryHandler.Reanalyze)
+		mediaAssets.Delete("/:id", svc.UserMediaLibraryHandler.Remove)
 	}
 	if svc.AIEntryHandler != nil {
 		apiV1.Post("/ai-entry/submit", svc.AIEntryHandler.Submit)

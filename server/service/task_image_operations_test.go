@@ -796,8 +796,102 @@ func TestTaskImageUploadRejectsNonBodyImageInUserAssistedMode(t *testing.T) {
 		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID,
 		FilePath: "output/source-a.png",
 	})
-	if err == nil || !strings.Contains(err.Error(), "only generated article body images") {
+	if err == nil || !strings.Contains(err.Error(), "only generated article or picture delivery images") {
 		t.Fatalf("Upload error = %v, want body-image restriction", err)
+	}
+}
+
+func TestTaskImageUploadAcceptsPictureImagesInUserAssistedMode(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	f.task.Type = model.TaskTypeWechatPicture
+	f.task.Channel = model.ChannelWechatPicture
+	f.task.SetProjectSnapshot(model.ProjectSnapshot{WechatDelivery: model.WechatDeliveryDecision{
+		Mode: model.WechatDeliveryModeUserAssisted,
+	}})
+	if err := f.repo.Tasks().Update(context.Background(), f.task); err != nil {
+		t.Fatal(err)
+	}
+	for index, path := range []string{"output/image_01.png", "output/cover.png"} {
+		role := model.FileRoleImage
+		if index == 1 {
+			role = model.FileRoleCover
+		}
+		data, err := f.store.Read(context.Background(), "fixtures/source-a.png")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.repo.TaskFiles().UpsertPendingCurrentExecution(context.Background(), f.task.ID, f.executionID, &model.TaskFile{
+			TaskID: f.task.ID, ExecutionID: f.executionID, Role: role,
+			FilePath: path, FileName: filepath.Base(path), MimeType: "image/png",
+			FileSize: int64(len(data)), ContentHash: hashTaskFileContent(data), OSSKey: "fixtures/source-a.png",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.service.Upload(context.Background(), UploadTaskImageRequest{
+			UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID,
+			FilePath: path,
+		}); err != nil {
+			t.Fatalf("Upload(%s) error = %v, want accepted picture image", path, err)
+		}
+	}
+}
+
+func TestTaskImageUploadHonorsManualPictureChoiceForAutomaticProject(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	f.task.Type = model.TaskTypeWechatPicture
+	f.task.Channel = model.ChannelWechatPicture
+	f.task.SetAgentInput(map[string]any{"picture_publish_draft": false})
+	if err := f.repo.Tasks().Update(context.Background(), f.task); err != nil {
+		t.Fatal(err)
+	}
+	type imageInput struct {
+		path string
+		role string
+	}
+	inputs := []imageInput{{path: "output/cover.png", role: model.FileRoleCover}, {path: "output/image_01.png", role: model.FileRoleImage}}
+	publicFiles := make([]*model.TaskFile, 0, len(inputs))
+	for _, input := range inputs {
+		data, err := f.store.Read(context.Background(), "fixtures/source-a.png")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.repo.TaskFiles().UpsertPendingCurrentExecution(context.Background(), f.task.ID, f.executionID, &model.TaskFile{
+			TaskID: f.task.ID, ExecutionID: f.executionID, Role: input.role,
+			FilePath: input.path, FileName: filepath.Base(input.path), MimeType: "image/png",
+			FileSize: int64(len(data)), ContentHash: hashTaskFileContent(data), OSSKey: "fixtures/source-a.png",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		result, err := f.service.Upload(context.Background(), UploadTaskImageRequest{
+			UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID,
+			FilePath: input.path,
+		})
+		if err != nil {
+			t.Fatalf("Upload manual picture image %s: %v", input.path, err)
+		}
+		if result.PlatformURL == "" || result.WechatURL != "" || result.MediaID != "" {
+			t.Fatalf("manual picture upload result = %#v, want public platform URL without WeChat media", result)
+		}
+		persisted := findTaskImageOperationOutputFile(t, f.repo, f.executionID, input.path)
+		if persisted.PlatformImageURL != result.PlatformURL || persisted.WechatURL != "" || persisted.MediaID != "" {
+			t.Fatalf("manual picture image metadata = %#v, want public URL only", persisted)
+		}
+		publicFiles = append(publicFiles, &model.TaskFile{
+			State: model.TaskFileStateDelivered, Role: input.role, FilePath: input.path,
+			FileName: filepath.Base(input.path), MimeType: "image/png", PlatformImageURL: result.PlatformURL,
+		})
+	}
+	pkg := &picturePublicationPackage{
+		Title: "茶主题", Content: validPictureCaption(), CoverPath: "output/cover.png",
+		ImagePaths: []string{"output/image_01.png"},
+	}
+	htmlBody, err := renderManualWechatPictureHTML(pkg, publicFiles)
+	if err != nil {
+		t.Fatalf("render manual copy from task-uploaded public URLs: %v", err)
+	}
+	if !strings.Contains(htmlBody, publicFiles[0].PlatformImageURL) || !strings.Contains(htmlBody, publicFiles[1].PlatformImageURL) ||
+		strings.Index(htmlBody, publicFiles[0].PlatformImageURL) > strings.Index(htmlBody, publicFiles[1].PlatformImageURL) {
+		t.Fatalf("manual picture HTML omitted or reordered uploaded public images: %s", htmlBody)
 	}
 }
 

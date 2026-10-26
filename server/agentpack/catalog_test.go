@@ -435,14 +435,14 @@ func TestLoadCatalogRejectsDuplicateArtifactPaths(t *testing.T) {
 }
 
 func TestLoadCatalogResolvesArtifactContractByTaskType(t *testing.T) {
-	manifest := strings.Replace(validFixtureManifest, "task_kinds: [demo-task]", "task_kinds: [demo-task, viral-analysis]", 1)
-	manifest = strings.Replace(manifest, "  demo-task: task.demo", "  demo-task: task.demo\n  viral-analysis: task.viral-analysis", 1)
+	manifest := strings.Replace(validFixtureManifest, "task_kinds: [demo-task]", "task_kinds: [demo-task, viral_analysis]", 1)
+	manifest = strings.Replace(manifest, "  demo-task: task.demo", "  demo-task: task.demo\n  viral_analysis: task.viral_analysis", 1)
 	manifest = strings.Replace(manifest, "artifacts:\n", `artifacts_by_task_type:
-  viral-analysis:
+  viral_analysis:
     - {role: analysis, path: output/source-analysis.md, mime_type: text/markdown, required: true}
     - {role: template, path: output/viral-template.json, mime_type: application/json, required: true}
 delivery_by_task_type:
-  viral-analysis:
+  viral_analysis:
     - {role: analysis, path: output/source-analysis.md, mime_type: text/markdown}
     - {role: template, path: output/viral-template.json, mime_type: application/json}
 artifacts:
@@ -1124,16 +1124,16 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 		profile string
 		adapter string
 	}{
-		"wechat-article":       {packID: "wechat-article", profile: "wechat-article", adapter: AdapterStandard},
-		"wechat-picture":       {packID: "wechat-picture", profile: "wechat-picture", adapter: AdapterStandard},
-		"seednote":             {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
-		"viral_analysis":       {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
-		"moments":              {packID: "moments", profile: "moments", adapter: AdapterStandard},
-		"ecommerce":            {packID: "ecommerce", profile: "ecommerce", adapter: AdapterStandard},
-		"hypit":                {packID: "hypit", profile: "hypit", adapter: AdapterStandard},
-		"montage":              {packID: "montage", profile: "montage", adapter: AdapterOpenMontage},
-		"whiteboard-animation": {packID: "whiteboard-animation", profile: "whiteboard-animation", adapter: AdapterStandard},
-		"feedback_analysis":    {packID: "feedback-analysis", profile: "feedback-analysis", adapter: AdapterStandard},
+		"wechat-article":               {packID: "wechat-article", profile: "wechat-article", adapter: AdapterStandard},
+		"wechat-picture":               {packID: "wechat-picture", profile: "wechat-picture", adapter: AdapterStandard},
+		"seednote":                     {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
+		model.TaskTypeViralAnalysis:    {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
+		"moments":                      {packID: "moments", profile: "moments", adapter: AdapterStandard},
+		"ecommerce":                    {packID: "ecommerce", profile: "ecommerce", adapter: AdapterStandard},
+		"hypit":                        {packID: "hypit", profile: "hypit", adapter: AdapterStandard},
+		"montage":                      {packID: "montage", profile: "montage", adapter: AdapterOpenMontage},
+		"whiteboard-animation":         {packID: "whiteboard-animation", profile: "whiteboard-animation", adapter: AdapterStandard},
+		model.TaskTypeFeedbackAnalysis: {packID: "feedback-analysis", profile: "feedback-analysis", adapter: AdapterStandard},
 	}
 	for taskType, want := range wantRoutes {
 		pack, ok := catalog.ForTaskType(taskType)
@@ -1229,7 +1229,7 @@ surfaces: [plugin]
 func TestEmbeddedCatalogResolvesSeednoteBillingOperations(t *testing.T) {
 	for _, tt := range []struct{ taskType, operation string }{
 		{"seednote", "task.seednote"},
-		{"viral_analysis", "task.viral_analysis"},
+		{model.TaskTypeViralAnalysis, "task.viral_analysis"},
 	} {
 		t.Run(tt.taskType, func(t *testing.T) {
 			operation, ok := Default().BillingOperation(tt.taskType)
@@ -1237,6 +1237,19 @@ func TestEmbeddedCatalogResolvesSeednoteBillingOperations(t *testing.T) {
 				t.Fatalf("BillingOperation(%q) = %q, %v; want %q", tt.taskType, operation, ok, tt.operation)
 			}
 		})
+	}
+}
+
+func TestCanonicalTaskTypeResolvesItsPackAndBillingOperation(t *testing.T) {
+	pack, ok := Default().ForTaskType(model.TaskTypeViralAnalysis)
+	if !ok || pack.ID != model.AgentIDSeednote {
+		t.Fatalf("ForTaskType(%q) = %q, %v; want seednote", model.TaskTypeViralAnalysis, pack.ID, ok)
+	}
+	if _, ok := Default().ForTaskType(model.TaskKindViralAnalysis); ok {
+		t.Fatal("legacy snake_case TaskKind unexpectedly resolves as a Task.Type")
+	}
+	if operation, ok := Default().BillingOperation(model.TaskTypeViralAnalysis); !ok || operation != "task.viral_analysis" {
+		t.Fatalf("BillingOperation(%q) = %q, %v", model.TaskTypeViralAnalysis, operation, ok)
 	}
 }
 
@@ -1278,7 +1291,7 @@ func TestRepositoryAgentPacksUseOneKebabCaseIdentity(t *testing.T) {
 
 func TestEmbeddedCatalogResolvesCurrentManagedRoutes(t *testing.T) {
 	catalog := Default()
-	for _, taskType := range []string{"wechat-article", "wechat-picture", "seednote", "viral_analysis", "moments", "ecommerce", "montage", "hypit", "whiteboard-animation", "feedback_analysis"} {
+	for _, taskType := range []string{"wechat-article", "wechat-picture", "seednote", model.TaskTypeViralAnalysis, "moments", "ecommerce", "montage", "hypit", "whiteboard-animation", model.TaskTypeFeedbackAnalysis} {
 		if _, ok := catalog.ForTaskType(taskType); !ok {
 			t.Errorf("embedded Catalog has no route for %q", taskType)
 		}

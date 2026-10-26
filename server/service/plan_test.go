@@ -81,8 +81,10 @@ func (r planCASRepositoryOverride) WithTx(ctx context.Context, fn func(repositor
 }
 
 type stubDraftClient struct {
-	listDraftsErr    error
-	listPublishedErr error
+	listDraftsErr       error
+	listPublishedErr    error
+	listDraftsResult    *appdraft.ListDraftsResult
+	listPublishedResult *appdraft.ListPublishedResult
 }
 
 func (c *stubDraftClient) CreateDraft([]appdraft.Article) (*appdraft.DraftResult, error) {
@@ -93,12 +95,18 @@ func (c *stubDraftClient) ListDrafts(offset, count int64) (*appdraft.ListDraftsR
 	if c.listDraftsErr != nil {
 		return nil, c.listDraftsErr
 	}
+	if c.listDraftsResult != nil {
+		return c.listDraftsResult, nil
+	}
 	return &appdraft.ListDraftsResult{TotalCount: 1, ItemCount: 1}, nil
 }
 
 func (c *stubDraftClient) ListPublished(offset, count int64) (*appdraft.ListPublishedResult, error) {
 	if c.listPublishedErr != nil {
 		return nil, c.listPublishedErr
+	}
+	if c.listPublishedResult != nil {
+		return c.listPublishedResult, nil
 	}
 	return &appdraft.ListPublishedResult{TotalCount: 1, ItemCount: 1}, nil
 }
@@ -1199,6 +1207,9 @@ func TestPublishingService_ListDrafts_DegradesWechat48001(t *testing.T) {
 	if result.Note == "" {
 		t.Fatal("expected explanatory note for 48001")
 	}
+	if result.HistoryAvailable {
+		t.Fatal("48001 must mark draft history unavailable")
+	}
 }
 
 func TestPublishingService_ListPublished_DegradesWrappedWechat48001(t *testing.T) {
@@ -1222,6 +1233,91 @@ func TestPublishingService_ListPublished_DegradesWrappedWechat48001(t *testing.T
 	}
 	if result.Note == "" {
 		t.Fatal("expected explanatory note for 48001")
+	}
+	if result.HistoryAvailable {
+		t.Fatal("48001 must mark published history unavailable")
+	}
+}
+
+func TestPublishingServiceHistoryWithoutCredentialsIsExplicitlyUnavailable(t *testing.T) {
+	_, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	logger := zerolog.New(zerolog.NewTestWriter(nil)).With().Timestamp().Logger()
+	for _, tc := range []struct {
+		name   string
+		config map[string]any
+	}{
+		{name: "missing channel config"},
+		{name: "empty credentials", config: map[string]any{
+			"wechat_app_id": "", "wechat_secret": "",
+			"wechat_delivery": map[string]any{"mode": "user_assisted", "automatic_enabled": false},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projectID := createTestProject(t, repo, "user-1", model.PlatformWechat)
+			if tc.config != nil {
+				config := &model.ProjectChannelConfig{ID: uuid.NewString(), ProjectID: projectID, Channel: model.ChannelArticle}
+				config.Config = datatypes.NewJSONType(tc.config)
+				if err := repo.ProjectChannelConfigs().Upsert(ctx, config); err != nil {
+					t.Fatalf("create channel config: %v", err)
+				}
+			}
+			svc := NewPublishingService(repo, &logger)
+			serviceCreated := false
+			svc.createDraftServiceFn = func(*model.Project) (draftClient, error) {
+				serviceCreated = true
+				return &stubDraftClient{}, nil
+			}
+
+			drafts, err := svc.ListDrafts(ctx, "user-1", projectID, 0, 20)
+			if err != nil {
+				t.Fatalf("ListDrafts without credentials: %v", err)
+			}
+			if drafts.HistoryAvailable || drafts.Note == "" {
+				t.Fatalf("draft history should explicitly be unavailable, got %#v", drafts)
+			}
+
+			published, err := svc.ListPublished(ctx, "user-1", projectID, 0, 20)
+			if err != nil {
+				t.Fatalf("ListPublished without credentials: %v", err)
+			}
+			if published.HistoryAvailable || published.Note == "" {
+				t.Fatalf("published history should explicitly be unavailable, got %#v", published)
+			}
+			if serviceCreated {
+				t.Fatal("history service must not be created without WeChat credentials")
+			}
+		})
+	}
+}
+
+func TestPublishingServiceSuccessfulHistoryIsAvailable(t *testing.T) {
+	_, repo := setupTestPlanService(t)
+	ctx := context.Background()
+	projectID := createTestWechatProject(t, repo, "user-1")
+	logger := zerolog.New(zerolog.NewTestWriter(nil)).With().Timestamp().Logger()
+	svc := NewPublishingService(repo, &logger)
+	svc.createDraftServiceFn = func(*model.Project) (draftClient, error) {
+		return &stubDraftClient{
+			listDraftsResult:    &appdraft.ListDraftsResult{},
+			listPublishedResult: &appdraft.ListPublishedResult{},
+		}, nil
+	}
+
+	drafts, err := svc.ListDrafts(ctx, "user-1", projectID, 0, 20)
+	if err != nil {
+		t.Fatalf("ListDrafts: %v", err)
+	}
+	if !drafts.HistoryAvailable {
+		t.Fatalf("successful empty draft result must be distinguishable from unavailable history: %#v", drafts)
+	}
+
+	published, err := svc.ListPublished(ctx, "user-1", projectID, 0, 20)
+	if err != nil {
+		t.Fatalf("ListPublished: %v", err)
+	}
+	if !published.HistoryAvailable {
+		t.Fatalf("successful empty published result must be distinguishable from unavailable history: %#v", published)
 	}
 }
 

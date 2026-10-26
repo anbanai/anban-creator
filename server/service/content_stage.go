@@ -60,11 +60,11 @@ func reuseStageTaskID(stage *model.ContentReuseStageExecution) string {
 func contentPlanningKindForStage(stage string) string {
 	switch stage {
 	case model.ContentReuseStageResearch:
-		return model.TaskTypeContentResearch
+		return model.TaskKindContentResearch
 	case model.ContentReuseStageScoring, model.ContentReuseStageBrief:
-		return model.TaskTypeContentValidation
+		return model.TaskKindContentValidation
 	case model.ContentReuseStageProduce:
-		return model.TaskTypeContentScript
+		return model.TaskKindContentScript
 	default:
 		return ""
 	}
@@ -213,7 +213,7 @@ func (s *ContentAssetService) FinalizeResearchJob(ctx context.Context, userID, j
 		return fmt.Errorf("research job task binding is missing")
 	}
 	task, err := s.repo.Tasks().FindByID(ctx, *job.TaskID)
-	if err != nil || task.UserID != userID || task.ProjectID != job.ProjectID || task.Type != model.TaskTypeContentResearch || task.TaskKind != model.TaskTypeContentResearch || task.CurrentExecutionID == nil || *task.CurrentExecutionID != acceptedExecutionID {
+	if err != nil || task.UserID != userID || task.ProjectID != job.ProjectID || task.Type != model.TaskTypeContentResearch || task.TaskKind != model.TaskKindContentResearch || task.CurrentExecutionID == nil || *task.CurrentExecutionID != acceptedExecutionID {
 		return fmt.Errorf("research task binding is invalid")
 	}
 	execution, err := s.repo.TaskExecutions().FindByID(ctx, acceptedExecutionID)
@@ -482,7 +482,7 @@ func (s *ContentAssetService) CompleteReuseStage(ctx context.Context, userID, st
 	if task.CurrentExecutionID == nil || *task.CurrentExecutionID != acceptedExecutionID {
 		return fmt.Errorf("stage execution is not current")
 	}
-	if expectedKind := contentReuseStageTaskKind(stage.Stage, run); expectedKind == "" || task.Type != expectedKind || task.TaskKind != expectedKind {
+	if expectedKind := contentReuseStageTaskKind(stage.Stage, run); expectedKind == "" || task.Type != model.TaskTypeForTaskKind(expectedKind) || task.TaskKind != expectedKind {
 		return fmt.Errorf("stage task kind does not match frozen stage")
 	}
 	if status != model.ContentStageCompleted && status != model.ContentStageFailed && status != model.ContentStagePaused {
@@ -575,12 +575,12 @@ func (s *ContentAssetService) CreatePlanningStageTask(ctx context.Context, userI
 	if digest != stage.InputSHA256 {
 		return nil, fmt.Errorf("planning task input differs from frozen stage input")
 	}
-	if taskKind != model.TaskTypeContentResearch && taskKind != model.TaskTypeContentValidation && taskKind != model.TaskTypeContentScript {
+	if taskKind != model.TaskKindContentResearch && taskKind != model.TaskKindContentValidation && taskKind != model.TaskKindContentScript {
 		return nil, fmt.Errorf("unsupported planning stage task kind %q", taskKind)
 	}
 	project, err := s.repo.Projects().FindByID(ctx, run.TargetProjectID)
 	if err != nil || project.UserID != userID {
 		return nil, fmt.Errorf("target project is not owned")
 	}
-	return s.taskSvc.CreateManual(ctx, CreateManualParams{UserID: userID, ProjectID: run.TargetProjectID, AgentID: model.AgentIDContentPlanning, Channel: model.ChannelContentPlanning, TaskKind: taskKind, RequestedTaskType: taskKind, ExecutionProfile: "effective", Prompt: fmt.Sprintf("content planning stage %s for reuse run %s", stage.Stage, run.ID), ContentAssetID: run.AssetID, ReuseRunID: run.ID, ReuseStageID: stage.ID, AgentInput: input})
+	return s.taskSvc.CreateManual(ctx, CreateManualParams{UserID: userID, ProjectID: run.TargetProjectID, AgentID: model.AgentIDContentPlanning, Channel: model.ChannelContentPlanning, TaskKind: taskKind, RequestedTaskType: model.TaskTypeForTaskKind(taskKind), ExecutionProfile: "effective", Prompt: fmt.Sprintf("content planning stage %s for reuse run %s", stage.Stage, run.ID), ContentAssetID: run.AssetID, ReuseRunID: run.ID, ReuseStageID: stage.ID, AgentInput: input})
 }

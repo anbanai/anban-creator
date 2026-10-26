@@ -11,6 +11,7 @@ import {
   BarChart3,
   Flame,
   UserRound,
+  ImageIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -31,6 +32,7 @@ export const mvpNavItems: NavItem[] = [
   { to: '/settings', label: '设置', icon: Settings },
   { to: '/content-analytics', label: '内容分析', icon: BarChart3 },
   { to: '/content-assets', label: '选题资产', icon: Sparkles },
+  { to: '/media-assets', label: '素材库', icon: ImageIcon },
   { to: '/trends', label: '热点雷达', icon: Flame },
 ]
 

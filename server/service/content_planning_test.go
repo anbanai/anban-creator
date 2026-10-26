@@ -23,11 +23,11 @@ func TestContentPlanningResearchAdmission(t *testing.T) {
 	svc, repo, _, existing, _ := planningFixture(t)
 	userID := existing.UserID
 	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
-	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{UserID: userID, ProjectID: projectID, AgentID: "content-planning", Channel: "content-planning", TaskKind: "content_research", RequestedTaskType: "content_research", ExecutionProfile: "effective", Prompt: "Discover evidenced content", AgentInput: map[string]any{"schema_version": "1.0", "task_kind": "content_research", "candidates": []any{}, "accepted_artifacts": []any{}}})
+	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{UserID: userID, ProjectID: projectID, AgentID: "content-planning", Channel: "content-planning", TaskKind: model.TaskKindContentResearch, RequestedTaskType: model.TaskTypeContentResearch, ExecutionProfile: "effective", Prompt: "Discover evidenced content", AgentInput: map[string]any{"schema_version": "1.0", "task_kind": model.TaskKindContentResearch, "candidates": []any{}, "accepted_artifacts": []any{}}})
 	if err != nil {
 		t.Fatalf("planning task admission: %v", err)
 	}
-	if len(tasks) != 1 || tasks[0].Type != "content_research" {
+	if len(tasks) != 1 || tasks[0].Type != model.TaskTypeContentResearch || tasks[0].TaskKind != model.TaskKindContentResearch {
 		t.Fatalf("unexpected tasks: %#v", tasks)
 	}
 	charge, err := repo.Billing().FindChargeByTask(context.Background(), tasks[0].ID)
@@ -82,18 +82,18 @@ func planningFixture(t *testing.T) (*TaskService, repository.Repository, *gorm.D
 	if err := db.AutoMigrate(&model.SearchOperation{}); err != nil {
 		t.Fatal(err)
 	}
-	task.Type = "content_research"
-	task.TaskKind = task.Type
+	task.Type = model.TaskTypeContentResearch
+	task.TaskKind = model.TaskKindContentResearch
 	task.AgentID = "content-planning"
 	task.Channel = task.AgentID
-	task.AgentInput = datatypes.NewJSONType(planningInputMap(t, model.ContentPlanningInput{SchemaVersion: "1.0", TaskKind: task.Type, Candidates: []model.PlanningCandidate{}, AcceptedArtifacts: []model.PlanningArtifactRef{}}))
+	task.AgentInput = datatypes.NewJSONType(planningInputMap(t, model.ContentPlanningInput{SchemaVersion: "1.0", TaskKind: task.TaskKind, Candidates: []model.PlanningCandidate{}, AcceptedArtifacts: []model.PlanningArtifactRef{}}))
 	task.SetProjectSnapshot(model.ProjectSnapshot{Platform: model.PlatformWechat})
 	if err := repo.Tasks().Update(context.Background(), task); err != nil {
 		t.Fatal(err)
 	}
 	execution.ManifestSealed = true
-	execution.TaskKind = task.Type
-	if err := applyAgentPackIdentity(execution, task.Type); err != nil {
+	execution.TaskKind = task.TaskKind
+	if err := applyAgentPackIdentity(execution, task.AgentID); err != nil {
 		t.Fatal(err)
 	}
 	svc.SetRuntimeDispatcher(&planningTestDispatcher{})
@@ -132,7 +132,7 @@ func planningPut(t *testing.T, svc *TaskService, repo repository.Repository, tas
 	return model.PlanningArtifactRef{TaskID: task.ID, ExecutionID: execution.ID, Path: name, ContentSHA256: hash}
 }
 func planningResearchOutputs(task *model.Task, execution *model.TaskExecution, source model.PlanningSource) (model.PlanningResearchResult, model.PlanningResearchEvidence) {
-	id := model.PlanningIdentity{SchemaVersion: "1.0", TaskID: task.ID, ExecutionID: execution.ID, TaskKind: task.Type, Status: "ready", Missing: []string{}}
+	id := model.PlanningIdentity{SchemaVersion: "1.0", TaskID: task.ID, ExecutionID: execution.ID, TaskKind: task.TaskKind, Status: "ready", Missing: []string{}}
 	assessment := model.PlanningAssessment{Score: 60, Rationale: "Evidence relates to the target audience", SourceRefs: []string{source.ID}}
 	return model.PlanningResearchResult{PlanningIdentity: id, Candidates: []model.PlanningProposal{{ID: "candidate-1", Title: "Evidence-backed topic", SemanticKernel: "A durable question", SourceRefs: []string{source.ID}, MergeAssetIDs: []string{}, TargetFit: assessment, Transferability: assessment, Angles: []string{"Practical explanation"}, ProductionCost: "text stage only", MaterialRisk: "none", ComplianceRisk: "verify claims"}}}, model.PlanningResearchEvidence{PlanningIdentity: id, Sources: []model.PlanningSource{source}}
 }
@@ -280,8 +280,9 @@ func TestContentPlanningQuoteFreezesOwnSKUAndTariffSource(t *testing.T) {
 	if err := repo.Billing().CreateAccount(context.Background(), &model.BillingWalletAccount{UserID: billingCatalogUserID, PaidCredits: 10000}); err != nil {
 		t.Fatal(err)
 	}
-	for _, kind := range []string{"content_research", "content_validation", "content_script"} {
-		q, err := catalog.CreateTaskQuote(context.Background(), TaskQuoteRequest{UserID: billingCatalogUserID, TaskType: kind, ExecutionProfile: "effective", RequestFingerprint: billingFingerprint(kind), IdempotencyScope: "planning", IdempotencyKey: kind})
+	for _, taskType := range []string{model.TaskTypeContentResearch, model.TaskTypeContentValidation, model.TaskTypeContentScript} {
+		kind := model.TaskKindForTaskType(taskType)
+		q, err := catalog.CreateTaskQuote(context.Background(), TaskQuoteRequest{UserID: billingCatalogUserID, TaskType: taskType, ExecutionProfile: "effective", RequestFingerprint: billingFingerprint(taskType), IdempotencyScope: "planning", IdempotencyKey: taskType})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -315,8 +316,8 @@ func TestContentPlanningValidationScriptAdmissionAndSemanticContracts(t *testing
 		t.Fatal(err)
 	}
 	validation := tasks[0]
-	validationExec := &model.TaskExecution{ID: uuid.NewString(), TaskID: validation.ID, TaskKind: validation.Type, Status: model.TaskExecutionSucceeded, ManifestSealed: true}
-	if err := applyAgentPackIdentity(validationExec, validation.Type); err != nil {
+	validationExec := &model.TaskExecution{ID: uuid.NewString(), TaskID: validation.ID, TaskKind: validation.TaskKind, Status: model.TaskExecutionSucceeded, ManifestSealed: true}
+	if err := applyAgentPackIdentity(validationExec, validation.AgentID); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.TaskExecutions().Create(ctx, validationExec); err != nil {
@@ -333,7 +334,7 @@ func TestContentPlanningValidationScriptAdmissionAndSemanticContracts(t *testing
 		for _, id := range ids {
 			checks = append(checks, model.PlanningCheck{ID: id, Status: "pass", Rationale: "Reviewed against source-1", SourceRefs: []string{"source-1"}})
 		}
-		return model.PlanningReview{PlanningIdentity: model.PlanningIdentity{SchemaVersion: "1.0", TaskID: task.ID, ExecutionID: exec.ID, TaskKind: task.Type, Status: "ready", Missing: []string{}}, ValidationKind: "semantic_only", ContentSHA256: hash, Checks: checks, SourceRefs: []string{"source-1"}}
+		return model.PlanningReview{PlanningIdentity: model.PlanningIdentity{SchemaVersion: "1.0", TaskID: task.ID, ExecutionID: exec.ID, TaskKind: task.TaskKind, Status: "ready", Missing: []string{}}, ValidationKind: "semantic_only", ContentSHA256: hash, Checks: checks, SourceRefs: []string{"source-1"}}
 	}
 	review := makeReview(validation, validationExec, articleRef.ContentSHA256, false)
 	reviewRef := planningPut(t, svc, repo, validation, validationExec, "output/validation-review.json", review, true)
@@ -360,14 +361,14 @@ func TestContentPlanningValidationScriptAdmissionAndSemanticContracts(t *testing
 		t.Fatal(err)
 	}
 	scriptTask := tasks[0]
-	scriptExec := &model.TaskExecution{ID: uuid.NewString(), TaskID: scriptTask.ID, TaskKind: scriptTask.Type, Status: model.TaskExecutionRunning, ManifestSealed: true}
-	if err := applyAgentPackIdentity(scriptExec, scriptTask.Type); err != nil {
+	scriptExec := &model.TaskExecution{ID: uuid.NewString(), TaskID: scriptTask.ID, TaskKind: scriptTask.TaskKind, Status: model.TaskExecutionRunning, ManifestSealed: true}
+	if err := applyAgentPackIdentity(scriptExec, scriptTask.AgentID); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.TaskExecutions().Create(ctx, scriptExec); err != nil {
 		t.Fatal(err)
 	}
-	script := model.PlanningVideoScript{PlanningIdentity: model.PlanningIdentity{SchemaVersion: "1.0", TaskID: scriptTask.ID, ExecutionID: scriptExec.ID, TaskKind: scriptTask.Type, Status: "ready", Missing: []string{}}, Platform: model.PlatformMontage, SpokenText: "Evidence explains the problem.\nThe second scene explains the response.", SourceRefs: []string{"source-1"}, Scenes: []model.PlanningScene{{Index: 1, StartSeconds: 0, EndSeconds: 5, SpokenText: "Evidence explains the problem.", Visuals: "Simple diagram", MaterialRequirements: []string{"diagram instructions; no generation"}, SourceRefs: []string{"source-1"}}, {Index: 2, StartSeconds: 5, EndSeconds: 10, SpokenText: "The second scene explains the response.", Visuals: "Response diagram", MaterialRequirements: []string{"diagram instructions; no generation"}, SourceRefs: []string{"source-1"}}}}
+	script := model.PlanningVideoScript{PlanningIdentity: model.PlanningIdentity{SchemaVersion: "1.0", TaskID: scriptTask.ID, ExecutionID: scriptExec.ID, TaskKind: scriptTask.TaskKind, Status: "ready", Missing: []string{}}, Platform: model.PlatformMontage, SpokenText: "Evidence explains the problem.\nThe second scene explains the response.", SourceRefs: []string{"source-1"}, Scenes: []model.PlanningScene{{Index: 1, StartSeconds: 0, EndSeconds: 5, SpokenText: "Evidence explains the problem.", Visuals: "Simple diagram", MaterialRequirements: []string{"diagram instructions; no generation"}, SourceRefs: []string{"source-1"}}, {Index: 2, StartSeconds: 5, EndSeconds: 10, SpokenText: "The second scene explains the response.", Visuals: "Response diagram", MaterialRequirements: []string{"diagram instructions; no generation"}, SourceRefs: []string{"source-1"}}}}
 	scriptRef := planningPut(t, svc, repo, scriptTask, scriptExec, "output/video-script.json", script, false)
 	planningPut(t, svc, repo, scriptTask, scriptExec, "output/video-script.md", "# Script\nEvidence explains the problem.\nThe second scene explains the response.", false)
 	planningPut(t, svc, repo, scriptTask, scriptExec, "output/video-subtitles.srt", "1\n00:00:00,000 --> 00:00:05,000\nEvidence explains the problem.\n\n2\n00:00:05,000 --> 00:00:10,000\nThe second scene explains the response.\n", false)
@@ -484,7 +485,7 @@ func TestContentPlanningNeverRequestsPublication(t *testing.T) {
 func TestContentPlanningResearchCanDeliverInsufficientEvidenceWithoutUnlockingValidation(t *testing.T) {
 	svc, repo, db, task, execution := planningFixture(t)
 	ctx := context.Background()
-	id := model.PlanningIdentity{SchemaVersion: "1.0", TaskID: task.ID, ExecutionID: execution.ID, TaskKind: task.Type, Status: "data_insufficient", Missing: []string{"no_relevant_sources"}}
+	id := model.PlanningIdentity{SchemaVersion: "1.0", TaskID: task.ID, ExecutionID: execution.ID, TaskKind: task.TaskKind, Status: "data_insufficient", Missing: []string{"no_relevant_sources"}}
 	r := model.PlanningResearchResult{PlanningIdentity: id, Candidates: []model.PlanningProposal{}}
 	e := model.PlanningResearchEvidence{PlanningIdentity: id, Sources: []model.PlanningSource{}}
 	refs := []model.PlanningArtifactRef{planningPut(t, svc, repo, task, execution, "output/content-research.json", r, true), planningPut(t, svc, repo, task, execution, "output/research-evidence.json", e, true)}

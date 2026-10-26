@@ -37,7 +37,7 @@ func newTaskRepository(db *gorm.DB) TaskRepository {
 func excludeInternalFeedbackTasks(q *gorm.DB) *gorm.DB {
 	return q.
 		Where("COALESCE(task_kind, '') <> ?", model.TaskKindFeedbackAnalysis).
-		Where("COALESCE(type, '') <> ?", model.TaskKindFeedbackAnalysis).
+		Where("COALESCE(type, '') <> ?", model.TaskTypeFeedbackAnalysis).
 		Where("COALESCE(agent_id, '') <> ?", model.AgentIDFeedbackAnalysis).
 		Where("COALESCE(channel, '') <> ?", model.ChannelFeedbackAnalysis)
 }

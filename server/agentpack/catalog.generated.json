@@ -1301,7 +1301,7 @@
     },
     {
       "id": "creation-planner",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "kind": "managed",
       "display_name": "创作模式",
       "description": "通过持续对话澄清本次作品需求，并在用户确认后交给 Server 创建正式创作任务。",
@@ -1334,7 +1334,7 @@
         "interactive-creation-clarification"
       ],
       "ui": {},
-      "digest": "94fd634c9b3e57bc9e1af85635346650a503a59475efdd0da4d33b8da13e130c"
+      "digest": "069beff7132cd3b6e8ba27ecd99bbde59fbae7e5615716dbf911e1bcc0965ffb"
     },
     {
       "id": "feedback-analysis",
@@ -2042,7 +2042,7 @@
     },
     {
       "id": "postmortem-review",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "kind": "managed",
       "display_name": "复盘模式",
       "description": "围绕已完成作品和只读分析证据进行交互式复盘，形成等待独立数据验证的画像改进候选。",
@@ -2075,7 +2075,7 @@
         "interactive-postmortem-review"
       ],
       "ui": {},
-      "digest": "cfde65a8a15b81e0d6e4ec2bf781d552436e1d5e19d3042355c1f6fd313a706d"
+      "digest": "320efb3e8e3f9666f02ca66e0ca4f1186e2e4b162070b51c802e01ceac8c7624"
     },
     {
       "id": "profile-analysis",
@@ -2385,7 +2385,7 @@
     },
     {
       "id": "project-creator",
-      "version": "1.0.6",
+      "version": "1.0.7",
       "kind": "managed",
       "display_name": "画像模式",
       "description": "通过中文对话判断 Anban 项目适配性，选择内容类型并创建或更新六维项目画像。",
@@ -2653,7 +2653,7 @@
       "ui": {
         "renderer": "custom:project-creator"
       },
-      "digest": "7f36d87caff7c670b4358847be2f3952087b10275ac17dce1bad83fb11c5b862"
+      "digest": "518f94383a4efe9216e06a07522153991c8be609860a21cdd6c88a01a5800c81"
     },
     {
       "id": "seednote",
@@ -3068,7 +3068,7 @@
     },
     {
       "id": "viral-ip-video-editor",
-      "version": "1.0.1",
+      "version": "1.0.4",
       "kind": "plugin",
       "display_name": "爆款 IP 视频剪辑",
       "description": "基于 Montage 运行时处理真人 IP 口播素材，完成留存导向的剪辑规划、制作指导和成片质量复核。",
@@ -3077,7 +3077,9 @@
         "skills": [
           "content-reuse",
           "content-tagging",
-          "montage"
+          "montage",
+          "portrait-cover-design",
+          "viral-ip-editing"
         ],
         "max_turns": 250
       },
@@ -3097,6 +3099,72 @@
         "montage-runtime"
       ],
       "artifacts": [
+        {
+          "role": "project_brief",
+          "path": "output/project_brief.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "transcript",
+          "path": "output/transcript.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "content_map",
+          "path": "output/content_map.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "edit_master_plan",
+          "path": "output/edit_master_plan.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "plan_review",
+          "path": "output/plan_review.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "edit_decision_list",
+          "path": "output/edit_decision_list.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "visual_plan",
+          "path": "output/visual_plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "sfx_cues",
+          "path": "output/sfx_cues.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "bgm_plan",
+          "path": "output/bgm_plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "captions",
+          "path": "output/captions.srt",
+          "mime_type": "text/plain",
+          "required": false
+        },
+        {
+          "role": "qc_report",
+          "path": "output/qc_report.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
         {
           "role": "content_tags",
           "path": "output/content-tags.json",
@@ -3164,9 +3232,33 @@
           "required": false
         },
         {
+          "role": "cover_reference_prompts",
+          "path": "output/cover-prompts.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
           "role": "cover_review",
           "path": "output/cover-quality.json",
           "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "cover_reference_analysis",
+          "path": "output/reference-analysis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_reference_input",
+          "path": "output/input-manifest.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_reference_review",
+          "path": "output/cover-review.md",
+          "mime_type": "text/markdown",
           "required": false
         },
         {
@@ -3183,13 +3275,13 @@
         }
       ],
       "ui": {},
-      "digest": "131e7009501e8c0c331481aebdd181a591834a5a00ef063f027c2462786fd2de"
+      "digest": "6e8d1922a20d8888b8ae83ae4e0ed3ae4c51eed2650edbfd0ecef8f8b5db3484"
     },
     {
       "id": "wechat-article",
       "channel": "wechat-article",
       "plan_task_kind": "content_generation",
-      "version": "2.0.13",
+      "version": "2.0.15",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到文章交付物的完整创作流程。",
@@ -3320,8 +3412,8 @@
           "required": false
         },
         {
-          "role": "cover_exact",
-          "path": "output/cover-exact.png",
+          "role": "cover_square",
+          "path": "output/cover-square.png",
           "mime_type": "image/png",
           "required": false
         },
@@ -3447,13 +3539,13 @@
           "funnel_stage"
         ]
       },
-      "digest": "accc0233e958d484b25875b6e4c2d7eeeb8e74d5a00c189b9c29548e22006a49"
+      "digest": "66fa7948a0354aaa4fcde1ee1d270467ad460c503fa795c8b68df34115dcb20c"
     },
     {
       "id": "wechat-picture",
       "channel": "wechat-picture",
       "plan_task_kind": "content_generation",
-      "version": "1.0.7",
+      "version": "1.0.8",
       "kind": "managed",
       "display_name": "微信公众号贴图",
       "description": "研究选题、编排图片消息并生成公众号 newspic 草稿交付包。",
@@ -3625,7 +3717,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "2b863859e1072c703db8ba8bbb8b5fd20cde89a555bd9809753577c470c8c517"
+      "digest": "854afd520e50c29aa0baf7240ec128597e70ebf251cfd0e8bb7c6423ab0613dc"
     },
     {
       "id": "whiteboard-animation",

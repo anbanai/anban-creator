@@ -379,12 +379,20 @@ func migrateLegacyIdentity(value string) (agentID, channel, taskKind string, ok 
 		return model.AgentIDSeednote, model.ChannelSeednote, model.TaskKindContentGeneration, true
 	case "wechat-picture":
 		return model.AgentIDWechatPicture, model.ChannelWechatPicture, model.TaskKindContentGeneration, true
-	case model.TaskTypeViralAnalysis, "viral-analysis":
+	case model.TaskTypeViralAnalysis, model.TaskKindViralAnalysis:
 		return model.AgentIDSeednote, model.ChannelSeednote, model.TaskKindViralAnalysis, true
 	case "channels-video":
 		return model.AgentIDMontage, model.ChannelMontage, model.PlatformMontage, true
-	case model.TaskTypeProfileAnalysis, "profile-analysis":
+	case model.TaskTypeProfileAnalysis, model.TaskKindProfileAnalysis:
 		return model.AgentIDProfileAnalysis, model.ChannelProfileAnalysis, model.TaskKindProfileAnalysis, true
+	case model.TaskTypeContentResearch, model.TaskKindContentResearch:
+		return model.AgentIDContentPlanning, model.ChannelContentPlanning, model.TaskKindContentResearch, true
+	case model.TaskTypeContentValidation, model.TaskKindContentValidation:
+		return model.AgentIDContentPlanning, model.ChannelContentPlanning, model.TaskKindContentValidation, true
+	case model.TaskTypeContentScript, model.TaskKindContentScript:
+		return model.AgentIDContentPlanning, model.ChannelContentPlanning, model.TaskKindContentScript, true
+	case model.TaskTypeFeedbackAnalysis, model.TaskKindFeedbackAnalysis:
+		return model.AgentIDFeedbackAnalysis, model.ChannelFeedbackAnalysis, model.TaskKindFeedbackAnalysis, true
 	case model.PlatformMontage:
 		return model.AgentIDMontage, model.ChannelMontage, model.PlatformMontage, true
 	case model.PlatformHypit:

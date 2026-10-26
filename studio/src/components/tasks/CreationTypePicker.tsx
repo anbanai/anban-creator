@@ -7,7 +7,7 @@ export const creationTypeDescriptions: Record<string, string> = {
   'wechat-article': '长文创作、配图与排版',
   'wechat-picture': '多图创作与配文',
   seednote: '笔记文案与种草配图',
-  viral_analysis: '拆解笔记的内容与表达',
+  'viral-analysis': '拆解笔记的内容与表达',
   moments: '朋友圈文案与配图',
   ecommerce: '商品主图与详情素材',
   montage: '根据素材生成视频',
