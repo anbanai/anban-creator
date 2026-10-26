@@ -22,6 +22,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&AssistantInteractionDraft{},
 		&AssistantInteractionEvent{},
 		&AssistantInteractionAttempt{},
+		&AssistantInteractionLegacyMigration{},
 		&ProjectChannelConfig{},
 		&Plan{},
 		&PlanEntry{},

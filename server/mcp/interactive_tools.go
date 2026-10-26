@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -28,7 +30,10 @@ func registerInteractiveTools(server *mcp.Server) {
 				"mode_id":        map[string]any{"type": "string", "enum": []any{"profile", "creation", "review"}},
 				"payload_digest": map[string]any{"type": "string", "minLength": 64, "maxLength": 64},
 			},
-			"required": []any{"interaction_id", "generation", "attempt_id", "mode_id", "payload", "payload_digest", "ready"},
+			// The authenticated interaction capability supplies the identity fields
+			// when the Agent cannot see opaque runtime metadata. Callers may still
+			// provide them to make an explicit attempt replayable.
+			"required": []any{"payload", "ready"},
 		},
 	}, stageAssistantDraftHandler)
 	server.AddTool(&mcp.Tool{
@@ -58,7 +63,7 @@ func registerInteractiveTools(server *mcp.Server) {
 				},
 				"memory_append": map[string]any{"type": "string", "maxLength": 65536},
 			},
-			"required": []any{"interaction_id", "generation", "attempt_id", "mode_id", "payload_digest", "project", "profile", "progress", "ready", "missing_fields", "inferred_fields"},
+			"required": []any{"project", "profile", "progress", "ready", "missing_fields", "inferred_fields"},
 		},
 	}, stageProjectCreatorDraftHandler)
 }
@@ -103,26 +108,6 @@ func stageAssistantDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (
 	}
 	args := parseArgs(req.Params.Arguments)
 	if svcs.InteractionSvc != nil {
-		interactionID, _ := args["interaction_id"].(string)
-		if strings.TrimSpace(interactionID) == "" || identity.InteractionID == "" {
-			return errorResult("interaction capability is required"), nil
-		}
-		generation, ok := interactionGeneration(args["generation"])
-		if !ok {
-			return errorResult("generation must be an integer"), nil
-		}
-		attemptID, ok := args["attempt_id"].(string)
-		if !ok || strings.TrimSpace(attemptID) == "" {
-			return errorResult("attempt_id is required"), nil
-		}
-		modeID, ok := args["mode_id"].(string)
-		if !ok || strings.TrimSpace(modeID) == "" {
-			return errorResult("mode_id is required"), nil
-		}
-		payloadDigest, ok := args["payload_digest"].(string)
-		if !ok || strings.TrimSpace(payloadDigest) == "" {
-			return errorResult("payload_digest is required"), nil
-		}
 		var payload json.RawMessage
 		if err := decodeInteractiveArgumentStrict(args, "payload", &payload); err != nil {
 			return errorResult(fmt.Sprintf("payload is invalid: %v", err)), nil
@@ -130,6 +115,10 @@ func stageAssistantDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (
 		ready, ok := args["ready"].(bool)
 		if !ok {
 			return errorResult("ready must be a boolean"), nil
+		}
+		interactionID, generation, attemptID, modeID, payloadDigest, metadataErr := resolveInteractionStageMetadata(identity, args, payload, ready)
+		if metadataErr != nil {
+			return errorResult(metadataErr.Error()), nil
 		}
 		if identity.InteractionID != interactionID || identity.Generation != generation || (identity.ModeID != "" && identity.ModeID != modeID) {
 			return errorResult(service.InteractionErrorGenerationChanged), nil
@@ -182,26 +171,6 @@ func stageProjectCreatorDraftHandler(ctx context.Context, req *mcp.CallToolReque
 	}
 	args := parseArgs(req.Params.Arguments)
 	if svcs.InteractionSvc != nil {
-		interactionID, _ := args["interaction_id"].(string)
-		if strings.TrimSpace(interactionID) == "" || identity.InteractionID == "" {
-			return errorResult("interaction capability is required"), nil
-		}
-		generation, ok := interactionGeneration(args["generation"])
-		if !ok {
-			return errorResult("generation must be an integer"), nil
-		}
-		attemptID, ok := args["attempt_id"].(string)
-		if !ok || strings.TrimSpace(attemptID) == "" {
-			return errorResult("attempt_id is required"), nil
-		}
-		modeID, ok := args["mode_id"].(string)
-		if !ok || strings.TrimSpace(modeID) == "" {
-			return errorResult("mode_id is required"), nil
-		}
-		payloadDigest, ok := args["payload_digest"].(string)
-		if !ok || strings.TrimSpace(payloadDigest) == "" {
-			return errorResult("payload_digest is required"), nil
-		}
 		var payload json.RawMessage
 		if raw, exists := args["payload"]; exists {
 			encoded, encodeErr := json.Marshal(raw)
@@ -219,6 +188,10 @@ func stageProjectCreatorDraftHandler(ctx context.Context, req *mcp.CallToolReque
 		ready, ok := args["ready"].(bool)
 		if !ok {
 			return errorResult("ready must be a boolean"), nil
+		}
+		interactionID, generation, attemptID, modeID, payloadDigest, metadataErr := resolveInteractionStageMetadata(identity, args, payload, ready)
+		if metadataErr != nil {
+			return errorResult(metadataErr.Error()), nil
 		}
 		if identity.InteractionID != interactionID || identity.Generation != generation || (identity.ModeID != "" && identity.ModeID != modeID) {
 			return errorResult(service.InteractionErrorGenerationChanged), nil
@@ -282,6 +255,69 @@ func interactionGeneration(raw any) (int64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+type interactionStageMetadata struct {
+	interactionID string
+	generation    int64
+	attemptID     string
+	modeID        string
+	payloadDigest string
+}
+
+// resolveInteractionStageMetadata binds an Agent's stage call to the
+// authenticated interaction capability. Runtime tokens are intentionally
+// opaque, so the Agent may omit those fields; explicit values are retained for
+// callers that need a stable attempt id across a transport retry.
+func resolveInteractionStageMetadata(identity mcpInteractiveIdentity, args map[string]any, payload json.RawMessage, ready bool) (string, int64, string, string, string, error) {
+	if identity.InteractionID == "" || identity.Generation < 1 {
+		return "", 0, "", "", "", fmt.Errorf("interaction capability is required")
+	}
+	interactionID := identity.InteractionID
+	if raw, exists := args["interaction_id"]; exists {
+		value, ok := raw.(string)
+		if !ok || strings.TrimSpace(value) == "" {
+			return "", 0, "", "", "", fmt.Errorf("interaction_id must be a string")
+		}
+		interactionID = strings.TrimSpace(value)
+	}
+	generation := identity.Generation
+	if raw, exists := args["generation"]; exists {
+		value, ok := interactionGeneration(raw)
+		if !ok {
+			return "", 0, "", "", "", fmt.Errorf("generation must be an integer")
+		}
+		generation = value
+	}
+	modeID := identity.ModeID
+	if raw, exists := args["mode_id"]; exists {
+		value, ok := raw.(string)
+		if !ok || strings.TrimSpace(value) == "" {
+			return "", 0, "", "", "", fmt.Errorf("mode_id must be a string")
+		}
+		modeID = strings.TrimSpace(value)
+	}
+	if modeID == "" {
+		return "", 0, "", "", "", fmt.Errorf("mode_id is required")
+	}
+	digest := sha256.Sum256(payload)
+	payloadDigest := hex.EncodeToString(digest[:])
+	if raw, exists := args["payload_digest"]; exists {
+		value, ok := raw.(string)
+		if !ok || strings.TrimSpace(value) == "" {
+			return "", 0, "", "", "", fmt.Errorf("payload_digest must be a string")
+		}
+		payloadDigest = strings.TrimSpace(value)
+	}
+	attemptID := "stage:" + modeID + ":" + payloadDigest + ":" + fmt.Sprint(ready)
+	if raw, exists := args["attempt_id"]; exists {
+		value, ok := raw.(string)
+		if !ok || strings.TrimSpace(value) == "" {
+			return "", 0, "", "", "", fmt.Errorf("attempt_id must be a string")
+		}
+		attemptID = strings.TrimSpace(value)
+	}
+	return interactionID, generation, attemptID, modeID, payloadDigest, nil
 }
 
 func decodeInteractiveArgument(args map[string]any, key string, target any) error {

@@ -44,12 +44,29 @@ func (s *AssistantInteractionService) AnswerQuestion(ctx context.Context, userID
 	return s.runRuntimeCommand(ctx, userID, interactionID, in.Generation, InteractionOperationAnswer, in.AttemptID, "session/answer", map[string]any{"callId": in.CallID, "answers": in.Answers}, len(in.Answers))
 }
 
+func (s *AssistantInteractionService) commandErrorWithSnapshot(ctx context.Context, userID string, interaction *model.AssistantInteraction, err error) error {
+	if err == nil {
+		return nil
+	}
+	structured := NormalizeInteractionError(err)
+	if structured == nil || interaction == nil {
+		return structured
+	}
+	if snapshot, snapshotErr := s.snapshotWithDrafts(ctx, userID, interaction); snapshotErr == nil {
+		return structured.WithSnapshot(snapshot)
+	}
+	return structured.WithSnapshot(s.snapshotFromInteraction(interaction))
+}
+
 func (s *AssistantInteractionService) runRuntimeCommand(ctx context.Context, userID, interactionID string, generation int64, operation InteractionOperation, attemptID, method string, params map[string]any, resultSize int) error {
 	lock := s.lockFor(interactionID)
 	lock.Lock()
 	defer lock.Unlock()
 	interaction, err := s.repo.AssistantInteractions().FindByIDForUser(ctx, userID, interactionID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return NewInteractionError(InteractionErrorRestartRequired, 404, "当前对话已结束，已保留可恢复内容", "restore_draft", "restart")
+		}
 		return NormalizeInteractionError(err)
 	}
 	if interaction.Generation != generation {
@@ -89,15 +106,15 @@ func (s *AssistantInteractionService) runRuntimeCommand(ctx context.Context, use
 	binding, err := s.ensureRuntimeLocked(ctx, userID, interaction)
 	if err != nil {
 		_ = s.repo.AssistantInteractions().UpdateAttempt(ctx, interactionID, attemptID, model.AssistantInteractionAttemptFailed, nil, InteractionErrorMessageNotAccepted)
-		return NormalizeInteractionError(err)
+		return s.commandErrorWithSnapshot(ctx, userID, interaction, err)
 	}
 	if binding.Generation != generation {
 		_ = s.repo.AssistantInteractions().UpdateAttempt(ctx, interactionID, attemptID, model.AssistantInteractionAttemptFailed, nil, InteractionErrorGenerationChanged)
-		return NewInteractionError(InteractionErrorGenerationChanged, 409, "对话状态已更新，请加载最新内容", "reload_snapshot")
+		return s.commandErrorWithSnapshot(ctx, userID, interaction, NewInteractionError(InteractionErrorGenerationChanged, 409, "对话状态已更新，请加载最新内容", "reload_snapshot"))
 	}
 	if binding.runtime == nil {
 		_ = s.repo.AssistantInteractions().UpdateAttempt(ctx, interactionID, attemptID, model.AssistantInteractionAttemptFailed, nil, InteractionErrorReconnecting)
-		return NewInteractionError(InteractionErrorReconnecting, 409, "正在恢复连接，请稍候", "wait_for_recovery")
+		return s.commandErrorWithSnapshot(ctx, userID, interaction, NewInteractionError(InteractionErrorReconnecting, 409, "正在恢复连接，请稍候", "wait_for_recovery"))
 	}
 	params["attempt_id"] = attemptID
 	params["sessionId"] = binding.LogicalSessionID
@@ -108,8 +125,12 @@ func (s *AssistantInteractionService) runRuntimeCommand(ctx context.Context, use
 		delete(params, "answers")
 	}
 	if err := binding.runtime.Command(ctx, method, params); err != nil {
-		_ = s.repo.AssistantInteractions().UpdateAttempt(ctx, interactionID, attemptID, model.AssistantInteractionAttemptFailed, nil, InteractionErrorMessageNotAccepted)
-		return NewInteractionError(InteractionErrorMessageNotAccepted, 409, "这次消息未送出，当前内容已保留", "retry_message").WithSnapshot(s.snapshotFromInteraction(interaction))
+		_ = s.repo.AssistantInteractions().UpdateAttempt(ctx, interactionID, attemptID, model.AssistantInteractionAttemptFailed, nil, InteractionErrorReconnecting)
+		_, replacementErr := s.replaceRuntimeLocked(ctx, userID, interaction, generation, "runtime_command_failed")
+		if replacementErr != nil {
+			return s.commandErrorWithSnapshot(ctx, userID, interaction, replacementErr)
+		}
+		return s.commandErrorWithSnapshot(ctx, userID, interaction, NewInteractionError(InteractionErrorReconnecting, 409, "正在恢复连接，请稍候", "wait_for_recovery"))
 	}
 	now := s.clock()
 	if err := s.repo.AssistantInteractions().UpdateAttempt(ctx, interactionID, attemptID, model.AssistantInteractionAttemptCompleted, json.RawMessage(`{"accepted":true}`), ""); err != nil {
@@ -153,6 +174,7 @@ func (s *AssistantInteractionService) CommitInteraction(ctx context.Context, use
 			return InteractionCommitResult{}, ErrInteractiveIdempotency
 		}
 		if len(attempt.Result) > 0 {
+			s.metrics.observeCommitDuplicate()
 			var replay InteractionCommitResult
 			if err := json.Unmarshal(attempt.Result, &replay); err != nil {
 				return InteractionCommitResult{}, errors.Join(ErrInteractivePersistence, err)
@@ -171,6 +193,7 @@ func (s *AssistantInteractionService) CommitInteraction(ctx context.Context, use
 	}
 	if interaction.Lifecycle == model.AssistantInteractionCompleted {
 		if latest, latestErr := s.repo.AssistantInteractions().FindLatestCommitAttempt(ctx, interactionID); latestErr == nil && len(latest.Result) > 0 {
+			s.metrics.observeCommitDuplicate()
 			var replay InteractionCommitResult
 			if err := json.Unmarshal(latest.Result, &replay); err != nil {
 				return InteractionCommitResult{}, errors.Join(ErrInteractivePersistence, err)
@@ -231,6 +254,7 @@ func (s *AssistantInteractionService) CommitInteraction(ctx context.Context, use
 	final := InteractionCommitResult{Status: InteractionCommitCreated, TaskID: assistantCommitTaskID(result), Result: mustAssistantCommitJSON(result)}
 	if err := s.repo.AssistantInteractions().CreateAttempt(ctx, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: interactionID, AttemptID: attemptID, Operation: string(InteractionOperationCommit), Generation: interaction.Generation, PayloadDigest: digest, Result: raw, CreatedAt: s.clock(), ExpiresAt: s.clock().Add(InteractionCommitReceiptRetention)}); err != nil {
 		if existing, findErr := s.repo.AssistantInteractions().FindAttempt(ctx, interactionID, attemptID); findErr == nil && existing.PayloadDigest == digest && len(existing.Result) > 0 {
+			s.metrics.observeCommitDuplicate()
 			return final, nil
 		}
 		return InteractionCommitResult{}, errors.Join(ErrInteractivePersistence, err)
