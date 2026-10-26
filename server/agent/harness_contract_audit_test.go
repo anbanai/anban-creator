@@ -136,6 +136,43 @@ func TestVisualProductionScopesMatchGetProjectProfileSchema(t *testing.T) {
 	}
 }
 
+func TestWechatDeliveryInstructionsStayConsistentAcrossHostDistributions(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	paths := []string{
+		"harness/packs/wechat-article/agent.claude.md",
+		"harness/packs/wechat-article/agent.codex.toml",
+		"harness/packs/wechat-article/agent.dsh.yml",
+		"harness/agents/wechat-article.md",
+		"harness/agents/wechat-article.toml",
+		"harness/packs/wechat-picture/agent.claude.md",
+		"harness/packs/wechat-picture/agent.codex.toml",
+		"harness/agents/wechat-picture.md",
+		"harness/agents/wechat-picture.toml",
+		"harness/skills/article-visual-design/SKILL.md",
+		"harness/skills/content-writing/SKILL.md",
+		"harness/skills/wechat-picture-visual-design/SKILL.md",
+		"harness/skills/wechat-picture-writing/SKILL.md",
+		"harness/dsh/presets/wechat-article/skills/article-visual-design/SKILL.md",
+		"harness/dsh/presets/wechat-article/skills/content-writing/SKILL.md",
+	}
+	for _, rel := range paths {
+		t.Run(rel, func(t *testing.T) {
+			body := readArticleContractFile(t, filepath.Join(root, rel))
+			if !strings.Contains(body, "wechat_delivery_instructions") {
+				t.Fatalf("%s does not require the Server-resolved semantic delivery instruction", rel)
+			}
+		})
+	}
+	for _, rel := range []string{"harness/packs/wechat-picture/agent.claude.md", "harness/packs/wechat-picture/agent.codex.toml", "harness/agents/wechat-picture.md", "harness/agents/wechat-picture.toml", "harness/skills/wechat-picture-writing/SKILL.md", "harness/skills/wechat-picture-visual-design/SKILL.md"} {
+		body := readArticleContractFile(t, filepath.Join(root, rel))
+		for _, term := range []string{"标题", "caption", "全部图片", "一次复制"} {
+			if !strings.Contains(body, term) {
+				t.Fatalf("%s is missing complete manual picture delivery term %q", rel, term)
+			}
+		}
+	}
+}
+
 func TestVisualPromptBlueprintsBindSourceFactsAndReviewLayout(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	for _, rel := range []string{

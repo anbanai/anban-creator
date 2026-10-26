@@ -140,10 +140,11 @@ func (s *Service) CreateDraft(articles []Article) (*DraftResult, error) {
 
 // ListDraftsResult 草稿列表结果
 type ListDraftsResult struct {
-	TotalCount int64       `json:"total_count"`
-	ItemCount  int64       `json:"item_count"`
-	Items      []DraftItem `json:"items"`
-	Note       string      `json:"note,omitempty"`
+	HistoryAvailable bool        `json:"history_available"`
+	TotalCount       int64       `json:"total_count"`
+	ItemCount        int64       `json:"item_count"`
+	Items            []DraftItem `json:"items"`
+	Note             string      `json:"note,omitempty"`
 }
 
 // DraftItem 草稿列表项
@@ -158,10 +159,11 @@ type DraftItem struct {
 
 // ListPublishedResult 已发布文章列表结果
 type ListPublishedResult struct {
-	TotalCount int64           `json:"total_count"`
-	ItemCount  int64           `json:"item_count"`
-	Items      []PublishedItem `json:"items"`
-	Note       string          `json:"note,omitempty"`
+	HistoryAvailable bool            `json:"history_available"`
+	TotalCount       int64           `json:"total_count"`
+	ItemCount        int64           `json:"item_count"`
+	Items            []PublishedItem `json:"items"`
+	Note             string          `json:"note,omitempty"`
 }
 
 // PublishedItem 已发布文章列表项
@@ -184,8 +186,9 @@ func (s *Service) ListDrafts(offset, count int64) (*ListDraftsResult, error) {
 	}
 
 	return &ListDraftsResult{
-		TotalCount: result.TotalCount,
-		ItemCount:  result.ItemCount,
+		HistoryAvailable: true,
+		TotalCount:       result.TotalCount,
+		ItemCount:        result.ItemCount,
 		Items: func() []DraftItem {
 			items := make([]DraftItem, len(result.Items))
 			for i, item := range result.Items {
@@ -211,8 +214,9 @@ func (s *Service) ListPublished(offset, count int64) (*ListPublishedResult, erro
 	}
 
 	return &ListPublishedResult{
-		TotalCount: result.TotalCount,
-		ItemCount:  result.ItemCount,
+		HistoryAvailable: true,
+		TotalCount:       result.TotalCount,
+		ItemCount:        result.ItemCount,
 		Items: func() []PublishedItem {
 			items := make([]PublishedItem, len(result.Items))
 			for i, item := range result.Items {

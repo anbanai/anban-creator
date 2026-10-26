@@ -434,6 +434,7 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/tasks/:id/files", svc.TaskHandler.GetFiles)
 		apiV1.Get("/tasks/:id/stream", svc.TaskHandler.Stream)
 		apiV1.Get("/tasks/:id/preview", svc.TaskHandler.PreviewHTML)
+		apiV1.Get("/tasks/:id/wechat-picture-copy", svc.TaskHandler.ManualWechatPictureHTML)
 		apiV1.Get("/tasks/:id/files/zip", svc.TaskHandler.DownloadZip)
 		apiV1.Get("/tasks/:id/files/retained/zip", svc.TaskHandler.DownloadRetainedZip)
 		apiV1.Get("/tasks/:id/files/:fileId/preview", svc.TaskHandler.PreviewFile)

@@ -6,10 +6,11 @@ const (
 	WechatDeliveryModeAutomatic    = "automatic"
 	WechatDeliveryModeUserAssisted = "user_assisted"
 
-	WechatDeliveryReasonMissingAppID      = "missing_app_id"
-	WechatDeliveryReasonMissingAppSecret  = "missing_app_secret"
-	WechatDeliveryReasonAutomaticDisabled = "automatic_delivery_disabled"
-	WechatDeliveryReasonCapabilityMissing = "wechat_capability_unavailable"
+	WechatDeliveryReasonMissingAppID         = "missing_app_id"
+	WechatDeliveryReasonMissingAppSecret     = "missing_app_secret"
+	WechatDeliveryReasonAutomaticDisabled    = "automatic_delivery_disabled"
+	WechatDeliveryReasonCapabilityMissing    = "wechat_capability_unavailable"
+	WechatDeliveryReasonPictureDraftDisabled = "picture_draft_not_requested"
 )
 
 // WechatDeliveryDecision freezes the credential-free WeChat delivery policy

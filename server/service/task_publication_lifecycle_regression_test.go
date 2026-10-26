@@ -289,6 +289,37 @@ func TestFinalizePicturePublicationRespectsRequestedImageCountMode(t *testing.T)
 	}
 }
 
+func TestFinalizePicturePublicationHonorsTaskRequestToSkipDraft(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, task, execution := setupCloudCompletionTest(t, false)
+	task.Type = model.TaskTypeWechatPicture
+	task.Channel = model.ChannelWechatPicture
+	task.SetAgentInput(map[string]any{"picture_publish_draft": false})
+	setAutomaticWechatDeliverySnapshot(task)
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	api := &fakeWechatPublicationAPI{
+		draftListResponse: &appwechat.DraftBatchGetResponse{},
+		addResponse:       &appwechat.DraftAddResponse{MediaID: "must-not-publish"},
+	}
+	logger := zerolog.New(io.Discard)
+	publicationSvc := NewWechatPublicationService(repo, func(*model.Project) (WechatPublicationAPI, error) { return api, nil }, &logger)
+	svc.SetWechatPublicationService(publicationSvc)
+
+	status, evidence, err := svc.finalizePicturePublication(ctx, task, execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result publicationDeliveryResult
+	if err := json.Unmarshal(evidence, &result); err != nil {
+		t.Fatal(err)
+	}
+	if status != model.TaskExecutionDraftDeliveryNotRequested || result.Code != "draft_disabled" || result.Attempted || api.addCalls != 0 {
+		t.Fatalf("status=%q result=%#v api_add_calls=%d, want no draft attempt", status, result, api.addCalls)
+	}
+}
+
 func TestFinalizePicturePublicationRejectsWildcardImagePath(t *testing.T) {
 	ctx := context.Background()
 	svc, repo, task, execution := setupCloudCompletionTest(t, false)

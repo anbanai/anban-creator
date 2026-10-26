@@ -135,4 +135,12 @@ export const tasksApi = {
     })
     return response.data
   },
+
+  fetchManualWechatPictureHTML: async (taskId: string): Promise<string> => {
+    const response = await http.get(`/tasks/${taskId}/wechat-picture-copy`, {
+      responseType: 'text',
+      transformResponse: [(value) => value],
+    })
+    return response.data
+  },
 }

@@ -122,9 +122,10 @@ func (s *TaskService) validateArticleImageHTML(ctx context.Context, task *model.
 		}
 		seen[url] = true
 	}
-	if uploadedImages == 0 {
-		return nil
-	}
+	// A requested article image slot must be represented by a mode-matched URL
+	// in the final HTML. Do not treat generated-but-unuploaded image files as a
+	// complete visual delivery; validateRequiredArticleImageSlots will report
+	// the missing slot even when uploadedImages is zero.
 	if err := s.validateRequiredArticleImageSlots(ctx, task, files, string(articleHTML)); err != nil {
 		return err
 	}
@@ -1325,6 +1326,9 @@ func isConcretePictureContentPath(path string) bool {
 }
 
 func (s *TaskService) finalizePicturePublication(ctx context.Context, task *model.Task, execution *model.TaskExecution) (string, []byte, error) {
+	if pictureTaskDraftDisabled(task) {
+		return model.TaskExecutionDraftDeliveryNotRequested, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryNotRequested, "draft_disabled", false, ""), nil
+	}
 	if decision := wechatDeliveryDecision(task); decision.IsUserAssisted() {
 		evidence, _ := json.Marshal(map[string]any{
 			"source": "server_finalizer", "status": model.TaskExecutionDraftDeliveryNotRequested,
@@ -1345,11 +1349,6 @@ func (s *TaskService) finalizePicturePublication(ctx context.Context, task *mode
 	}
 	if !publicationPolicy.DraftEnabled {
 		return model.TaskExecutionDraftDeliveryNotRequested, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryNotRequested, "draft_disabled", false, ""), nil
-	}
-	if input := task.AgentInput.Data(); input != nil {
-		if publish, ok := input["picture_publish_draft"].(bool); ok && !publish {
-			return model.TaskExecutionDraftDeliveryNotRequested, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryNotRequested, "draft_disabled", false, ""), nil
-		}
 	}
 	body, found, err := s.readExecutionArtifact(ctx, execution.ID, "output/publish-package.json", maxTaskDeliveryJSONBytes)
 	if err != nil {

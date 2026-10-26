@@ -5,6 +5,7 @@ import { FileText, Download, Eye, Loader2, FileCode, File, ChevronLeft, ChevronR
 import { toast } from 'sonner'
 import type { TaskFile } from '@/types'
 import { api } from '../lib/api'
+import { getApiErrorMessage } from '@/lib/http-client'
 import {
   Dialog,
   DialogContent,
@@ -169,6 +170,7 @@ function FilePreviewModalContent({
   taskId,
   taskType,
   articleImageDeliveryBlocked,
+  manualPictureCopyAvailable,
   articleAuthor,
   previewTitle,
   details,
@@ -181,6 +183,7 @@ function FilePreviewModalContent({
   taskId: string
   taskType?: string
   articleImageDeliveryBlocked?: boolean
+  manualPictureCopyAvailable?: boolean
   articleAuthor?: string
   previewTitle?: string
   details?: React.ReactNode
@@ -490,7 +493,8 @@ function FilePreviewModalContent({
             复制文本
           </Button>
         )}
-        {isHTML && htmlContent && taskType === 'wechat-article' && articleImageDeliveryBlocked && <p role="alert" className="mr-auto text-sm text-destructive">正文配图交付未通过，暂不能复制为完整文章。</p>}
+        {articleImageDeliveryBlocked && taskType === 'wechat-article' && <p role="alert" className="mr-auto text-sm text-destructive">正文配图交付未通过，暂不能复制为完整文章。</p>}
+        {articleImageDeliveryBlocked && taskType === 'wechat-picture' && <p role="alert" className="mr-auto text-sm text-destructive">图片交付未通过，暂不能复制完整图文内容。</p>}
         {isHTML && htmlContent && taskType === 'wechat-article' && !articleImageDeliveryBlocked && <>
           <Button variant="secondary" size="sm" onClick={async () => {
             try {
@@ -512,7 +516,18 @@ function FilePreviewModalContent({
           <ArticleMetadataCopy files={files} taskId={taskId} author={articleAuthor} />
           <Button variant="ghost" size="sm" onClick={() => window.open('https://mp.weixin.qq.com/', '_blank', 'noopener,noreferrer')}><ExternalLink className="size-3.5" />打开公众号后台</Button>
         </>}
-        {isHTML && htmlContent && taskType !== 'wechat-article' && (
+        {taskType === 'wechat-picture' && manualPictureCopyAvailable && !articleImageDeliveryBlocked && (
+          <Button variant="secondary" size="sm" onClick={async () => {
+            try {
+              const pictureHTML = await api.tasks.fetchManualWechatPictureHTML(taskId)
+              await copyWechatArticle(pictureHTML, files, (id) => api.tasks.previewFileBlob(taskId, id))
+              toast.success('图文内容已复制，切换到公众号后台按 Ctrl+V')
+            } catch (error) {
+              toast.error(getApiErrorMessage(error, '完整贴图交付暂不可复制，请检查图片交付状态'))
+            }
+          }}><Copy className="size-3.5" />复制图文内容</Button>
+        )}
+        {isHTML && htmlContent && taskType !== 'wechat-article' && taskType !== 'wechat-picture' && (
           <Button variant="secondary" size="sm" onClick={() => void navigator.clipboard.writeText(htmlContent).then(() => toast.success('已复制 HTML 源码'))}>
             <FileCode className="h-3.5 w-3.5" />复制 HTML 源码
           </Button>
@@ -536,6 +551,7 @@ export function FilePreviewGallery({
   taskId,
   taskType,
   articleImageDeliveryBlocked,
+  manualPictureCopyAvailable,
   inlineItemClassName,
   renderPreviewDetails,
   renderTrigger,
@@ -548,6 +564,7 @@ export function FilePreviewGallery({
   taskId: string
   taskType?: string
   articleImageDeliveryBlocked?: boolean
+  manualPictureCopyAvailable?: boolean
   inlineItemClassName?: string
   renderPreviewDetails?: (file: TaskFile) => React.ReactNode
   renderTrigger?: (file: TaskFile, open: () => void) => React.ReactNode
@@ -619,6 +636,7 @@ export function FilePreviewGallery({
             taskId={taskId}
             taskType={taskType}
             articleImageDeliveryBlocked={articleImageDeliveryBlocked}
+            manualPictureCopyAvailable={manualPictureCopyAvailable}
             articleAuthor={articleAuthor}
             previewTitle={previewTitle}
             details={renderPreviewDetails?.(currentFile)}
