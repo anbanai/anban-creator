@@ -24,6 +24,15 @@ type PlatformConfig struct {
 	Fields               []PlatformFieldConfig `json:"fields"`
 }
 
+const (
+	WechatArticleWideCoverRatio   = "2.35:1"
+	WechatArticleSquareCoverRatio = "1:1"
+)
+
+// WechatArticleCoverRatios are fixed by the Official Account article cover
+// contract and are intentionally separate from user-selectable image ratios.
+var WechatArticleCoverRatios = []string{WechatArticleWideCoverRatio, WechatArticleSquareCoverRatio}
+
 // PlatformConfigs defines all supported platforms and their form configurations.
 var PlatformConfigs = map[string]*PlatformConfig{
 	PlatformHypit: {ID: PlatformHypit, Label: "视频复刻", BadgeVariant: "secondary", DefaultImageRatio: "9:16", SupportedImageRatios: []string{"9:16", "16:9", "1:1", "4:3", "3:4"}, Fields: []PlatformFieldConfig{{Key: "name", Label: "项目名称", Type: "text", Group: "basic", Required: true}, {Key: "instructions", Label: "创作要求", Type: "textarea", Group: "basic"}}},

@@ -738,23 +738,22 @@ func TestFinalizeArticlePublicationAllowsCurrentCoverHeroAndContentImage(t *test
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/marketing-scan.json", "application/json", scanBody)
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/final-review.md", "text/markdown", []byte("# Final review\n\nPassed.\n"))
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/viral-audit.md", "text/markdown", []byte("# Viral audit\n\nPassed.\n"))
-	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover.png", "image/png", []byte("unuploaded-cover-image"))
-	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover-exact.png", "image/png", []byte("selected-cover-image"))
-	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover-alternative.png", "image/png", []byte("alternative-cover-image"))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover.png", "image/png", []byte("wide-cover-image"))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/cover-square.png", "image/png", []byte("square-cover-image"))
 	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/img_01.png", "image/png", []byte("content-image"))
 	addRequiredArticleImagePlan(t, svc, repo, task, execution, contentURL)
 	if err := db.Model(&model.TaskFile{}).
-		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/cover-exact.png").
+		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/cover.png").
 		Updates(map[string]any{
 			"role": model.FileRoleCover, "media_id": "cover-media-id", "wechat_url": coverURL,
 		}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Model(&model.TaskFile{}).
-		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/cover-alternative.png").
+		Where("task_id = ? AND execution_id = ? AND file_path = ?", task.ID, execution.ID, "output/cover-square.png").
 		Updates(map[string]any{
-			"role": model.FileRoleCover, "media_id": "alternative-cover-media-id",
-			"wechat_url": "https://mmbiz.qpic.cn/alternative-cover.png",
+			"role": model.FileRoleCover, "media_id": "square-cover-media-id",
+			"wechat_url": "https://mmbiz.qpic.cn/square-cover.png",
 		}).Error; err != nil {
 		t.Fatal(err)
 	}

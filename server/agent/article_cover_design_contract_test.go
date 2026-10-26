@@ -32,7 +32,9 @@ func TestArticleCoverDesignUsesDirectedPlanAndScopedReferences(t *testing.T) {
 		"output/cover-plan.md",
 		"output/cover-prompt.md",
 		"output/cover-quality.json",
-		"$EFFECTIVE_ASPECT_RATIO",
+		"2.35:1",
+		"1:1",
+		"output/cover-square.png",
 		"generate_image(",
 		"analyze_image(",
 		"upload_image(",
@@ -139,7 +141,6 @@ func TestArticleAgentWiresPortraitReferenceOnlyIntoCoverStep(t *testing.T) {
 			}
 		}
 		for _, stale := range []string{
-			"2.35:1",
 			"`visual_quality_scorecard` + `cover_effectiveness_scorecard` 写入 `cover-prompt.md`",
 		} {
 			if strings.Contains(body, stale) {

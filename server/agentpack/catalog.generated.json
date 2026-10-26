@@ -3320,8 +3320,8 @@
           "required": false
         },
         {
-          "role": "cover_exact",
-          "path": "output/cover-exact.png",
+          "role": "cover_square",
+          "path": "output/cover-square.png",
           "mime_type": "image/png",
           "required": false
         },
@@ -3447,7 +3447,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "accc0233e958d484b25875b6e4c2d7eeeb8e74d5a00c189b9c29548e22006a49"
+      "digest": "c36f931d8ccc46517e4db86ff51f706f57ad8fbfb26792ad010a021d06ef601a"
     },
     {
       "id": "wechat-picture",

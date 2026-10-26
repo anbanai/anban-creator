@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -132,6 +132,7 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 	}
 	allowedRatios := model.SupportedImageRatiosForChannel(channel)
 	allowed := model.IsBusinessImageRatioAllowedForChannel(channel, req.AspectRatio)
+	wechatCoverRatio := channel == model.ChannelArticle && req.ImageType == "cover" && isFixedWechatArticleCoverRatio(req.AspectRatio)
 	if channel == "" || len(allowedRatios) == 0 {
 		// Legacy rows are read only during migration; new admissions always freeze
 		// Channel. Keep their image capability checks working until the backfill is
@@ -143,8 +144,8 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 		allowedRatios = model.SupportedImageRatios(legacy)
 		allowed = model.IsBusinessImageRatioAllowed(legacy, req.AspectRatio)
 	}
-	if !allowed ||
-		(strings.TrimSpace(task.ImageRatio) != "" && task.ImageRatio != model.ImageRatioAuto && task.ImageRatio != req.AspectRatio) {
+	allowed = allowed || wechatCoverRatio
+	if !allowed || (!wechatCoverRatio && strings.TrimSpace(task.ImageRatio) != "" && task.ImageRatio != model.ImageRatioAuto && task.ImageRatio != req.AspectRatio) {
 		return nil, &ImageRatioNotAllowedError{
 			RequestedRatio: req.AspectRatio, AllowedImageRatios: allowedRatios, TaskImageRatio: task.ImageRatio,
 		}
@@ -327,9 +328,12 @@ func largestExactRatioDimensions(width, height int, ratio string) (int, int, boo
 	if width <= 0 || height <= 0 || len(parts) != 2 {
 		return 0, 0, false
 	}
-	ratioWidth, errWidth := strconv.Atoi(parts[0])
-	ratioHeight, errHeight := strconv.Atoi(parts[1])
-	if errWidth != nil || errHeight != nil || ratioWidth <= 0 || ratioHeight <= 0 {
+	ratioValue, ok := parseImageRatio(ratio)
+	if !ok || ratioValue.Sign() <= 0 || !ratioValue.Num().IsInt64() || !ratioValue.Denom().IsInt64() {
+		return 0, 0, false
+	}
+	ratioWidth, ratioHeight := int(ratioValue.Num().Int64()), int(ratioValue.Denom().Int64())
+	if ratioWidth <= 0 || ratioHeight <= 0 {
 		return 0, 0, false
 	}
 	scale := min(width/ratioWidth, height/ratioHeight)
@@ -382,12 +386,35 @@ func imageDimensionsMatchRatio(width, height int, ratio string) bool {
 	if width <= 0 || height <= 0 || len(parts) != 2 {
 		return false
 	}
-	ratioWidth, errWidth := strconv.Atoi(parts[0])
-	ratioHeight, errHeight := strconv.Atoi(parts[1])
-	if errWidth != nil || errHeight != nil || ratioWidth <= 0 || ratioHeight <= 0 {
+	ratioValue, ok := parseImageRatio(ratio)
+	if !ok || ratioValue.Sign() <= 0 || !ratioValue.Num().IsInt64() || !ratioValue.Denom().IsInt64() {
 		return false
 	}
+	ratioWidth, ratioHeight := ratioValue.Num().Int64(), ratioValue.Denom().Int64()
 	return int64(width)*int64(ratioHeight) == int64(height)*int64(ratioWidth)
+}
+
+func isFixedWechatArticleCoverRatio(ratio string) bool {
+	ratio = strings.TrimSpace(ratio)
+	for _, allowed := range model.WechatArticleCoverRatios {
+		if ratio == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func parseImageRatio(ratio string) (*big.Rat, bool) {
+	parts := strings.Split(strings.TrimSpace(ratio), ":")
+	if len(parts) != 2 {
+		return nil, false
+	}
+	width, okWidth := new(big.Rat).SetString(strings.TrimSpace(parts[0]))
+	height, okHeight := new(big.Rat).SetString(strings.TrimSpace(parts[1]))
+	if !okWidth || !okHeight || height.Sign() <= 0 {
+		return nil, false
+	}
+	return new(big.Rat).Quo(width, height), true
 }
 
 type taskImageOperationSnapshot struct {

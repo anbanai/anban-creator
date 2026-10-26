@@ -289,6 +289,50 @@ func TestGenerateTaskImageRejectsMissingOrAutoAspectRatioWithoutProviderCall(t *
 	}
 }
 
+func TestGenerateWechatArticleCoverAcceptsFixedCoverRatiosWithoutProjectRatioOverride(t *testing.T) {
+	for _, ratio := range []string{"1:1", "2.35:1"} {
+		t.Run(ratio, func(t *testing.T) {
+			f := newTaskImageFixture(t)
+			ctx := context.Background()
+			project, err := f.repo.Projects().FindByID(ctx, f.projectID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			project.Platform = model.PlatformWechat
+			if err := f.repo.Projects().Update(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			task, err := f.repo.Tasks().FindByID(ctx, f.taskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			task.Type = model.PlatformWechat
+			task.Channel = model.ChannelArticle
+			task.ImageRatio = "16:9"
+			if err := f.repo.Tasks().Update(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+
+			req := f.request()
+			req.AspectRatio = ratio
+			width, height := 3, 3
+			if ratio == "2.35:1" {
+				width, height = 47, 20
+			}
+			if err := os.WriteFile(f.generator.result.LocalFilePath, taskImagePNG(width, height), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err = f.service.Generate(ctx, req)
+			if err != nil {
+				t.Fatalf("Generate(%s) error = %v", ratio, err)
+			}
+			if f.generator.calls != 1 || f.generator.resolvedSize != ratio {
+				t.Fatalf("generator calls=%d ratio=%q, want provider validation to accept %q", f.generator.calls, f.generator.resolvedSize, ratio)
+			}
+		})
+	}
+}
+
 func TestGenerateTaskImageRejectsMissingFrozenCapabilityBeforeResolution(t *testing.T) {
 	f := newTaskImageFixture(t)
 	if err := f.db.Model(&model.Task{}).
