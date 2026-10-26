@@ -793,6 +793,25 @@ func TestAssistantCheckpointRequiresOwnedProjectAndWork(t *testing.T) {
 	}
 }
 
+func TestAssistantReadyCreationCheckpointRequiresQualityContract(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	project := createAssistantProject(t, repo, "user-1", "创作画像")
+	svc := NewInteractiveService(repo)
+	session := &InteractiveSession{
+		ID: uuid.NewString(), UserID: "user-1", ModeID: AssistantModeCreation, AgentID: "creation-planner",
+		ProjectID: project.ID, ExpiresAt: time.Now().Add(time.Hour),
+	}
+	svc.sessions[session.ID] = session
+
+	_, err := svc.SaveAssistantCheckpoint(context.Background(), "user-1", session.ID, AssistantCheckpointInput{
+		SchemaVersion: "1.0", Status: model.AssistantCheckpointReady, Summary: "创作计划",
+		Payload: json.RawMessage(`{"plan":{"goal":"介绍新茶","content_type":"wechat-article","topic":"冲泡方法","angle":"问题拆解","expression_form":"清单"}}`),
+	})
+	if !errors.Is(err, ErrAssistantCheckpointInvalid) {
+		t.Fatalf("ready creation checkpoint error = %v, want quality contract validation", err)
+	}
+}
+
 func TestAssistantCheckpointExpiresAndUsesKnownStatuses(t *testing.T) {
 	if !assistantCheckpointStatusAllowed(model.AssistantCheckpointReady) || assistantCheckpointStatusAllowed("anything") {
 		t.Fatal("checkpoint status allowlist does not match expected lifecycle")

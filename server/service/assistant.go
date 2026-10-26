@@ -933,6 +933,11 @@ func (s *InteractiveService) SaveAssistantCheckpoint(ctx context.Context, userID
 	if err := validateAssistantCheckpointPayload(input.Payload); err != nil {
 		return nil, err
 	}
+	if modeID == AssistantModeCreation && input.Status == model.AssistantCheckpointReady {
+		if _, _, err := decodeAssistantCreationPlan(input.Payload); err != nil {
+			return nil, err
+		}
+	}
 	if s.repo == nil || s.repo.AssistantCheckpoints() == nil {
 		return nil, ErrInteractivePersistence
 	}
