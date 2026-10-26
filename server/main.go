@@ -120,6 +120,9 @@ func main() {
 		if err := requireWechatAccountAnalyticsSchema(mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database schema is not ready for WeChat account analytics")
 		}
+		if err := service.MigratePersistedTaskTypes(context.Background(), mysqlDB); err != nil {
+			log.Fatal().Err(err).Msg("failed to canonicalize persisted task types")
+		}
 		if err := service.AssertExecutableIdentityReadiness(context.Background(), mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database executable identity is not ready")
 		}
@@ -133,9 +136,6 @@ func main() {
 			log.Fatal().Err(err).Msg("failed to auto-migrate models")
 		} else {
 			log.Info().Msg("database migration completed")
-		}
-		if err := service.MigratePersistedTaskTypes(context.Background(), mysqlDB); err != nil {
-			log.Fatal().Err(err).Msg("failed to canonicalize persisted task types")
 		}
 		if err := service.MigrateTopicPoolToContentAssets(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate topic pool content assets")
