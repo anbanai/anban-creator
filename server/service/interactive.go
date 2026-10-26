@@ -218,6 +218,8 @@ type InteractiveRuntimeSpec struct {
 	SessionID        string
 	WorkspaceID      string
 	ProjectID        string
+	InteractionID    string
+	Generation       int64
 	AgentPackID      string
 	PresetIDs        []string
 	ServerInstanceID string
@@ -3226,7 +3228,7 @@ type ExecRuntimeFactory struct {
 }
 
 func (f ExecRuntimeFactory) Start(ctx context.Context, sessionID, _ string, runtimeToken string, emit func(string, any)) (Runtime, error) {
-	return f.start(ctx, sessionID, "project-creator", runtimeToken, "", "", nil, nil, emit)
+	return f.start(ctx, sessionID, "project-creator", runtimeToken, "", "", "", 0, nil, nil, emit)
 }
 
 func (f ExecRuntimeFactory) StartWithContext(ctx context.Context, sessionID, presetID string, runtimeToken, initialContext string, emit func(string, any)) (Runtime, error) {
@@ -3235,7 +3237,7 @@ func (f ExecRuntimeFactory) StartWithContext(ctx context.Context, sessionID, pre
 		return nil, err
 	}
 	f.DSHPatch = patch
-	return f.start(ctx, sessionID, presetID, runtimeToken, initialContext, "", nil, nil, emit)
+	return f.start(ctx, sessionID, presetID, runtimeToken, initialContext, "", "", 0, nil, nil, emit)
 }
 
 func (f ExecRuntimeFactory) StartSession(ctx context.Context, spec InteractiveRuntimeSpec, emit func(string, any)) (Runtime, error) {
@@ -3246,7 +3248,7 @@ func (f ExecRuntimeFactory) StartSession(ctx context.Context, spec InteractiveRu
 	}
 	f.DSHPatch = patch
 	if strings.TrimSpace(spec.WorkspaceID) == "" {
-		return f.start(ctx, spec.SessionID, spec.AgentPackID, spec.RuntimeToken, spec.InitialContext, "", nil, nil, emit)
+		return f.start(ctx, spec.SessionID, spec.AgentPackID, spec.RuntimeToken, spec.InitialContext, spec.InteractionID, "", spec.Generation, nil, nil, emit)
 	}
 	presetIDs := append([]string(nil), spec.PresetIDs...)
 	if len(presetIDs) == 0 {
@@ -3260,10 +3262,10 @@ func (f ExecRuntimeFactory) StartSession(ctx context.Context, spec InteractiveRu
 		}
 		patches = appendInteractiveUniqueString(patches, presetPatch)
 	}
-	return f.start(ctx, spec.SessionID, spec.AgentPackID, spec.RuntimeToken, spec.InitialContext, spec.WorkspaceID, presetIDs, patches, emit)
+	return f.start(ctx, spec.SessionID, spec.AgentPackID, spec.RuntimeToken, spec.InitialContext, spec.InteractionID, spec.WorkspaceID, spec.Generation, presetIDs, patches, emit)
 }
 
-func (f ExecRuntimeFactory) start(ctx context.Context, sessionID, presetID, runtimeToken, initialContext, workspaceID string, presetIDs, patches []string, emit func(string, any)) (Runtime, error) {
+func (f ExecRuntimeFactory) start(ctx context.Context, sessionID, presetID, runtimeToken, initialContext, interactionID, workspaceID string, generation int64, presetIDs, patches []string, emit func(string, any)) (Runtime, error) {
 	if strings.TrimSpace(f.Command) == "" {
 		return nil, ErrInteractiveAgent
 	}
@@ -3300,6 +3302,8 @@ func (f ExecRuntimeFactory) start(ctx context.Context, sessionID, presetID, runt
 	cmd.Env = dshBridgeRuntimeEnvironment(dshHome, f.APIKey)
 	cmd.Env = append(cmd.Env,
 		"ANBAN_DSH_BRIDGE_SESSION_ID="+sessionID,
+		"ANBAN_DSH_BRIDGE_INTERACTION_ID="+interactionID,
+		"ANBAN_DSH_BRIDGE_GENERATION="+fmt.Sprint(generation),
 		"ANBAN_DSH_BRIDGE_WORKSPACE_ID="+workspaceID,
 		"ANBAN_DSH_BRIDGE_PRESETS="+strings.Join(presetIDs, ","),
 		"ANBAN_DSH_BRIDGE_PRESET_ID="+presetID,

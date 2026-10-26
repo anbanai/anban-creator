@@ -116,6 +116,8 @@ func (f ContainerRuntimeFactory) StartSession(ctx context.Context, spec Interact
 		"--pids-limit", strconv.FormatInt(f.Config.PidsLimit, 10),
 		"-e", "HOME=/tmp/dsh-home", "-e", "DSH_HOME=/tmp/dsh-home",
 		"-e", "ANBAN_DSH_BRIDGE_SESSION_ID",
+		"-e", "ANBAN_DSH_BRIDGE_INTERACTION_ID",
+		"-e", "ANBAN_DSH_BRIDGE_GENERATION",
 		"-e", "ANBAN_DSH_BRIDGE_WORKSPACE_ID",
 		"-e", "ANBAN_DSH_BRIDGE_PRESETS",
 		"-e", "ANBAN_DSH_BRIDGE_PATCHES",
@@ -199,6 +201,8 @@ func (f ContainerRuntimeFactory) startCommand(ctx context.Context, cancel contex
 	cmd := exec.CommandContext(ctx, docker, args...)
 	cmd.Env = append(os.Environ(),
 		"ANBAN_DSH_BRIDGE_SESSION_ID="+spec.SessionID,
+		"ANBAN_DSH_BRIDGE_INTERACTION_ID="+spec.InteractionID,
+		"ANBAN_DSH_BRIDGE_GENERATION="+strconv.FormatInt(spec.Generation, 10),
 		"ANBAN_DSH_BRIDGE_WORKSPACE_ID="+spec.WorkspaceID,
 		"ANBAN_DSH_BRIDGE_PRESETS="+strings.Join(spec.PresetIDs, ","),
 		"ANBAN_DSH_BRIDGE_PATCHES="+strings.Join(patchesForSpec(spec), ","),

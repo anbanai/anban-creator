@@ -4,7 +4,7 @@ import { ArrowLeft, Bot, Check, ChevronDown, Library, Loader2, Plus, Upload, Use
 import { Streamdown } from 'streamdown'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
-import type { AssistantModeID, AssistantWorkspace as AssistantWorkspaceState, AssistantProject } from '@/lib/api/assistant'
+import type { AssistantInteractionSnapshot, AssistantModeID, AssistantWorkspace as AssistantWorkspaceState, AssistantProject } from '@/lib/api/assistant'
 import type { InteractiveDraft } from '@/lib/api/interactive'
 import { useAuth } from '@/contexts/AuthContext'
 import { InteractiveStreamError, streamAssistantWorkspace, type InteractiveStreamEvent } from '@/lib/interactive-events'
@@ -120,12 +120,6 @@ function parsePersistedDrafts(value: unknown): Record<string, Draft | null> | un
   return result
 }
 
-function parsePersistedEventIds(value: unknown): Record<string, string | undefined> {
-  const source = recordValue(value)
-  if (!source) return {}
-  return Object.fromEntries(Object.entries(source).flatMap(([mode, eventId]) => typeof eventId === 'string' ? [[mode, eventId]] : []))
-}
-
 function parseEventData(event: InteractiveStreamEvent): Record<string, unknown> {
   if (typeof event.data !== 'string') return {}
   try {
@@ -152,6 +146,28 @@ function parseQuestions(value: unknown): DshQuestion[] {
     }) : undefined
     return [{ id, question, header: stringValue(candidate.header), detail: stringValue(candidate.detail), options, multiSelect: candidate.multiSelect === true || candidate.multi_select === true }]
   })
+}
+
+function draftReceiptToDraft(receipt: AssistantInteractionSnapshot['drafts'][number]): Draft {
+  const payload = recordValue(receipt.payload) ?? {}
+  return {
+    ...payload,
+    payload,
+    draft_id: receipt.draft_id,
+    revision: receipt.revision,
+    payload_digest: receipt.payload_digest,
+    ready: receipt.ready,
+    confirmation_state: receipt.confirmation_state,
+  }
+}
+
+function draftsFromSnapshot(snapshot: AssistantInteractionSnapshot): Record<string, Draft | null> {
+  const latest = new Map<string, AssistantInteractionSnapshot['drafts'][number]>()
+  for (const receipt of snapshot.drafts) {
+    const current = latest.get(receipt.mode_id)
+    if (!current || receipt.revision > current.revision) latest.set(receipt.mode_id, receipt)
+  }
+  return Object.fromEntries([...latest.entries()].map(([mode, receipt]) => [mode, draftReceiptToDraft(receipt)]))
 }
 
 function modeLabel(mode: AssistantModeID) {
@@ -217,8 +233,10 @@ function readPersistedWorkspace(): PersistedWorkspace | null {
     const candidate = value as Partial<PersistedWorkspace>
     if (candidate.workspace !== null && (typeof candidate.workspace !== 'object' || !isMode(candidate.workspace.mode_id) || typeof candidate.workspace.id !== 'string')) return null
     return {
-      workspace: candidate.workspace as AssistantWorkspaceState | null,
-      lastEventIds: parsePersistedEventIds(candidate.lastEventIds),
+      workspace: candidate.workspace ? { ...(candidate.workspace as AssistantWorkspaceState), session_id: '', sessions: {} } : null,
+      // Event cursors and runtime session identities are transport state. The
+      // Server snapshot is authoritative after a refresh or generation change.
+      lastEventIds: {},
       creationType: typeof candidate.creationType === 'string' ? candidate.creationType : undefined,
       mode: isMode(candidate.mode) ? candidate.mode : undefined,
       projectId: typeof candidate.projectId === 'string' ? candidate.projectId : undefined,
@@ -266,6 +284,7 @@ export default function AssistantWorkspace() {
   const [draftByMode, setDraftByMode] = useState<Record<string, Draft | null>>(persisted?.draftByMode ?? {})
   const [error, setError] = useState<string | null>(null)
   const [interactionState, dispatchInteraction] = useReducer(assistantInteractionReducer, initialAssistantInteractionState)
+  const [, setInteractionSnapshot] = useState<AssistantInteractionSnapshot | null>(null)
   const [sending, setSending] = useState(false)
   const [responding, setResponding] = useState(false)
   const [switching, setSwitching] = useState(false)
@@ -282,12 +301,25 @@ export default function AssistantWorkspace() {
   const conversationOrder = useRef<Record<string, number>>({})
 
   useEffect(() => {
-    if (workspace) dispatchInteraction({ type: 'snapshot', snapshot: { interaction_id: workspace.id, mode_id: workspace.mode_id, project_id: workspace.project_id, content_id: workspace.content_id, lifecycle: 'active', generation: workspace.generation ?? 1, runtime_status: workspace.runtime_status, expires_at: workspace.expires_at, last_activity_at: '', available_actions: ['send_message', 'restart'], drafts: [] } })
-  }, [workspace?.id, workspace?.generation, workspace?.mode_id, workspace?.project_id, workspace?.content_id, workspace?.runtime_status, workspace?.expires_at])
+    if (!workspace) return
+    let cancelled = false
+    void api.assistant.getInteractionSnapshot(workspace.id).then((snapshot) => {
+      if (cancelled) return
+      setInteractionSnapshot(snapshot)
+      setWorkspace((current) => current ? { ...current, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, generation: snapshot.generation, runtime_status: snapshot.runtime_status, expires_at: snapshot.expires_at } : current)
+      setDraftByMode(draftsFromSnapshot(snapshot))
+      dispatchInteraction({ type: 'snapshot', snapshot })
+    }).catch((snapshotError) => {
+      if (cancelled) return
+      const status = assistantWorkspaceHttpStatus(snapshotError)
+      dispatchInteraction({ type: 'error', code: status === 404 || status === 410 ? 'assistant_interaction_restart_required' : 'assistant_interaction_reconnecting' })
+    })
+    return () => { cancelled = true }
+  }, [workspace?.id])
 
   useEffect(() => {
-    if (error) dispatchInteraction({ type: 'error', code: error.includes('计划') ? 'assistant_draft_saved_retryable' : 'assistant_message_not_accepted' })
-  }, [error])
+    if (error && interactionState.status === 'connecting') dispatchInteraction({ type: 'error', code: error.includes('计划') ? 'assistant_draft_saved_retryable' : 'assistant_message_not_accepted' })
+  }, [error, interactionState.status])
 
   const nextConversationOrder = (conversationMode: AssistantModeID) => {
     const next = (conversationOrder.current[conversationMode] ?? 0) + 1
@@ -306,8 +338,8 @@ export default function AssistantWorkspace() {
   useEffect(() => {
     try {
       sessionStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({
-        workspace,
-        lastEventIds,
+        workspace: workspace ? { ...workspace, session_id: '', sessions: {} } : null,
+        lastEventIds: {},
         creationType,
         mode,
         projectId,
@@ -408,15 +440,10 @@ export default function AssistantWorkspace() {
 
   const resetExpiredWorkspace = (preservedComposer?: string) => {
     workspaceResetVersion.current += 1
-    setWorkspace(null)
-    setConversationPhase('setup')
-    setLastEventIds({})
     setResponding(false)
-    setError(null)
+    setError('连接已结束，当前计划和输入已保留，请恢复后继续。')
     if (preservedComposer !== undefined) setComposer(preservedComposer)
-    setMessagesByMode((current) => ({ ...current, [mode]: [] }))
-    setQuestionsByMode((current) => ({ ...current, [mode]: [] }))
-    setDraftByMode((current) => ({ ...current, [mode]: null }))
+    dispatchInteraction({ type: 'error', code: 'assistant_interaction_restart_required' })
   }
 
   useEffect(() => {
@@ -483,6 +510,15 @@ export default function AssistantWorkspace() {
       lastEventId: lastEventIds[mode],
       expectedSessionId: workspace.sessions[mode],
       generation: workspace.generation,
+      onGenerationChanged: (generation) => {
+        dispatchInteraction({ type: 'generation_changed', generation })
+        void api.assistant.getInteractionSnapshot(workspace.id).then((snapshot) => {
+          setInteractionSnapshot(snapshot)
+          setWorkspace((current) => current ? { ...current, generation: snapshot.generation, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, runtime_status: snapshot.runtime_status } : current)
+          setDraftByMode(draftsFromSnapshot(snapshot))
+          dispatchInteraction({ type: 'snapshot', snapshot })
+        }).catch(() => undefined)
+      },
     })
     void (async () => {
       try {
@@ -617,7 +653,10 @@ export default function AssistantWorkspace() {
       }
       setResponding(true)
     } catch (sendError) {
-      if (createdWorkspace) void Promise.resolve(api.assistant.closeWorkspace(createdWorkspace.id)).catch(() => undefined)
+      if (createdWorkspace) {
+        setWorkspace(createdWorkspace)
+        setConversationPhase('active')
+      }
       setComposer(text)
       setMessagesByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).filter((message) => message.id !== optimisticID) }))
       const errorCode = assistantWorkspaceErrorCode(sendError)
@@ -1055,9 +1094,9 @@ export default function AssistantWorkspace() {
       <main data-testid="assistant-workspace" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
       <AssistantRecoveryBanner
         state={interactionState}
-        onRetry={() => setError(null)}
-        onRestoreDraft={() => setError(null)}
-        onRestart={() => resetExpiredWorkspace()}
+        onRetry={() => { if (workspace) void api.assistant.getInteractionSnapshot(workspace.id).then(setInteractionSnapshot).then(() => setError(null)).catch(() => undefined) }}
+        onRestoreDraft={() => { if (workspace) void api.assistant.getInteractionSnapshot(workspace.id).then((snapshot) => { setInteractionSnapshot(snapshot); setDraftByMode(draftsFromSnapshot(snapshot)); dispatchInteraction({ type: 'snapshot', snapshot }); setError(null) }).catch(() => undefined) }}
+        onRestart={() => { setWorkspace(null); setInteractionSnapshot(null); setConversationPhase('setup'); setLastEventIds({}); setMessagesByMode({}); setQuestionsByMode({}); setDraftByMode({}); setError(null); dispatchInteraction({ type: 'restart' }) }}
         onViewTask={() => { if (interactionState.taskId) navigate(`/tasks/${encodeURIComponent(interactionState.taskId)}`) }}
       />
       {!workspace ? (

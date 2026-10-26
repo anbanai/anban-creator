@@ -2,13 +2,22 @@ package service
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
+)
+
+const (
+	InteractionDraftRetention         = 30 * 24 * time.Hour
+	InteractionCommitReceiptRetention = 30 * 24 * time.Hour
+	InteractionEventRetention         = 24 * time.Hour
+	InteractionAttemptRetention       = 24 * time.Hour
 )
 
 const (
@@ -83,6 +92,16 @@ func NewInteractionAttemptID() string {
 		return "attempt-unavailable"
 	}
 	return hex.EncodeToString(raw[:])
+}
+
+func interactionCommandDigest(method, attemptID string, params map[string]any) string {
+	payload, _ := json.Marshal(struct {
+		Method  string         `json:"method"`
+		Attempt string         `json:"attempt_id"`
+		Params  map[string]any `json:"params"`
+	}{Method: method, Attempt: attemptID, Params: params})
+	digest := sha256.Sum256(payload)
+	return hex.EncodeToString(digest[:])
 }
 
 type InteractionSnapshot struct {

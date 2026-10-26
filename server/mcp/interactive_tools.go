@@ -25,10 +25,10 @@ func registerInteractiveTools(server *mcp.Server) {
 				"interaction_id": map[string]any{"type": "string", "minLength": 1},
 				"generation":     map[string]any{"type": "integer", "minimum": 1},
 				"attempt_id":     map[string]any{"type": "string", "minLength": 1, "maxLength": 128},
-				"mode_id":        map[string]any{"type": "string", "enum": []any{"creation", "review"}},
+				"mode_id":        map[string]any{"type": "string", "enum": []any{"profile", "creation", "review"}},
 				"payload_digest": map[string]any{"type": "string", "minLength": 64, "maxLength": 64},
 			},
-			"required": []any{"payload", "ready"},
+			"required": []any{"interaction_id", "generation", "attempt_id", "mode_id", "payload", "payload_digest", "ready"},
 		},
 	}, stageAssistantDraftHandler)
 	server.AddTool(&mcp.Tool{
@@ -41,7 +41,7 @@ func registerInteractiveTools(server *mcp.Server) {
 				"interaction_id": map[string]any{"type": "string", "minLength": 1},
 				"generation":     map[string]any{"type": "integer", "minimum": 1},
 				"attempt_id":     map[string]any{"type": "string", "minLength": 1, "maxLength": 128},
-				"mode_id":        map[string]any{"type": "string", "enum": []any{"creation", "review"}},
+				"mode_id":        map[string]any{"type": "string", "enum": []any{"profile", "creation", "review"}},
 				"payload_digest": map[string]any{"type": "string", "minLength": 64, "maxLength": 64},
 				"payload":        map[string]any{"type": "object"},
 				"project":        projectCreatorProjectSchema(),
@@ -58,7 +58,7 @@ func registerInteractiveTools(server *mcp.Server) {
 				},
 				"memory_append": map[string]any{"type": "string", "maxLength": 65536},
 			},
-			"required": []any{"project", "profile", "progress", "ready", "missing_fields", "inferred_fields"},
+			"required": []any{"interaction_id", "generation", "attempt_id", "mode_id", "payload_digest", "project", "profile", "progress", "ready", "missing_fields", "inferred_fields"},
 		},
 	}, stageProjectCreatorDraftHandler)
 }
@@ -102,7 +102,11 @@ func stageAssistantDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (
 		return errorResult("payload and ready are required"), nil
 	}
 	args := parseArgs(req.Params.Arguments)
-	if interactionID, ok := args["interaction_id"].(string); ok && strings.TrimSpace(interactionID) != "" && svcs.InteractionSvc != nil {
+	if svcs.InteractionSvc != nil {
+		interactionID, _ := args["interaction_id"].(string)
+		if strings.TrimSpace(interactionID) == "" || identity.InteractionID == "" {
+			return errorResult("interaction capability is required"), nil
+		}
 		generation, ok := interactionGeneration(args["generation"])
 		if !ok {
 			return errorResult("generation must be an integer"), nil
@@ -127,7 +131,9 @@ func stageAssistantDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (
 		if !ok {
 			return errorResult("ready must be a boolean"), nil
 		}
-		identity, _ := getMCPInteractiveIdentity(ctx)
+		if identity.InteractionID != interactionID || identity.Generation != generation {
+			return errorResult(service.InteractionErrorGenerationChanged), nil
+		}
 		result, err := svcs.InteractionSvc.StageDraftForInteraction(ctx, identity.UserID, service.InteractionStageInput{InteractionID: interactionID, Generation: generation, AttemptID: attemptID, ModeID: modeID, Payload: payload, PayloadDigest: payloadDigest, Ready: ready})
 		if err != nil {
 			return errorResult(fmt.Sprintf("stage assistant draft: %v", err)), nil
@@ -175,7 +181,11 @@ func stageProjectCreatorDraftHandler(ctx context.Context, req *mcp.CallToolReque
 		return errorResult("project, profile, progress, and ready are required"), nil
 	}
 	args := parseArgs(req.Params.Arguments)
-	if interactionID, ok := args["interaction_id"].(string); ok && strings.TrimSpace(interactionID) != "" && svcs.InteractionSvc != nil {
+	if svcs.InteractionSvc != nil {
+		interactionID, _ := args["interaction_id"].(string)
+		if strings.TrimSpace(interactionID) == "" || identity.InteractionID == "" {
+			return errorResult("interaction capability is required"), nil
+		}
 		generation, ok := interactionGeneration(args["generation"])
 		if !ok {
 			return errorResult("generation must be an integer"), nil
@@ -210,7 +220,9 @@ func stageProjectCreatorDraftHandler(ctx context.Context, req *mcp.CallToolReque
 		if !ok {
 			return errorResult("ready must be a boolean"), nil
 		}
-		identity, _ := getMCPInteractiveIdentity(ctx)
+		if identity.InteractionID != interactionID || identity.Generation != generation {
+			return errorResult(service.InteractionErrorGenerationChanged), nil
+		}
 		result, err := svcs.InteractionSvc.StageDraftForInteraction(ctx, identity.UserID, service.InteractionStageInput{InteractionID: interactionID, Generation: generation, AttemptID: attemptID, ModeID: modeID, Payload: payload, PayloadDigest: payloadDigest, Ready: ready})
 		if err != nil {
 			return errorResult(fmt.Sprintf("stage project creator draft: %v", err)), nil

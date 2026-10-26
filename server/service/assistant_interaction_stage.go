@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -23,6 +22,11 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 		return InteractionStageResult{}, ErrInteractivePersistence
 	}
 	if strings.TrimSpace(in.InteractionID) == "" || strings.TrimSpace(in.ModeID) == "" || strings.TrimSpace(in.AttemptID) == "" || len(in.Payload) == 0 {
+		return InteractionStageResult{}, ErrInteractiveDraftInvalid
+	}
+	switch in.ModeID {
+	case AssistantModeProfile, AssistantModeCreation, AssistantModeReview:
+	default:
 		return InteractionStageResult{}, ErrInteractiveDraftInvalid
 	}
 	lock := s.lockFor(in.InteractionID)
@@ -46,11 +50,15 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 		if current.PayloadDigest != in.PayloadDigest {
 			return InteractionStageResult{}, ErrInteractiveIdempotency
 		}
-		var replay model.AssistantInteractionDraft
+		var replay struct {
+			DraftID  string `json:"draft_id"`
+			Revision int64  `json:"revision"`
+			Ready    bool   `json:"ready"`
+		}
 		if err := json.Unmarshal(current.Result, &replay); err != nil {
 			return InteractionStageResult{}, errors.Join(ErrInteractivePersistence, err)
 		}
-		return InteractionStageResult{DraftID: replay.ID, Revision: replay.Revision, ConfirmationRequired: replay.Ready, AvailableActions: []string{"confirm_draft", "continue_editing"}, Durable: true}, nil
+		return InteractionStageResult{DraftID: replay.DraftID, Revision: replay.Revision, ConfirmationRequired: replay.Ready, AvailableActions: []string{"confirm_draft", "continue_editing"}, Durable: true}, nil
 	} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
 		return InteractionStageResult{}, errors.Join(ErrInteractivePersistence, findErr)
 	}
@@ -61,8 +69,8 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 		return InteractionStageResult{}, errors.Join(ErrInteractivePersistence, findErr)
 	}
 	now := s.clock()
-	draft := &model.AssistantInteractionDraft{ID: uuid.NewString(), InteractionID: in.InteractionID, ModeID: in.ModeID, Revision: revision, Payload: append(json.RawMessage(nil), in.Payload...), PayloadDigest: in.PayloadDigest, Ready: in.Ready, ConfirmationState: model.AssistantInteractionDraftPending, SourceGeneration: in.Generation, ExpiresAt: now.Add(30 * 24 * time.Hour), CreatedAt: now, UpdatedAt: now}
-	attempt := &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: in.InteractionID, AttemptID: in.AttemptID, Operation: string(InteractionOperationStage), Generation: in.Generation, PayloadDigest: in.PayloadDigest, CreatedAt: now, ExpiresAt: now.Add(24 * time.Hour)}
+	draft := &model.AssistantInteractionDraft{ID: uuid.NewString(), InteractionID: in.InteractionID, ModeID: in.ModeID, Revision: revision, Payload: append(json.RawMessage(nil), in.Payload...), PayloadDigest: in.PayloadDigest, Ready: in.Ready, ConfirmationState: model.AssistantInteractionDraftPending, SourceGeneration: in.Generation, ExpiresAt: now.Add(InteractionDraftRetention), CreatedAt: now, UpdatedAt: now}
+	attempt := &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: in.InteractionID, AttemptID: in.AttemptID, Operation: string(InteractionOperationStage), Generation: in.Generation, PayloadDigest: in.PayloadDigest, CreatedAt: now, ExpiresAt: now.Add(InteractionAttemptRetention)}
 	persisted, _, err := s.repo.AssistantInteractions().CreateDraftIfAttemptNew(ctx, draft, attempt)
 	if err != nil {
 		if errors.Is(err, repository.ErrInteractionAttemptConflict) {

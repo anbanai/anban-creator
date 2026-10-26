@@ -102,7 +102,7 @@ func TestAssistantInteractionRepositoryDraftAttemptIsIdempotent(t *testing.T) {
 }
 
 func TestAssistantInteractionRepositoryRetention(t *testing.T) {
-	repo, _ := newAssistantInteractionTestRepository(t)
+	repo, db := newAssistantInteractionTestRepository(t)
 	now := time.Now().UTC()
 	old := now.Add(-48 * time.Hour)
 	if err := repo.AssistantInteractions().CreateEvent(context.Background(), &model.AssistantInteractionEvent{ID: "event-old", InteractionID: "interaction-1", Sequence: 1, Type: "message", Data: json.RawMessage(`{}`), CreatedAt: old}); err != nil {
@@ -116,5 +116,11 @@ func TestAssistantInteractionRepositoryRetention(t *testing.T) {
 	}
 	if count, err := repo.AssistantInteractions().ExpireAttempts(context.Background(), now.Add(-24*time.Hour)); err != nil || count != 1 {
 		t.Fatalf("attempts expired = %d, %v", count, err)
+	}
+	if err := db.Create(&model.AssistantInteractionDraft{ID: "draft-old", InteractionID: "interaction-1", ModeID: "creation", Revision: 1, Payload: json.RawMessage(`{}`), PayloadDigest: "digest", ConfirmationState: model.AssistantInteractionDraftPending, ExpiresAt: old}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count, err := repo.AssistantInteractions().ExpireDrafts(context.Background(), now); err != nil || count != 1 {
+		t.Fatalf("drafts expired = %d, %v", count, err)
 	}
 }

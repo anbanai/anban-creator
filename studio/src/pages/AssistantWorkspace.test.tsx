@@ -613,7 +613,7 @@ describe('AssistantWorkspace', () => {
     expect(secondKey).toBe(firstKey)
   })
 
-  it('keeps the unsent message and offers a fresh session after workspace expiry', async () => {
+  it('keeps the unsent message and retries the durable interaction after expiry', async () => {
     const expired = Object.assign(new Error('expired'), { response: { data: { error_code: 'assistant_workspace_expired' } } })
     mocks.workspaceMessage.mockRejectedValueOnce(expired).mockResolvedValueOnce(undefined)
     renderPage()
@@ -624,7 +624,7 @@ describe('AssistantWorkspace', () => {
     expect(screen.queryByText(/对话已过期/)).not.toBeInTheDocument()
     expect(screen.queryByText(/SSE connection failed/)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledTimes(2))
     expect(mocks.workspaceMessage).toHaveBeenLastCalledWith('workspace-1', 'profile', '继续完善画像')
   })

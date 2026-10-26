@@ -91,17 +91,57 @@ export interface AssistantInteractionEvent {
   data: string
 }
 
+export class AssistantInteractionStreamError extends Error {
+  readonly status: number
+
+  constructor(status: number) {
+    super(`interaction stream failed: ${status}`)
+    this.name = 'AssistantInteractionStreamError'
+    this.status = status
+  }
+}
+
+function waitForInteractionRetry(ms: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new DOMException('The operation was aborted.', 'AbortError'))
+      return
+    }
+    const timer = window.setTimeout(resolve, ms)
+    signal?.addEventListener('abort', () => {
+      window.clearTimeout(timer)
+      reject(signal.reason ?? new DOMException('The operation was aborted.', 'AbortError'))
+    }, { once: true })
+  })
+}
+
 export function streamAssistantInteraction(interactionId: string, token: string, signal?: AbortSignal, options: InteractionEventStreamOptions = {}): AsyncGenerator<AssistantInteractionEvent> {
   return (async function* () {
     let cursor = options.lastEventId
     let generation = options.generation ?? 1
+    let reconnects = 0
     while (!signal?.aborted) {
-      const response = await fetch(`/api/v1/assistant/interactions/${encodeURIComponent(interactionId)}/events`, {
-        headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream', ...(cursor ? { 'Last-Event-ID': cursor } : {}) },
-        signal,
-      })
-      if (!response.ok) throw new Error(`interaction stream failed: ${response.status}`)
+      let response: Response
+      try {
+        response = await fetch(`/api/v1/assistant/interactions/${encodeURIComponent(interactionId)}/events`, {
+          headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream', ...(cursor ? { 'Last-Event-ID': cursor } : {}) },
+          signal,
+        })
+      } catch (error) {
+        if (signal?.aborted) throw error
+        await waitForInteractionRetry(Math.min(10_000, 250 * 2 ** Math.min(reconnects, 6)), signal)
+        reconnects += 1
+        continue
+      }
+      if (!response.ok) {
+        if (response.status === 404 || response.status === 410) throw new AssistantInteractionStreamError(response.status)
+        if (response.status === 409) cursor = undefined
+        await waitForInteractionRetry(Math.min(10_000, 250 * 2 ** Math.min(reconnects, 6)), signal)
+        reconnects += 1
+        continue
+      }
       if (!response.body) return
+      reconnects = 0
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
@@ -129,7 +169,7 @@ export function streamAssistantInteraction(interactionId: string, token: string,
         }
       } finally { reader.releaseLock() }
       if (signal?.aborted) return
-      cursor = undefined
+      await waitForInteractionRetry(250, signal)
     }
   })()
 }

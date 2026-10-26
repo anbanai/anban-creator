@@ -21,6 +21,7 @@ type AssistantInteractionRepository interface {
 	FindByScopeForUpdate(context.Context, string, string, string, string) (*model.AssistantInteraction, error)
 	UpdateLifecycle(context.Context, string, string, time.Time) error
 	UpdateMode(context.Context, string, string, time.Time) error
+	UpdateProject(context.Context, string, string, time.Time) error
 	CompareAndSwapGeneration(context.Context, string, int64, int64, time.Time) (bool, error)
 	CreateRuntimeBinding(context.Context, *model.AssistantInteractionRuntime) error
 	FindCurrentRuntime(context.Context, string, int64) (*model.AssistantInteractionRuntime, error)
@@ -29,6 +30,7 @@ type AssistantInteractionRepository interface {
 	FindDraftForUser(context.Context, string, string) (*model.AssistantInteractionDraft, error)
 	FindLatestDraft(context.Context, string, string, string) (*model.AssistantInteractionDraft, error)
 	ListDrafts(context.Context, string, string) ([]*model.AssistantInteractionDraft, error)
+	ExpireDrafts(context.Context, time.Time) (int64, error)
 	UpdateDraftState(context.Context, string, string, time.Time) error
 	CreateEvent(context.Context, *model.AssistantInteractionEvent) error
 	NextEventSequence(context.Context, string) (uint64, error)
@@ -94,6 +96,18 @@ func (r *assistantInteractionRepository) UpdateLifecycle(ctx context.Context, id
 func (r *assistantInteractionRepository) UpdateMode(ctx context.Context, id, mode string, at time.Time) error {
 	return r.db.WithContext(ctx).Model(&model.AssistantInteraction{}).Where("id = ?", id).Updates(map[string]any{"mode_id": mode, "last_activity_at": at, "updated_at": at}).Error
 }
+func (r *assistantInteractionRepository) UpdateProject(ctx context.Context, id, projectID string, at time.Time) error {
+	var value model.AssistantInteraction
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&value).Error; err != nil {
+		return err
+	}
+	scope := value.UserID + ":" + projectID + ":" + value.ContentID
+	updates := map[string]any{"project_id": projectID, "scope": scope, "last_activity_at": at, "updated_at": at}
+	if value.ActiveScope != nil {
+		updates["active_scope"] = scope
+	}
+	return r.db.WithContext(ctx).Model(&model.AssistantInteraction{}).Where("id = ?", id).Updates(updates).Error
+}
 func (r *assistantInteractionRepository) CompareAndSwapGeneration(ctx context.Context, id string, expected, next int64, at time.Time) (bool, error) {
 	result := r.db.WithContext(ctx).Model(&model.AssistantInteraction{}).Where("id = ? AND generation = ? AND closed_at IS NULL", id, expected).Updates(map[string]any{"generation": next, "last_activity_at": at, "updated_at": at})
 	return result.RowsAffected == 1, result.Error
@@ -130,13 +144,13 @@ func (r *assistantInteractionRepository) CreateDraftIfAttemptNew(ctx context.Con
 			_ = tx.Rollback()
 			return nil, false, ErrInteractionAttemptConflict
 		}
-		var result model.AssistantInteractionDraft
+		var result assistantInteractionDraftReceipt
 		if decodeErr := json.Unmarshal(existing.Result, &result); decodeErr != nil {
 			_ = tx.Rollback()
 			return nil, false, decodeErr
 		}
 		_ = tx.Rollback()
-		return &result, false, nil
+		return &model.AssistantInteractionDraft{ID: result.DraftID, Revision: result.Revision, Ready: result.Ready, ConfirmationState: result.ConfirmationState}, false, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		_ = tx.Rollback()
@@ -146,7 +160,10 @@ func (r *assistantInteractionRepository) CreateDraftIfAttemptNew(ctx context.Con
 		_ = tx.Rollback()
 		return nil, false, err
 	}
-	encoded, err := json.Marshal(draft)
+	// Attempts are replay receipts, not a second draft store. Keep only the
+	// identifiers needed to return an idempotent stage result; the full payload
+	// remains in assistant_interaction_drafts where the user-owned draft lives.
+	encoded, err := json.Marshal(assistantInteractionDraftReceipt{DraftID: draft.ID, Revision: draft.Revision, Ready: draft.Ready, ConfirmationState: draft.ConfirmationState})
 	if err != nil {
 		_ = tx.Rollback()
 		return nil, false, err
@@ -161,6 +178,14 @@ func (r *assistantInteractionRepository) CreateDraftIfAttemptNew(ctx context.Con
 	}
 	return draft, true, nil
 }
+
+type assistantInteractionDraftReceipt struct {
+	DraftID           string `json:"draft_id"`
+	Revision          int64  `json:"revision"`
+	Ready             bool   `json:"ready"`
+	ConfirmationState string `json:"confirmation_state"`
+}
+
 func (r *assistantInteractionRepository) FindDraftForUser(ctx context.Context, userID, id string) (*model.AssistantInteractionDraft, error) {
 	var value model.AssistantInteractionDraft
 	err := r.db.WithContext(ctx).Table("assistant_interaction_drafts").Joins("JOIN assistant_interactions ON assistant_interactions.id = assistant_interaction_drafts.interaction_id").Where("assistant_interactions.user_id = ? AND assistant_interaction_drafts.id = ?", userID, id).First(&value).Error
@@ -184,6 +209,10 @@ func (r *assistantInteractionRepository) ListDrafts(ctx context.Context, userID,
 		Where("assistant_interactions.user_id = ? AND assistant_interaction_drafts.interaction_id = ?", userID, interactionID).
 		Order("assistant_interaction_drafts.mode_id ASC, assistant_interaction_drafts.revision DESC").Find(&values).Error
 	return values, err
+}
+func (r *assistantInteractionRepository) ExpireDrafts(ctx context.Context, before time.Time) (int64, error) {
+	result := r.db.WithContext(ctx).Where("expires_at <= ?", before).Delete(&model.AssistantInteractionDraft{})
+	return result.RowsAffected, result.Error
 }
 func (r *assistantInteractionRepository) UpdateDraftState(ctx context.Context, id, state string, at time.Time) error {
 	return r.db.WithContext(ctx).Model(&model.AssistantInteractionDraft{}).Where("id = ?", id).Updates(map[string]any{"confirmation_state": state, "updated_at": at}).Error

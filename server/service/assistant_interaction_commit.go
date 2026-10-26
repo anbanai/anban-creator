@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/google/uuid"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -57,8 +59,7 @@ func (s *AssistantInteractionService) runRuntimeCommand(ctx context.Context, use
 	if attemptID == "" {
 		attemptID = NewInteractionAttemptID()
 	}
-	digest := sha256.Sum256([]byte(method + ":" + attemptID))
-	payloadDigest := hex.EncodeToString(digest[:])
+	payloadDigest := interactionCommandDigest(method, attemptID, params)
 	if previous, findErr := s.repo.AssistantInteractions().FindAttempt(ctx, interactionID, attemptID); findErr == nil {
 		if previous.PayloadDigest != payloadDigest {
 			return ErrInteractiveIdempotency
@@ -68,6 +69,9 @@ func (s *AssistantInteractionService) runRuntimeCommand(ctx context.Context, use
 	binding, err := s.ensureRuntimeLocked(ctx, userID, interaction)
 	if err != nil {
 		return NormalizeInteractionError(err)
+	}
+	if binding.Generation != generation {
+		return NewInteractionError(InteractionErrorGenerationChanged, 409, "对话状态已更新，请加载最新内容", "reload_snapshot")
 	}
 	if binding.runtime == nil {
 		return NewInteractionError(InteractionErrorReconnecting, 409, "正在恢复连接，请稍候", "wait_for_recovery")
@@ -139,6 +143,16 @@ func (s *AssistantInteractionService) CommitInteraction(ctx context.Context, use
 	} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
 		return InteractionCommitResult{}, errors.Join(ErrInteractivePersistence, findErr)
 	}
+	if draft.ModeID == AssistantModeProfile {
+		result, profileErr := s.commitProfileInteraction(ctx, userID, interactionID, interaction.Generation, draft, req, digest)
+		if profileErr == nil {
+			return result, nil
+		}
+		if errors.Is(profileErr, ErrAssistantCheckpointInvalid) || errors.Is(profileErr, ErrProjectProfileVersionConflict) {
+			return InteractionCommitResult{}, NewInteractionError(InteractionErrorDraftRevisionConflict, 409, "计划当前不可确认，请恢复最新计划", "reload_snapshot", "restore_draft")
+		}
+		return InteractionCommitResult{}, profileErr
+	}
 
 	checkpoint, err := s.commitCheckpoint(ctx, userID, interaction, draft)
 	if err != nil {
@@ -158,7 +172,7 @@ func (s *AssistantInteractionService) CommitInteraction(ctx context.Context, use
 		if errors.Is(err, ErrAssistantCheckpointInvalid) || errors.Is(err, ErrAssistantCreationInputsMissing) || errors.Is(err, ErrAssistantCheckpointConflict) {
 			code = InteractionErrorDraftRevisionConflict
 		}
-		_ = s.repo.AssistantInteractions().CreateAttempt(ctx, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: interactionID, AttemptID: attemptID, Operation: string(InteractionOperationCommit), Generation: interaction.Generation, PayloadDigest: digest, ErrorCode: code, CreatedAt: s.clock(), ExpiresAt: s.clock().Add(24 * time.Hour)})
+		_ = s.repo.AssistantInteractions().CreateAttempt(ctx, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: interactionID, AttemptID: attemptID, Operation: string(InteractionOperationCommit), Generation: interaction.Generation, PayloadDigest: digest, ErrorCode: code, CreatedAt: s.clock(), ExpiresAt: s.clock().Add(InteractionCommitReceiptRetention)})
 		if code == InteractionErrorDraftRevisionConflict {
 			return InteractionCommitResult{}, NewInteractionError(code, 409, "计划当前不可确认，请恢复最新计划", "reload_snapshot", "restore_draft")
 		}
@@ -169,7 +183,7 @@ func (s *AssistantInteractionService) CommitInteraction(ctx context.Context, use
 		return InteractionCommitResult{}, errors.Join(ErrInteractivePersistence, err)
 	}
 	final := InteractionCommitResult{Status: InteractionCommitCreated, TaskID: assistantCommitTaskID(result), Result: mustAssistantCommitJSON(result)}
-	if err := s.repo.AssistantInteractions().CreateAttempt(ctx, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: interactionID, AttemptID: attemptID, Operation: string(InteractionOperationCommit), Generation: interaction.Generation, PayloadDigest: digest, Result: raw, CreatedAt: s.clock(), ExpiresAt: s.clock().Add(24 * time.Hour)}); err != nil {
+	if err := s.repo.AssistantInteractions().CreateAttempt(ctx, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: interactionID, AttemptID: attemptID, Operation: string(InteractionOperationCommit), Generation: interaction.Generation, PayloadDigest: digest, Result: raw, CreatedAt: s.clock(), ExpiresAt: s.clock().Add(InteractionCommitReceiptRetention)}); err != nil {
 		if existing, findErr := s.repo.AssistantInteractions().FindAttempt(ctx, interactionID, attemptID); findErr == nil && existing.PayloadDigest == digest && len(existing.Result) > 0 {
 			return final, nil
 		}
@@ -177,6 +191,163 @@ func (s *AssistantInteractionService) CommitInteraction(ctx context.Context, use
 	}
 	_ = s.repo.AssistantInteractions().UpdateDraftState(ctx, draft.ID, model.AssistantInteractionDraftConsumed, s.clock())
 	_ = s.repo.AssistantInteractions().UpdateLifecycle(ctx, interactionID, model.AssistantInteractionCompleted, s.clock())
+	return final, nil
+}
+
+type interactionProfileDraftPayload struct {
+	Project        InteractiveProject   `json:"project"`
+	Profile        model.ProjectProfile `json:"profile"`
+	Progress       InteractiveProgress  `json:"progress"`
+	MissingFields  []string             `json:"missing_fields"`
+	InferredFields []string             `json:"inferred_fields"`
+	MemoryAppend   string               `json:"memory_append,omitempty"`
+	Ready          bool                 `json:"ready"`
+}
+
+// commitProfileInteraction is the Server-owned profile confirmation boundary.
+// The runtime has already produced a durable draft; this transaction applies
+// only its structured project/profile fields and records the replay receipt
+// beside the write so a retry cannot create a second project.
+func (s *AssistantInteractionService) commitProfileInteraction(ctx context.Context, userID, interactionID string, generation int64, draft *model.AssistantInteractionDraft, req InteractionCommitRequest, digest string) (InteractionCommitResult, error) {
+	var final InteractionCommitResult
+	err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		interaction, err := tx.AssistantInteractions().FindByIDForUser(ctx, userID, interactionID)
+		if err != nil {
+			return errors.Join(ErrInteractivePersistence, err)
+		}
+		if interaction.Generation != generation {
+			return NewInteractionError(InteractionErrorGenerationChanged, 409, "对话状态已更新，请加载最新内容", "reload_snapshot")
+		}
+		attemptID := "commit:" + req.IdempotencyKey
+		if existing, findErr := tx.AssistantInteractions().FindAttempt(ctx, interactionID, attemptID); findErr == nil {
+			if existing.PayloadDigest != digest {
+				return ErrInteractiveIdempotency
+			}
+			if len(existing.Result) == 0 {
+				return NewInteractionError(InteractionErrorCommitReconciliationRequired, 409, "创建结果需要核对，请查看任务状态", "view_task", "reconcile_commit")
+			}
+			if err := json.Unmarshal(existing.Result, &final); err != nil {
+				return errors.Join(ErrInteractivePersistence, err)
+			}
+			if final.Status == InteractionCommitCreated {
+				final.Status = InteractionCommitAlreadyCreated
+			}
+			return nil
+		} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
+			return errors.Join(ErrInteractivePersistence, findErr)
+		}
+
+		var payload interactionProfileDraftPayload
+		if err := json.Unmarshal(draft.Payload, &payload); err != nil {
+			return fmt.Errorf("%w: invalid profile draft payload: %v", ErrAssistantCheckpointInvalid, err)
+		}
+		if !payload.Ready || !draft.Ready {
+			return ErrAssistantCheckpointInvalid
+		}
+		if err := payload.Profile.Validate(); err != nil {
+			return fmt.Errorf("%w: invalid profile draft: %v", ErrAssistantCheckpointInvalid, err)
+		}
+
+		var project *model.Project
+		var profile model.ProjectProfile
+		if strings.TrimSpace(interaction.ProjectID) != "" {
+			project, err = tx.Projects().FindByIDForUpdate(ctx, interaction.ProjectID)
+			if err != nil {
+				return errors.Join(ErrInteractivePersistence, err)
+			}
+			if project.UserID != userID {
+				return ErrInteractiveSessionOwner
+			}
+			current := projectProfileFor(project)
+			if payload.Profile.Version > 0 && payload.Profile.Version != current.Version {
+				return ErrProjectProfileVersionConflict
+			}
+			profile = current
+			profile.Dimensions = preserveOmittedProfileDimensions(current.Dimensions, payload.Profile.Dimensions)
+			profile.AnalysisLimits = append([]string(nil), payload.Profile.AnalysisLimits...)
+			profile.FollowUpQuestions = append([]string(nil), payload.Profile.FollowUpQuestions...)
+			profile.Status = model.ProfileStatusConfirmed
+			profile.ApplicationSource = model.ProfileApplicationSourceUserConfirmation
+			if profile.InitializationStatus != model.ProfileInitializationQueued && profile.InitializationStatus != model.ProfileInitializationRunning {
+				profile.InitializationStatus = model.ProfileInitializationReady
+				profile.LastError = ""
+			}
+			profile.Version = current.Version + 1
+			if err := profile.Validate(); err != nil {
+				return fmt.Errorf("%w: invalid confirmed profile: %v", ErrAssistantCheckpointInvalid, err)
+			}
+			project.Profile = datatypes.NewJSONType(profile)
+			if err := tx.Projects().Update(ctx, project); err != nil {
+				return errors.Join(ErrInteractivePersistence, err)
+			}
+		} else {
+			profile = payload.Profile
+			profile.Status = model.ProfileStatusConfirmed
+			profile.ApplicationSource = model.ProfileApplicationSourceUserConfirmation
+			profile.InitializationStatus = model.ProfileInitializationReady
+			profile.LastError = ""
+			profile.Version = 1
+			if err := profile.Validate(); err != nil {
+				return fmt.Errorf("%w: invalid confirmed profile: %v", ErrAssistantCheckpointInvalid, err)
+			}
+			project = &model.Project{
+				Name:         payload.Project.Name,
+				Platform:     payload.Project.Platform,
+				Instructions: payload.Project.Instructions,
+				Keywords:     payload.Project.Keywords,
+				VisualStyle:  payload.Project.VisualStyle,
+				Profile:      datatypes.NewJSONType(profile),
+			}
+			projectSvc := NewProjectService(tx, nil)
+			if err := projectSvc.prepareCreate(userID, project); err != nil {
+				return fmt.Errorf("%w: %v", ErrAssistantCheckpointInvalid, err)
+			}
+			if err := tx.Projects().Create(ctx, project); err != nil {
+				return errors.Join(ErrInteractivePersistence, err)
+			}
+			now := s.clock()
+			if err := tx.AssistantInteractions().UpdateProject(ctx, interactionID, project.ID, now); err != nil {
+				return errors.Join(ErrInteractivePersistence, err)
+			}
+		}
+
+		dimensions, err := json.Marshal(profile.Dimensions)
+		if err != nil {
+			return errors.Join(ErrInteractivePersistence, err)
+		}
+		snapshot, err := json.Marshal(profile)
+		if err != nil {
+			return errors.Join(ErrInteractivePersistence, err)
+		}
+		if err := tx.ProjectProfileRevisions().Create(ctx, &model.ProjectProfileRevision{ID: uuid.NewString(), ProjectID: project.ID, Revision: profile.Version, SixDimensions: dimensions, ProfileSnapshot: snapshot, SourceTaskID: profile.AnalysisTaskID}); err != nil {
+			return errors.Join(ErrInteractivePersistence, err)
+		}
+		if err := persistProfileState(ctx, tx, project.ID, profile); err != nil {
+			return errors.Join(ErrInteractivePersistence, err)
+		}
+
+		committed := AssistantCommitResult{ModeID: AssistantModeProfile, Status: "committed", Project: project, Profile: &profile}
+		resultJSON, err := json.Marshal(committed)
+		if err != nil {
+			return errors.Join(ErrInteractivePersistence, err)
+		}
+		final = InteractionCommitResult{Status: InteractionCommitCreated, Result: resultJSON}
+		receiptJSON, err := json.Marshal(final)
+		if err != nil {
+			return errors.Join(ErrInteractivePersistence, err)
+		}
+		now := s.clock()
+		if err := tx.AssistantInteractions().CreateAttempt(ctx, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: interactionID, AttemptID: attemptID, Operation: string(InteractionOperationCommit), Generation: generation, PayloadDigest: digest, Result: receiptJSON, CreatedAt: now, ExpiresAt: now.Add(InteractionCommitReceiptRetention)}); err != nil {
+			return errors.Join(ErrInteractivePersistence, err)
+		}
+		if err := tx.AssistantInteractions().UpdateDraftState(ctx, draft.ID, model.AssistantInteractionDraftConsumed, now); err != nil {
+			return errors.Join(ErrInteractivePersistence, err)
+		}
+		return tx.AssistantInteractions().UpdateLifecycle(ctx, interactionID, model.AssistantInteractionCompleted, now)
+	})
+	if err != nil {
+		return InteractionCommitResult{}, err
+	}
 	return final, nil
 }
 

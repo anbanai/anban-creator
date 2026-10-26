@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -31,6 +32,13 @@ func TestStageDraftForInteractionPersistsAndReplaysByAttempt(t *testing.T) {
 	if _, err := svc.StageDraftForInteraction(context.Background(), "user-1", input); !errors.Is(err, ErrInteractiveIdempotency) && !errors.Is(err, ErrInteractiveDraftInvalid) {
 		t.Fatalf("different payload error = %v", err)
 	}
+	attempt, err := svc.repo.AssistantInteractions().FindAttempt(context.Background(), snapshot.ID, "stage-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(attempt.Result), "write") || strings.Contains(string(attempt.Result), "payload") {
+		t.Fatalf("stage attempt receipt contains draft content: %s", attempt.Result)
+	}
 }
 
 func TestStageDraftForInteractionRejectsStaleGeneration(t *testing.T) {
@@ -45,5 +53,22 @@ func TestStageDraftForInteractionRejectsStaleGeneration(t *testing.T) {
 	_, err = svc.StageDraftForInteraction(context.Background(), "user-1", InteractionStageInput{InteractionID: snapshot.ID, Generation: snapshot.Generation, AttemptID: "stage-stale", ModeID: "creation", Payload: json.RawMessage(`{"plan":{}}`), PayloadDigest: "digest", Ready: true})
 	if err == nil || NormalizeInteractionError(err).Code != InteractionErrorGenerationChanged {
 		t.Fatalf("stale stage error = %v", err)
+	}
+}
+
+func TestStageDraftForInteractionRejectsUnknownMode(t *testing.T) {
+	svc, _ := newAssistantInteractionServiceTest(t)
+	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "create-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := json.RawMessage(`{"plan":{}}`)
+	digest := sha256.Sum256(payload)
+	_, err = svc.StageDraftForInteraction(context.Background(), "user-1", InteractionStageInput{
+		InteractionID: snapshot.ID, Generation: snapshot.Generation, AttemptID: "stage-unknown-mode", ModeID: "unknown",
+		Payload: payload, PayloadDigest: hex.EncodeToString(digest[:]), Ready: true,
+	})
+	if !errors.Is(err, ErrInteractiveDraftInvalid) {
+		t.Fatalf("unknown mode error = %v", err)
 	}
 }
