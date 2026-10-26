@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Activity, AlertCircle, ArrowLeft, ArrowUpDown, Check, ChevronDown, ChevronLeft, ChevronRight, History, Layers3, Loader2, Search, Upload, X } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
@@ -28,7 +28,7 @@ import { platformIcon, platformIconColor } from '@/lib/PlatformIcon'
 import SeednoteOfficialAnalytics from '@/components/analytics/SeednoteOfficialAnalytics'
 import WechatAccountOverviewPanel from '@/components/analytics/WechatAccountOverview'
 import WechatTrafficSources from '@/components/analytics/WechatTrafficSources'
-import { wechatAccountAnalyticsApi, wechatAccountMetrics, wechatTrafficSources, type WechatAccountMetric, type WechatTrafficSource } from '@/lib/wechat-account-analytics'
+import { wechatAccountAnalyticsApi, wechatAccountMetrics, wechatTrafficMetrics, wechatTrafficSources, type WechatAccountMetric, type WechatTrafficSource } from '@/lib/wechat-account-analytics'
 import type { Project } from '@/types'
 import ContentLineagePanel from '@/components/tasks/ContentLineagePanel'
 
@@ -175,6 +175,9 @@ export default function ContentAnalyticsPage() {
     ? analyticsPlatformForAgent(requestAgent)
     : platformParam === 'seednote' ? 'seednote' : 'wechat'
   const accountAnalyticsEnabled = analyticsPlatform === 'wechat' && project?.platform === 'wechat'
+  const wechatConfigQuery = useQuery({ queryKey: ['wechat-platform-config', project?.id], queryFn: () => api.projects.getWechatPlatformConfig(project!.id), enabled: Boolean(project?.id && accountAnalyticsEnabled && !contentId), staleTime: 60_000, retry: false })
+  const accountConnection = wechatConfigQuery.data?.connection
+  const canSyncAccountAnalytics = Boolean(accountConnection?.connected && accountConnection.can_read_account_analytics)
   // A detail ID is canonical. Resolve its actual type before applying any
   // Agent filter so stale or conflicting deep-link parameters cannot blank it.
   const agentContentType = contentId ? undefined : analyticsContentTypeForAgent(requestAgent)
@@ -183,7 +186,8 @@ export default function ContentAnalyticsPage() {
   const seednoteView: SeednoteAnalyticsViewKey = analyticsPlatform === 'seednote' && seednoteAnalyticsViews.some(item => item.key === requestedSeednoteView) ? requestedSeednoteView! : 'watch'
   const viewMetrics = analyticsPlatform === 'seednote' ? seednoteMetricsForView(seednoteView) : metrics
   const metric = viewMetrics.find(m => m.key === params.get('metric'))?.key || viewMetrics.find(m => m.key === (analyticsPlatform === 'seednote' ? 'view_count' : 'read_users'))?.key || viewMetrics.find(m => m.summary)?.key || viewMetrics[0].key
-  const accountMetric = wechatAccountMetrics.some(item => item.key === params.get('account_metric')) ? params.get('account_metric') as WechatAccountMetric : 'read_users'
+  const accountMetric = wechatAccountMetrics.some(item => item.key === params.get('account_metric')) ? params.get('account_metric') as WechatAccountMetric : canSyncAccountAnalytics ? 'follower_net_gain_count' : 'read_users'
+  const accountSourceMetric = wechatTrafficMetrics.some(item => item.key === params.get('account_source_metric')) ? params.get('account_source_metric') as WechatAccountMetric : canSyncAccountAnalytics ? 'follower_gain_count' : 'read_users'
   const accountSource = wechatTrafficSources.some(item => item.value === params.get('account_source')) ? params.get('account_source') as WechatTrafficSource : 'all'
   const rangeError = periodError(period.from, period.to)
   const request = useMemo(() => ({ platform: analyticsPlatform, content_type: agentContentType, from: period.from, to: period.to, granularity: period.granularity, metric_basis: 'cumulative' as const }), [analyticsPlatform, agentContentType, period.from, period.to, period.granularity])
@@ -201,6 +205,16 @@ export default function ContentAnalyticsPage() {
   // belong to the traffic-source drilldown below, so changing its filter must
   // not replace the totals or comparisons shown here.
   const accountOverviewQuery = useQuery({ queryKey: ['wechat-account-analytics', project?.id, 'overview', period.from, period.to], queryFn: ({ signal }) => wechatAccountAnalyticsApi.overview(project!.id, { from: period.from, to: period.to }, signal), enabled: enabled && accountAnalyticsEnabled && !contentId, staleTime: 60_000, retry: false })
+  const accountSyncMutation = useMutation({
+    mutationFn: (range: { from: string; to: string }) => wechatAccountAnalyticsApi.sync(project!.id, range),
+    onSuccess: async result => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['wechat-account-analytics', project?.id] }),
+        queryClient.invalidateQueries({ queryKey: ['content-analytics', project?.id] }),
+      ])
+      setNotice(`已从微信同步 ${result.account_days} 天账号统计（${result.from} 至 ${result.to}）`)
+    },
+  })
   const detailQuery = useQuery({ queryKey: ['content-analytics', project?.id, 'detail', contentId, request], queryFn: ({ signal }) => contentAnalyticsApi.detail(project!.id, contentId!, request, signal), enabled: enabled && Boolean(contentId), staleTime: 60_000 })
   const contentTarget = parseTargetKey(contentId)
   const contentLineageQuery = useQuery({ queryKey: ['content-asset-lineage-by-content', project?.id, contentTarget?.kind, contentTarget?.id], queryFn: () => api.contentAssets.forContent({ project_id: project!.id, content_kind: contentTarget!.kind, content_id: contentTarget!.id }), enabled: enabled && Boolean(contentTarget), staleTime: 60_000 })
@@ -222,6 +236,13 @@ export default function ContentAnalyticsPage() {
   const contents = listQuery.data?.items ?? []
   const total = listQuery.data?.total ?? 0
   const pageCount = Math.max(1, Math.ceil(total / 25))
+  const syncRangeDays = Math.floor((Date.parse(`${period.to}T00:00:00Z`) - Date.parse(`${period.from}T00:00:00Z`)) / 86_400_000) + 1
+  const syncRangeTooLong = !rangeError && (!Number.isFinite(syncRangeDays) || syncRangeDays > 31)
+  const syncUnavailableMessage = accountConnection?.authorization_record_exists
+    ? !accountConnection.connected ? '公众号授权已失效，请在项目设置中重新绑定。'
+      : !accountConnection.can_read_account_analytics ? '当前授权未包含公众号用户统计权限。'
+        : syncRangeTooLong ? '单次同步最多覆盖 31 天，请缩短所选时间范围。' : undefined
+    : undefined
   const tableMetrics = metrics.filter(m => m.summary && serverSortableMetrics.has(m.key))
   const rows = contents
   function update(values: Record<string, string | undefined>, replace = true) { setParams(previous => { const next = new URLSearchParams(previous); if (project) next.set('account', project.id); for (const [key, value] of Object.entries(period)) { if (!next.get(key)) next.set(key, value) } for (const [key, value] of Object.entries(values)) { if (value) next.set(key, value); else next.delete(key) } return next }, { replace }) }
@@ -265,7 +286,7 @@ export default function ContentAnalyticsPage() {
   function setPeriod(next: AnalyticsPeriod) { update({ from: next.from, to: next.to, preset: next.preset, granularity: next.granularity, page: undefined }, false) }
   function selectContent(id: string) { if (!contentId) tableScroll.current = document.getElementById('main-content')?.scrollTop || window.scrollY; update({ content: id }, false) }
   function backToTable() { restoreScroll.current = true; update({ content: undefined }, false) }
-  function changeAccount(id: string) { update({ account: id, agent: undefined, platform: undefined, content: undefined, metric: undefined, basis: undefined, q: undefined, type: undefined, sort: undefined, direction: undefined, page: undefined }, false); setNotice(''); setImportedDate('') }
+  function changeAccount(id: string) { update({ account: id, agent: undefined, platform: undefined, content: undefined, metric: undefined, account_metric: undefined, account_source_metric: undefined, account_source: undefined, basis: undefined, q: undefined, type: undefined, sort: undefined, direction: undefined, page: undefined }, false); setNotice(''); setImportedDate('') }
   function changeAgent(agentID: string) {
     if (agentID === selectedAgent) return
     update({ agent: agentID, platform: analyticsPlatformForAgent(agentID), content: undefined, metric: undefined, view: undefined, type: undefined, sort: undefined, direction: undefined, page: undefined }, false)
@@ -299,13 +320,13 @@ export default function ContentAnalyticsPage() {
       <div className="border-b pb-4"><AnalyticsPeriodControls className="min-w-0" value={period} onChange={setPeriod} /></div>
       {notice && <div role="status" className="flex items-center justify-between gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm"><span>{notice}</span>{importedDate && (importedDate < period.from || importedDate > period.to) && <Button size="sm" variant="outline" onClick={() => setPeriod({ ...period, preset: 'custom', from: importedDate, to: importedDate })}>查看本次数据</Button>}<Tooltip><TooltipTrigger render={<Button size="icon-md" variant="ghost" aria-label="关闭提示" onClick={() => setNotice('')} />}><X /></TooltipTrigger><TooltipContent>关闭提示</TooltipContent></Tooltip></div>}
       {accountAnalyticsEnabled && !contentId && <div className="space-y-4">
-        <WechatAccountOverviewPanel overview={accountOverviewQuery.data} loading={accountOverviewQuery.isPending} error={accountOverviewQuery.error instanceof Error ? accountOverviewQuery.error : undefined} selectedMetric={accountMetric} granularity={period.granularity} onMetricChange={value => update({ account_metric: value })} />
+        <WechatAccountOverviewPanel overview={accountOverviewQuery.data} loading={accountOverviewQuery.isPending} error={accountOverviewQuery.error instanceof Error ? accountOverviewQuery.error : undefined} selectedMetric={accountMetric} granularity={period.granularity} onMetricChange={value => update({ account_metric: value })} onSync={canSyncAccountAnalytics ? () => accountSyncMutation.mutate({ from: period.from, to: period.to }) : undefined} syncing={accountSyncMutation.isPending} syncDisabled={Boolean(rangeError || syncRangeTooLong)} syncDisabledMessage={syncUnavailableMessage} syncError={accountSyncMutation.error instanceof Error ? accountSyncMutation.error : undefined} />
         <WechatContentCumulativeOverview overview={overviewQuery.data} loading={overviewQuery.isPending} error={overviewQuery.error instanceof Error ? overviewQuery.error : undefined} metrics={metrics} selectedMetric={metric} onMetricChange={value => update({ metric: value })} />
         <div>
           <button type="button" aria-expanded={trafficSourcesOpen} aria-controls="wechat-traffic-source-panel" onClick={() => setTrafficSourcesOpen(open => !open)} className="flex min-h-10 w-full items-center justify-between border-y py-2 text-left text-sm font-medium hover:text-primary focus-visible:outline-2 focus-visible:outline-primary">
             <span>流量来源</span><ChevronDown aria-hidden="true" className={`size-4 transition-transform ${trafficSourcesOpen ? 'rotate-180' : ''}`} />
           </button>
-          {trafficSourcesOpen && <div id="wechat-traffic-source-panel" className="pt-3"><WechatTrafficSources projectId={project.id} from={period.from} to={period.to} metric="read_users" source={accountSource} onSourceChange={value => update({ account_source: value })} /></div>}
+          {trafficSourcesOpen && <div id="wechat-traffic-source-panel" className="pt-3"><WechatTrafficSources projectId={project.id} from={period.from} to={period.to} metric={accountSourceMetric} source={accountSource} onMetricChange={value => update({ account_source_metric: value })} onSourceChange={value => update({ account_source: value })} /></div>}
         </div>
       </div>}
       {analyticsPlatform === 'seednote' && !contentId ? <SeednoteOfficialAnalytics view={seednoteView} views={seednoteAnalyticsViews} overview={error || rangeError || missingSelection ? undefined : dataQuery.data as AnalyticsOverview | undefined} data={error || rangeError || missingSelection ? [] : dataQuery.data?.series ?? []} metrics={viewMetrics} selectedMetric={metric} onViewChange={changeSeednoteView} onMetricChange={value => update({ metric: value })} loading={dataQuery.isPending && !rangeError} emptyMessage={rangeError || (error ? '数据读取失败，请重试。' : missingSelection ? '未找到这篇内容，请切换内容或返回全部内容。' : undefined)} /> : (contentId || !accountAnalyticsEnabled) ? <><div className="grid grid-cols-2 overflow-hidden rounded-xl border bg-card sm:grid-cols-3 xl:flex" aria-label="关键指标">{metrics.filter(item => item.summary).map(item => <button key={item.key} className={`relative min-w-0 flex-1 border-b border-r px-4 py-4 text-left transition-colors hover:bg-muted/50 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-primary xl:border-b-0 last:border-r-0 ${metric === item.key ? 'bg-primary/[0.045]' : ''}`} aria-pressed={metric === item.key} onClick={() => update({ metric: item.key })}>{metric === item.key && <span className="absolute inset-x-4 bottom-0 h-0.5 rounded-full bg-primary" />}<span className="text-xs text-muted-foreground">{item.label}</span><span className="mt-2 block text-2xl font-semibold tracking-tight tabular-nums">{dataQuery.isPending || error || rangeError || missingSelection || dataQuery.data?.totals[item.key] == null ? '—' : item.format(dataQuery.data.totals[item.key]!)}</span></button>)}</div><AnalyticsTrend title={contentId ? '内容趋势' : '整体趋势'} metrics={metrics} data={error || rangeError || missingSelection ? [] : dataQuery.data?.series ?? []} selectedMetric={metric} onMetricChange={value => update({ metric: value })} loading={dataQuery.isPending && !rangeError} description={descriptionFor()} emptyMessage={rangeError || (error ? '数据读取失败，请重试。' : missingSelection ? '未找到这篇内容，请切换内容或返回全部内容。' : undefined)} /></> : null}

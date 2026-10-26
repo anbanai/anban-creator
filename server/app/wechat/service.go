@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/app/config"
@@ -32,9 +33,10 @@ const maxDownloadedFileBytes int64 = 25 << 20
 
 // Service 微信服务
 type Service struct {
-	cfg *config.Config
-	log *zerolog.Logger
-	oa  *officialaccount.OfficialAccount
+	cfg         *config.Config
+	log         *zerolog.Logger
+	oa          *officialaccount.OfficialAccount
+	accessToken AccessTokenSource
 }
 
 // NewService 创建微信服务
@@ -55,6 +57,32 @@ func NewService(cfg *config.Config, log *zerolog.Logger) *Service {
 	}
 }
 
+// NewServiceWithOfficialAccount adapts an Open Platform-authorized account to
+// the existing material/draft workflows while keeping token retrieval owned by
+// the Server.
+func NewServiceWithOfficialAccount(oa *officialaccount.OfficialAccount, accessToken AccessTokenSource, log *zerolog.Logger) *Service {
+	if oa != nil && accessToken != nil {
+		oa.SetAccessTokenHandle(sdkAccessTokenHandle{source: accessToken})
+	}
+	return &Service{oa: oa, accessToken: accessToken, log: log}
+}
+
+// NewAuthorizedService builds an SDK client whose material and draft calls use
+// the Server-managed Open Platform authorizer token source.
+func NewAuthorizedService(appID string, accessToken AccessTokenSource, log *zerolog.Logger) *Service {
+	oa := wechat.NewWechat().GetOfficialAccount(&wechatconfig.Config{
+		AppID: strings.TrimSpace(appID),
+		Cache: wechatcache.NewMemory(),
+	})
+	return NewServiceWithOfficialAccount(oa, accessToken, log)
+}
+
+type sdkAccessTokenHandle struct{ source AccessTokenSource }
+
+func (h sdkAccessTokenHandle) GetAccessToken() (string, error) {
+	return h.source(context.Background())
+}
+
 // getOfficialAccount 获取公众号实例（缓存在 Service 中，避免每次调用重新创建）
 func (s *Service) getOfficialAccount() *officialaccount.OfficialAccount {
 	return s.oa
@@ -63,6 +91,9 @@ func (s *Service) getOfficialAccount() *officialaccount.OfficialAccount {
 // OfficialAPI returns the typed publication-lifecycle transport using this
 // service's managed Official Account access-token cache.
 func (s *Service) OfficialAPI() *OfficialAPI {
+	if s.accessToken != nil {
+		return NewOfficialAPI(nil, "", s.accessToken)
+	}
 	return NewOfficialAPI(nil, "", func(context.Context) (string, error) {
 		return s.getOfficialAccount().GetAccessToken()
 	})

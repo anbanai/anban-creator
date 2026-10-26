@@ -242,6 +242,30 @@ export default function ProjectsPage() {
     setSearchParams(next, { replace: true })
   }, [onboardingProject, searchParams, setSearchParams, visibleProjects])
 
+  useEffect(() => {
+    const outcome = searchParams.get('wechat_authorization')
+    if (!outcome) return
+    if (outcome === 'connected' && isLoading) return
+
+    if (outcome === 'connected') {
+      const projectID = searchParams.get('project_id')
+      const project = visibleProjects.find((item) => item.id === projectID)
+      if (project) {
+        setChannelProject(project)
+        toast.success('公众号已绑定，可保存到草稿箱')
+      } else {
+        toast.error('授权已完成，但未找到对应的人设')
+      }
+    } else {
+      toast.error('公众号授权未完成，请重试')
+    }
+
+    const next = new URLSearchParams(searchParams)
+    next.delete('wechat_authorization')
+    next.delete('project_id')
+    setSearchParams(next, { replace: true })
+  }, [isLoading, searchParams, setSearchParams, visibleProjects])
+
   const createMutation = useMutation({
     mutationFn: async ({ data, sessionID, returnContext }: { data: CreateProjectRequest; sessionID: number; returnContext: Omit<Parameters<typeof projectCreatedReturnHref>[0], 'projectId'> | null }) => {
       const created = await api.projects.create(data)
@@ -597,8 +621,8 @@ export default function ProjectsPage() {
                         <MessagesSquare aria-hidden="true" className="size-4" />
                       </span>
                       <div className="min-w-0">
-                        <h3 id="wechat-publishing-title" className="text-sm font-medium">公众号自动发布</h3>
-                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">文章与贴图共用一个公众号账号。AppSecret 只在保存时提交，之后不会回显。</p>
+                        <h3 id="wechat-publishing-title" className="text-sm font-medium">公众号扫码绑定</h3>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">文章与贴图共用一个公众号。创作结果可保存到草稿箱，正式发布需在任务详情确认。</p>
                       </div>
                     </div>
                     <span className="shrink-0 text-xs font-medium text-muted-foreground">创建后自动配置</span>

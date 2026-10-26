@@ -20,6 +20,9 @@ export interface TaskDeliverablesPanelProps {
   isAdmin: boolean
   lifecycle?: TaskLifecycle
   onOpenLogs?: () => void
+  deliveryMode?: string
+  canFormallyPublish?: boolean
+  isNewspic?: boolean
 }
 
 function emptyMessage(status: TaskStatus) {
@@ -29,7 +32,7 @@ function emptyMessage(status: TaskStatus) {
   return '当前作品没有可交付文件。'
 }
 
-export function TaskDeliverablesPanel({ taskId, taskStatus, files, taskType, filesLoading = false, filesError = false, onRetryFiles, workflow, outcome, errorMessage, onResume, isAdmin, lifecycle, onOpenLogs }: TaskDeliverablesPanelProps) {
+export function TaskDeliverablesPanel({ taskId, taskStatus, files, taskType, filesLoading = false, filesError = false, onRetryFiles, workflow, outcome, errorMessage, onResume, isAdmin, lifecycle, onOpenLogs, deliveryMode, canFormallyPublish, isNewspic }: TaskDeliverablesPanelProps) {
   const settledFiles = files.filter((file) => file.state === 'delivered' || file.state === 'retained')
   const coreFiles = settledFiles.filter((file) => file.is_deliverable === true)
   const internalFiles = isAdmin ? settledFiles.filter((file) => file.is_deliverable !== true) : []
@@ -114,6 +117,9 @@ export function TaskDeliverablesPanel({ taskId, taskStatus, files, taskType, fil
             taskId={taskId}
             status={taskStatus}
             lifecycle={lifecycle}
+            deliveryMode={deliveryMode}
+            canFormallyPublish={canFormallyPublish}
+            isNewspic={isNewspic}
             workflow={workflow}
             outcome={outcome}
             errorMessage={errorMessage}

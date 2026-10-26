@@ -46,22 +46,24 @@ func (WechatAccountAnalyticsBatch) TableName() string { return "wechat_account_a
 // Every metric is a pointer so an unavailable metric remains distinct from an
 // observed zero.
 type WechatAccountAnalyticsDay struct {
-	ID                string    `gorm:"type:char(36);primaryKey" json:"id"`
-	ProjectID         string    `gorm:"type:char(36);index:idx_wechat_account_analytics_days_project_date,priority:1;not null" json:"project_id"`
-	BatchID           string    `gorm:"type:char(36);index:idx_wechat_account_analytics_days_project_date,priority:3;index;not null" json:"batch_id"`
-	StatDate          string    `gorm:"type:char(10);index:idx_wechat_account_analytics_days_project_date,priority:2;not null" json:"stat_date"`
-	ReadUsers         *int64    `json:"read_users"`
-	ShareUsers        *int64    `json:"share_users"`
-	OriginalReadUsers *int64    `json:"original_read_users"`
-	LikeUsers         *int64    `json:"like_users"`
-	CollectionUsers   *int64    `json:"collection_users"`
-	CommentCount      *int64    `json:"comment_count"`
-	FollowerGainCount *int64    `json:"follower_gain_count"`
-	PublishedArticles *int64    `json:"published_articles"`
-	Source            string    `gorm:"type:varchar(255);not null;default:''" json:"source,omitempty"`
-	RawData           string    `gorm:"type:json" json:"raw_data,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                   string    `gorm:"type:char(36);primaryKey" json:"id"`
+	ProjectID            string    `gorm:"type:char(36);index:idx_wechat_account_analytics_days_project_date,priority:1;not null" json:"project_id"`
+	BatchID              string    `gorm:"type:char(36);index:idx_wechat_account_analytics_days_project_date,priority:3;index;not null" json:"batch_id"`
+	StatDate             string    `gorm:"type:char(10);index:idx_wechat_account_analytics_days_project_date,priority:2;not null" json:"stat_date"`
+	ReadUsers            *int64    `json:"read_users"`
+	ShareUsers           *int64    `json:"share_users"`
+	OriginalReadUsers    *int64    `json:"original_read_users"`
+	LikeUsers            *int64    `json:"like_users"`
+	CollectionUsers      *int64    `json:"collection_users"`
+	CommentCount         *int64    `json:"comment_count"`
+	FollowerGainCount    *int64    `json:"follower_gain_count"`
+	FollowerCancelCount  *int64    `json:"follower_cancel_count"`
+	FollowerNetGainCount *int64    `json:"follower_net_gain_count"`
+	PublishedArticles    *int64    `json:"published_articles"`
+	Source               string    `gorm:"type:varchar(255);not null;default:''" json:"source,omitempty"`
+	RawData              string    `gorm:"type:json" json:"raw_data,omitempty"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 func (WechatAccountAnalyticsDay) TableName() string { return "wechat_account_analytics_days" }
@@ -77,6 +79,14 @@ const (
 	WechatTrafficSourceMoments             WechatTrafficSource = "moments"
 	WechatTrafficSourceOfficialAccountHome WechatTrafficSource = "official_account_home"
 	WechatTrafficSourceSearch              WechatTrafficSource = "search"
+	WechatTrafficSourceBusinessCard        WechatTrafficSource = "business_card"
+	WechatTrafficSourceQRCode              WechatTrafficSource = "qr_code"
+	WechatTrafficSourceArticleAccount      WechatTrafficSource = "article_account"
+	WechatTrafficSourceWechatAds           WechatTrafficSource = "wechat_ads"
+	WechatTrafficSourceReprint             WechatTrafficSource = "reprint"
+	WechatTrafficSourceMiniProgram         WechatTrafficSource = "mini_program"
+	WechatTrafficSourceChannels            WechatTrafficSource = "channels"
+	WechatTrafficSourceLiveStream          WechatTrafficSource = "live_stream"
 	WechatTrafficSourceOther               WechatTrafficSource = "other"
 )
 
@@ -84,7 +94,9 @@ func (s WechatTrafficSource) Valid() bool {
 	switch s {
 	case WechatTrafficSourceMessage, WechatTrafficSourceRecommendation, WechatTrafficSourceChat,
 		WechatTrafficSourceMoments, WechatTrafficSourceOfficialAccountHome, WechatTrafficSourceSearch,
-		WechatTrafficSourceOther:
+		WechatTrafficSourceBusinessCard, WechatTrafficSourceQRCode, WechatTrafficSourceArticleAccount,
+		WechatTrafficSourceWechatAds, WechatTrafficSourceReprint, WechatTrafficSourceMiniProgram,
+		WechatTrafficSourceChannels, WechatTrafficSourceLiveStream, WechatTrafficSourceOther:
 		return true
 	default:
 		return false
@@ -106,6 +118,22 @@ func NormalizeWechatTrafficSource(label string) (WechatTrafficSource, error) {
 		return WechatTrafficSourceMoments, nil
 	case "公众号主页", "公众号主页访问", "official account home", "official_account_home":
 		return WechatTrafficSourceOfficialAccountHome, nil
+	case "名片分享", "名片", "business_card":
+		return WechatTrafficSourceBusinessCard, nil
+	case "扫描二维码", "扫码", "qr code", "qr_code":
+		return WechatTrafficSourceQRCode, nil
+	case "文章内账号名称", "文章内公众号名称", "article_account":
+		return WechatTrafficSourceArticleAccount, nil
+	case "微信广告", "wechat ads", "wechat_ads":
+		return WechatTrafficSourceWechatAds, nil
+	case "他人转载", "reprint":
+		return WechatTrafficSourceReprint, nil
+	case "小程序关注", "mini program", "mini_program":
+		return WechatTrafficSourceMiniProgram, nil
+	case "视频号", "channels":
+		return WechatTrafficSourceChannels, nil
+	case "直播", "live", "live_stream":
+		return WechatTrafficSourceLiveStream, nil
 	case "搜一搜", "搜索", "search":
 		return WechatTrafficSourceSearch, nil
 	case "其他", "其它", "other":
@@ -117,16 +145,18 @@ func NormalizeWechatTrafficSource(label string) (WechatTrafficSource, error) {
 
 // WechatTrafficSourceDay stores one source-attributed read fact for a day.
 type WechatTrafficSourceDay struct {
-	ID            string              `gorm:"type:char(36);primaryKey" json:"id"`
-	ProjectID     string              `gorm:"type:char(36);index:idx_wechat_traffic_source_days_project_date,priority:1;uniqueIndex:uq_wechat_traffic_source_days_batch_date_source,priority:1;not null" json:"project_id"`
-	BatchID       string              `gorm:"type:char(36);index:idx_wechat_traffic_source_days_project_date,priority:3;index;uniqueIndex:uq_wechat_traffic_source_days_batch_date_source,priority:3;not null" json:"batch_id"`
-	StatDate      string              `gorm:"type:char(10);index:idx_wechat_traffic_source_days_project_date,priority:2;uniqueIndex:uq_wechat_traffic_source_days_batch_date_source,priority:2;not null" json:"stat_date"`
-	Source        WechatTrafficSource `gorm:"type:varchar(40);uniqueIndex:uq_wechat_traffic_source_days_batch_date_source,priority:4;not null" json:"source"`
-	OriginalLabel string              `gorm:"type:varchar(255);not null;default:''" json:"original_label,omitempty"`
-	ReadUsers     *int64              `json:"read_users"`
-	RawData       string              `gorm:"type:json" json:"raw_data,omitempty"`
-	CreatedAt     time.Time           `json:"created_at"`
-	UpdatedAt     time.Time           `json:"updated_at"`
+	ID                 string              `gorm:"type:char(36);primaryKey" json:"id"`
+	ProjectID          string              `gorm:"type:char(36);index:idx_wechat_traffic_source_days_project_date,priority:1;uniqueIndex:uq_wechat_traffic_source_days_batch_date_source,priority:1;not null" json:"project_id"`
+	BatchID            string              `gorm:"type:char(36);index:idx_wechat_traffic_source_days_project_date,priority:3;index;uniqueIndex:uq_wechat_traffic_source_days_batch_date_source,priority:3;not null" json:"batch_id"`
+	StatDate           string              `gorm:"type:char(10);index:idx_wechat_traffic_source_days_project_date,priority:2;uniqueIndex:uq_wechat_traffic_source_days_batch_date_source,priority:2;not null" json:"stat_date"`
+	Source             WechatTrafficSource `gorm:"type:varchar(40);uniqueIndex:uq_wechat_traffic_source_days_batch_date_source,priority:4;not null" json:"source"`
+	OriginalLabel      string              `gorm:"type:varchar(255);not null;default:''" json:"original_label,omitempty"`
+	ReadUsers          *int64              `json:"read_users"`
+	NewFollowers       *int64              `json:"new_followers"`
+	CancelledFollowers *int64              `json:"cancelled_followers"`
+	RawData            string              `gorm:"type:json" json:"raw_data,omitempty"`
+	CreatedAt          time.Time           `json:"created_at"`
+	UpdatedAt          time.Time           `json:"updated_at"`
 }
 
 func (WechatTrafficSourceDay) TableName() string { return "wechat_traffic_source_days" }

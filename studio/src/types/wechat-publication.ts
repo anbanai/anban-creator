@@ -24,6 +24,7 @@ export interface WechatPublication {
   task_id: string
   project_id: string
   draft_media_id?: string
+  delivery_mode?: 'draft' | 'direct_publish' | 'user_assisted' | string
   draft_title?: string
   draft_author?: string
   draft_digest?: string

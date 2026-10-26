@@ -11,6 +11,7 @@ import (
 
 	appwechat "github.com/anbanai/anban-creator/server/app/wechat"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/platform"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -110,7 +111,8 @@ func (s *WechatTrackingService) CaptureMetrics(ctx context.Context, trackingID s
 	}
 	response, err := s.platform.FetchArticleTotalDetail(ctx, project, tracking.PublishedAt.In(wechatAnalyticsLocation).Format("2006-01-02"))
 	if err != nil {
-		if code, ok := publicationWechatErrCode(err); ok && code == 48001 {
+		code, hasWechatCode := publicationWechatErrCode(err)
+		if (hasWechatCode && code == 48001) || errors.Is(err, platform.ErrWechatAnalyticsCapabilityMissing) {
 			tracking.Status = model.WechatTrackingStatusUnsupported
 			tracking.LastFetchAt = &now
 			tracking.NextFetchAt = nil

@@ -7,13 +7,13 @@ import ContentAnalyticsPage from './ContentAnalyticsPage'
 import { contentAnalyticsApi } from '@/lib/content-analytics'
 import { wechatAccountAnalyticsApi } from '@/lib/wechat-account-analytics'
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'user-1' } }) }))
-vi.mock('@/lib/api', () => ({ api: { projects: { list: vi.fn(async () => [{ id: 'notes', platform: 'seednote', name: '生活笔记', agent_ids: ['seednote'] }]) } } }))
+vi.mock('@/lib/api', () => ({ api: { projects: { list: vi.fn(async () => [{ id: 'notes', platform: 'seednote', name: '生活笔记', agent_ids: ['seednote'] }]), getWechatPlatformConfig: vi.fn(async () => ({ project_id: 'wechat', platform: 'wechat', app_id: '', secret_configured: false, credentials_conflict: false, automatic_delivery_enabled: false })) } } }))
 vi.mock('@/components/analytics/AnalyticsTrend', () => ({ default: () => <div>趋势</div> }))
 vi.mock('@/components/analytics/ContentImportDialog', () => ({ default: ({ onImported }: { onImported: (result: { count: number; date: string }) => void }) => <button type="button" aria-label="模拟导入完成" onClick={() => onImported({ count: 1, date: '2026-09-24' })}>模拟导入完成</button> }))
 vi.mock('@/components/analytics/WechatAccountImportDialog', () => ({ default: ({ onImported }: { onImported: (result: { count: number; date: string; dateFrom: string; dateTo: string }) => void }) => <button type="button" aria-label="模拟账号导入完成" onClick={() => onImported({ count: 1, date: '2026-08-31', dateFrom: '2026-08-01', dateTo: '2026-08-31' })}>模拟账号导入完成</button> }))
 vi.mock('@/components/analytics/ContentImportHistory', () => ({ default: () => null }))
 vi.mock('@/lib/content-analytics', async importOriginal => ({ ...await importOriginal<typeof import('@/lib/content-analytics')>(), contentAnalyticsApi: { overview: vi.fn(), contents: vi.fn(), detail: vi.fn(), dates: vi.fn(), observations: vi.fn() } }))
-vi.mock('@/lib/wechat-account-analytics', async importOriginal => ({ ...await importOriginal<typeof import('@/lib/wechat-account-analytics')>(), wechatAccountAnalyticsApi: { overview: vi.fn(), trafficSources: vi.fn() } }))
+vi.mock('@/lib/wechat-account-analytics', async importOriginal => ({ ...await importOriginal<typeof import('@/lib/wechat-account-analytics')>(), wechatAccountAnalyticsApi: { overview: vi.fn(), trafficSources: vi.fn(), sync: vi.fn() } }))
 const content = { id: 'canonical-1', title: '服务器内容', content_type: 'image_text', tags: [{ dimension: 'source_relation', value: 'hot_search', display_name: '热搜' }, { dimension: 'performance', value: 'viral', display_name: '爆款' }], metrics: { view_count: 12 } }
 const summary = { revision: 4, updated_at: '', metric_basis: 'cumulative' as const, totals: { view_count: 12 }, series: [], unavailable_metrics: {} }
 beforeEach(() => {
@@ -26,6 +26,7 @@ beforeEach(() => {
   vi.mocked(contentAnalyticsApi.observations).mockResolvedValue({ revision: 4, items: [], total: 0, offset: 0, limit: 25 })
   vi.mocked(wechatAccountAnalyticsApi.overview).mockResolvedValue({ revision: 8, from: '2026-09-01', to: '2026-09-30', data_through: '2026-09-30', covered_dates: [], coverage: { covered_days: 0, expected_days: 30, complete: false }, series: [], totals: {}, comparisons: {}, unavailable_metrics: {} })
   vi.mocked(wechatAccountAnalyticsApi.trafficSources).mockResolvedValue({ revision: 8, from: '2026-09-01', to: '2026-09-30', metric: 'read_users', total: null, coverage: { covered_days: 0, expected_days: 30, complete: false }, covered_dates: [], data_quality: null, series: [], items: [] })
+  vi.mocked(wechatAccountAnalyticsApi.sync).mockResolvedValue({ revision: 9, batch: { id: 'batch-sync', status: 'completed', source: 'wechat_open_platform_user_summary' }, from: '2026-09-01', to: '2026-09-30', account_days: 30 })
 })
 describe('server analytics queries', () => {
   it('offers compact date presets for yesterday, recent days, and a custom range', async () => {
@@ -99,6 +100,22 @@ describe('server analytics queries', () => {
     expect(vi.mocked(wechatAccountAnalyticsApi.overview).mock.calls[0]?.[1]).not.toHaveProperty('source')
     fireEvent.click(await screen.findByRole('button', { name: '流量来源' }))
     await waitFor(() => expect(wechatAccountAnalyticsApi.trafficSources).toHaveBeenCalledWith('wechat', expect.objectContaining({ source: 'search' }), expect.any(AbortSignal)))
+  })
+
+  it('enables official account sync only for an authorized project and refreshes analytics after sync', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号人设', agent_ids: ['wechat-article'] } as Project])
+    vi.mocked(api.projects.getWechatPlatformConfig).mockResolvedValue({
+      project_id: 'wechat', platform: 'wechat', app_id: '', secret_configured: false, credentials_conflict: false,
+      automatic_delivery_enabled: false,
+      connection: { authorization_enabled: true, authorization_record_exists: true, connected: true, status: 'connected', can_create_draft: true, can_upload_material: true, can_read_account_analytics: true },
+    })
+    window.history.replaceState(null, '', '/content-analytics?account=wechat&platform=wechat&from=2026-09-01&to=2026-09-30&preset=custom')
+    render(<ContentAnalyticsPage />)
+
+    const syncButton = await screen.findByRole('button', { name: '同步账号统计' })
+    fireEvent.click(syncButton)
+    await waitFor(() => expect(wechatAccountAnalyticsApi.sync).toHaveBeenCalledWith('wechat', { from: '2026-09-01', to: '2026-09-30' }))
+    expect(await screen.findByText(/已从微信同步 30 天账号统计/)).toBeInTheDocument()
   })
 
   it('opens the imported account date range when it is outside the selected period', async () => {

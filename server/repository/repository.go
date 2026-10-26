@@ -45,6 +45,7 @@ type Repository interface {
 	WechatAnalyticsImports() WechatAnalyticsImportRepository
 	WechatAccountAnalytics() WechatAccountAnalyticsRepository
 	WechatCapabilities() WechatCapabilityRepository
+	WechatOpenPlatformAuthorizations() WechatOpenPlatformAuthorizationRepository
 	ChannelsTrackings() ChannelsTrackingRepository
 	ChannelsMetricSnapshots() ChannelsMetricSnapshotRepository
 	Templates() TemplateRepository
@@ -416,6 +417,7 @@ type WechatPublicationRepository interface {
 	MarkDraftAddAttempted(ctx context.Context, id, claimToken string, attemptedAt, nextCheckAt time.Time) (bool, error)
 	UpdateDraftClaimed(ctx context.Context, publication *model.WechatPublication, token string) (bool, error)
 	ClaimPublish(ctx context.Context, id, token string, now, staleBefore time.Time, nextCheckAt *time.Time) (bool, error)
+	SetDeliveryMode(ctx context.Context, id, mode string, updatedAt time.Time) (bool, error)
 	UpdateClaimed(ctx context.Context, publication *model.WechatPublication, token string) (bool, error)
 	DeleteLifecycleByTaskID(ctx context.Context, taskID string) error
 }
@@ -455,7 +457,8 @@ type WechatAccountAnalyticsRepository interface {
 	CreateSources(ctx context.Context, sources []*model.WechatTrafficSourceDay) error
 	FindBatchByIdempotency(ctx context.Context, projectID, key string) (*model.WechatAccountAnalyticsBatch, error)
 	ListWinningDays(ctx context.Context, projectID, from, to string) ([]*model.WechatAccountAnalyticsDay, error)
-	ListWinningSources(ctx context.Context, projectID, from, to string) ([]*model.WechatTrafficSourceDay, error)
+	ListWinningDaysForMetric(ctx context.Context, projectID, from, to, metric string) ([]*model.WechatAccountAnalyticsDay, error)
+	ListWinningSources(ctx context.Context, projectID, from, to, metric string) ([]*model.WechatTrafficSourceDay, error)
 	RevokeBatch(ctx context.Context, projectID, batchID string, revokedAt time.Time) error
 	LockProject(ctx context.Context, projectID string) error
 	CurrentRevision(ctx context.Context, projectID string) (int64, error)
@@ -671,6 +674,7 @@ type repository struct {
 	wechatAnalyticsImports    WechatAnalyticsImportRepository
 	wechatAccountAnalytics    WechatAccountAnalyticsRepository
 	wechatCapabilities        WechatCapabilityRepository
+	wechatOpenPlatformAuths   WechatOpenPlatformAuthorizationRepository
 	channelsTrackings         ChannelsTrackingRepository
 	channelsMetricSnapshots   ChannelsMetricSnapshotRepository
 	templates                 TemplateRepository
@@ -716,6 +720,7 @@ func New(db *gorm.DB) Repository {
 	wechatAnalyticsImports := newWechatAnalyticsImportRepository(db)
 	wechatAccountAnalytics := newWechatAccountAnalyticsRepository(db)
 	wechatCapabilities := newWechatCapabilityRepository(db)
+	wechatOpenPlatformAuths := newWechatOpenPlatformAuthorizationRepository(db)
 	channelsTrackings := newChannelsTrackingRepository(db)
 	channelsMetricSnapshots := newChannelsMetricSnapshotRepository(db)
 	templates := newTemplateRepository(db)
@@ -767,6 +772,7 @@ func New(db *gorm.DB) Repository {
 		wechatAnalyticsImports:    wechatAnalyticsImports,
 		wechatAccountAnalytics:    wechatAccountAnalytics,
 		wechatCapabilities:        wechatCapabilities,
+		wechatOpenPlatformAuths:   wechatOpenPlatformAuths,
 		channelsTrackings:         channelsTrackings,
 		channelsMetricSnapshots:   channelsMetricSnapshots,
 		templates:                 templates,
@@ -839,7 +845,10 @@ func (r *repository) WechatAccountAnalytics() WechatAccountAnalyticsRepository {
 	return r.wechatAccountAnalytics
 }
 func (r *repository) WechatCapabilities() WechatCapabilityRepository { return r.wechatCapabilities }
-func (r *repository) ChannelsTrackings() ChannelsTrackingRepository  { return r.channelsTrackings }
+func (r *repository) WechatOpenPlatformAuthorizations() WechatOpenPlatformAuthorizationRepository {
+	return r.wechatOpenPlatformAuths
+}
+func (r *repository) ChannelsTrackings() ChannelsTrackingRepository { return r.channelsTrackings }
 func (r *repository) ChannelsMetricSnapshots() ChannelsMetricSnapshotRepository {
 	return r.channelsMetricSnapshots
 }
@@ -919,6 +928,7 @@ type txRepository struct {
 	wechatAnalyticsImports  WechatAnalyticsImportRepository
 	wechatAccountAnalytics  WechatAccountAnalyticsRepository
 	wechatCapabilities      WechatCapabilityRepository
+	wechatOpenPlatformAuths WechatOpenPlatformAuthorizationRepository
 	channelsTrackings       ChannelsTrackingRepository
 	channelsMetricSnapshots ChannelsMetricSnapshotRepository
 	templates               TemplateRepository
@@ -971,6 +981,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		wechatAnalyticsImports:  newWechatAnalyticsImportRepository(tx),
 		wechatAccountAnalytics:  newWechatAccountAnalyticsRepository(tx),
 		wechatCapabilities:      newWechatCapabilityRepository(tx),
+		wechatOpenPlatformAuths: newWechatOpenPlatformAuthorizationRepository(tx),
 		channelsTrackings:       newChannelsTrackingRepository(tx),
 		channelsMetricSnapshots: newChannelsMetricSnapshotRepository(tx),
 		templates:               newTemplateRepository(tx),
@@ -1047,7 +1058,10 @@ func (r *txRepository) WechatAccountAnalytics() WechatAccountAnalyticsRepository
 	return r.wechatAccountAnalytics
 }
 func (r *txRepository) WechatCapabilities() WechatCapabilityRepository { return r.wechatCapabilities }
-func (r *txRepository) ChannelsTrackings() ChannelsTrackingRepository  { return r.channelsTrackings }
+func (r *txRepository) WechatOpenPlatformAuthorizations() WechatOpenPlatformAuthorizationRepository {
+	return r.wechatOpenPlatformAuths
+}
+func (r *txRepository) ChannelsTrackings() ChannelsTrackingRepository { return r.channelsTrackings }
 func (r *txRepository) ChannelsMetricSnapshots() ChannelsMetricSnapshotRepository {
 	return r.channelsMetricSnapshots
 }

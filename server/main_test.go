@@ -139,6 +139,12 @@ func TestWechatAccountAnalyticsSchemaReadiness(t *testing.T) {
 	if err := requireWechatAccountAnalyticsSchema(ready); err != nil {
 		t.Fatalf("current schema readiness: %v", err)
 	}
+	if err := ready.Migrator().DropColumn(&model.WechatAccountAnalyticsDay{}, "FollowerCancelCount"); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireWechatAccountAnalyticsSchema(ready); err == nil || !strings.Contains(err.Error(), "20261026_wechat_account_analytics_open_platform.sql") {
+		t.Fatalf("Open Platform analytics schema readiness = %v, want extension migration instruction", err)
+	}
 }
 
 func TestTaskBillingSchemaReadiness(t *testing.T) {

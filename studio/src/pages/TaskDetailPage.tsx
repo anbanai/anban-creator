@@ -755,6 +755,9 @@ export default function TaskDetailPage() {
             <TaskExecutionRail
               key={task.id}
               taskId={task.id}
+              deliveryMode={task.project_snapshot?.wechat_delivery?.mode}
+              canFormallyPublish={task.project_snapshot?.wechat_delivery?.can_formally_publish}
+              isNewspic={task.type === 'wechat-picture'}
               status={task.status}
               lifecycle={displayLifecycle}
               workflow={task.workflow_status}
@@ -774,6 +777,9 @@ export default function TaskDetailPage() {
             <TaskDeliverablesPanel
               taskId={task.id}
               taskStatus={task.status}
+              deliveryMode={task.project_snapshot?.wechat_delivery?.mode}
+              canFormallyPublish={task.project_snapshot?.wechat_delivery?.can_formally_publish}
+              isNewspic={task.type === 'wechat-picture'}
               files={files ?? []}
               taskType={task.type}
               filesLoading={filesLoading}

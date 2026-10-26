@@ -419,10 +419,37 @@ func (s *TaskService) freezeProjectChannelConfig(ctx context.Context, projectID,
 		if value, ok := values["automatic_delivery_enabled"].(bool); ok {
 			automaticEnabled = &value
 		}
+		requestedMode, _ := values["delivery_mode"].(string)
+		authorization, authorizationErr := s.repo.WechatOpenPlatformAuthorizations().FindByProjectID(ctx, projectID)
+		if authorizationErr == nil && authorization != nil {
+			available := wechatCapabilitiesForScopes(authorization.GrantedScopes)
+			if channel == model.ChannelWechatPicture {
+				available.FormalPublish = false
+			}
+			snapshot.WechatDelivery = model.ResolveWechatDeliveryDecisionWithOpenPlatform(
+				authorization.AuthorizerAppID,
+				authorization.Status == model.WechatAuthorizationStatusConnected,
+				model.WechatDeliveryCapabilities{CanCreateDraft: available.Draft, CanFormallyPublish: available.FormalPublish, CanReadArticleAnalytics: available.ArticleAnalytics, CanReadAccountAnalytics: available.AccountAnalytics},
+				automaticEnabled,
+				requestedMode,
+			).WithServerPublicationCapabilities()
+			return
+		}
+		if authorizationErr != nil && !errors.Is(authorizationErr, gorm.ErrRecordNotFound) {
+			snapshot.WechatDelivery = model.WechatDeliveryDecision{
+				Mode:        model.WechatDeliveryModeUserAssisted,
+				ReasonCodes: []string{model.WechatDeliveryReasonCapabilityMissing},
+			}.WithServerPublicationCapabilities()
+			return
+		}
 		secret := strings.TrimSpace(mapStringValue(values, "wechat_secret"))
-		snapshot.WechatDelivery = model.ResolveWechatDeliveryDecision(
+		decision := model.ResolveWechatDeliveryDecision(
 			mapStringValue(values, "wechat_app_id"), secret != "", automaticEnabled,
-		).WithServerPublicationCapabilities()
+		)
+		if requestedMode != "" {
+			decision.Mode = model.NormalizeWechatDeliveryMode(requestedMode, automaticEnabled)
+		}
+		snapshot.WechatDelivery = decision.WithServerPublicationCapabilities()
 	}
 }
 

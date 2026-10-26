@@ -29,18 +29,20 @@ type ParsedWechatAccountAnalyticsWorkbook struct {
 }
 
 type ParsedWechatAccountAnalyticsRow struct {
-	SourceRow         int               `json:"source_row"`
-	StatDate          string            `json:"stat_date"`
-	ReadUsers         *int64            `json:"read_users"`
-	ShareUsers        *int64            `json:"share_users"`
-	OriginalReadUsers *int64            `json:"original_read_users"`
-	LikeUsers         *int64            `json:"like_users"`
-	CollectionUsers   *int64            `json:"collection_users"`
-	CommentCount      *int64            `json:"comment_count"`
-	FollowerGainCount *int64            `json:"follower_gain_count"`
-	PublishedArticles *int64            `json:"published_articles"`
-	Raw               map[string]string `json:"raw"`
-	ParseError        string            `json:"parse_error,omitempty"`
+	SourceRow            int               `json:"source_row"`
+	StatDate             string            `json:"stat_date"`
+	ReadUsers            *int64            `json:"read_users"`
+	ShareUsers           *int64            `json:"share_users"`
+	OriginalReadUsers    *int64            `json:"original_read_users"`
+	LikeUsers            *int64            `json:"like_users"`
+	CollectionUsers      *int64            `json:"collection_users"`
+	CommentCount         *int64            `json:"comment_count"`
+	FollowerGainCount    *int64            `json:"follower_gain_count"`
+	FollowerCancelCount  *int64            `json:"follower_cancel_count"`
+	FollowerNetGainCount *int64            `json:"follower_net_gain_count"`
+	PublishedArticles    *int64            `json:"published_articles"`
+	Raw                  map[string]string `json:"raw"`
+	ParseError           string            `json:"parse_error,omitempty"`
 }
 
 type ParsedWechatTrafficSourceRow struct {
@@ -56,14 +58,16 @@ type ParsedWechatTrafficSourceRow struct {
 var wechatAccountDateHeaders = []string{"日期", "统计日期", "数据日期", "时间", "date", "stat_date"}
 
 var wechatAccountMetricHeaders = map[string][]string{
-	"read_users":          {"阅读人数", "阅读人数（人）", "阅读用户数", "阅读人数(人)", "read_users", "read users"},
-	"share_users":         {"分享人数", "分享用户数", "share_users", "share users"},
-	"original_read_users": {"跳转阅读原文", "跳转阅读原文人数", "阅读原文", "阅读原文人数", "original_read_users", "jump_original_users", "original article clicks"},
-	"like_users":          {"点赞人数", "点赞数", "点赞用户数", "like_users", "likes"},
-	"collection_users":    {"收藏人数", "收藏数", "收藏用户数", "collection_users", "收藏"},
-	"comment_count":       {"留言人数", "评论数", "评论人数", "comment_count", "comments"},
-	"follower_gain_count": {"新增关注", "新增关注人数", "净增关注", "follower_gain_count", "new followers"},
-	"published_articles":  {"发表篇数", "发布篇数", "发文篇数", "published_articles", "articles"},
+	"read_users":              {"阅读人数", "阅读人数（人）", "阅读用户数", "阅读人数(人)", "read_users", "read users"},
+	"share_users":             {"分享人数", "分享用户数", "share_users", "share users"},
+	"original_read_users":     {"跳转阅读原文", "跳转阅读原文人数", "阅读原文", "阅读原文人数", "original_read_users", "jump_original_users", "original article clicks"},
+	"like_users":              {"点赞人数", "点赞数", "点赞用户数", "like_users", "likes"},
+	"collection_users":        {"收藏人数", "收藏数", "收藏用户数", "collection_users", "收藏"},
+	"comment_count":           {"留言人数", "评论数", "评论人数", "comment_count", "comments"},
+	"follower_gain_count":     {"新增关注", "新增关注人数", "follower_gain_count", "new followers"},
+	"follower_cancel_count":   {"取消关注", "取消关注人数", "取关人数", "follower_cancel_count", "unfollows"},
+	"follower_net_gain_count": {"净增关注", "净增关注人数", "净增用户", "follower_net_gain_count", "net new followers"},
+	"published_articles":      {"发表篇数", "发布篇数", "发文篇数", "published_articles", "articles"},
 }
 
 var wechatAccountSourceHeaders = map[model.WechatTrafficSource][]string{
@@ -174,6 +178,10 @@ func ParseWechatAccountAnalyticsWorkbook(data []byte, location *time.Location) (
 					parsed.CommentCount = parsedMetric
 				case "follower_gain_count":
 					parsed.FollowerGainCount = parsedMetric
+				case "follower_cancel_count":
+					parsed.FollowerCancelCount = parsedMetric
+				case "follower_net_gain_count":
+					parsed.FollowerNetGainCount = parsedMetric
 				case "published_articles":
 					parsed.PublishedArticles = parsedMetric
 				}

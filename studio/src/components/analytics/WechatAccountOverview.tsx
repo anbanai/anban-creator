@@ -1,6 +1,7 @@
-import { AlertCircle, CalendarDays, CheckCircle2, Database, Minus, TrendingDown, TrendingUp } from 'lucide-react'
+import { AlertCircle, CalendarDays, CheckCircle2, Database, Minus, RefreshCw, TrendingDown, TrendingUp } from 'lucide-react'
 import AnalyticsTrend from '@/components/analytics/AnalyticsTrend'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 import { formatWechatComparison, wechatAccountMetrics, type WechatAccountMetric, type WechatAccountOverview as Overview, type WechatComparisonSet } from '@/lib/wechat-account-analytics'
 import { bucketDailySeries, type Granularity } from '@/lib/analytics-period'
 
@@ -27,6 +28,11 @@ export default function WechatAccountOverviewPanel({
   selectedMetric = 'read_users',
   granularity = 'day',
   onMetricChange,
+  onSync,
+  syncing = false,
+  syncDisabled = false,
+  syncDisabledMessage,
+  syncError,
 }: {
   overview?: Overview
   loading?: boolean
@@ -34,21 +40,35 @@ export default function WechatAccountOverviewPanel({
   selectedMetric?: WechatAccountMetric
   granularity?: Granularity
   onMetricChange?: (metric: WechatAccountMetric) => void
+  onSync?: () => void
+  syncing?: boolean
+  syncDisabled?: boolean
+  syncDisabledMessage?: string
+  syncError?: Error
 }) {
   const metric = wechatAccountMetrics.find(item => item.key === selectedMetric) ?? wechatAccountMetrics[0]
-  const summaryMetrics = wechatAccountMetrics.slice(0, 4)
+  const primarySummaryKeys: WechatAccountMetric[] = ['read_users', 'share_users', 'original_read_users', 'like_users']
+  const summaryKeys = primarySummaryKeys.includes(selectedMetric)
+    ? primarySummaryKeys
+    : [...primarySummaryKeys.slice(0, 3), selectedMetric]
+  const summaryMetrics = summaryKeys.map(key => wechatAccountMetrics.find(item => item.key === key)).filter((item): item is typeof wechatAccountMetrics[number] => Boolean(item))
   const coverage = overview?.coverage
   const series = bucketDailySeries(overview?.series ?? [], granularity, wechatAccountMetrics.map(({ key }) => ({ key, aggregation: 'sum' as const })), overview?.from, overview?.to)
   const granularityLabel = granularity === 'day' ? '日' : granularity === 'week' ? '周' : '月'
   const unavailable = error?.message || overview?.unavailable_metrics?.[selectedMetric]
   return <section aria-label="公众号数据概况" className="space-y-4">
-    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 className="text-base font-semibold">账号数据概况</h2><p className="mt-1 text-xs text-muted-foreground">公众号账号级每日统计，与单篇内容累计数据分开计算。</p></div>
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-1.5"><CalendarDays className="size-3.5" />{overview ? `${overview.from} 至 ${overview.to}` : '等待数据'}</span>
-        {overview?.data_through && <span>数据截至 {overview.data_through}</span>}
-      </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5"><CalendarDays className="size-3.5" />{overview ? `${overview.from} 至 ${overview.to}` : '等待数据'}</span>
+            {overview?.data_through && <span>数据截至 {overview.data_through}</span>}
+          </div>
+          {onSync && <Button variant="outline" size="sm" disabled={syncing || syncDisabled} onClick={onSync}><RefreshCw className={syncing ? 'animate-spin' : ''} />{syncing ? '正在同步' : '同步账号统计'}</Button>}
+        </div>
     </div>
+    {syncDisabledMessage && <p className="text-xs text-muted-foreground">{syncDisabledMessage}</p>}
+    {syncError && <Alert variant="destructive"><AlertCircle /><AlertDescription>公众号账号统计同步失败：{syncError.message}</AlertDescription></Alert>}
     {error && <Alert variant="destructive"><AlertCircle /><AlertDescription>账号统计暂时无法读取：{error.message}</AlertDescription></Alert>}
     {!error && coverage && <div className={`flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-xs ${coverage.complete ? 'border-emerald-500/30 bg-emerald-500/[0.04] text-emerald-700 dark:text-emerald-300' : 'border-amber-500/30 bg-amber-500/[0.05] text-amber-700 dark:text-amber-300'}`} role="status">
       {coverage.complete ? <CheckCircle2 className="size-3.5" /> : <Database className="size-3.5" />}<span>数据覆盖 {coverage.covered_days} / {coverage.expected_days} 天</span>{!coverage.complete && <span>，缺失日期保留为空；比较仅在覆盖完整时显示。</span>}

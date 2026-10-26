@@ -127,6 +127,9 @@ function hasSubmissionEvidence(publication?: WechatPublication | null) {
 export interface TaskExecutionRailProps {
   taskId: string
   status: TaskStatus
+  deliveryMode?: string
+  canFormallyPublish?: boolean
+  isNewspic?: boolean
   lifecycle?: TaskLifecycle
   workflow?: WorkflowStatus | string | null
   outcome?: TaskOutcome
@@ -148,6 +151,9 @@ export interface TaskExecutionRailProps {
 export function TaskExecutionRail({
   taskId,
   status,
+  deliveryMode,
+  canFormallyPublish,
+  isNewspic = false,
   lifecycle,
   workflow,
   outcome,
@@ -239,6 +245,7 @@ export function TaskExecutionRail({
       return invalidatePublication()
     },
   })
+  const keepDraft = useMutation({ mutationFn: () => api.tasks.keepWechatDraft(taskId), onSuccess: invalidatePublication })
   const retryPublish = useMutation({ mutationFn: () => api.tasks.retryWechatPublish(taskId), onSuccess: invalidatePublication })
   const recoverDraft = useMutation({ mutationFn: () => api.tasks.recoverWechatPublication(taskId), onSuccess: invalidatePublication })
   const selectArticle = useMutation({
@@ -267,8 +274,8 @@ export function TaskExecutionRail({
     mutationFn: () => api.tasks.restoreWechatPublication(taskId),
     onSuccess: invalidatePublication,
   })
-  const publicationActionPending = reconcile.isPending || publish.isPending || retryPublish.isPending || recoverDraft.isPending || selectArticle.isPending || bindManualPublication.isPending || skipPublication.isPending || restorePublication.isPending
-  const publicationActionFailed = reconcile.isError || publish.isError || retryPublish.isError || recoverDraft.isError || selectArticle.isError || bindManualPublication.isError || skipPublication.isError || restorePublication.isError
+  const publicationActionPending = reconcile.isPending || publish.isPending || keepDraft.isPending || retryPublish.isPending || recoverDraft.isPending || selectArticle.isPending || bindManualPublication.isPending || skipPublication.isPending || restorePublication.isPending
+  const publicationActionFailed = reconcile.isError || publish.isError || keepDraft.isError || retryPublish.isError || recoverDraft.isError || selectArticle.isError || bindManualPublication.isError || skipPublication.isError || restorePublication.isError
 
   const announcement = currentStage
     ? status === 'completed' && currentStage.kind === 'publication' && publication?.status === 'awaiting_manual_publish'
@@ -378,8 +385,12 @@ export function TaskExecutionRail({
                       stage={stage}
                       publication={publication}
                       outcome={outcome}
+                      deliveryMode={deliveryMode}
+                      canFormallyPublish={canFormallyPublish}
+                      isNewspic={isNewspic}
                       pending={publicationActionPending}
                       onPublish={() => setConfirmPublish(true)}
+                      onKeepDraft={() => keepDraft.mutate()}
                       onRetryPublish={() => retryPublish.mutate()}
                       onReconcile={() => reconcile.mutate()}
                       onRecoverDraft={() => recoverDraft.mutate()}
@@ -505,8 +516,12 @@ function PublicationStageActions({
   stage,
   publication,
   outcome,
+  deliveryMode,
+  canFormallyPublish,
+  isNewspic = false,
   pending,
   onPublish,
+  onKeepDraft,
   onRetryPublish,
   onReconcile,
   onRecoverDraft,
@@ -518,8 +533,12 @@ function PublicationStageActions({
   stage: TaskLifecycleStage
   publication?: WechatPublication | null
   outcome?: TaskOutcome
+  deliveryMode?: string
+  canFormallyPublish?: boolean
+  isNewspic?: boolean
   pending: boolean
   onPublish: () => void
+  onKeepDraft: () => void
   onRetryPublish: () => void
   onReconcile: () => void
   onRecoverDraft: () => void
@@ -600,16 +619,24 @@ function PublicationStageActions({
   const submitted = hasSubmissionEvidence(publication)
   const canConfirmManualPublication = !submitted && publication?.draft_media_id
     && (publication.status === 'drafted' || publication.status === 'awaiting_manual_publish')
+  const formalPublishAvailable = canFormallyPublish !== false && !isNewspic
+  const keepAndPublishActions = publication?.status === 'drafted' && stage.state === 'pending' ? (
+    <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
+      <span className="text-[11px] text-muted-foreground">项目默认：{deliveryMode === 'direct_publish' ? '正式发布' : '草稿箱'}</span>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant={publication.delivery_mode === 'draft' ? 'secondary' : 'outline'} className="min-h-11" aria-pressed={publication.delivery_mode === 'draft'} loading={pending} onClick={onKeepDraft}>保留在草稿箱</Button>
+        <Tooltip>
+          <TooltipTrigger render={<Button size="sm" variant="outline" className="min-h-11" disabled={!formalPublishAvailable} loading={pending} onClick={onPublish}>正式发布</Button>} />
+          {!formalPublishAvailable && <TooltipContent>{isNewspic ? '说说的正式发布能力尚未通过测试公众号验证' : '当前公众号未授予正式发布权限'}</TooltipContent>}
+        </Tooltip>
+      </div>
+    </div>
+  ) : null
   if (canConfirmManualPublication) {
     return (
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         {publication.status === 'awaiting_manual_publish' ? backendLink : stage.state === 'pending' && publication.status === 'drafted' ? (
-          <Tooltip>
-            <TooltipTrigger render={<Button size="icon-md" variant="ghost" className="hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent" loading={pending} onClick={onPublish} aria-label="正式发布" />}>
-              {pending ? null : <Send className="size-4" aria-hidden="true" />}
-            </TooltipTrigger>
-            <TooltipContent>通过平台正式发布</TooltipContent>
-          </Tooltip>
+          keepAndPublishActions
         ) : null}
         <Button size="sm" variant="secondary" className="min-h-11" loading={pending} onClick={onManualPublished}>我已发布</Button>
         <Button size="sm" variant="ghost" className="min-h-11 text-muted-foreground" loading={pending} onClick={onSkipPublication}>不再发布</Button>

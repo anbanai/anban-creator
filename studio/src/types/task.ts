@@ -97,13 +97,17 @@ export interface ProjectSnapshot {
   theme?: string
   author?: string
   wechat_delivery?: {
-    mode: 'automatic' | 'user_assisted'
+    mode: 'automatic' | 'draft' | 'direct_publish' | 'user_assisted'
     automatic_enabled: boolean
     app_id_configured: boolean
     secret_configured: boolean
     may_upload_material: boolean
     may_create_draft: boolean
     may_formally_publish: boolean
+    can_create_draft?: boolean
+    can_formally_publish?: boolean
+    can_read_article_analytics?: boolean
+    can_read_account_analytics?: boolean
     reason_codes?: string[]
   }
   ecommerce_defaults?: {

@@ -603,8 +603,18 @@ describe('ProjectsPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
     await waitFor(() => expect(api.projects.create).toHaveBeenCalledTimes(1))
 
-    const settings = await screen.findByRole('dialog', { name: '配置自动发布' })
+    const settings = await screen.findByRole('dialog', { name: '公众号设置' })
     expect(await within(settings).findByLabelText('微信 AppID')).toHaveValue('wx-test')
+  })
+
+  it('opens the project WeChat settings after a successful QR authorization callback', async () => {
+    window.history.pushState({}, '', '/projects?wechat_authorization=connected&project_id=ch-1')
+    render(<ProjectsPage />)
+
+    expect(await screen.findByRole('dialog', { name: '公众号设置' })).toBeInTheDocument()
+    expect(successMock).toHaveBeenCalledWith('公众号已绑定，可保存到草稿箱')
+    await waitFor(() => expect(window.location.search).toBe(''))
+    expect(errorMock).not.toHaveBeenCalled()
   })
 
   it.each(['create failure', 'create success', 'update success'])('ignores a stale %s after another editor opens', async (outcome) => {

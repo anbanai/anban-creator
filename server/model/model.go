@@ -18,6 +18,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&AssistantSessionLease{},
 		&AssistantWorkspace{},
 		&ProjectChannelConfig{},
+		&WechatOpenPlatformAuthorization{},
+		&WechatOpenPlatformAuthorizationState{},
 		&Plan{},
 		&PlanEntry{},
 		&Task{},

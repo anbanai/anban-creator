@@ -62,6 +62,15 @@ describe('WeChat account analytics contract', () => {
     expect(coverageStatus).toHaveTextContent('比较仅在覆盖完整时显示。')
   })
 
+  it('keeps established account metrics visible and surfaces a selected newer metric', () => {
+    render(<WechatAccountOverviewPanel overview={overview} loading={false} selectedMetric="follower_gain_count" />)
+
+    const metricCards = within(screen.getByLabelText('公众号账号关键指标')).getAllByRole('button')
+    expect(metricCards).toHaveLength(4)
+    expect(screen.getByRole('button', { name: /分享人数2/ })).toBeInTheDocument()
+    expect(within(screen.getByLabelText('公众号账号关键指标')).getByRole('button', { name: /新增关注/ })).toBeInTheDocument()
+  })
+
   it('groups account trend rows by the selected week granularity', () => {
     render(<WechatAccountOverviewPanel overview={overview} loading={false} selectedMetric="read_users" granularity="week" />)
 

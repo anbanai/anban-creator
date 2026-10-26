@@ -102,6 +102,17 @@ func TestOfficialAPIUsesOfficialPublicationEndpointsAndStringIdentifiers(t *test
 				return nil
 			},
 		},
+		{
+			name: "user summary", path: "/datacube/getusersummary", body: `{"begin_date":"2026-08-02","end_date":"2026-08-07"}`,
+			response: `{"list":[{"ref_date":"2026-08-02","user_source":30,"new_user":3,"cancel_user":1}]}`,
+			call: func(ctx context.Context, api *OfficialAPI) error {
+				result, err := api.GetUserSummary(ctx, UserSummaryRequest{BeginDate: "2026-08-02", EndDate: "2026-08-07"})
+				if err == nil && (len(result.List) != 1 || result.List[0].UserSource != 30 || result.List[0].NewUser != 3 || result.List[0].CancelUser != 1) {
+					t.Fatalf("user summary response = %#v", result)
+				}
+				return err
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

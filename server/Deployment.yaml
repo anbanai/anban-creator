@@ -230,6 +230,11 @@ spec:
             - secretRef:
                 name: anban-onboarding-providers
                 optional: true
+            # Optional: enable project-scoped WeChat Open Platform QR
+            # authorization after creating this Secret and filling config.yaml.
+            - secretRef:
+                name: anban-wechat-open-platform
+                optional: true
           name: "${micro_service_name}-${version_switch}"
           image: "${image_repo}"
           imagePullPolicy: Always

@@ -92,6 +92,53 @@ func TestWechatProjectReconcileLeasePreservesSQLiteSubsecondDuration(t *testing.
 	}
 }
 
+func TestUnsubmittedDraftsAreExcludedFromPublicationReconciliation(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	now := time.Now().UTC()
+	plainDraft := &model.WechatPublication{
+		ID: uuid.NewString(), TaskID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1",
+		Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafted,
+		DraftMediaID: "draft-plain", NextCheckAt: &now,
+	}
+	authorizedRetry := &model.WechatPublication{
+		ID: uuid.NewString(), TaskID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1",
+		Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafted,
+		DeliveryMode: model.WechatDeliveryModeDirectPublish, DraftMediaID: "draft-authorized", NextCheckAt: &now,
+	}
+	submitted := &model.WechatPublication{
+		ID: uuid.NewString(), TaskID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1",
+		Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafted,
+		DraftMediaID: "draft-submitted", SubmitAttemptedAt: &now, NextCheckAt: &now,
+	}
+	for _, publication := range []*model.WechatPublication{plainDraft, authorizedRetry, submitted} {
+		if err := repo.WechatPublications().Create(context.Background(), publication); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	pending, err := repo.WechatPublications().FindPendingByProject(context.Background(), "project-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	due, err := repo.WechatPublications().FindDue(context.Background(), now.Add(time.Second), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, publications := range map[string][]*model.WechatPublication{"pending": pending, "due": due} {
+		got := map[string]bool{}
+		for _, publication := range publications {
+			got[publication.ID] = true
+		}
+		if got[plainDraft.ID] || !got[authorizedRetry.ID] || !got[submitted.ID] {
+			t.Fatalf("%s publications = %#v, want authorized retries and submission evidence only", name, got)
+		}
+	}
+	if claimed, err := repo.WechatPublications().ClaimDueDispatch(context.Background(), plainDraft.ID, plainDraft.UpdatedAt, now.Add(time.Second), now.Add(time.Minute)); err != nil || claimed {
+		t.Fatalf("unsubmitted draft claim = %v, %v; want not claimed", claimed, err)
+	}
+}
+
 func TestWechatArticleBindingHasOneConcurrentWinnerPerProject(t *testing.T) {
 	db := setupTestDB(t)
 	sqlDB, err := db.DB()
@@ -217,6 +264,32 @@ func TestWechatPreflightTransitionsRequireExpectedStatusAndVersion(t *testing.T)
 			t.Fatalf("stored=%#v err=%v", stored, err)
 		}
 	})
+}
+
+func TestClaimPublishAtomicallySelectsDirectPublishDeliveryMode(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	publication := &model.WechatPublication{
+		ID: uuid.NewString(), TaskID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1",
+		DraftMediaID: "draft-1", DeliveryMode: model.WechatDeliveryModeDraft,
+		Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafted,
+	}
+	if err := repo.WechatPublications().Create(ctx, publication); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	won, err := repo.WechatPublications().ClaimPublish(ctx, publication.ID, "publish-claim", now, now.Add(-time.Minute), &now)
+	if err != nil || !won {
+		t.Fatalf("ClaimPublish won=%v err=%v", won, err)
+	}
+	stored, err := repo.WechatPublications().FindByID(ctx, publication.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != model.WechatPublicationStatusPublishSubmitting || stored.DeliveryMode != model.WechatDeliveryModeDirectPublish {
+		t.Fatalf("claimed publication status/mode = %q/%q", stored.Status, stored.DeliveryMode)
+	}
 }
 
 func TestWechatReconciliationTransitionsAreNarrowAndVersionGuarded(t *testing.T) {

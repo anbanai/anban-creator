@@ -35,6 +35,24 @@ func TestWechatAccountAnalyticsMigrationContract(t *testing.T) {
 	}
 }
 
+func TestWechatOpenPlatformAccountAnalyticsMigrationContract(t *testing.T) {
+	b, err := os.ReadFile("20261026_wechat_account_analytics_open_platform.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, required := range []string{
+		"follower_cancel_count",
+		"follower_net_gain_count",
+		"new_followers",
+		"cancelled_followers",
+	} {
+		if !strings.Contains(s, required) {
+			t.Errorf("Open Platform analytics migration is missing %q", required)
+		}
+	}
+}
+
 func TestWechatAccountAnalyticsAutoMigrateAndNullableMetrics(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
@@ -162,7 +180,7 @@ func TestWechatAccountAnalyticsRepositoryWinnerRevocationAndRevision(t *testing.
 	}
 	for _, day := range []*model.WechatAccountAnalyticsDay{
 		{ID: "day-old", ProjectID: old.ProjectID, BatchID: old.ID, StatDate: "2026-10-08", ReadUsers: ptrInt64(10)},
-		{ID: "day-new", ProjectID: newer.ProjectID, BatchID: newer.ID, StatDate: "2026-10-08", ReadUsers: ptrInt64(20)},
+		{ID: "day-new", ProjectID: newer.ProjectID, BatchID: newer.ID, StatDate: "2026-10-08", ReadUsers: ptrInt64(20), FollowerGainCount: ptrInt64(4)},
 		{ID: "day-active", ProjectID: active.ProjectID, BatchID: active.ID, StatDate: "2026-10-08", ReadUsers: ptrInt64(30)},
 	} {
 		if err := repo.WechatAccountAnalytics().CreateDays(ctx, []*model.WechatAccountAnalyticsDay{day}); err != nil {
@@ -175,6 +193,14 @@ func TestWechatAccountAnalyticsRepositoryWinnerRevocationAndRevision(t *testing.
 	}
 	if len(winners) != 1 || winners[0].ReadUsers == nil || *winners[0].ReadUsers != 30 {
 		t.Fatalf("winner = %#v, want active fact", winners)
+	}
+	readWinner, err := repo.WechatAccountAnalytics().ListWinningDaysForMetric(ctx, old.ProjectID, "2026-10-08", "2026-10-08", "read_users")
+	if err != nil || len(readWinner) != 1 || readWinner[0].ReadUsers == nil || *readWinner[0].ReadUsers != 30 {
+		t.Fatalf("read winner = %#v err=%v, want active read fact", readWinner, err)
+	}
+	followerWinner, err := repo.WechatAccountAnalytics().ListWinningDaysForMetric(ctx, old.ProjectID, "2026-10-08", "2026-10-08", "follower_gain_count")
+	if err != nil || len(followerWinner) != 1 || followerWinner[0].FollowerGainCount == nil || *followerWinner[0].FollowerGainCount != 4 {
+		t.Fatalf("follower winner = %#v err=%v, want the latest batch that supplies this metric", followerWinner, err)
 	}
 	if err := repo.WechatAccountAnalytics().RevokeBatch(ctx, old.ProjectID, old.ID, time.Now().UTC()); err != nil {
 		t.Fatal(err)

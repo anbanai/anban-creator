@@ -119,12 +119,15 @@ type ProjectService struct {
 }
 
 type WechatPlatformConfig struct {
-	ProjectID                string `json:"project_id"`
-	Platform                 string `json:"platform"`
-	AppID                    string `json:"app_id"`
-	SecretConfigured         bool   `json:"secret_configured"`
-	CredentialsConflict      bool   `json:"credentials_conflict"`
-	AutomaticDeliveryEnabled bool   `json:"automatic_delivery_enabled"`
+	ProjectID                string                        `json:"project_id"`
+	Platform                 string                        `json:"platform"`
+	AppID                    string                        `json:"app_id"`
+	SecretConfigured         bool                          `json:"secret_configured"`
+	CredentialsConflict      bool                          `json:"credentials_conflict"`
+	AutomaticDeliveryEnabled bool                          `json:"automatic_delivery_enabled"`
+	DeliveryMode             string                        `json:"delivery_mode"`
+	AuthorizationEnabled     bool                          `json:"authorization_enabled"`
+	Connection               *WechatOpenPlatformConnection `json:"connection,omitempty"`
 }
 
 type ProjectMemoryLifecycle interface {
@@ -951,6 +954,7 @@ func (s *ProjectService) GetWechatPlatformConfig(ctx context.Context, userID, pr
 	}
 	appID, secret, conflict := compareWechatChannelCredentials(article, picture)
 	automaticEnabled := wechatAutomaticDeliveryEnabled(article) && wechatAutomaticDeliveryEnabled(picture)
+	deliveryMode := wechatProjectDeliveryMode(article, picture, automaticEnabled)
 	return &WechatPlatformConfig{
 		ProjectID:                projectID,
 		Platform:                 model.PlatformWechat,
@@ -958,7 +962,20 @@ func (s *ProjectService) GetWechatPlatformConfig(ctx context.Context, userID, pr
 		SecretConfigured:         secret != "",
 		CredentialsConflict:      conflict,
 		AutomaticDeliveryEnabled: automaticEnabled,
+		DeliveryMode:             deliveryMode,
 	}, nil
+}
+
+func wechatProjectDeliveryMode(article, picture *model.ProjectChannelConfig, automaticEnabled bool) string {
+	for _, config := range []*model.ProjectChannelConfig{article, picture} {
+		if config == nil {
+			continue
+		}
+		if mode, ok := config.Config.Data()["delivery_mode"].(string); ok && strings.TrimSpace(mode) != "" {
+			return model.NormalizeWechatDeliveryMode(mode, &automaticEnabled)
+		}
+	}
+	return model.NormalizeWechatDeliveryMode("", &automaticEnabled)
 }
 
 func wechatAutomaticDeliveryEnabled(config *model.ProjectChannelConfig) bool {
@@ -1069,6 +1086,63 @@ func (s *ProjectService) SetWechatAutomaticDelivery(ctx context.Context, userID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("set WeChat automatic delivery: %w", err)
+	}
+	return s.GetWechatPlatformConfig(ctx, userID, projectID)
+}
+
+func (s *ProjectService) SetWechatDeliveryMode(ctx context.Context, userID, projectID, mode string) (*WechatPlatformConfig, error) {
+	return s.SetWechatDeliverySettings(ctx, userID, projectID, &mode, nil)
+}
+
+func (s *ProjectService) SetWechatDeliverySettings(ctx context.Context, userID, projectID string, mode *string, automaticEnabled *bool) (*WechatPlatformConfig, error) {
+	if mode != nil {
+		value := strings.TrimSpace(*mode)
+		if value != model.WechatDeliveryModeDraft && value != model.WechatDeliveryModeDirectPublish {
+			return nil, ErrInvalidWechatPlatformConfig
+		}
+		mode = &value
+	}
+	if mode == nil && automaticEnabled == nil {
+		return nil, ErrInvalidWechatPlatformConfig
+	}
+	project, err := s.ownedProject(ctx, userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	supported, err := supportsWechatPlatformForProject(ctx, s.repo, project)
+	if err != nil {
+		return nil, fmt.Errorf("derive project WeChat capability: %w", err)
+	}
+	if !supported {
+		return nil, ErrInvalidWechatPlatformConfig
+	}
+	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		for _, channel := range []string{model.ChannelArticle, model.ChannelWechatPicture} {
+			row, getErr := tx.ProjectChannelConfigs().Get(ctx, projectID, channel)
+			if getErr != nil && !errors.Is(getErr, gorm.ErrRecordNotFound) {
+				return getErr
+			}
+			values := map[string]any{}
+			if row != nil {
+				values = row.Config.Data()
+			} else {
+				row = &model.ProjectChannelConfig{ID: uuid.NewString(), ProjectID: projectID, Channel: channel}
+			}
+			if mode != nil {
+				values["delivery_mode"] = *mode
+			}
+			if automaticEnabled != nil {
+				values["automatic_delivery_enabled"] = *automaticEnabled
+			}
+			row.Config = datatypes.NewJSONType(values)
+			if err := tx.ProjectChannelConfigs().Upsert(ctx, row); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("set WeChat delivery settings: %w", err)
 	}
 	return s.GetWechatPlatformConfig(ctx, userID, projectID)
 }

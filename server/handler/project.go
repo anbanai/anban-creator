@@ -40,9 +40,10 @@ type ProjectHandler struct {
 		ReadProject(context.Context, string) (projectmemory.ProjectView, error)
 		ReplaceMarkdownFileIfUnchanged(context.Context, string, string, string, string) error
 	}
-	tasks             *service.TaskService
-	billingCatalog    *service.BillingCatalogService
-	feedbackScheduler *service.FeedbackScheduler
+	tasks              *service.TaskService
+	billingCatalog     *service.BillingCatalogService
+	feedbackScheduler  *service.FeedbackScheduler
+	wechatOpenPlatform *service.WechatOpenPlatformService
 }
 
 // NewProjectHandler creates a new ProjectHandler.
@@ -76,6 +77,10 @@ func (h *ProjectHandler) SetProjectMemoryStore(store interface {
 }
 
 func (h *ProjectHandler) SetTaskService(tasks *service.TaskService) { h.tasks = tasks }
+
+func (h *ProjectHandler) SetWechatOpenPlatformService(svc *service.WechatOpenPlatformService) {
+	h.wechatOpenPlatform = svc
+}
 
 func (h *ProjectHandler) SetBillingCatalogService(catalog *service.BillingCatalogService) {
 	h.billingCatalog = catalog
@@ -234,7 +239,7 @@ func (h *ProjectHandler) respondProjectUpdateError(c fiber.Ctx, projectID string
 	if errors.Is(err, service.ErrProjectNotFound) {
 		return Error(c, fiber.StatusNotFound, "project not found")
 	}
-	if errors.Is(err, service.ErrProjectOwnedByUser) {
+	if errors.Is(err, service.ErrProjectOwnedByUser) || errors.Is(err, service.ErrWechatOpenPlatformForbidden) {
 		return Forbidden(c, "you do not have access to this project")
 	}
 	if errors.Is(err, service.ErrProjectUpdateConflict) {
@@ -333,9 +338,10 @@ type projectChannelConfigResponseBody struct {
 }
 
 type wechatPlatformConfigRequest struct {
-	AppID                    string `json:"app_id"`
-	Secret                   string `json:"secret"`
-	AutomaticDeliveryEnabled *bool  `json:"automatic_delivery_enabled,omitempty"`
+	AppID                    string  `json:"app_id"`
+	Secret                   string  `json:"secret"`
+	AutomaticDeliveryEnabled *bool   `json:"automatic_delivery_enabled,omitempty"`
+	DeliveryMode             *string `json:"delivery_mode,omitempty"`
 }
 
 type projectConfigRequest struct {
@@ -892,6 +898,14 @@ func (h *ProjectHandler) GetWechatPlatformConfig(c fiber.Ctx) error {
 	if err != nil {
 		return h.respondProjectConfigError(c, err)
 	}
+	if h.wechatOpenPlatform != nil {
+		connection, connectionErr := h.wechatOpenPlatform.GetConnection(c.Context(), userID, c.Params("id"))
+		if connectionErr != nil {
+			return h.respondProjectConfigError(c, connectionErr)
+		}
+		config.AuthorizationEnabled = true
+		config.Connection = connection
+	}
 	return Success(c, config)
 }
 
@@ -906,12 +920,12 @@ func (h *ProjectHandler) UpsertWechatPlatformConfig(c fiber.Ctx) error {
 	}
 	var config *service.WechatPlatformConfig
 	var err error
-	if req.AutomaticDeliveryEnabled != nil && strings.TrimSpace(req.AppID) == "" && strings.TrimSpace(req.Secret) == "" {
-		config, err = h.service.SetWechatAutomaticDelivery(c.Context(), userID, c.Params("id"), *req.AutomaticDeliveryEnabled)
+	if strings.TrimSpace(req.AppID) == "" && strings.TrimSpace(req.Secret) == "" && (req.AutomaticDeliveryEnabled != nil || req.DeliveryMode != nil) {
+		config, err = h.service.SetWechatDeliverySettings(c.Context(), userID, c.Params("id"), req.DeliveryMode, req.AutomaticDeliveryEnabled)
 	} else {
 		config, err = h.service.UpsertWechatPlatformConfig(c.Context(), userID, c.Params("id"), req.AppID, req.Secret)
-		if err == nil && req.AutomaticDeliveryEnabled != nil {
-			config, err = h.service.SetWechatAutomaticDelivery(c.Context(), userID, c.Params("id"), *req.AutomaticDeliveryEnabled)
+		if err == nil && (req.AutomaticDeliveryEnabled != nil || req.DeliveryMode != nil) {
+			config, err = h.service.SetWechatDeliverySettings(c.Context(), userID, c.Params("id"), req.DeliveryMode, req.AutomaticDeliveryEnabled)
 		}
 	}
 	if err != nil {
@@ -919,6 +933,13 @@ func (h *ProjectHandler) UpsertWechatPlatformConfig(c fiber.Ctx) error {
 			return Error(c, fiber.StatusConflict, err.Error())
 		}
 		return h.respondProjectConfigError(c, err)
+	}
+	if h.wechatOpenPlatform != nil {
+		config.AuthorizationEnabled = true
+		config.Connection, err = h.wechatOpenPlatform.GetConnection(c.Context(), userID, c.Params("id"))
+		if err != nil {
+			return h.respondProjectConfigError(c, err)
+		}
 	}
 	return Success(c, config)
 }

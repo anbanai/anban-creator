@@ -1510,16 +1510,8 @@ func (s *TaskService) finalizePicturePublication(ctx context.Context, task *mode
 }
 
 func pictureCoverInfo(ratio string) *appwechat.DraftCoverInfo {
-	ratio = strings.TrimSpace(ratio)
-	if ratio == "" || ratio == "auto" {
-		ratio = "3:4"
-	}
-	switch ratio {
-	case "9:16", "3:4", "1:1", "4:3", "16:9":
-	default:
-		ratio = "3:4"
-	}
-	return &appwechat.DraftCoverInfo{CropPercentList: []appwechat.DraftCropPercent{{Ratio: strings.ReplaceAll(ratio, ":", "_"), X1: 0, Y1: 0, X2: 1, Y2: 1}}}
+	ratio = normalizeWechatNewspicCropRatio(ratio)
+	return &appwechat.DraftCoverInfo{CropPercentList: []appwechat.DraftCropPercent{{Ratio: ratio, X1: 0, Y1: 0, X2: 1, Y2: 1}}}
 }
 
 func pictureImageCount(raw any) (int, bool) {

@@ -100,6 +100,32 @@ func TestWechatPlatformConfigCanDisableAutomaticDelivery(t *testing.T) {
 	}
 }
 
+func TestWechatPlatformConfigStoresDeliveryModeForBothWechatChannels(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	ensureTestUser(t, repo, userID)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	svc := NewProjectService(repo, nil)
+	updated, err := svc.SetWechatDeliveryMode(ctx, userID, projectID, model.WechatDeliveryModeDirectPublish)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.DeliveryMode != model.WechatDeliveryModeDirectPublish {
+		t.Fatalf("delivery mode = %q", updated.DeliveryMode)
+	}
+	for _, channel := range []string{model.ChannelArticle, model.ChannelWechatPicture} {
+		config, err := repo.ProjectChannelConfigs().Get(ctx, projectID, channel)
+		if err != nil || config.Config.Data()["delivery_mode"] != model.WechatDeliveryModeDirectPublish {
+			t.Fatalf("%s mode = %#v, %v", channel, config, err)
+		}
+	}
+	if _, err := svc.SetWechatDeliveryMode(ctx, userID, projectID, "publish_without_confirmation"); !errors.Is(err, ErrInvalidWechatPlatformConfig) {
+		t.Fatalf("invalid delivery mode error = %v", err)
+	}
+}
+
 func TestWechatPlatformConfigRequiresSecretToResolveLegacyConflict(t *testing.T) {
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)

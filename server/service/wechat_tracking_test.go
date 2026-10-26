@@ -12,6 +12,7 @@ import (
 
 	appwechat "github.com/anbanai/anban-creator/server/app/wechat"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/platform"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -301,6 +302,30 @@ func TestWechatTrackingTransientErrorRetriesBut48001BecomesUnsupported(t *testin
 		tracking, _ := f.repo.WechatTrackings().FindByID(context.Background(), f.tracking.ID)
 		if tracking.Status != model.WechatTrackingStatusUnsupported || tracking.NextFetchAt != nil || tracking.MsgID != "" || f.provider.calls != 1 {
 			t.Fatalf("unsupported tracking = %#v calls=%d", tracking, f.provider.calls)
+		}
+	})
+	t.Run("missing authorized analytics scope", func(t *testing.T) {
+		f := newWechatTrackingFixture(t, model.WechatPublicationSourceWechatConsole, "", "", "https://mp.weixin.qq.com/s/manual", published)
+		f.provider.err = platform.ErrWechatAnalyticsCapabilityMissing
+		if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+			t.Fatal(err)
+		}
+		tracking, _ := f.repo.WechatTrackings().FindByID(context.Background(), f.tracking.ID)
+		if tracking.Status != model.WechatTrackingStatusUnsupported || tracking.NextFetchAt != nil {
+			t.Fatalf("tracking without article analytics permission = %#v", tracking)
+		}
+		capabilities, err := f.repo.WechatCapabilities().ListByProject(context.Background(), f.tracking.ProjectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		foundDenied := false
+		for _, capability := range capabilities {
+			if capability.Capability == model.WechatCapabilityDataCubeArticleStats && capability.Status == model.WechatCapabilityDenied {
+				foundDenied = true
+			}
+		}
+		if !foundDenied {
+			t.Fatalf("article analytics denied capability not recorded: %#v", capabilities)
 		}
 	})
 }

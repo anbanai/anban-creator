@@ -82,13 +82,47 @@ func (r *wechatAccountAnalyticsRepository) ListWinningDays(ctx context.Context, 
 	return rows, nil
 }
 
-func (r *wechatAccountAnalyticsRepository) ListWinningSources(ctx context.Context, projectID, from, to string) ([]*model.WechatTrafficSourceDay, error) {
+// ListWinningDaysForMetric selects the winning fact independently for one
+// metric. Workbook and Open Platform batches can therefore complement each
+// other without one source masking fields it did not provide.
+func (r *wechatAccountAnalyticsRepository) ListWinningDaysForMetric(ctx context.Context, projectID, from, to, metric string) ([]*model.WechatAccountAnalyticsDay, error) {
+	column := map[string]string{
+		"read_users": "read_users", "share_users": "share_users", "original_read_users": "original_read_users",
+		"like_users": "like_users", "collection_users": "collection_users", "comment_count": "comment_count",
+		"follower_gain_count": "follower_gain_count", "follower_cancel_count": "follower_cancel_count",
+		"follower_net_gain_count": "follower_net_gain_count", "published_articles": "published_articles",
+	}[metric]
+	if column == "" {
+		return nil, errors.New("unsupported WeChat account analytics metric")
+	}
+	var rows []*model.WechatAccountAnalyticsDay
+	q := r.db.WithContext(ctx).Table("wechat_account_analytics_days AS d").
+		Select("d.*").
+		Joins("JOIN wechat_account_analytics_batches AS b ON b.id = d.batch_id AND b.project_id = d.project_id").
+		Where("d.project_id = ? AND d.stat_date BETWEEN ? AND ? AND d."+column+" IS NOT NULL AND b.revoked_at IS NULL AND b.status IN ?", projectID, from, to, []string{model.WechatAccountAnalyticsBatchActive, model.WechatAccountAnalyticsBatchCompleted}).
+		Where("NOT EXISTS (SELECT 1 FROM wechat_account_analytics_days d2 JOIN wechat_account_analytics_batches b2 ON b2.id = d2.batch_id AND b2.project_id = d2.project_id WHERE d2.project_id = d.project_id AND d2.stat_date = d.stat_date AND d2."+column+" IS NOT NULL AND b2.revoked_at IS NULL AND b2.status IN ? AND "+wechatWinnerPrecedes+")", []string{model.WechatAccountAnalyticsBatchActive, model.WechatAccountAnalyticsBatchCompleted}, model.WechatAccountAnalyticsBatchActive, model.WechatAccountAnalyticsBatchCompleted).
+		Order("d.stat_date ASC, d.id ASC")
+	if err := q.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (r *wechatAccountAnalyticsRepository) ListWinningSources(ctx context.Context, projectID, from, to, metric string) ([]*model.WechatTrafficSourceDay, error) {
+	column := map[string]string{
+		"read_users":            "read_users",
+		"follower_gain_count":   "new_followers",
+		"follower_cancel_count": "cancelled_followers",
+	}[metric]
+	if column == "" {
+		return nil, errors.New("unsupported WeChat traffic source metric")
+	}
 	var rows []*model.WechatTrafficSourceDay
 	q := r.db.WithContext(ctx).Table("wechat_traffic_source_days AS d").
 		Select("d.*").
 		Joins("JOIN wechat_account_analytics_batches AS b ON b.id = d.batch_id AND b.project_id = d.project_id").
-		Where("d.project_id = ? AND d.stat_date BETWEEN ? AND ? AND b.revoked_at IS NULL AND b.status IN ?", projectID, from, to, []string{model.WechatAccountAnalyticsBatchActive, model.WechatAccountAnalyticsBatchCompleted}).
-		Where("NOT EXISTS (SELECT 1 FROM wechat_traffic_source_days d2 JOIN wechat_account_analytics_batches b2 ON b2.id = d2.batch_id AND b2.project_id = d2.project_id WHERE d2.project_id = d.project_id AND d2.stat_date = d.stat_date AND d2.source = d.source AND b2.revoked_at IS NULL AND b2.status IN ? AND "+wechatWinnerPrecedes+")", []string{model.WechatAccountAnalyticsBatchActive, model.WechatAccountAnalyticsBatchCompleted}, model.WechatAccountAnalyticsBatchActive, model.WechatAccountAnalyticsBatchCompleted).
+		Where("d.project_id = ? AND d.stat_date BETWEEN ? AND ? AND d."+column+" IS NOT NULL AND b.revoked_at IS NULL AND b.status IN ?", projectID, from, to, []string{model.WechatAccountAnalyticsBatchActive, model.WechatAccountAnalyticsBatchCompleted}).
+		Where("NOT EXISTS (SELECT 1 FROM wechat_traffic_source_days d2 JOIN wechat_account_analytics_batches b2 ON b2.id = d2.batch_id AND b2.project_id = d2.project_id WHERE d2.project_id = d.project_id AND d2.stat_date = d.stat_date AND d2.source = d.source AND d2."+column+" IS NOT NULL AND b2.revoked_at IS NULL AND b2.status IN ? AND "+wechatWinnerPrecedes+")", []string{model.WechatAccountAnalyticsBatchActive, model.WechatAccountAnalyticsBatchCompleted}, model.WechatAccountAnalyticsBatchActive, model.WechatAccountAnalyticsBatchCompleted).
 		Order("d.stat_date ASC, d.source ASC, d.id ASC")
 	if err := q.Find(&rows).Error; err != nil {
 		return nil, err

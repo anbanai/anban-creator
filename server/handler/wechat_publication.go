@@ -92,6 +92,24 @@ func (h *WechatPublicationHandler) Publish(c fiber.Ctx) error {
 	return Success(c, publication)
 }
 
+func (h *WechatPublicationHandler) KeepDraft(c fiber.Ctx) error {
+	userID, taskID, err := h.requestIdentity(c)
+	if err != nil {
+		return err
+	}
+	service, ok := h.service.(interface {
+		KeepDraft(context.Context, string, string) (*model.WechatPublication, error)
+	})
+	if !ok {
+		return Error(c, fiber.StatusServiceUnavailable, "WeChat draft choice unavailable")
+	}
+	publication, err := service.KeepDraft(c.Context(), userID, taskID)
+	if err != nil {
+		return h.handleError(c, taskID, err)
+	}
+	return Success(c, publication)
+}
+
 func (h *WechatPublicationHandler) RetryPublish(c fiber.Ctx) error {
 	userID, taskID, err := h.requestIdentity(c)
 	if err != nil {
@@ -207,6 +225,10 @@ func (h *WechatPublicationHandler) handleError(c fiber.Ctx, taskID string, err e
 		return Error(c, fiber.StatusConflict, service.ErrWechatPublicationConflict.Error())
 	case errors.Is(err, service.ErrWechatPublicationModeConflict):
 		return Error(c, fiber.StatusConflict, service.ErrWechatPublicationModeConflict.Error())
+	case errors.Is(err, service.ErrWechatPublicationFormalPublishUnavailable):
+		return Error(c, fiber.StatusForbidden, "公众号当前权限或内容类型不支持正式发布")
+	case errors.Is(err, service.ErrWechatOpenPlatformNotConnected):
+		return Error(c, fiber.StatusForbidden, "公众号授权已失效，请重新扫码绑定")
 	case errors.Is(err, service.ErrWechatPublicationPending):
 		return Error(c, fiber.StatusConflict, service.ErrWechatPublicationPending.Error())
 	case errors.Is(err, service.ErrWechatPublicationRateLimited):

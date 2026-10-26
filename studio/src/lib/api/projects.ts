@@ -88,7 +88,13 @@ export const projectsApi = {
   getWechatPlatformConfig: (id: string) =>
     unwrap<WechatPlatformConfig>(http.get(`/projects/${id}/platform-configs/wechat`)),
 
-  upsertWechatPlatformConfig: (id: string, data: { app_id?: string; secret?: string; automatic_delivery_enabled?: boolean }) =>
+  startWechatAuthorization: (id: string) =>
+    unwrap<{ authorization_url: string; expires_at: string }>(http.post(`/projects/${id}/wechat/authorization`)),
+
+  disconnectWechatAuthorization: (id: string) =>
+    unwrap<{ disconnected: boolean }>(http.delete(`/projects/${id}/platform-configs/wechat/authorization`)),
+
+  upsertWechatPlatformConfig: (id: string, data: { app_id?: string; secret?: string; automatic_delivery_enabled?: boolean; delivery_mode?: 'draft' | 'direct_publish' }) =>
     unwrap<WechatPlatformConfig>(http.put(`/projects/${id}/platform-configs/wechat`, data)),
 
   platformConfigs: () =>

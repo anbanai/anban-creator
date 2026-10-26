@@ -25,6 +25,27 @@ export interface WechatPlatformConfig {
   secret_configured: boolean
   credentials_conflict: boolean
   automatic_delivery_enabled: boolean
+  delivery_mode?: 'draft' | 'direct_publish' | 'user_assisted' | string
+  authorization_enabled?: boolean
+  connection?: WechatAuthorizationConnection
+}
+
+export interface WechatAuthorizationConnection {
+  authorization_enabled: boolean
+  authorization_record_exists: boolean
+  connected: boolean
+  status: 'connected' | 'revoked' | 'disconnected' | string
+  authorizer_app_id?: string
+  account_name?: string
+  avatar_url?: string
+  account_type?: number
+  granted_scopes?: number[]
+  can_create_draft: boolean
+  can_upload_material: boolean
+  can_formally_publish?: boolean
+  can_read_article_analytics?: boolean
+  can_read_account_analytics?: boolean
+  missing_capabilities?: string[]
 }
 
 export interface Project {

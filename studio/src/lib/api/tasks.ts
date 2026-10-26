@@ -74,6 +74,8 @@ export const tasksApi = {
   getWechatPublication: readWechatPublication,
   publishWechat: (id: string) =>
     unwrap<WechatPublication>(http.post(`/tasks/${id}/wechat-publication/publish`)),
+  keepWechatDraft: (id: string) =>
+    unwrap<WechatPublication>(http.post(`/tasks/${id}/wechat-publication/keep-draft`)),
   retryWechatPublish: (id: string) =>
     unwrap<WechatPublication>(http.post(`/tasks/${id}/wechat-publication/retry-publish`)),
   reconcileWechat: (id: string) =>

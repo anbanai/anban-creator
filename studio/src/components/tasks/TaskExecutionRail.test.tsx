@@ -18,6 +18,7 @@ vi.mock('@/lib/api', async () => {
         getWechatPublication: vi.fn(),
         reconcileWechat: vi.fn(),
         publishWechat: vi.fn(),
+        keepWechatDraft: vi.fn(),
         retryWechatPublish: vi.fn(),
         selectWechatArticle: vi.fn(),
         recoverWechatPublication: vi.fn(),
@@ -89,6 +90,9 @@ describe('TaskExecutionRail', () => {
     vi.mocked(api.tasks.getWechatPublication).mockResolvedValue(null)
     vi.mocked(api.tasks.publishWechat).mockResolvedValue({
       id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'anban_api', status: 'publishing',
+    })
+    vi.mocked(api.tasks.keepWechatDraft).mockResolvedValue({
+      id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'anban_api', status: 'drafted', delivery_mode: 'draft',
     })
     vi.mocked(api.tasks.reconcileWechat).mockResolvedValue({ reconciled: true })
     vi.mocked(api.tasks.retryWechatPublish).mockResolvedValue({
@@ -233,6 +237,24 @@ describe('TaskExecutionRail', () => {
     expect(screen.getByRole('heading', { name: '确认正式发布' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '确认发布' }))
     await waitFor(() => expect(api.tasks.publishWechat).toHaveBeenCalledWith('task-1'))
+  })
+
+  it('lets a task retain its existing draft without calling publish', async () => {
+    vi.mocked(api.tasks.getWechatPublication).mockResolvedValue({
+      id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'anban_api', status: 'drafted',
+      draft_media_id: 'draft-1', delivery_mode: 'direct_publish',
+    })
+    const articleLifecycle: TaskLifecycle = {
+      ...lifecycle,
+      stages: [...lifecycle.stages.map((stage) => ({ ...stage, state: 'complete' as const })),
+        { id: 'system_draft', title: '创建公众号草稿', source: 'server', kind: 'draft', state: 'complete' },
+        { id: 'system_publication', title: '正式发布', source: 'server', kind: 'publication', state: 'pending' }],
+    }
+    render(<TaskExecutionRail taskId="task-1" status="completed" lifecycle={articleLifecycle} deliveryMode="direct_publish" canFormallyPublish onOpenLogs={vi.fn()} />)
+    expect(await screen.findByText('项目默认：正式发布')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '保留在草稿箱' }))
+    await waitFor(() => expect(api.tasks.keepWechatDraft).toHaveBeenCalledWith('task-1'))
+    expect(api.tasks.publishWechat).not.toHaveBeenCalled()
   })
 
   it('lets users confirm a manual WeChat publication without requiring a URL', async () => {

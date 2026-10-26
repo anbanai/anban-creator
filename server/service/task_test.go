@@ -73,6 +73,7 @@ func setupTaskTestDB(t *testing.T) *gorm.DB {
 		&model.IlinkBinding{}, &model.IlinkNotification{}, &model.UploadSession{}, &model.Asset{},
 		&model.ProjectChannelConfig{}, &model.WechatPublicationAttempt{},
 		&model.WechatPublication{}, &model.WechatPublicationBinding{},
+		&model.WechatOpenPlatformAuthorization{}, &model.WechatOpenPlatformAuthorizationState{},
 		&model.PlanEntry{},
 		&model.WechatArticleTracking{}, &model.WechatMetricSnapshot{},
 	); err != nil {
@@ -896,6 +897,45 @@ func TestTaskService_FinalizeSelectionRequiresTopicAndAngleForArticle(t *testing
 	}
 }
 
+func TestWechatDeliverySnapshotPrefersOpenPlatformAndFailsClosedAfterUnlink(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	projectID := uuid.NewString()
+	for _, channel := range []string{model.ChannelArticle, model.ChannelWechatPicture} {
+		config := &model.ProjectChannelConfig{ID: uuid.NewString(), ProjectID: projectID, Channel: channel}
+		config.Config = datatypes.NewJSONType(map[string]any{
+			"wechat_app_id": "wx-legacy", "wechat_secret": "legacy-secret", "automatic_delivery_enabled": true,
+		})
+		if err := repo.ProjectChannelConfigs().Upsert(ctx, config); err != nil {
+			t.Fatal(err)
+		}
+	}
+	authorization := &model.WechatOpenPlatformAuthorization{
+		ID: uuid.NewString(), ProjectID: projectID, UserID: uuid.NewString(), AuthorizerAppID: "wx-authorizer",
+		Status: model.WechatAuthorizationStatusConnected, RefreshTokenCiphertext: "ciphertext", GrantedScopes: []int{11, 7}, AuthorizedAt: time.Now(),
+	}
+	if err := repo.WechatOpenPlatformAuthorizations().Upsert(ctx, authorization); err != nil {
+		t.Fatal(err)
+	}
+
+	var connected model.ProjectSnapshot
+	svc.freezeProjectChannelConfig(ctx, projectID, model.ChannelArticle, &connected)
+	if connected.WechatDelivery.IsUserAssisted() || !connected.WechatDelivery.OpenPlatformConnected || connected.WechatDelivery.SecretConfigured {
+		t.Fatalf("connected delivery = %#v", connected.WechatDelivery)
+	}
+
+	authorization.Status = model.WechatAuthorizationStatusRevoked
+	authorization.RefreshTokenCiphertext = ""
+	if err := repo.WechatOpenPlatformAuthorizations().Upsert(ctx, authorization); err != nil {
+		t.Fatal(err)
+	}
+	var revoked model.ProjectSnapshot
+	svc.freezeProjectChannelConfig(ctx, projectID, model.ChannelArticle, &revoked)
+	if !revoked.WechatDelivery.IsUserAssisted() || revoked.WechatDelivery.SecretConfigured || revoked.WechatDelivery.OpenPlatformConnected {
+		t.Fatalf("revoked delivery silently fell back to legacy credentials: %#v", revoked.WechatDelivery)
+	}
+}
+
 func TestTaskService_CreateManualSnapshotsProjectConfig(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
@@ -978,7 +1018,7 @@ func TestTaskService_CreateManualSnapshotsProjectConfig(t *testing.T) {
 		snap.VisualStyle != "旧视觉" || snap.Author != "旧署名" {
 		t.Fatalf("snapshot = %+v, want original project values", snap)
 	}
-	if snap.WechatDelivery.Mode != model.WechatDeliveryModeAutomatic || !snap.WechatDelivery.SecretConfigured ||
+	if snap.WechatDelivery.Mode != model.WechatDeliveryModeDraft || !snap.WechatDelivery.SecretConfigured ||
 		snap.WechatDelivery.MayCreateDraft || snap.WechatDelivery.MayFormallyPublish {
 		t.Fatalf("WeChat delivery decision = %+v, want frozen automatic upload-only access", snap.WechatDelivery)
 	}

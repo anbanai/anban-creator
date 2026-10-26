@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +24,51 @@ import (
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 )
+
+type routerWechatOpenPlatformService struct{}
+
+func (routerWechatOpenPlatformService) StartAuthorization(context.Context, string, string) (*service.WechatAuthorizationStart, error) {
+	return &service.WechatAuthorizationStart{}, nil
+}
+func (routerWechatOpenPlatformService) Disconnect(context.Context, string, string) error { return nil }
+func (routerWechatOpenPlatformService) CompleteAuthorization(context.Context, string, string) (string, error) {
+	return "", nil
+}
+func (routerWechatOpenPlatformService) AuthorizationReturnURL(string, string) string {
+	return "/projects"
+}
+func (routerWechatOpenPlatformService) VerifyCallbackURL(string, string, string) bool { return true }
+func (routerWechatOpenPlatformService) HandleEvent(context.Context, string, string, string, string, []byte) error {
+	return nil
+}
+
+func TestWechatOpenPlatformRoutesExposeOnlySignedCallbacksAndProtectedProjectOperations(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	openPlatformHandler := handler.NewWechatOpenPlatformHandler(routerWechatOpenPlatformService{}, &logger)
+	app := NewRouter(&Services{
+		Config: &config.Config{}, Logger: &logger,
+		ProjectHandler:            handler.NewProjectHandler(service.NewProjectService(repository.New(nil), &logger), &logger),
+		WechatOpenPlatformHandler: openPlatformHandler,
+	})
+	want := map[string]bool{
+		"GET /api/v1/wechat/open-platform/authorization/callback":           false,
+		"GET /api/v1/wechat/open-platform/events":                           false,
+		"POST /api/v1/wechat/open-platform/events":                          false,
+		"POST /api/v1/projects/:id/wechat/authorization":                    false,
+		"DELETE /api/v1/projects/:id/platform-configs/wechat/authorization": false,
+	}
+	for _, route := range app.GetRoutes() {
+		key := route.Method + " " + route.Path
+		if _, ok := want[key]; ok {
+			want[key] = true
+		}
+	}
+	for route, found := range want {
+		if !found {
+			t.Errorf("missing route %s", route)
+		}
+	}
+}
 
 func TestOnboardingRoutesRequireAuthentication(t *testing.T) {
 	logger := zerolog.New(io.Discard)

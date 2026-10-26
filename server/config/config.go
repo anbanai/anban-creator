@@ -33,6 +33,7 @@ type Config struct {
 	Redis              RedisConfig                     `yaml:"redis"`
 	JWT                JWTConfig                       `yaml:"jwt"`
 	WeChat             WeChatConfig                    `yaml:"wechat"`
+	WechatOpenPlatform WechatOpenPlatformConfig        `yaml:"wechat_open_platform"`
 	Storage            StorageConfig                   `yaml:"storage"`
 	MCP                MCPConfig                       `yaml:"mcp"`
 	Hypit              HypitConfig                     `yaml:"hypit"`
@@ -1468,35 +1469,36 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		}
 	}
 	known := map[string]bool{
-		"server":            true,
-		"rate_limit":        true,
-		"article_resources": true,
-		"logging":           true,
-		"database":          true,
-		"redis":             true,
-		"jwt":               true,
-		"wechat":            true,
-		"storage":           true,
-		"mcp":               true,
-		"montage":           true,
-		"video_edit":        true,
-		"local_life":        true,
-		"hypit":             true,
-		"model_providers":   true,
-		"model_routes":      true,
-		"billing_runtime":   true,
-		"claude":            true,
-		"cors":              true,
-		"asynq":             true,
-		"email":             true,
-		"invitation":        true,
-		"seednote":          true,
-		"worldtree":         true,
-		"ilink":             true,
-		"trends":            true,
-		"search":            true,
-		"dsh":               true,
-		"onboarding":        true,
+		"server":               true,
+		"rate_limit":           true,
+		"article_resources":    true,
+		"logging":              true,
+		"database":             true,
+		"redis":                true,
+		"jwt":                  true,
+		"wechat":               true,
+		"wechat_open_platform": true,
+		"storage":              true,
+		"mcp":                  true,
+		"montage":              true,
+		"video_edit":           true,
+		"local_life":           true,
+		"hypit":                true,
+		"model_providers":      true,
+		"model_routes":         true,
+		"billing_runtime":      true,
+		"claude":               true,
+		"cors":                 true,
+		"asynq":                true,
+		"email":                true,
+		"invitation":           true,
+		"seednote":             true,
+		"worldtree":            true,
+		"ilink":                true,
+		"trends":               true,
+		"search":               true,
+		"dsh":                  true,
+		"onboarding":           true,
 	}
 	for key := range top {
 		if !known[key] {
@@ -2280,6 +2282,12 @@ func (c *Config) Validate() error {
 	}
 	if err := c.ArticleResources.Validate(); err != nil {
 		errs = append(errs, err.Error())
+	}
+	if err := c.WechatOpenPlatform.Validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if c.WechatOpenPlatform.Enabled() && strings.TrimSpace(c.Server.PublicBaseURL) == "" {
+		errs = append(errs, "server.public_base_url is required when WeChat Open Platform authorization is enabled")
 	}
 	if raw := strings.TrimSpace(c.Server.PublicBaseURL); raw != "" {
 		u, err := url.Parse(raw)

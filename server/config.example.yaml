@@ -72,6 +72,15 @@ wechat:
   app_id: "${ANBAN_WECHAT_APP_ID}"
   app_secret: "${ANBAN_WECHAT_APP_SECRET}"
 
+# Optional third-party platform configuration for project-scoped QR authorization.
+# Refresh-token encryption key accepts 32 bytes or base64-encoded 32 bytes.
+wechat_open_platform:
+  component_app_id: "${ANBAN_WECHAT_COMPONENT_APP_ID}"
+  component_app_secret: "${ANBAN_WECHAT_COMPONENT_APP_SECRET}"
+  message_token: "${ANBAN_WECHAT_COMPONENT_TOKEN}"
+  encoding_aes_key: "${ANBAN_WECHAT_COMPONENT_ENCODING_AES_KEY}"
+  token_encryption_key: "${ANBAN_WECHAT_TOKEN_ENCRYPTION_KEY}"
+
 storage:
   provider: "oss"
   endpoint: "${ANBAN_OSS_ENDPOINT}"

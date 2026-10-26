@@ -172,7 +172,7 @@ func (s *WechatAccountAnalyticsImportService) Import(ctx context.Context, req We
 		}
 		days := make([]*model.WechatAccountAnalyticsDay, 0, len(parsed.Rows))
 		for _, row := range parsed.Rows {
-			days = append(days, &model.WechatAccountAnalyticsDay{ID: uuid.NewString(), ProjectID: project.ID, BatchID: batch.ID, StatDate: row.StatDate, ReadUsers: row.ReadUsers, ShareUsers: row.ShareUsers, OriginalReadUsers: row.OriginalReadUsers, LikeUsers: row.LikeUsers, CollectionUsers: row.CollectionUsers, CommentCount: row.CommentCount, FollowerGainCount: row.FollowerGainCount, PublishedArticles: row.PublishedArticles, Source: parsed.Source, RawData: marshalWechatAccountRaw(row.Raw), CreatedAt: now, UpdatedAt: now})
+			days = append(days, &model.WechatAccountAnalyticsDay{ID: uuid.NewString(), ProjectID: project.ID, BatchID: batch.ID, StatDate: row.StatDate, ReadUsers: row.ReadUsers, ShareUsers: row.ShareUsers, OriginalReadUsers: row.OriginalReadUsers, LikeUsers: row.LikeUsers, CollectionUsers: row.CollectionUsers, CommentCount: row.CommentCount, FollowerGainCount: row.FollowerGainCount, FollowerCancelCount: row.FollowerCancelCount, FollowerNetGainCount: row.FollowerNetGainCount, PublishedArticles: row.PublishedArticles, Source: parsed.Source, RawData: marshalWechatAccountRaw(row.Raw), CreatedAt: now, UpdatedAt: now})
 		}
 		if err := analyticsRepo.CreateDays(ctx, days); err != nil {
 			return err

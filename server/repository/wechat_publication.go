@@ -125,12 +125,11 @@ func (r *wechatPublicationRepository) FindPendingByProject(ctx context.Context, 
 	var publications []*model.WechatPublication
 	err := r.db.WithContext(ctx).
 		Where("project_id = ?", projectID).
-		Where("status IN ?", []string{
+		Where("status IN ? OR (status = ? AND (delivery_mode = ? OR submit_attempted_at IS NOT NULL OR publish_id <> '' OR msg_data_id <> '' OR msg_id <> ''))", []string{
 			model.WechatPublicationStatusDrafting,
-			model.WechatPublicationStatusDrafted,
 			model.WechatPublicationStatusPublishSubmitting,
 			model.WechatPublicationStatusNeedsSelection,
-		}).
+		}, model.WechatPublicationStatusDrafted, model.WechatDeliveryModeDirectPublish).
 		Order("created_at ASC").Find(&publications).Error
 	return publications, err
 }
@@ -153,13 +152,12 @@ func (r *wechatPublicationRepository) FindDue(ctx context.Context, now time.Time
 	var publications []*model.WechatPublication
 	query := r.db.WithContext(ctx).
 		Where("next_check_at IS NOT NULL AND next_check_at <= ?", now).
-		Where("status IN ?", []string{
+		Where("status IN ? OR (status = ? AND (delivery_mode = ? OR submit_attempted_at IS NOT NULL OR publish_id <> '' OR msg_data_id <> '' OR msg_id <> ''))", []string{
 			model.WechatPublicationStatusDrafting,
-			model.WechatPublicationStatusDrafted,
 			model.WechatPublicationStatusPublishSubmitting,
 			model.WechatPublicationStatusPublishing,
 			model.WechatPublicationStatusNeedsSelection,
-		}).
+		}, model.WechatPublicationStatusDrafted, model.WechatDeliveryModeDirectPublish).
 		Order("next_check_at ASC")
 	if limit > 0 {
 		query = query.Limit(limit)
@@ -172,13 +170,12 @@ func (r *wechatPublicationRepository) ClaimDueDispatch(ctx context.Context, id s
 		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
 			Where("id = ? AND updated_at = ?", id, expectedUpdatedAt).
 			Where("next_check_at IS NOT NULL AND next_check_at <= ?", now).
-			Where("status IN ?", []string{
+			Where("status IN ? OR (status = ? AND (delivery_mode = ? OR submit_attempted_at IS NOT NULL OR publish_id <> '' OR msg_data_id <> '' OR msg_id <> ''))", []string{
 				model.WechatPublicationStatusDrafting,
-				model.WechatPublicationStatusDrafted,
 				model.WechatPublicationStatusPublishSubmitting,
 				model.WechatPublicationStatusPublishing,
 				model.WechatPublicationStatusNeedsSelection,
-			}).
+			}, model.WechatPublicationStatusDrafted, model.WechatDeliveryModeDirectPublish).
 			Update("next_check_at", leaseUntil)
 	})
 	return rows == 1, err
@@ -285,6 +282,7 @@ func (r *wechatPublicationRepository) UpdateReconciliation(ctx context.Context, 
 			Updates(map[string]any{
 				"status":                  publication.Status,
 				"source":                  publication.Source,
+				"delivery_mode":           publication.DeliveryMode,
 				"wechat_status_code":      publication.WechatStatusCode,
 				"next_check_at":           publication.NextCheckAt,
 				"last_checked_at":         publication.LastCheckedAt,
@@ -536,6 +534,7 @@ func (r *wechatPublicationRepository) ClaimPublish(ctx context.Context, id, toke
 		Where("claim_token = '' OR claimed_at IS NULL OR claimed_at < ?", staleBefore).
 		Updates(map[string]any{
 			"status":              model.WechatPublicationStatusPublishSubmitting,
+			"delivery_mode":       model.WechatDeliveryModeDirectPublish,
 			"claim_token":         token,
 			"claimed_at":          &now,
 			"submit_attempted_at": &now,
@@ -545,6 +544,17 @@ func (r *wechatPublicationRepository) ClaimPublish(ctx context.Context, id, toke
 			"wechat_status_code":  0,
 			"last_error":          "",
 		})
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *wechatPublicationRepository) SetDeliveryMode(ctx context.Context, id, mode string, updatedAt time.Time) (bool, error) {
+	updates := map[string]any{"delivery_mode": mode, "updated_at": updatedAt}
+	if mode == model.WechatDeliveryModeDraft {
+		updates["next_check_at"] = nil
+	}
+	result := r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+		Where("id = ? AND status IN ? AND submit_attempted_at IS NULL AND claim_token = ''", id, []string{model.WechatPublicationStatusDrafted, model.WechatPublicationStatusAwaitingManual}).
+		Updates(updates)
 	return result.RowsAffected == 1, result.Error
 }
 

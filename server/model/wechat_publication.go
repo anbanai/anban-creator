@@ -57,6 +57,7 @@ type WechatPublication struct {
 	DraftAuthor               string         `gorm:"type:varchar(500);not null;default:''" json:"draft_author,omitempty"`
 	DraftDigest               string         `gorm:"type:text;not null" json:"draft_digest,omitempty"`
 	DraftThumbMediaID         string         `gorm:"type:varchar(191);not null;default:''" json:"draft_thumb_media_id,omitempty"`
+	DeliveryMode              string         `gorm:"type:varchar(24);not null;default:'draft';index" json:"delivery_mode"`
 	DraftContentFingerprint   string         `gorm:"type:char(64);not null;default:'';index" json:"draft_content_fingerprint,omitempty"`
 	DraftRequestFingerprint   string         `gorm:"type:char(64);not null;default:''" json:"draft_request_fingerprint,omitempty"`
 	DraftImageMediaIDs        datatypes.JSON `gorm:"type:json" json:"draft_image_media_ids,omitempty"`

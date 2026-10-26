@@ -172,6 +172,23 @@ type ArticleTotalDetailRequest struct {
 	BeginDate string `json:"begin_date"`
 	EndDate   string `json:"end_date"`
 }
+
+type UserSummaryRequest struct {
+	BeginDate string `json:"begin_date"`
+	EndDate   string `json:"end_date"`
+}
+
+type UserSummaryItem struct {
+	RefDate    string `json:"ref_date"`
+	UserSource int    `json:"user_source"`
+	NewUser    int64  `json:"new_user"`
+	CancelUser int64  `json:"cancel_user"`
+}
+
+type UserSummaryResponse struct {
+	List []UserSummaryItem `json:"list"`
+}
+
 type ArticleTotalDetailResponse struct {
 	IsDelay     bool                     `json:"is_delay"`
 	List        []ArticleTotalDetailItem `json:"list"`
@@ -244,6 +261,10 @@ func (p *OfficialAPI) BatchGetFreePublishes(ctx context.Context, request FreePub
 func (p *OfficialAPI) GetArticleTotalDetail(ctx context.Context, request ArticleTotalDetailRequest) (*ArticleTotalDetailResponse, error) {
 	var response ArticleTotalDetailResponse
 	return &response, p.post(ctx, "/datacube/getarticletotaldetail", request, &response)
+}
+func (p *OfficialAPI) GetUserSummary(ctx context.Context, request UserSummaryRequest) (*UserSummaryResponse, error) {
+	var response UserSummaryResponse
+	return &response, p.post(ctx, "/datacube/getusersummary", request, &response)
 }
 
 func (p *OfficialAPI) post(ctx context.Context, path string, payload, target any) error {

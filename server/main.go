@@ -378,6 +378,8 @@ func main() {
 	var feedbackSvc *service.FeedbackService
 	var publishingSvc *service.PublishingService
 	var wechatPublicationSvc *service.WechatPublicationService
+	var wechatOpenPlatformSvc *service.WechatOpenPlatformService
+	var wechatAccountAnalyticsSyncSvc *service.WechatAccountAnalyticsSyncService
 	var seednoteTrackingSvc *service.SeednoteTrackingService
 	var wechatTrackingSvc *service.WechatTrackingService
 	var channelsTrackingSvc *service.ChannelsTrackingService
@@ -404,20 +406,35 @@ func main() {
 		projectSvc.SetMontageCapabilityService(montageCapabilitySvc)
 		feedbackSvc = service.NewFeedbackService(repo, log)
 		publishingSvc = service.NewPublishingService(repo, log)
+		if cfg.WechatOpenPlatform.Enabled() {
+			var openPlatformErr error
+			wechatOpenPlatformSvc, openPlatformErr = service.NewWechatOpenPlatformService(repo, cfg.WechatOpenPlatform, cfg.Server.PublicBaseURL, rdb)
+			if openPlatformErr != nil {
+				log.Fatal().Err(openPlatformErr).Msg("initialize WeChat Open Platform")
+			}
+		}
+		if wechatOpenPlatformSvc != nil {
+			wechatAccountAnalyticsSyncSvc = service.NewWechatAccountAnalyticsSyncService(repo, func(ctx context.Context, project *model.Project, authorization *model.WechatOpenPlatformAuthorization) (service.WechatUserSummaryAPI, error) {
+				account := appwechat.NewAuthorizedService(authorization.AuthorizerAppID, func(ctx context.Context) (string, error) {
+					return wechatOpenPlatformSvc.AccessTokenForProject(ctx, project.ID)
+				}, log)
+				return account.OfficialAPI(), nil
+			})
+		}
+		wechatAccountClientFactory := service.NewWechatAccountClientFactory(repo, publishingSvc, wechatOpenPlatformSvc, log)
 		wechatPublicationSvc = service.NewWechatPublicationService(repo, func(project *model.Project) (service.WechatPublicationAPI, error) {
-			appCfg, err := publishingSvc.BuildAppConfigForProject(project)
+			account, err := wechatAccountClientFactory.ForProject(project)
 			if err != nil {
 				return nil, err
 			}
-			return appwechat.NewService(appCfg, log).OfficialAPI(), nil
+			return account.OfficialAPI(), nil
 		}, log)
 		wechatPublicationSvc.SetMaterialUploader(func(ctx context.Context, project *model.Project, data []byte, filename string) (*appwechat.UploadMaterialResult, error) {
-			publisher := service.NewPublishingService(repo, log)
-			appCfg, err := publisher.BuildAppConfigForProject(project)
+			account, err := wechatAccountClientFactory.ForProject(project)
 			if err != nil {
 				return nil, err
 			}
-			return appwechat.NewService(appCfg, log).UploadMaterialFromBytes(data, filename)
+			return account.UploadMaterialFromBytes(data, filename)
 		})
 		templateSvc = service.NewTemplateService(repo, log)
 		posterSvc = service.NewPosterService(repo, log)
@@ -534,7 +551,16 @@ func main() {
 
 	if repo != nil {
 		seednoteTrackingSvc = service.NewSeednoteTrackingService(repo, nil, asynqClient, log)
-		wechatTrackingSvc = service.NewWechatTrackingService(repo, platform.NewWechatOfficialAnalyticsProvider(log, repo), asynqClient, log)
+		wechatAnalyticsProvider := platform.NewWechatOfficialAnalyticsProvider(log, repo)
+		if wechatOpenPlatformSvc != nil {
+			wechatAnalyticsProvider.SetOpenPlatformAPIFactory(func(ctx context.Context, project *model.Project, authorization *model.WechatOpenPlatformAuthorization) (platform.WechatArticleDetailAPI, error) {
+				account := appwechat.NewAuthorizedService(authorization.AuthorizerAppID, func(ctx context.Context) (string, error) {
+					return wechatOpenPlatformSvc.AccessTokenForProject(ctx, project.ID)
+				}, log)
+				return account.OfficialAPI(), nil
+			})
+		}
+		wechatTrackingSvc = service.NewWechatTrackingService(repo, wechatAnalyticsProvider, asynqClient, log)
 		channelsTrackingSvc = service.NewChannelsTrackingService(repo, worldtreeClient, asynqClient, log)
 		log.Info().Msg("SeedNote tracking service initialized")
 		log.Info().Msg("WeChat article tracking service initialized")
@@ -587,6 +613,7 @@ func main() {
 	var wechatAccountAnalyticsImportHandler *handler.WechatAccountAnalyticsImportHandler
 	var wechatAccountAnalyticsHandler *handler.WechatAccountAnalyticsHandler
 	var wechatPublicationHandler *handler.WechatPublicationHandler
+	var wechatOpenPlatformHandler *handler.WechatOpenPlatformHandler
 	var channelsAnalyticsHandler *handler.ChannelsAnalyticsHandler
 	var agentHandler *handler.AgentHandler
 	var agentProfileHandler *handler.AgentProfileHandler
@@ -639,13 +666,17 @@ func main() {
 		wechatAnalyticsHandler = handler.NewWechatAnalyticsHandler(wechatTrackingSvc, log)
 		wechatAnalyticsImportHandler = handler.NewWechatAnalyticsImportHandler(service.NewWechatAnalyticsImportService(repo, store), log)
 		wechatAccountAnalyticsImportHandler = handler.NewWechatAccountAnalyticsImportHandler(service.NewWechatAccountAnalyticsImportService(repo, store), log)
-		wechatAccountAnalyticsHandler = handler.NewWechatAccountAnalyticsHandler(service.NewWechatAccountAnalyticsService(repo), log)
+		wechatAccountAnalyticsHandler = handler.NewWechatAccountAnalyticsHandler(service.NewWechatAccountAnalyticsService(repo), log, wechatAccountAnalyticsSyncSvc)
 		wechatPublicationHandler = handler.NewWechatPublicationHandler(wechatPublicationSvc, log)
 		channelsAnalyticsHandler = handler.NewChannelsAnalyticsHandler(channelsTrackingSvc, log)
 		if ilinkBindingSvc != nil {
 			ilinkHandler = handler.NewIlinkHandler(ilinkBindingSvc, log)
 		}
 		projectHandler = handler.NewProjectHandler(projectSvc, log)
+		if wechatOpenPlatformSvc != nil {
+			wechatOpenPlatformHandler = handler.NewWechatOpenPlatformHandler(wechatOpenPlatformSvc, log)
+			projectHandler.SetWechatOpenPlatformService(wechatOpenPlatformSvc)
+		}
 		projectHandler.SetFeedbackScheduler(feedbackScheduler)
 		feedbackDashboardHandler = handler.NewFeedbackDashboardHandler(projectSvc, repo, feedbackScheduler)
 		projectHandler.SetTaskService(taskSvc)
@@ -1045,6 +1076,7 @@ func main() {
 		WechatAnalyticsImportHandler:        wechatAnalyticsImportHandler,
 		WechatAccountAnalyticsImportHandler: wechatAccountAnalyticsImportHandler,
 		WechatAccountAnalyticsHandler:       wechatAccountAnalyticsHandler,
+		WechatOpenPlatformHandler:           wechatOpenPlatformHandler,
 		WechatPublicationHandler:            wechatPublicationHandler,
 		ChannelsAnalyticsHandler:            channelsAnalyticsHandler,
 		AgentHandler:                        agentHandler,
@@ -1365,6 +1397,21 @@ func requireWechatAccountAnalyticsSchema(db *gorm.DB) error {
 	for _, item := range required {
 		if !db.Migrator().HasTable(item.name) || !db.Migrator().HasColumn(item.model, item.column) {
 			return fmt.Errorf("existing database requires server/migrations/20261009_wechat_account_analytics.sql before startup (missing %s.%s)", item.name, item.column)
+		}
+	}
+	openPlatformRequired := []struct {
+		model  any
+		name   string
+		column string
+	}{
+		{&model.WechatAccountAnalyticsDay{}, "wechat_account_analytics_days", "FollowerCancelCount"},
+		{&model.WechatAccountAnalyticsDay{}, "wechat_account_analytics_days", "FollowerNetGainCount"},
+		{&model.WechatTrafficSourceDay{}, "wechat_traffic_source_days", "NewFollowers"},
+		{&model.WechatTrafficSourceDay{}, "wechat_traffic_source_days", "CancelledFollowers"},
+	}
+	for _, item := range openPlatformRequired {
+		if !db.Migrator().HasColumn(item.model, item.column) {
+			return fmt.Errorf("existing database requires server/migrations/20261026_wechat_account_analytics_open_platform.sql before startup (missing %s.%s)", item.name, item.column)
 		}
 	}
 	return nil

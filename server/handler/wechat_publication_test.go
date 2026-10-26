@@ -32,6 +32,10 @@ func (f *fakeWechatPublicationService) Publish(_ context.Context, userID, taskID
 	f.method, f.userID, f.taskID = "publish", userID, taskID
 	return f.publication, f.err
 }
+func (f *fakeWechatPublicationService) KeepDraft(_ context.Context, userID, taskID string) (*model.WechatPublication, error) {
+	f.method, f.userID, f.taskID = "keep-draft", userID, taskID
+	return f.publication, f.err
+}
 func (f *fakeWechatPublicationService) RetryPublish(_ context.Context, userID, taskID string) (*model.WechatPublication, error) {
 	f.method, f.userID, f.taskID = "retry-publish", userID, taskID
 	return f.publication, f.err
@@ -67,6 +71,7 @@ func publicationHandlerApp(fake WechatPublicationActions) *fiber.App {
 	app.Post("/tasks/:id/wechat-publication/skip", h.Skip)
 	app.Post("/tasks/:id/wechat-publication/restore", h.RestoreSkipped)
 	app.Post("/tasks/:id/wechat-publication/publish", h.Publish)
+	app.Post("/tasks/:id/wechat-publication/keep-draft", h.KeepDraft)
 	app.Post("/tasks/:id/wechat-publication/retry-publish", h.RetryPublish)
 	app.Post("/tasks/:id/wechat-publication/reconcile", h.Reconcile)
 	app.Post("/tasks/:id/wechat-publication/recover", h.Recover)
@@ -79,6 +84,7 @@ func TestWechatPublicationHandlerActionsAreThinAndArticleIDOnly(t *testing.T) {
 	for _, tc := range []struct{ name, method, path, body, called, articleID string }{
 		{"get", http.MethodGet, "/tasks/" + taskID + "/wechat-publication", "", "get", ""},
 		{"publish", http.MethodPost, "/tasks/" + taskID + "/wechat-publication/publish", "", "publish", ""},
+		{"keep draft", http.MethodPost, "/tasks/" + taskID + "/wechat-publication/keep-draft", "", "keep-draft", ""},
 		{"retry publish", http.MethodPost, "/tasks/" + taskID + "/wechat-publication/retry-publish", "", "retry-publish", ""},
 		{"reconcile", http.MethodPost, "/tasks/" + taskID + "/wechat-publication/reconcile", "", "reconcile", ""},
 		{"recover", http.MethodPost, "/tasks/" + taskID + "/wechat-publication/recover", "", "recover", ""},
@@ -154,6 +160,8 @@ func TestWechatPublicationHandlerMapsOwnershipStateAndRateLimit(t *testing.T) {
 		{"ownership", service.ErrWechatPublicationForbidden, http.StatusForbidden},
 		{"state conflict", service.ErrWechatPublicationConflict, http.StatusConflict},
 		{"mode conflict", service.ErrWechatPublicationModeConflict, http.StatusConflict},
+		{"formal publish unavailable", service.ErrWechatPublicationFormalPublishUnavailable, http.StatusForbidden},
+		{"authorization revoked", service.ErrWechatOpenPlatformNotConnected, http.StatusForbidden},
 		{"pending", service.ErrWechatPublicationPending, http.StatusConflict},
 		{"rate limit", service.ErrWechatPublicationRateLimited, http.StatusTooManyRequests},
 		{"article absent", service.ErrWechatPublicationArticleNotFound, http.StatusBadRequest},

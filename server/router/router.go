@@ -49,6 +49,7 @@ type Services struct {
 	WechatAnalyticsImportHandler        *handler.WechatAnalyticsImportHandler
 	WechatAccountAnalyticsImportHandler *handler.WechatAccountAnalyticsImportHandler
 	WechatAccountAnalyticsHandler       *handler.WechatAccountAnalyticsHandler
+	WechatOpenPlatformHandler           *handler.WechatOpenPlatformHandler
 	WechatPublicationHandler            *handler.WechatPublicationHandler
 	ChannelsAnalyticsHandler            *handler.ChannelsAnalyticsHandler
 	AgentHandler                        *handler.AgentHandler
@@ -233,6 +234,11 @@ func NewRouter(svc *Services) *fiber.App {
 		app.Get("/api/v1/resources/:category", svc.ResourceHandler.List)
 		app.Get("/api/v1/resources/:category/:name", svc.ResourceHandler.Get)
 	}
+	if svc.WechatOpenPlatformHandler != nil {
+		app.Get("/api/v1/wechat/open-platform/authorization/callback", svc.WechatOpenPlatformHandler.AuthorizationCallback)
+		app.Get("/api/v1/wechat/open-platform/events", svc.WechatOpenPlatformHandler.VerifyEvents)
+		app.Post("/api/v1/wechat/open-platform/events", svc.WechatOpenPlatformHandler.ReceiveEvents)
+	}
 
 	// ---------------------------------------------------------------------------
 	// Protected API group — /api/v1 (requires authentication)
@@ -324,6 +330,10 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Delete("/projects/:id/channel-configs/:channel", svc.ProjectHandler.DeleteChannelConfig)
 		apiV1.Get("/projects/:id/platform-configs/wechat", svc.ProjectHandler.GetWechatPlatformConfig)
 		apiV1.Put("/projects/:id/platform-configs/wechat", svc.ProjectHandler.UpsertWechatPlatformConfig)
+		if svc.WechatOpenPlatformHandler != nil {
+			apiV1.Post("/projects/:id/wechat/authorization", svc.WechatOpenPlatformHandler.StartAuthorization)
+			apiV1.Delete("/projects/:id/platform-configs/wechat/authorization", svc.WechatOpenPlatformHandler.Disconnect)
+		}
 		if svc.FeedbackDashboardHandler != nil {
 			apiV1.Get("/projects/:id/feedback", svc.FeedbackDashboardHandler.Get)
 			apiV1.Post("/projects/:id/feedback/rerun", svc.FeedbackDashboardHandler.Rerun)
@@ -469,6 +479,7 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/projects/:id/wechat/capabilities", svc.WechatPublicationHandler.Capabilities)
 		apiV1.Get("/tasks/:id/wechat-publication", svc.WechatPublicationHandler.Get)
 		apiV1.Post("/tasks/:id/wechat-publication/publish", svc.WechatPublicationHandler.Publish)
+		apiV1.Post("/tasks/:id/wechat-publication/keep-draft", svc.WechatPublicationHandler.KeepDraft)
 		apiV1.Post("/tasks/:id/wechat-publication/retry-publish", svc.WechatPublicationHandler.RetryPublish)
 		apiV1.Post("/tasks/:id/wechat-publication/reconcile", svc.WechatPublicationHandler.Reconcile)
 		apiV1.Post("/tasks/:id/wechat-publication/recover", svc.WechatPublicationHandler.Recover)
@@ -490,6 +501,7 @@ func NewRouter(svc *Services) *fiber.App {
 	if svc.WechatAccountAnalyticsHandler != nil {
 		apiV1.Get("/projects/:id/wechat-analytics/overview", svc.WechatAccountAnalyticsHandler.Overview)
 		apiV1.Get("/projects/:id/wechat-analytics/traffic-sources", svc.WechatAccountAnalyticsHandler.TrafficSources)
+		apiV1.Post("/projects/:id/wechat-analytics/sync", svc.WechatAccountAnalyticsHandler.Sync)
 	}
 	if svc.WechatAccountAnalyticsImportHandler != nil {
 		apiV1.Post("/projects/:id/wechat-analytics/account-imports/preview", svc.WechatAccountAnalyticsImportHandler.Preview)
