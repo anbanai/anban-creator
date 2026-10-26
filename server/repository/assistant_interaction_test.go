@@ -70,6 +70,76 @@ func TestAssistantInteractionRepositoryAllowsOnlyOneActiveScope(t *testing.T) {
 	}
 }
 
+func TestAssistantInteractionRepositoryFindOrCreateActiveReturnsExistingScope(t *testing.T) {
+	repo, _ := newAssistantInteractionTestRepository(t)
+	now := time.Now().UTC()
+	first := &model.AssistantInteraction{ID: "scope-first", UserID: "user-1", ModeID: "profile", ProjectID: "project-1", Lifecycle: model.AssistantInteractionActive, Generation: 1, ExpiresAt: now.Add(time.Hour), LastActivityAt: now, CreatedAt: now, UpdatedAt: now}
+	got, created, err := repo.AssistantInteractions().FindOrCreateActive(context.Background(), first)
+	if err != nil || !created || got.ID != first.ID {
+		t.Fatalf("first FindOrCreateActive = %#v, created=%v, err=%v", got, created, err)
+	}
+	second := *first
+	second.ID = "scope-second"
+	second.ModeID = "creation"
+	got, created, err = repo.AssistantInteractions().FindOrCreateActive(context.Background(), &second)
+	if err != nil || created || got.ID != first.ID {
+		t.Fatalf("duplicate FindOrCreateActive = %#v, created=%v, err=%v", got, created, err)
+	}
+}
+
+func TestAssistantInteractionRepositoryAppendEventFencesGenerationAndAllocatesSequence(t *testing.T) {
+	repo, _ := newAssistantInteractionTestRepository(t)
+	now := time.Now().UTC()
+	interaction := &model.AssistantInteraction{ID: "event-interaction", UserID: "user-1", ModeID: "creation", Lifecycle: model.AssistantInteractionActive, Generation: 1, ExpiresAt: now.Add(time.Hour), LastActivityAt: now, CreatedAt: now, UpdatedAt: now}
+	if err := repo.AssistantInteractions().Create(context.Background(), interaction); err != nil {
+		t.Fatal(err)
+	}
+	for sequence := uint64(1); sequence <= 2; sequence++ {
+		accepted, err := repo.AssistantInteractions().AppendEvent(context.Background(), interaction.ID, 1, &model.AssistantInteractionEvent{ID: uuid.NewString(), Type: "runtime.ready", Data: json.RawMessage(`{}`), CreatedAt: now})
+		if err != nil || !accepted {
+			t.Fatalf("append event %d = accepted=%v, err=%v", sequence, accepted, err)
+		}
+	}
+	if ok, err := repo.AssistantInteractions().CompareAndSwapGeneration(context.Background(), interaction.ID, 1, 2, now); err != nil || !ok {
+		t.Fatalf("generation CAS = %v, %v", ok, err)
+	}
+	accepted, err := repo.AssistantInteractions().AppendEvent(context.Background(), interaction.ID, 1, &model.AssistantInteractionEvent{ID: uuid.NewString(), Type: "late", Data: json.RawMessage(`{}`), CreatedAt: now})
+	if err != nil || accepted {
+		t.Fatalf("stale append = accepted=%v, err=%v", accepted, err)
+	}
+	accepted, err = repo.AssistantInteractions().AppendEvent(context.Background(), interaction.ID, 2, &model.AssistantInteractionEvent{ID: uuid.NewString(), Type: "runtime.replaced", Data: json.RawMessage(`{}`), CreatedAt: now})
+	if err != nil || !accepted {
+		t.Fatalf("current append = accepted=%v, err=%v", accepted, err)
+	}
+	oldEvents, err := repo.AssistantInteractions().ListEventsAfter(context.Background(), interaction.ID, 1, 0, 10)
+	if err != nil || len(oldEvents) != 2 || oldEvents[0].Generation != 1 || oldEvents[1].Generation != 1 {
+		t.Fatalf("generation 1 events = %#v, err=%v", oldEvents, err)
+	}
+	currentEvents, err := repo.AssistantInteractions().ListEventsAfter(context.Background(), interaction.ID, 2, 0, 10)
+	if err != nil || len(currentEvents) != 1 || currentEvents[0].Generation != 2 || currentEvents[0].Type != "runtime.replaced" {
+		t.Fatalf("generation 2 events = %#v, err=%v", currentEvents, err)
+	}
+}
+
+func TestAssistantInteractionRepositoryMarkNeedsConfirmationDoesNotReopenTerminal(t *testing.T) {
+	repo, _ := newAssistantInteractionTestRepository(t)
+	now := time.Now().UTC()
+	interaction := &model.AssistantInteraction{ID: "terminal-interaction", UserID: "user-1", ModeID: "creation", Lifecycle: model.AssistantInteractionCompleted, Generation: 1, ExpiresAt: now.Add(time.Hour), LastActivityAt: now, CreatedAt: now, UpdatedAt: now}
+	if err := repo.AssistantInteractions().Create(context.Background(), interaction); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AssistantInteractions().MarkNeedsConfirmation(context.Background(), interaction.ID, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.AssistantInteractions().FindByID(context.Background(), interaction.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Lifecycle != model.AssistantInteractionCompleted {
+		t.Fatalf("terminal lifecycle = %q, want completed", got.Lifecycle)
+	}
+}
+
 func TestAssistantInteractionRepositoryAllowsMultipleClosedScopes(t *testing.T) {
 	repo, _ := newAssistantInteractionTestRepository(t)
 	now := time.Now().UTC()

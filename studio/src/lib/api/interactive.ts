@@ -115,6 +115,13 @@ function waitForInteractionRetry(ms: number, signal?: AbortSignal) {
   })
 }
 
+function interactionEventGap(previous: string | undefined, current: string | undefined): boolean {
+  if (!previous || !current) return false
+  const previousSequence = Number(previous)
+  const currentSequence = Number(current)
+  return Number.isSafeInteger(previousSequence) && Number.isSafeInteger(currentSequence) && currentSequence > previousSequence + 1
+}
+
 export function streamAssistantInteraction(interactionId: string, token: string, signal?: AbortSignal, options: InteractionEventStreamOptions = {}): AsyncGenerator<AssistantInteractionEvent> {
   return (async function* () {
     let cursor = options.lastEventId
@@ -145,6 +152,7 @@ export function streamAssistantInteraction(interactionId: string, token: string,
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let gapDetected = false
       try {
         while (true) {
           const { done, value } = await reader.read()
@@ -155,20 +163,57 @@ export function streamAssistantInteraction(interactionId: string, token: string,
           for (const chunk of chunks) {
             const event = parseInteractionSSE(chunk)
             if (!event) continue
-            if (event.id) cursor = event.id
             const data = parseInteractionData(event.data)
             const nextGeneration = typeof data.generation === 'number' ? data.generation : generation
-            if (nextGeneration !== generation) {
+            if (nextGeneration < generation) continue
+            const generationChanged = nextGeneration !== generation
+            if (generationChanged) {
               generation = nextGeneration
               cursor = undefined
               options.onGenerationChanged?.(generation)
             }
+            if (!generationChanged && interactionEventGap(cursor, event.id)) {
+              gapDetected = true
+              break
+            }
+            if (event.id) cursor = event.id
             options.onEvent?.(event)
             yield event
           }
+          if (gapDetected) break
         }
-      } finally { reader.releaseLock() }
+        if (!gapDetected && buffer.trim()) {
+          const event = parseInteractionSSE(`${buffer}\n\n`)
+          if (event) {
+            const data = parseInteractionData(event.data)
+            const nextGeneration = typeof data.generation === 'number' ? data.generation : generation
+            if (nextGeneration >= generation) {
+              const generationChanged = nextGeneration !== generation
+              if (generationChanged) {
+                generation = nextGeneration
+                cursor = undefined
+                options.onGenerationChanged?.(generation)
+              }
+              if (!generationChanged && interactionEventGap(cursor, event.id)) {
+                gapDetected = true
+              } else {
+                if (event.id) cursor = event.id
+                options.onEvent?.(event)
+                yield event
+              }
+            }
+          }
+        }
+      } finally {
+        if (gapDetected) await reader.cancel().catch(() => undefined)
+        reader.releaseLock()
+      }
       if (signal?.aborted) return
+      if (gapDetected) {
+        cursor = undefined
+        reconnects = 0
+        continue
+      }
       await waitForInteractionRetry(250, signal)
     }
   })()

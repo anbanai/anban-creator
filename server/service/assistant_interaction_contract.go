@@ -105,17 +105,19 @@ func interactionCommandDigest(method, attemptID string, params map[string]any) s
 }
 
 type InteractionSnapshot struct {
-	ID               string                 `json:"interaction_id"`
-	ModeID           string                 `json:"mode_id"`
-	ProjectID        string                 `json:"project_id,omitempty"`
-	ContentID        string                 `json:"content_id,omitempty"`
-	Lifecycle        string                 `json:"lifecycle"`
-	Generation       int64                  `json:"generation"`
-	RuntimeStatus    string                 `json:"runtime_status"`
-	ExpiresAt        string                 `json:"expires_at"`
-	LastActivityAt   string                 `json:"last_activity_at"`
-	AvailableActions []string               `json:"available_actions,omitempty"`
-	Drafts           []InteractionDraftView `json:"drafts,omitempty"`
+	ID                string                   `json:"interaction_id"`
+	ModeID            string                   `json:"mode_id"`
+	ProjectID         string                   `json:"project_id,omitempty"`
+	ContentID         string                   `json:"content_id,omitempty"`
+	Lifecycle         string                   `json:"lifecycle"`
+	Generation        int64                    `json:"generation"`
+	RuntimeStatus     string                   `json:"runtime_status"`
+	ExpiresAt         string                   `json:"expires_at"`
+	LastActivityAt    string                   `json:"last_activity_at"`
+	AvailableActions  []string                 `json:"available_actions,omitempty"`
+	RecoveryErrorCode string                   `json:"recovery_error_code,omitempty"`
+	Drafts            []InteractionDraftView   `json:"drafts,omitempty"`
+	CommitResult      *InteractionCommitResult `json:"commit_result,omitempty"`
 }
 
 type InteractionDraftView struct {

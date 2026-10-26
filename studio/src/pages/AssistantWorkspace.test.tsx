@@ -643,6 +643,20 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(screen.getAllByRole('textbox', { name: '发送消息' }).map((item) => (item as HTMLTextAreaElement).value)).toContain('保留这段需求'))
   })
 
+  it('abandons the current interaction before starting over from recovery state', async () => {
+    mocks.streamEvents = [{ event: 'session.expired', id: 'event-session-expired', data: JSON.stringify({ status: 'expired' }) }]
+    renderPage()
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '这段内容需要保留到恢复' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await screen.findByRole('button', { name: '重新开始' })
+
+    fireEvent.click(screen.getByRole('button', { name: '重新开始' }))
+    await waitFor(() => expect(mocks.closeWorkspace).toHaveBeenCalledWith('workspace-1'))
+    expect(screen.queryByRole('button', { name: '重新开始' })).not.toBeInTheDocument()
+  })
+
   it('restores the conversation and confirmation card after a page refresh', async () => {
     const firstRender = renderPage()
     const composer = await screen.findByRole('textbox', { name: '发送消息' })

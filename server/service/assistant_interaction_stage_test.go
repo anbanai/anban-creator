@@ -28,8 +28,8 @@ func TestStageDraftForInteractionPersistsAndReplaysByAttempt(t *testing.T) {
 		t.Fatalf("replay = %#v, %v", replay, err)
 	}
 	events, err := svc.Events(context.Background(), "user-1", snapshot.ID, 0)
-	if err != nil || len(events) == 0 {
-		t.Fatalf("stage events = %#v, %v", events, err)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("stage events = %#v, %v, want one event after replay", events, err)
 	}
 	var liveData map[string]any
 	if err := json.Unmarshal(events[len(events)-1].Data, &liveData); err != nil {
@@ -81,5 +81,52 @@ func TestStageDraftForInteractionRejectsUnknownMode(t *testing.T) {
 	})
 	if !errors.Is(err, ErrInteractiveDraftInvalid) {
 		t.Fatalf("unknown mode error = %v", err)
+	}
+}
+
+func TestStageDraftForInteractionRejectsAttemptReuseAcrossModeOrReadyState(t *testing.T) {
+	svc, _ := newAssistantInteractionServiceTest(t)
+	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "stage-identity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := json.RawMessage(`{"plan":{"goal":"write"}}`)
+	digest := sha256.Sum256(payload)
+	input := InteractionStageInput{
+		InteractionID: snapshot.ID,
+		Generation:    snapshot.Generation,
+		AttemptID:     "same-attempt",
+		ModeID:        AssistantModeCreation,
+		Payload:       payload,
+		PayloadDigest: hex.EncodeToString(digest[:]),
+		Ready:         false,
+	}
+	if _, err := svc.StageDraftForInteraction(context.Background(), "user-1", input); err != nil {
+		t.Fatal(err)
+	}
+
+	modeReuse := input
+	modeReuse.ModeID = AssistantModeReview
+	if _, err := svc.StageDraftForInteraction(context.Background(), "user-1", modeReuse); !errors.Is(err, ErrInteractiveIdempotency) {
+		t.Fatalf("attempt reuse across modes error = %v, want ErrInteractiveIdempotency", err)
+	}
+
+	readyReuse := input
+	readyReuse.Ready = true
+	if _, err := svc.StageDraftForInteraction(context.Background(), "user-1", readyReuse); !errors.Is(err, ErrInteractiveIdempotency) {
+		t.Fatalf("attempt reuse across ready state error = %v, want ErrInteractiveIdempotency", err)
+	}
+}
+
+func TestDraftPersistenceFailureUsesRetryableRecoveryContract(t *testing.T) {
+	err := draftSavedRetryableError(errors.New("database unavailable"))
+	if err.Code != InteractionErrorDraftSavedRetryable || err.Status != 503 {
+		t.Fatalf("draft persistence error = %#v", err)
+	}
+	if strings.Join(err.AvailableActions, ",") != "retry_stage,confirm_draft" {
+		t.Fatalf("draft persistence actions = %v", err.AvailableActions)
+	}
+	if strings.Contains(err.Message, "database") || strings.Contains(err.Error(), "database") {
+		t.Fatalf("draft persistence error leaked cause: %s", err)
 	}
 }

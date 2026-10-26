@@ -8,6 +8,32 @@
 --   interaction events and attempts: 24 HOUR
 -- Cleanup is performed by the Server scheduler after these tables exist.
 
+-- The homepage used AssistantWorkspace-backed logical sessions before this
+-- boundary. Keep an auditable cutover record and fence those sessions without
+-- copying their in-flight transcript into the new interaction tables. Standalone
+-- /interactive sessions have an empty workspace_id and are intentionally left
+-- outside this cutover.
+CREATE TABLE IF NOT EXISTS assistant_interaction_legacy_migrations (
+  legacy_session_id char(36) NOT NULL PRIMARY KEY,
+  migration_key varchar(64) NOT NULL,
+  migrated_at datetime(6) NOT NULL,
+  KEY idx_assistant_interaction_legacy_migration_key (migration_key)
+);
+
+INSERT INTO assistant_interaction_legacy_migrations (legacy_session_id, migration_key, migrated_at)
+SELECT s.id, 'homepage_interaction_cutover', CURRENT_TIMESTAMP(6)
+FROM assistant_sessions s
+WHERE s.workspace_id <> ''
+  AND NOT EXISTS (
+    SELECT 1 FROM assistant_interaction_legacy_migrations m
+    WHERE m.legacy_session_id = s.id
+  );
+
+UPDATE assistant_sessions s
+SET s.status = 'abandoned', s.closed_at = COALESCE(s.closed_at, CURRENT_TIMESTAMP(6)), s.updated_at = CURRENT_TIMESTAMP(6)
+WHERE s.workspace_id <> ''
+  AND s.status NOT IN ('closed', 'expired', 'interrupted', 'abandoned');
+
 CREATE TABLE IF NOT EXISTS assistant_interactions (
   id char(36) NOT NULL PRIMARY KEY,
   user_id char(36) NOT NULL,
@@ -68,11 +94,13 @@ CREATE TABLE IF NOT EXISTS assistant_interaction_drafts (
 CREATE TABLE IF NOT EXISTS assistant_interaction_events (
   id char(36) NOT NULL PRIMARY KEY,
   interaction_id char(36) NOT NULL,
+  generation bigint NOT NULL,
   sequence bigint unsigned NOT NULL,
   type varchar(64) NOT NULL,
   data json NOT NULL,
   created_at datetime(6) NOT NULL,
   UNIQUE KEY idx_assistant_interaction_event_sequence (interaction_id, sequence),
+  KEY idx_assistant_interaction_event_generation (interaction_id, generation, sequence),
   KEY idx_assistant_interaction_event_created (created_at)
 );
 
@@ -83,6 +111,7 @@ CREATE TABLE IF NOT EXISTS assistant_interaction_attempts (
   operation varchar(24) NOT NULL,
   generation bigint NOT NULL,
   payload_digest char(64) NOT NULL,
+  status varchar(24) NOT NULL DEFAULT 'pending',
   result json NULL,
   error_code varchar(96) NOT NULL DEFAULT '',
   created_at datetime(6) NOT NULL,

@@ -19,6 +19,9 @@ const (
 	AssistantInteractionDraftConfirmed    = "confirmed"
 	AssistantInteractionDraftConsumed     = "consumed"
 	AssistantInteractionDraftSuperseded   = "superseded"
+	AssistantInteractionAttemptPending    = "pending"
+	AssistantInteractionAttemptCompleted  = "completed"
+	AssistantInteractionAttemptFailed     = "failed"
 )
 
 // AssistantInteraction is the durable, user-visible conversation boundary.
@@ -83,7 +86,8 @@ func (AssistantInteractionDraft) TableName() string { return "assistant_interact
 type AssistantInteractionEvent struct {
 	ID            string          `gorm:"type:char(36);primaryKey" json:"id"`
 	InteractionID string          `gorm:"type:char(36);uniqueIndex:idx_assistant_interaction_event_sequence,priority:1;index:idx_assistant_interaction_event,priority:1;not null" json:"interaction_id"`
-	Sequence      uint64          `gorm:"uniqueIndex:idx_assistant_interaction_event_sequence,priority:2;index:idx_assistant_interaction_event,priority:2;not null" json:"sequence"`
+	Generation    int64           `gorm:"index:idx_assistant_interaction_event_generation,priority:2;not null" json:"generation"`
+	Sequence      uint64          `gorm:"uniqueIndex:idx_assistant_interaction_event_sequence,priority:2;index:idx_assistant_interaction_event,priority:2;index:idx_assistant_interaction_event_generation,priority:3;not null" json:"sequence"`
 	Type          string          `gorm:"type:varchar(64);not null" json:"type"`
 	Data          json.RawMessage `gorm:"type:json;not null" json:"data"`
 	CreatedAt     time.Time       `gorm:"index;not null" json:"created_at"`
@@ -98,6 +102,7 @@ type AssistantInteractionAttempt struct {
 	Operation     string          `gorm:"type:varchar(24);not null" json:"operation"`
 	Generation    int64           `gorm:"not null" json:"generation"`
 	PayloadDigest string          `gorm:"type:char(64);not null" json:"payload_digest"`
+	Status        string          `gorm:"type:varchar(24);not null;default:'pending'" json:"status"`
 	Result        json.RawMessage `gorm:"type:json" json:"result,omitempty"`
 	ErrorCode     string          `gorm:"type:varchar(96);not null;default:''" json:"error_code,omitempty"`
 	CreatedAt     time.Time       `gorm:"index;not null" json:"created_at"`

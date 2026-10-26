@@ -4,9 +4,9 @@ import (
 	"bufio"
 	"encoding/json"
 	"strconv"
-	"strings"
 	"time"
 
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/gofiber/fiber/v3"
 )
@@ -32,12 +32,7 @@ func (h *AssistantHandler) InteractionCreate(c fiber.Ctx) error {
 	if err := decodeInteractiveJSON(c.Body(), &req); err != nil {
 		return Error(c, 400, "invalid request body")
 	}
-	if strings.TrimSpace(req.ResumeInteractionID) != "" {
-		if snapshot, err := h.interactionSvc.Snapshot(c.Context(), uid, req.ResumeInteractionID); err == nil {
-			return Success(c, snapshot)
-		}
-	}
-	snapshot, err := h.interactionSvc.CreateOrResume(c.Context(), uid, service.AssistantInteractionInput{ModeID: req.ModeID, ProjectID: req.ProjectID, ContentID: req.ContentID, AgentID: req.AgentID, Intent: req.Intent}, c.Get("Idempotency-Key"))
+	snapshot, err := h.interactionSvc.CreateOrResume(c.Context(), uid, service.AssistantInteractionInput{ModeID: req.ModeID, ProjectID: req.ProjectID, ContentID: req.ContentID, ResumeInteractionID: req.ResumeInteractionID, AgentID: req.AgentID, Intent: req.Intent}, c.Get("Idempotency-Key"))
 	if err != nil {
 		return interactiveError(c, err)
 	}
@@ -91,6 +86,7 @@ func (h *AssistantHandler) InteractionAnswer(c fiber.Ctx) error {
 		return Error(c, 503, "assistant unavailable")
 	}
 	var req struct {
+		CallID     string                      `json:"call_id"`
 		Generation int64                       `json:"generation"`
 		AttemptID  string                      `json:"attempt_id"`
 		Answers    []service.InteractiveAnswer `json:"answers"`
@@ -98,7 +94,7 @@ func (h *AssistantHandler) InteractionAnswer(c fiber.Ctx) error {
 	if err := decodeInteractiveJSON(c.Body(), &req); err != nil {
 		return Error(c, 400, "invalid request body")
 	}
-	err := h.interactionSvc.AnswerQuestion(c.Context(), uid, c.Params("id"), service.InteractionAnswerInput{Generation: req.Generation, AttemptID: req.AttemptID, CallID: c.Params("callId"), Answers: req.Answers})
+	err := h.interactionSvc.AnswerQuestion(c.Context(), uid, c.Params("id"), service.InteractionAnswerInput{Generation: req.Generation, AttemptID: req.AttemptID, CallID: req.CallID, Answers: req.Answers})
 	if err != nil {
 		return interactiveError(c, err)
 	}
@@ -166,7 +162,7 @@ func (h *AssistantHandler) InteractionEvents(c fiber.Ctx) error {
 				if _, err := w.WriteString("id: " + strconv.FormatUint(event.Sequence, 10) + "\nevent: " + event.Type + "\ndata: "); err != nil {
 					return
 				}
-				encoded, _ := json.Marshal(event.Data)
+				encoded := interactionEventData(event)
 				if _, err := w.Write(encoded); err != nil {
 					return
 				}
@@ -184,4 +180,21 @@ func (h *AssistantHandler) InteractionEvents(c fiber.Ctx) error {
 			}
 		}
 	})
+}
+
+func interactionEventData(event *model.AssistantInteractionEvent) []byte {
+	if event == nil {
+		return []byte(`{}`)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(event.Data, &fields); err != nil || fields == nil {
+		return event.Data
+	}
+	generation, _ := json.Marshal(event.Generation)
+	fields["generation"] = generation
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		return event.Data
+	}
+	return encoded
 }

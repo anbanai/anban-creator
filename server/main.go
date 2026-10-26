@@ -865,7 +865,8 @@ func main() {
 	}
 
 	// 14.1. Create MCP handler (using official MCP Go SDK).
-	var assistantInteractionSvc *service.AssistantInteractionService
+	assistantInteractionSvc := service.NewAssistantInteractionService(repo, assistantInteractionFactory, nil)
+	assistantInteractionSvc.SetTaskService(taskSvc)
 	var mcpHandler http.Handler
 	if projectSvc != nil && taskSvc != nil && planSvc != nil {
 		// Create AI operation services for MCP tools.
@@ -910,8 +911,6 @@ func main() {
 		}
 		agentProjectProfileSvc := service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), cfg.Montage, imageCapabilityResolver, repo)
 		agentProjectProfileSvc.SetVideoEditConfig(cfg.VideoEdit)
-		assistantInteractionSvc = service.NewAssistantInteractionService(repo, assistantInteractionFactory, nil)
-		assistantInteractionSvc.SetTaskService(taskSvc)
 		mcp.SetServices(&mcp.Services{
 			ProjectSvc:             projectSvc,
 			TaskSvc:                taskSvc,

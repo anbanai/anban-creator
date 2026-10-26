@@ -40,6 +40,29 @@ func TestOnboardingRoutesRequireAuthentication(t *testing.T) {
 	}
 }
 
+func TestAssistantInteractionRoutesUseInteractionScopedAnswers(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	app := NewRouter(&Services{
+		Config:          &config.Config{},
+		Logger:          &logger,
+		AssistantHandler: handler.NewAssistantHandler(nil, nil, nil),
+	})
+	routes := app.GetRoutes()
+	want := map[string]bool{
+		"POST /api/v1/assistant/interactions/:id/answers": true,
+	}
+	for _, route := range routes {
+		key := route.Method + " " + route.Path
+		if key == "POST /api/v1/assistant/interactions/:id/questions/:callId/answers" {
+			t.Fatalf("legacy interaction answer route is still registered: %s", key)
+		}
+		delete(want, key)
+	}
+	for route := range want {
+		t.Errorf("missing interaction route: %s", route)
+	}
+}
+
 func TestConfiguredRateLimitTiersAreAppliedPerRoute(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

@@ -29,7 +29,9 @@ export interface AssistantInteractionSnapshot {
   expires_at: string
   last_activity_at: string
   available_actions: string[]
+  recovery_error_code?: string
   drafts: AssistantInteractionDraftReceipt[]
+  commit_result?: AssistantInteractionCommitResult
 }
 
 export interface AssistantInteractionCommitRequest {
@@ -133,7 +135,7 @@ export interface AssistantCheckpoint extends AssistantCheckpointRequest {
   revision?: number
 }
 
-export type AssistantCommitRequest = { idempotency_key: string } & (
+export type AssistantCommitRequest = { idempotency_key: string; options?: Record<string, unknown> } & (
   | { confirmation_token: string; video_edit_defaults?: VideoEditDefaults }
   | { checkpoint_id: string; checkpoint_digest: string }
 )
@@ -203,9 +205,9 @@ export const assistantApi = {
     const requestedID = 'checkpoint_id' in payload ? payload.checkpoint_id : undefined
     const draft = snapshot.drafts.find((item) => item.draft_id === requestedID) ?? snapshot.drafts.find((item) => item.ready)
     if (!draft) throw new Error('当前计划尚未保存，请恢复计划')
-    const result = await assistantApi.commitInteraction(workspaceId, { draft_id: draft.draft_id, revision: draft.revision, idempotency_key: payload.idempotency_key })
-    if (result.result && typeof result.result === 'object') return result.result as InteractiveCommitResult & Record<string, unknown>
-    return { status: result.status, task: result.task_id ? { id: result.task_id } : undefined }
+    const result = await assistantApi.commitInteraction(workspaceId, { draft_id: draft.draft_id, revision: draft.revision, idempotency_key: payload.idempotency_key, options: payload.options })
+    if (result.result && typeof result.result === 'object') return { ...result.result as InteractiveCommitResult & Record<string, unknown>, interaction_status: result.status, task_id: result.task_id } as InteractiveCommitResult & Record<string, unknown>
+    return { interaction_status: result.status, task_id: result.task_id, task: result.task_id ? { id: result.task_id } : undefined }
   },
 
   closeWorkspace: (workspaceId: string) => http.delete(`/assistant/interactions/${encodeURIComponent(workspaceId)}`),
@@ -217,7 +219,7 @@ export const assistantApi = {
   sendInteractionMessage: (interactionId: string, payload: { generation: number; client_message_id: string; text: string }) =>
     unwrap<{ accepted: boolean }>(http.post(`/assistant/interactions/${encodeURIComponent(interactionId)}/messages`, payload, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
   answerInteractionQuestion: (interactionId: string, callId: string, payload: { generation: number; attempt_id: string; answers: Array<{ id: string; selected: string[]; custom?: string }> }) =>
-    unwrap<{ accepted: boolean }>(http.post(`/assistant/interactions/${encodeURIComponent(interactionId)}/questions/${encodeURIComponent(callId)}/answers`, payload, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
+    unwrap<{ accepted: boolean }>(http.post(`/assistant/interactions/${encodeURIComponent(interactionId)}/answers`, { ...payload, call_id: callId }, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
   commitInteraction: (interactionId: string, payload: AssistantInteractionCommitRequest) =>
     unwrap<AssistantInteractionCommitResult>(http.post(`/assistant/interactions/${encodeURIComponent(interactionId)}/commit`, payload, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
 }

@@ -4,7 +4,7 @@ import { ArrowLeft, Bot, Check, ChevronDown, Library, Loader2, Plus, Upload, Use
 import { Streamdown } from 'streamdown'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
-import type { AssistantInteractionSnapshot, AssistantModeID, AssistantWorkspace as AssistantWorkspaceState, AssistantProject } from '@/lib/api/assistant'
+import type { AssistantInteractionDraftReceipt, AssistantInteractionSnapshot, AssistantModeID, AssistantWorkspace as AssistantWorkspaceState, AssistantProject } from '@/lib/api/assistant'
 import type { InteractiveDraft } from '@/lib/api/interactive'
 import { useAuth } from '@/contexts/AuthContext'
 import { InteractiveStreamError, streamAssistantWorkspace, type InteractiveStreamEvent } from '@/lib/interactive-events'
@@ -167,7 +167,7 @@ function draftsFromSnapshot(snapshot: AssistantInteractionSnapshot): Record<stri
     const current = latest.get(receipt.mode_id)
     if (!current || receipt.revision > current.revision) latest.set(receipt.mode_id, receipt)
   }
-  return Object.fromEntries([...latest.entries()].map(([mode, receipt]) => [mode, draftReceiptToDraft(receipt)]))
+  return Object.fromEntries([...latest.entries()].map(([mode, receipt]) => [mode, receipt.confirmation_state === 'consumed' ? null : draftReceiptToDraft(receipt)]))
 }
 
 function modeLabel(mode: AssistantModeID) {
@@ -192,11 +192,42 @@ function assistantWorkspaceHttpStatus(error: unknown): number | undefined {
   return typeof status === 'number' ? status : undefined
 }
 
+function assistantInteractionSnapshotFromError(error: unknown): AssistantInteractionSnapshot | undefined {
+  if (!error || typeof error !== 'object' || !('response' in error)) return undefined
+  const body = (error as { response?: { data?: unknown } }).response?.data
+  if (!body || typeof body !== 'object') return undefined
+  const envelope = body as { data?: unknown; snapshot?: unknown }
+  const candidate = envelope.data ?? envelope.snapshot
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return undefined
+  const snapshot = candidate as Partial<AssistantInteractionSnapshot>
+  return typeof snapshot.interaction_id === 'string' && typeof snapshot.generation === 'number' && typeof snapshot.lifecycle === 'string'
+    ? snapshot as AssistantInteractionSnapshot
+    : undefined
+}
+
+function assistantInteractionErrorMessage(errorCode: string | undefined, fallback: string): string {
+  const safeFallback = /session\s+not\s+found|interactive\s+session|runtime\s+token|mcp/i.test(fallback)
+    ? '这次操作未完成，当前内容已保留，请重试。'
+    : fallback
+  switch (errorCode) {
+    case 'assistant_interaction_generation_changed': return '对话状态已更新，正在恢复最新内容。'
+    case 'assistant_interaction_reconnecting': return '正在恢复连接，请稍候。'
+    case 'assistant_interaction_restart_required': return '连接已结束，当前计划和输入已保留，请恢复后继续。'
+    case 'assistant_message_not_accepted': return '刚才的消息未送出，内容已保留，请重试。'
+    case 'assistant_draft_saved_retryable': return '计划已保留，但暂存未完成，请重试暂存。'
+    case 'assistant_draft_revision_conflict': return '计划版本已更新，请恢复最新计划后再确认。'
+    case 'assistant_commit_reconciliation_required': return '创建结果需要核对，请查看任务状态。'
+    case 'assistant_commit_already_applied': return '任务已经创建，请查看任务。'
+    default: return safeFallback
+  }
+}
+
 function isStaleAssistantWorkspaceError(error: unknown) {
   const errorCode = assistantWorkspaceErrorCode(error)
   return errorCode === 'assistant_workspace_expired'
     || errorCode === 'assistant_workspace_not_found'
     || errorCode === 'interactive_session_closed'
+    || errorCode === 'assistant_interaction_restart_required'
     || assistantWorkspaceHttpStatus(error) === 404
     || assistantWorkspaceHttpStatus(error) === 410
 }
@@ -297,6 +328,7 @@ export default function AssistantWorkspace() {
   const workspaceResetVersion = useRef(0)
   const workspaceCreateKey = useRef<string | null>(null)
   const sendInFlight = useRef(false)
+  const commitIdempotencyKeys = useRef<Record<string, string>>({})
   const imageRatioContextKey = useRef<string | null>(null)
   const conversationOrder = useRef<Record<string, number>>({})
 
@@ -442,8 +474,55 @@ export default function AssistantWorkspace() {
     workspaceResetVersion.current += 1
     setResponding(false)
     setError('连接已结束，当前计划和输入已保留，请恢复后继续。')
-    if (preservedComposer !== undefined) setComposer(preservedComposer)
+    const preserved = preservedComposer ?? lastSubmittedMessage.current
+    if (preserved) setComposer((current) => current || preserved)
     dispatchInteraction({ type: 'error', code: 'assistant_interaction_restart_required' })
+  }
+
+  const refreshInteractionSnapshot = async () => {
+    if (!workspace) return
+    try {
+      const snapshot = await api.assistant.getInteractionSnapshot(workspace.id)
+      setInteractionSnapshot(snapshot)
+      setWorkspace((current) => current ? { ...current, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, generation: snapshot.generation, runtime_status: snapshot.runtime_status, expires_at: snapshot.expires_at } : current)
+      setDraftByMode(draftsFromSnapshot(snapshot))
+      dispatchInteraction({ type: 'snapshot', snapshot })
+      setError(null)
+    } catch (snapshotError) {
+      const recovered = assistantInteractionSnapshotFromError(snapshotError)
+      if (recovered) {
+        setInteractionSnapshot(recovered)
+        setWorkspace((current) => current ? { ...current, mode_id: recovered.mode_id, project_id: recovered.project_id, content_id: recovered.content_id, generation: recovered.generation, runtime_status: recovered.runtime_status, expires_at: recovered.expires_at } : current)
+        setDraftByMode(draftsFromSnapshot(recovered))
+        dispatchInteraction({ type: 'snapshot', snapshot: recovered })
+        setError(null)
+        return
+      }
+      dispatchInteraction({ type: 'error', code: assistantWorkspaceHttpStatus(snapshotError) === 404 || assistantWorkspaceHttpStatus(snapshotError) === 410 ? 'assistant_interaction_restart_required' : 'assistant_interaction_reconnecting' })
+    }
+  }
+
+  const restartInteraction = async () => {
+    const currentWorkspace = workspace
+    streamAbort.current?.abort()
+    if (currentWorkspace) {
+      try {
+        await api.assistant.closeWorkspace(currentWorkspace.id)
+      } catch {
+        // A missing or already-ended interaction is already safe to restart.
+      }
+    }
+    workspaceResetVersion.current += 1
+    setWorkspace(null)
+    setInteractionSnapshot(null)
+    setConversationPhase('setup')
+    setLastEventIds({})
+    setMessagesByMode({})
+    setQuestionsByMode({})
+    setDraftByMode({})
+    setComposer('')
+    setError(null)
+    dispatchInteraction({ type: 'restart' })
   }
 
   useEffect(() => {
@@ -573,17 +652,21 @@ export default function AssistantWorkspace() {
           } else if (event.event === 'draft.ready') {
             const stagedDraft = recordValue(data.draft) ?? recordValue(data.value)
               ?? (data.ready === true || data.confirmation_token ? data : undefined)
-            if (stagedDraft) setDraftByMode((current) => ({ ...current, [eventMode]: stagedDraft }))
+            if (stagedDraft) {
+              setDraftByMode((current) => ({ ...current, [eventMode]: stagedDraft }))
+              if (typeof stagedDraft.draft_id === 'string' && typeof stagedDraft.mode_id === 'string' && typeof stagedDraft.revision === 'number' && typeof stagedDraft.payload_digest === 'string' && typeof stagedDraft.ready === 'boolean' && typeof stagedDraft.confirmation_state === 'string') {
+                dispatchInteraction({ type: 'draft_ready', draft: stagedDraft as unknown as AssistantInteractionDraftReceipt })
+              }
+            }
           }
         }
       } catch (streamError) {
         if (!controller.signal.aborted) {
           setResponding(false)
           if (streamError instanceof InteractiveStreamError && (streamError.status === 404 || streamError.status === 410)) {
-            resetExpiredWorkspace()
-            setError(null)
+            resetExpiredWorkspace(lastSubmittedMessage.current || undefined)
           } else {
-            setError(streamError instanceof Error ? streamError.message : '助手连接已中断')
+            setError(streamError instanceof Error ? assistantInteractionErrorMessage(undefined, streamError instanceof InteractiveStreamError ? '助手连接已中断，正在恢复。' : streamError.message) : '助手连接已中断，正在恢复。')
           }
         }
       }
@@ -661,7 +744,7 @@ export default function AssistantWorkspace() {
       } else if (assistantWorkspaceHttpStatus(sendError) === 409) {
         setError('对话状态刚刚发生变化，输入已保留，请稍后重试。')
       } else {
-        setError(sendError instanceof Error ? sendError.message : '消息发送失败')
+        setError(assistantInteractionErrorMessage(errorCode, sendError instanceof Error ? sendError.message : '消息发送失败'))
       }
       const conflictMessage = assistantWorkspaceConflictMessage(errorCode, 'send')
       if (conflictMessage && errorCode !== 'assistant_workspace_mode_mismatch' && errorCode !== 'interactive_event_gap'
@@ -776,7 +859,7 @@ export default function AssistantWorkspace() {
       } else if (errorCode === 'assistant_workspace_busy') {
         setError('助手仍在处理上一条消息，请稍后提交回答。')
       } else {
-        setError(answerError instanceof Error ? answerError.message : '提交回答失败')
+        setError(assistantInteractionErrorMessage(errorCode, answerError instanceof Error ? answerError.message : '提交回答失败'))
       }
       const conflictMessage = assistantWorkspaceConflictMessage(errorCode, 'answer')
       if (conflictMessage && errorCode !== 'assistant_workspace_busy') setError(conflictMessage)
@@ -787,7 +870,11 @@ export default function AssistantWorkspace() {
     if (!workspace || !activeDraft || committing) return
     setCommitting(true)
     try {
-      const idempotencyKey = crypto.randomUUID()
+      const draftID = stringValue(activeDraft.draft_id) ?? stringValue(activeDraft.id) ?? 'draft'
+      const draftRevision = typeof activeDraft.revision === 'number' ? activeDraft.revision : 0
+      const commitKeyID = `${workspace.id}:${draftID}:${draftRevision}`
+      const idempotencyKey = commitIdempotencyKeys.current[commitKeyID] ?? crypto.randomUUID()
+      commitIdempotencyKeys.current[commitKeyID] = idempotencyKey
       const tokenValue = stringValue(activeDraft.confirmation_token)
       let result: Awaited<ReturnType<typeof api.assistant.workspaceCommit>>
       if (mode === 'profile' && tokenValue) {
@@ -801,6 +888,7 @@ export default function AssistantWorkspace() {
           ? activeDraft.payload
           : activeDraft
         const payload = structuredClone(draftPayload) as Draft
+        let commitOptions: Record<string, unknown> | undefined
         if (mode === 'creation') {
           if (!selectedCreationType) {
             setError('当前人设不支持可用的创作类型')
@@ -853,9 +941,12 @@ export default function AssistantWorkspace() {
             plan.video_edit_preferences = Object.fromEntries(Object.entries(videoEditPreferences).filter(([, value]) => value !== undefined && value !== ''))
           }
           if (plan !== payload) payload.plan = plan
+          const optionKeys = ['content_type', 'execution_profile', 'image_ratio', 'image_capability_key', 'assets', 'video_edit_brief', 'video_edit_preferences']
+          const planOptions = Object.fromEntries(optionKeys.filter((key) => Object.prototype.hasOwnProperty.call(plan, key)).map((key) => [key, plan[key]]))
+          commitOptions = { plan: planOptions }
         }
         const checkpoint = await api.assistant.workspaceCheckpoint(workspace.id, mode, { schema_version: '1.0', payload, summary: `${modeLabel(mode)}草稿`, status: 'ready' })
-        result = await api.assistant.workspaceCommit(workspace.id, mode, { checkpoint_id: checkpoint.id, checkpoint_digest: checkpoint.payload_digest, idempotency_key: idempotencyKey })
+        result = await api.assistant.workspaceCommit(workspace.id, mode, { checkpoint_id: checkpoint.id, checkpoint_digest: checkpoint.payload_digest, idempotency_key: idempotencyKey, options: commitOptions })
       }
       const committedProjectID = stringValue(result.project?.id)
       if (mode === 'profile' && committedProjectID) {
@@ -876,12 +967,14 @@ export default function AssistantWorkspace() {
         void queryClient.invalidateQueries({ queryKey: ['assistant-bootstrap'] })
       }
       if (mode !== 'creation') setAttachments([])
-      const committedTaskID = stringValue(result.task?.id)
+      const committedTaskID = stringValue(result.task?.id) ?? stringValue((result as { task_id?: unknown }).task_id)
+      const interactionStatus = stringValue((result as { interaction_status?: unknown }).interaction_status) ?? 'created'
+      dispatchInteraction({ type: 'commit_result', result: { status: interactionStatus, task_id: committedTaskID } })
       setDraftByMode((current) => ({ ...current, [mode]: null }))
       if (mode === 'creation' && committedTaskID) navigate(`/tasks/${encodeURIComponent(committedTaskID)}`)
     } catch (commitError) {
       const errorCode = assistantWorkspaceErrorCode(commitError)
-      setError(assistantWorkspaceConflictMessage(errorCode, 'commit') ?? (commitError instanceof Error ? commitError.message : '确认失败'))
+      setError(assistantWorkspaceConflictMessage(errorCode, 'commit') ?? assistantInteractionErrorMessage(errorCode, commitError instanceof Error ? commitError.message : '确认失败'))
       if (errorCode === 'project_profile_revision_conflict') {
         void queryClient.invalidateQueries({ queryKey: ['assistant-bootstrap'] })
       }
@@ -1081,9 +1174,9 @@ export default function AssistantWorkspace() {
       <main data-testid="assistant-workspace" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
       <AssistantRecoveryBanner
         state={interactionState}
-        onRetry={() => { if (workspace) void api.assistant.getInteractionSnapshot(workspace.id).then(setInteractionSnapshot).then(() => setError(null)).catch(() => undefined) }}
-        onRestoreDraft={() => { if (workspace) void api.assistant.getInteractionSnapshot(workspace.id).then((snapshot) => { setInteractionSnapshot(snapshot); setDraftByMode(draftsFromSnapshot(snapshot)); dispatchInteraction({ type: 'snapshot', snapshot }); setError(null) }).catch(() => undefined) }}
-        onRestart={() => { setWorkspace(null); setInteractionSnapshot(null); setConversationPhase('setup'); setLastEventIds({}); setMessagesByMode({}); setQuestionsByMode({}); setDraftByMode({}); setError(null); dispatchInteraction({ type: 'restart' }) }}
+        onRetry={() => { void refreshInteractionSnapshot() }}
+        onRestoreDraft={() => { void refreshInteractionSnapshot() }}
+        onRestart={() => { void restartInteraction() }}
         onViewTask={() => { if (interactionState.taskId) navigate(`/tasks/${encodeURIComponent(interactionState.taskId)}`) }}
       />
       {!workspace ? (

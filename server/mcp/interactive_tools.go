@@ -131,7 +131,7 @@ func stageAssistantDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (
 		if !ok {
 			return errorResult("ready must be a boolean"), nil
 		}
-		if identity.InteractionID != interactionID || identity.Generation != generation {
+		if identity.InteractionID != interactionID || identity.Generation != generation || (identity.ModeID != "" && identity.ModeID != modeID) {
 			return errorResult(service.InteractionErrorGenerationChanged), nil
 		}
 		result, err := svcs.InteractionSvc.StageDraftForInteraction(ctx, identity.UserID, service.InteractionStageInput{InteractionID: interactionID, Generation: generation, AttemptID: attemptID, ModeID: modeID, Payload: payload, PayloadDigest: payloadDigest, Ready: ready})
@@ -220,7 +220,7 @@ func stageProjectCreatorDraftHandler(ctx context.Context, req *mcp.CallToolReque
 		if !ok {
 			return errorResult("ready must be a boolean"), nil
 		}
-		if identity.InteractionID != interactionID || identity.Generation != generation {
+		if identity.InteractionID != interactionID || identity.Generation != generation || (identity.ModeID != "" && identity.ModeID != modeID) {
 			return errorResult(service.InteractionErrorGenerationChanged), nil
 		}
 		result, err := svcs.InteractionSvc.StageDraftForInteraction(ctx, identity.UserID, service.InteractionStageInput{InteractionID: interactionID, Generation: generation, AttemptID: attemptID, ModeID: modeID, Payload: payload, PayloadDigest: payloadDigest, Ready: ready})

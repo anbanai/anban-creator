@@ -19,15 +19,25 @@ import (
 	"gorm.io/gorm"
 )
 
-type assistantInteractionTestRuntime struct{}
+type assistantInteractionTestRuntime struct {
+	factory *assistantInteractionTestFactory
+}
 
-func (assistantInteractionTestRuntime) Command(context.Context, string, any) error { return nil }
-func (assistantInteractionTestRuntime) Close() error                               { return nil }
+func (r assistantInteractionTestRuntime) Command(_ context.Context, method string, _ any) error {
+	if r.factory != nil {
+		r.factory.mu.Lock()
+		r.factory.commands = append(r.factory.commands, method)
+		r.factory.mu.Unlock()
+	}
+	return nil
+}
+func (assistantInteractionTestRuntime) Close() error { return nil }
 
 type assistantInteractionTestFactory struct {
 	mu        sync.Mutex
 	starts    int
 	callbacks map[string]func(string, any)
+	commands  []string
 }
 
 func (f *assistantInteractionTestFactory) Start(_ context.Context, sessionID, _ string, _ string, callback func(string, any)) (Runtime, error) {
@@ -38,13 +48,19 @@ func (f *assistantInteractionTestFactory) Start(_ context.Context, sessionID, _ 
 	}
 	f.starts++
 	f.callbacks[sessionID] = callback
-	return assistantInteractionTestRuntime{}, nil
+	return assistantInteractionTestRuntime{factory: f}, nil
 }
 
 func (f *assistantInteractionTestFactory) callback(sessionID string) func(string, any) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.callbacks[sessionID]
+}
+
+type assistantInteractionFailingFactory struct{}
+
+func (assistantInteractionFailingFactory) Start(context.Context, string, string, string, func(string, any)) (Runtime, error) {
+	return nil, errors.New("runtime unavailable")
 }
 
 func newAssistantInteractionServiceTest(t *testing.T) (*AssistantInteractionService, *assistantInteractionTestFactory) {
@@ -115,6 +131,20 @@ func TestCommitInteractionCreatesProfileProjectAndReplaysDurableReceipt(t *testi
 	if replay.Status != InteractionCommitAlreadyCreated {
 		t.Fatalf("profile commit replay status = %q", replay.Status)
 	}
+	recovered, err := svc.Snapshot(context.Background(), "user-1", snapshot.ID)
+	if err != nil {
+		t.Fatalf("snapshot after commit = %v", err)
+	}
+	if recovered.CommitResult == nil || recovered.CommitResult.Status != InteractionCommitCreated || recovered.CommitResult.Result == nil {
+		t.Fatalf("snapshot commit receipt = %#v, want durable commit result", recovered.CommitResult)
+	}
+	var recoveredCommit AssistantCommitResult
+	if err := json.Unmarshal(recovered.CommitResult.Result, &recoveredCommit); err != nil {
+		t.Fatal(err)
+	}
+	if recoveredCommit.Project == nil || recoveredCommit.Project.ID != committed.Project.ID {
+		t.Fatalf("snapshot commit project = %#v, want %q", recoveredCommit.Project, committed.Project.ID)
+	}
 	interaction, err := svc.repo.AssistantInteractions().FindByIDForUser(context.Background(), "user-1", snapshot.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -138,6 +168,29 @@ func TestCommitInteractionCreatesProfileProjectAndReplaysDurableReceipt(t *testi
 	}
 }
 
+func TestAssistantInteractionStartsLogicalSessionBeforeCommands(t *testing.T) {
+	svc, factory := newAssistantInteractionServiceTest(t)
+	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "handshake")
+	if err != nil {
+		t.Fatal(err)
+	}
+	factory.mu.Lock()
+	commands := append([]string(nil), factory.commands...)
+	factory.mu.Unlock()
+	if len(commands) != 1 || commands[0] != "session/start" {
+		t.Fatalf("runtime commands = %#v, want one session/start before interaction commands", commands)
+	}
+	if err := svc.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{Generation: snapshot.Generation, ClientMessageID: "handshake-message", Text: "继续"}); err != nil {
+		t.Fatal(err)
+	}
+	factory.mu.Lock()
+	commands = append([]string(nil), factory.commands...)
+	factory.mu.Unlock()
+	if len(commands) != 2 || commands[1] != "session/prompt" {
+		t.Fatalf("runtime commands after message = %#v, want session/start then session/prompt", commands)
+	}
+}
+
 func TestInteractionMessageAttemptConflictsWhenPayloadChanges(t *testing.T) {
 	svc, _ := newAssistantInteractionServiceTest(t)
 	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "message-digest")
@@ -151,6 +204,42 @@ func TestInteractionMessageAttemptConflictsWhenPayloadChanges(t *testing.T) {
 	input.Text = "另一条需求"
 	if err := svc.SendMessage(context.Background(), "user-1", snapshot.ID, input); !errors.Is(err, ErrInteractiveIdempotency) {
 		t.Fatalf("changed message payload error = %v", err)
+	}
+}
+
+func TestInteractionMessageDoesNotReplayPendingAttempt(t *testing.T) {
+	svc, _ := newAssistantInteractionServiceTest(t)
+	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "pending-message")
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := map[string]any{"contentBlocks": []map[string]string{{"type": "text", "text": "需求"}}}
+	digest := interactionCommandDigest("session/prompt", "message-1", params)
+	if err := svc.repo.AssistantInteractions().CreateAttempt(context.Background(), &model.AssistantInteractionAttempt{
+		ID: uuid.NewString(), InteractionID: snapshot.ID, AttemptID: "message-1", Operation: string(InteractionOperationMessage), Generation: snapshot.Generation,
+		PayloadDigest: digest, Status: model.AssistantInteractionAttemptPending, CreatedAt: svc.clock(), ExpiresAt: svc.clock().Add(InteractionAttemptRetention),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err = svc.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{Generation: snapshot.Generation, ClientMessageID: "message-1", Text: "需求"})
+	if err == nil || NormalizeInteractionError(err).Code != InteractionErrorReconnecting {
+		t.Fatalf("pending message retry error = %v, want reconnecting", err)
+	}
+}
+
+func TestInteractionAnswerRequiresAttemptIDForRetrySafety(t *testing.T) {
+	svc, _ := newAssistantInteractionServiceTest(t)
+	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "answer-idempotency")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = svc.AnswerQuestion(context.Background(), "user-1", snapshot.ID, InteractionAnswerInput{
+		Generation: snapshot.Generation,
+		CallID:     "call-1",
+		Answers:    []InteractiveAnswer{{ID: "q-1", Selected: []string{"option-1"}}},
+	})
+	if err == nil || NormalizeInteractionError(err).Code != InteractionErrorMessageNotAccepted {
+		t.Fatalf("missing answer attempt error = %v, want %s", err, InteractionErrorMessageNotAccepted)
 	}
 }
 
@@ -208,6 +297,71 @@ func TestAssistantInteractionModesShareOneInteraction(t *testing.T) {
 	}
 	if second.ModeID != AssistantModeReview {
 		t.Fatalf("current mode = %q", second.ModeID)
+	}
+}
+
+func TestAssistantInteractionResumeUpdatesModeAndContextOnSameInteraction(t *testing.T) {
+	svc, _ := newAssistantInteractionServiceTest(t)
+	first, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation, ProjectID: "project-1"}, "create")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{
+		ModeID:              AssistantModeReview,
+		ProjectID:           "project-2",
+		ContentID:           "content-2",
+		ResumeInteractionID: first.ID,
+	}, "resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.ID != first.ID || resumed.ModeID != AssistantModeReview || resumed.ProjectID != "project-2" || resumed.ContentID != "content-2" {
+		t.Fatalf("resumed snapshot = %#v, want same interaction with updated context", resumed)
+	}
+}
+
+func TestCompletedInteractionRejectsRuntimeWritesAndReplaysExistingCommit(t *testing.T) {
+	svc, _ := newAssistantInteractionServiceTest(t)
+	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeProfile}, "terminal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := model.NewProjectProfile()
+	payload, err := json.Marshal(map[string]any{
+		"project": map[string]any{"name": "终态测试", "platform": "wechat"},
+		"profile": profile, "progress": map[string]string{"stage": "ready"},
+		"missing_fields": []string{}, "inferred_fields": []string{}, "ready": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(payload)
+	stage, err := svc.StageDraftForInteraction(context.Background(), "user-1", InteractionStageInput{InteractionID: snapshot.ID, Generation: snapshot.Generation, AttemptID: "terminal-stage", ModeID: AssistantModeProfile, Payload: payload, PayloadDigest: hex.EncodeToString(digest[:]), Ready: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := svc.CommitInteraction(context.Background(), "user-1", snapshot.ID, InteractionCommitRequest{DraftID: stage.DraftID, Revision: stage.Revision, IdempotencyKey: "terminal-commit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Status != InteractionCommitCreated {
+		t.Fatalf("initial commit status = %q", created.Status)
+	}
+	if svc.AcceptRuntimeEvent(snapshot.ID, snapshot.Generation, "assistant.message", map[string]any{"text": "late"}) {
+		t.Fatal("late runtime event was accepted after completion")
+	}
+	if err := svc.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{Generation: snapshot.Generation, ClientMessageID: "late-message", Text: "late"}); err == nil || NormalizeInteractionError(err).Code != InteractionErrorRestartRequired {
+		t.Fatalf("late message error = %v, want restart_required", err)
+	}
+	if _, err := svc.StageDraftForInteraction(context.Background(), "user-1", InteractionStageInput{InteractionID: snapshot.ID, Generation: snapshot.Generation, AttemptID: "late-stage", ModeID: AssistantModeProfile, Payload: payload, PayloadDigest: hex.EncodeToString(digest[:]), Ready: true}); err == nil || NormalizeInteractionError(err).Code != InteractionErrorRestartRequired {
+		t.Fatalf("late stage error = %v, want restart_required", err)
+	}
+	replay, err := svc.CommitInteraction(context.Background(), "user-1", snapshot.ID, InteractionCommitRequest{DraftID: stage.DraftID, Revision: stage.Revision, IdempotencyKey: "different-key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replay.Status != InteractionCommitAlreadyCreated || replay.TaskID != created.TaskID {
+		t.Fatalf("post-completion replay = %#v, want existing receipt", replay)
 	}
 }
 
@@ -283,6 +437,10 @@ func TestAssistantInteractionReplacementDropsOldRuntimeCallbacks(t *testing.T) {
 	if accepted := svc.AcceptRuntimeEvent(snapshot.ID, snapshot.Generation+1, "runtime.ready", map[string]any{}); !accepted {
 		t.Fatal("current runtime event was rejected")
 	}
+	events, err := svc.Events(context.Background(), "user-1", snapshot.ID, 0)
+	if err != nil || len(events) != 1 || events[0].Generation != snapshot.Generation+1 {
+		t.Fatalf("current generation events = %#v, err=%v", events, err)
+	}
 	oldCallback("draft.ready", map[string]any{"ready": true})
 }
 
@@ -297,7 +455,7 @@ func TestAssistantInteractionRuntimeEventsPersistMetadataOnly(t *testing.T) {
 	if !svc.AcceptRuntimeEvent(snapshot.ID, snapshot.Generation, "assistant.message", map[string]any{"text": secretBody, "material_url": materialURL, "runtime_token": "secret-token"}) {
 		t.Fatal("runtime event was not accepted")
 	}
-	events, err := svc.repo.AssistantInteractions().ListEventsAfter(context.Background(), snapshot.ID, 0, 10)
+	events, err := svc.repo.AssistantInteractions().ListEventsAfter(context.Background(), snapshot.ID, snapshot.Generation, 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,6 +507,50 @@ func TestAssistantInteractionSnapshotRecoversAfterServerRestart(t *testing.T) {
 	}
 	if recovered.Generation != snapshot.Generation+1 {
 		t.Fatalf("recovered snapshot generation = %d, want %d", recovered.Generation, snapshot.Generation+1)
+	}
+}
+
+func TestAssistantInteractionSnapshotKeepsReadyDraftWhenRuntimeReplacementFails(t *testing.T) {
+	svc, _ := newAssistantInteractionServiceTest(t)
+	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "ready-draft")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := json.RawMessage(`{"plan":{"goal":"runtime independent confirmation"}}`)
+	digest := sha256.Sum256(payload)
+	if _, err := svc.StageDraftForInteraction(context.Background(), "user-1", InteractionStageInput{
+		InteractionID: snapshot.ID,
+		Generation:    snapshot.Generation,
+		AttemptID:     "ready-draft-stage",
+		ModeID:        AssistantModeCreation,
+		Payload:       payload,
+		PayloadDigest: hex.EncodeToString(digest[:]),
+		Ready:         true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The durable draft must remain readable even if the old runtime is gone
+	// and the replacement cannot start. Confirmation no longer depends on it.
+	restarted := NewAssistantInteractionService(svc.repo, assistantInteractionFailingFactory{}, svc.clock)
+	recovered, err := restarted.Snapshot(context.Background(), "user-1", snapshot.ID)
+	if err != nil {
+		t.Fatalf("snapshot with failed runtime replacement = %v", err)
+	}
+	if recovered.Lifecycle != model.AssistantInteractionNeedsConfirmation || len(recovered.Drafts) != 1 || !recovered.Drafts[0].Ready {
+		t.Fatalf("recovered snapshot = %#v, want ready durable draft", recovered)
+	}
+}
+
+func TestAssistantInteractionSnapshotReportsStartingWhenRuntimeIsNotConfigured(t *testing.T) {
+	svc, _ := newAssistantInteractionServiceTest(t)
+	svc.factory = nil
+	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "starting-runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.RuntimeStatus != InteractionRuntimeStarting {
+		t.Fatalf("runtime status = %q, want %q", snapshot.RuntimeStatus, InteractionRuntimeStarting)
 	}
 }
 

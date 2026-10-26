@@ -74,3 +74,20 @@ it('creates and commits from a durable interaction draft receipt', async () => {
   expect(http.post).toHaveBeenNthCalledWith(2, '/assistant/interactions/interaction-1/commit', { draft_id: 'draft-1', revision: 2, idempotency_key: 'commit-1' }, { timeout: 15 * 60 * 1000 })
   expect(result.status).toBe('already_created')
 })
+
+it('answers an interaction using the interaction-scoped answer endpoint', async () => {
+  vi.mocked(http.post).mockResolvedValue({ data: { data: { accepted: true } } })
+
+  await assistantApi.answerInteractionQuestion('interaction-1', 'call-1', {
+    generation: 3,
+    attempt_id: 'answer-1',
+    answers: [{ id: 'choice', selected: ['yes'] }],
+  })
+
+  expect(http.post).toHaveBeenCalledWith('/assistant/interactions/interaction-1/answers', {
+    call_id: 'call-1',
+    generation: 3,
+    attempt_id: 'answer-1',
+    answers: [{ id: 'choice', selected: ['yes'] }],
+  }, { timeout: 15 * 60 * 1000 })
+})

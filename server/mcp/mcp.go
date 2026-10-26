@@ -228,7 +228,8 @@ func requestIdentityMiddleware(next mcp.MethodHandler) mcp.MethodHandler {
 		ctx = withMCPExecutionIdentity(ctx, info.UserID, projectID, taskID, executionID)
 		interactiveProjectID, _ := info.Extra["project_id"].(string)
 		if interactionID != "" {
-			ctx = withMCPInteractionCapability(ctx, info.UserID, interactionID, interactionGeneration, interactiveProjectID)
+			modeID, _ := info.Extra["assistant_mode_id"].(string)
+			ctx = withMCPInteractionCapabilityMode(ctx, info.UserID, interactionID, interactionGeneration, modeID, interactiveProjectID)
 		} else {
 			ctx = withMCPInteractiveIdentity(ctx, info.UserID, interactiveSessionID, interactiveProjectID)
 		}
@@ -757,6 +758,7 @@ type mcpInteractiveIdentity struct {
 	ProjectID     string
 	InteractionID string
 	Generation    int64
+	ModeID        string
 }
 
 func withMCPUserID(ctx context.Context, userID string) context.Context {
@@ -794,6 +796,14 @@ func withMCPInteractiveIdentity(ctx context.Context, userID, sessionID string, p
 
 func withMCPInteractionCapability(ctx context.Context, userID, interactionID string, generation int64, projectID ...string) context.Context {
 	identity := mcpInteractiveIdentity{UserID: strings.TrimSpace(userID), InteractionID: strings.TrimSpace(interactionID), Generation: generation}
+	if len(projectID) > 0 {
+		identity.ProjectID = strings.TrimSpace(projectID[0])
+	}
+	return context.WithValue(ctx, mcpInteractiveIdentityContextKey{}, identity)
+}
+
+func withMCPInteractionCapabilityMode(ctx context.Context, userID, interactionID string, generation int64, modeID string, projectID ...string) context.Context {
+	identity := mcpInteractiveIdentity{UserID: strings.TrimSpace(userID), InteractionID: strings.TrimSpace(interactionID), Generation: generation, ModeID: strings.TrimSpace(modeID)}
 	if len(projectID) > 0 {
 		identity.ProjectID = strings.TrimSpace(projectID[0])
 	}

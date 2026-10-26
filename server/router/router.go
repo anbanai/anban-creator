@@ -242,12 +242,22 @@ func NewRouter(svc *Services) *fiber.App {
 	authMiddleware := appmiddleware.AuthMiddleware(svc.JWTService, svc.Repo, svc.Logger)
 	rateLimiter := appmiddleware.RateLimit(svc.Redis, "api", svc.Config.RateLimit.API.Requests, svc.Config.RateLimit.API.Window)
 	apiV1 := app.Group("/api/v1", authMiddleware, rateLimiter)
+	if svc.InteractiveHandler != nil {
+		interactive := apiV1.Group("/interactive")
+		interactive.Get("/agents", svc.InteractiveHandler.Agents)
+		interactive.Post("/sessions", svc.InteractiveHandler.Create)
+		interactive.Get("/sessions/:id/events", svc.InteractiveHandler.Events)
+		interactive.Post("/sessions/:id/messages", svc.InteractiveHandler.Message)
+		interactive.Post("/sessions/:id/questions/:callId/answers", svc.InteractiveHandler.Answers)
+		interactive.Post("/sessions/:id/commit", svc.InteractiveHandler.Commit)
+		interactive.Delete("/sessions/:id", svc.InteractiveHandler.Delete)
+	}
 	if svc.AssistantHandler != nil {
 		assistant := apiV1.Group("/assistant")
 		assistant.Post("/interactions", svc.AssistantHandler.InteractionCreate)
 		assistant.Get("/interactions/:id", svc.AssistantHandler.InteractionSnapshot)
 		assistant.Post("/interactions/:id/messages", svc.AssistantHandler.InteractionMessage)
-		assistant.Post("/interactions/:id/questions/:callId/answers", svc.AssistantHandler.InteractionAnswer)
+		assistant.Post("/interactions/:id/answers", svc.AssistantHandler.InteractionAnswer)
 		assistant.Get("/interactions/:id/events", svc.AssistantHandler.InteractionEvents)
 		assistant.Post("/interactions/:id/commit", svc.AssistantHandler.InteractionCommit)
 		assistant.Delete("/interactions/:id", svc.AssistantHandler.InteractionDelete)
