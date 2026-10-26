@@ -76,6 +76,32 @@ func TestHarnessAutonomyAndFailureContracts(t *testing.T) {
 	}
 }
 
+func TestViralIPVideoEditorCoverRoutingUsesMontageContract(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	paths := []string{
+		"harness/skills/viral-ip-editing/SKILL.md",
+		"harness/agents/viral-ip-video-editor.md",
+		"harness/packs/viral-ip-video-editor/agent.claude.md",
+		"harness/packs/viral-ip-video-editor/agent.codex.toml",
+	}
+	for _, rel := range paths {
+		t.Run(rel, func(t *testing.T) {
+			body := readArticleContractFile(t, filepath.Join(root, rel))
+			for _, term := range []string{
+				"$VIDEO_ASPECT_RATIO",
+				"cover-prompts.md",
+				"cover_v2.png",
+				"delivery manifest",
+				"cover.png",
+			} {
+				if !strings.Contains(body, term) {
+					t.Fatalf("viral IP cover routing missing %q", term)
+				}
+			}
+		})
+	}
+}
+
 func TestProjectCreatorProfileRefreshPreservesScopeAndDirectionSemantics(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	creator := readArticleContractFile(t, filepath.Join(root, "harness/skills/project-creator-client-discovery/SKILL.md"))
