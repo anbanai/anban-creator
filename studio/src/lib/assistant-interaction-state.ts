@@ -38,7 +38,9 @@ export function assistantInteractionReducer(state: AssistantInteractionState, ac
     case 'snapshot': {
       const snapshot = action.snapshot
       const readyDraft = (snapshot.drafts ?? []).some((draft) => draft.ready && draft.confirmation_state !== 'consumed')
-      const status = snapshot.recovery_error_code === 'assistant_commit_reconciliation_required'
+      const status = snapshot.recovery_error_code === 'assistant_command_outcome_unknown'
+        ? 'command_uncertain'
+        : snapshot.recovery_error_code === 'assistant_commit_reconciliation_required'
         ? 'restart_required'
         : snapshot.lifecycle === 'completed' ? 'completed' : readyDraft || snapshot.lifecycle === 'needs_confirmation' ? 'needs_confirmation' : snapshot.lifecycle === 'reconnecting' ? 'reconnecting' : 'connecting'
       return { ...state, interactionId: snapshot.interaction_id, generation: snapshot.generation, status, availableActions: snapshot.available_actions ?? [], drafts: snapshot.drafts ?? [], errorCode: snapshot.recovery_error_code, taskId: snapshot.commit_result?.task_id }

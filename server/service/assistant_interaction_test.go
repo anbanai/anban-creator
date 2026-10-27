@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -656,6 +657,16 @@ func TestAssistantInteractionCommandFailureFencesGenerationAndReplacesRuntime(t 
 	}
 	if commands != 1 {
 		t.Fatalf("runtime command deliveries = %d, want no duplicate delivery", commands)
+	}
+	reloaded, err := svc.Snapshot(context.Background(), "user-1", snapshot.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.RecoveryErrorCode != InteractionErrorCommandOutcomeUnknown {
+		t.Fatalf("reloaded recovery error = %q, want outcome unknown", reloaded.RecoveryErrorCode)
+	}
+	if !reflect.DeepEqual(reloaded.AvailableActions, []string{"retry_with_new_attempt", "restart"}) {
+		t.Fatalf("reloaded available actions = %#v, want explicit resend actions", reloaded.AvailableActions)
 	}
 }
 

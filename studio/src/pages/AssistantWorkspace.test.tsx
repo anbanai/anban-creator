@@ -978,6 +978,24 @@ describe('AssistantWorkspace', () => {
     expect(screen.queryByText(/session not found/i)).not.toBeInTheDocument()
   })
 
+  it('keeps an uncertain message resend explicit after page refresh', async () => {
+    sessionStorage.setItem('anban:assistant-workspace', JSON.stringify({
+      workspace: { id: 'workspace-1', mode_id: 'profile', project_id: 'draft-ready', runtime_status: 'failed', expires_at: '' },
+      mode: 'profile', projectId: 'draft-ready', composer: '恢复后继续',
+      uncertainRetry: { kind: 'message', text: '恢复后继续' },
+    }))
+    mocks.getInteractionSnapshot.mockResolvedValueOnce({
+      interaction_id: 'workspace-1', mode_id: 'profile', project_id: 'draft-ready', lifecycle: 'active', generation: 2,
+      runtime_status: 'running', expires_at: '', last_activity_at: '', recovery_error_code: 'assistant_command_outcome_unknown',
+      available_actions: ['retry_with_new_attempt', 'restart'], drafts: [],
+    })
+    renderPage()
+
+    expect(await screen.findByText('上一条操作的结果无法确认，重新提交可能重复执行')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '仍然重试' }))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'profile', '恢复后继续', true))
+  })
+
   it('silently returns to the home state when the event stream reports an expired session', async () => {
     mocks.streamEvents = [{ event: 'session.expired', id: 'event-session-expired', data: JSON.stringify({ status: 'expired' }) }]
     renderPage()

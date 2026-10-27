@@ -320,6 +320,12 @@ func (s *AssistantInteractionService) snapshotWithDrafts(ctx context.Context, us
 			snapshot.AvailableActions = []string{"view_task", "restart"}
 		}
 	}
+	if snapshot.CommitResult == nil && snapshot.RecoveryErrorCode == "" {
+		if _, attemptErr := s.repo.AssistantInteractions().FindLatestCommandOutcomeUnknown(ctx, interaction.ID); attemptErr == nil {
+			snapshot.RecoveryErrorCode = InteractionErrorCommandOutcomeUnknown
+			snapshot.AvailableActions = []string{"retry_with_new_attempt", "restart"}
+		}
+	}
 	return snapshot, nil
 }
 

@@ -171,6 +171,28 @@ func TestAssistantInteractionRepositoryDraftAttemptIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestAssistantInteractionRepositoryIgnoresSupersededUnknownCommand(t *testing.T) {
+	repo, _ := newAssistantInteractionTestRepository(t)
+	base := time.Now().UTC()
+	if err := repo.AssistantInteractions().CreateAttempt(context.Background(), &model.AssistantInteractionAttempt{
+		ID: "attempt-unknown", InteractionID: "interaction-1", AttemptID: "message-unknown", Operation: "message",
+		Generation: 1, PayloadDigest: "digest-unknown", Status: model.AssistantInteractionAttemptPending,
+		ErrorCode: "assistant_command_outcome_unknown", CreatedAt: base, ExpiresAt: base.Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AssistantInteractions().CreateAttempt(context.Background(), &model.AssistantInteractionAttempt{
+		ID: "attempt-retry", InteractionID: "interaction-1", AttemptID: "message-retry", Operation: "message",
+		Generation: 2, PayloadDigest: "digest-retry", Status: model.AssistantInteractionAttemptCompleted,
+		Result: json.RawMessage(`{"accepted":true}`), CreatedAt: base.Add(time.Second), ExpiresAt: base.Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AssistantInteractions().FindLatestCommandOutcomeUnknown(context.Background(), "interaction-1"); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("superseded unknown command = %v, want record not found", err)
+	}
+}
+
 func TestAssistantInteractionRepositoryRetention(t *testing.T) {
 	repo, db := newAssistantInteractionTestRepository(t)
 	now := time.Now().UTC()

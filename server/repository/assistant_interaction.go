@@ -48,6 +48,7 @@ type AssistantInteractionRepository interface {
 	FindCreateAttempt(context.Context, string, string) (*model.AssistantInteractionAttempt, error)
 	UpdateAttempt(context.Context, string, string, string, json.RawMessage, string) error
 	FindLatestCommitAttempt(context.Context, string) (*model.AssistantInteractionAttempt, error)
+	FindLatestCommandOutcomeUnknown(context.Context, string) (*model.AssistantInteractionAttempt, error)
 	ExpireAttempts(context.Context, time.Time) (int64, error)
 	ExpireEvents(context.Context, time.Time) (int64, error)
 }
@@ -465,6 +466,18 @@ func (r *assistantInteractionRepository) FindLatestCommitAttempt(ctx context.Con
 		Where("interaction_id = ? AND operation = ?", interactionID, "commit").
 		Order("created_at DESC").First(&value).Error; err != nil {
 		return nil, err
+	}
+	return &value, nil
+}
+func (r *assistantInteractionRepository) FindLatestCommandOutcomeUnknown(ctx context.Context, interactionID string) (*model.AssistantInteractionAttempt, error) {
+	var value model.AssistantInteractionAttempt
+	if err := r.db.WithContext(ctx).
+		Where("interaction_id = ? AND operation IN ?", interactionID, []string{"message", "answer"}).
+		Order("created_at DESC").Order("id DESC").First(&value).Error; err != nil {
+		return nil, err
+	}
+	if value.Status != model.AssistantInteractionAttemptPending || value.ErrorCode != "assistant_command_outcome_unknown" {
+		return nil, gorm.ErrRecordNotFound
 	}
 	return &value, nil
 }

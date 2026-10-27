@@ -126,6 +126,9 @@ func (s *AssistantInteractionService) runRuntimeCommand(ctx context.Context, use
 	}
 	if err := binding.runtime.Command(ctx, method, params); err != nil {
 		_, replacementErr := s.replaceRuntimeLocked(ctx, userID, interaction, generation, "runtime_command_failed")
+		if persistErr := s.repo.AssistantInteractions().UpdateAttempt(ctx, interactionID, attemptID, model.AssistantInteractionAttemptPending, nil, InteractionErrorCommandOutcomeUnknown); persistErr != nil {
+			return errors.Join(ErrInteractivePersistence, persistErr)
+		}
 		if replacementErr != nil {
 			// Command errors are ambiguous even after a replacement runtime starts:
 			// the failed runtime may have accepted the request before its

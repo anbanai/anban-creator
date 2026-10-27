@@ -46,6 +46,9 @@ type Message = { id: string; role: 'user' | 'assistant'; text: string; order: nu
 type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers']; order: number }
 type Draft = Record<string, unknown>
 type RouteState = AssistantRouteState
+type UncertainRetry =
+  | { kind: 'message'; text: string }
+  | { kind: 'answer'; mode: AssistantModeID; callId: string; answers: DshQuestionAnswer['answers'] }
 type PersistedWorkspace = {
   workspace: AssistantWorkspaceState | null
   creationType?: string
@@ -56,6 +59,7 @@ type PersistedWorkspace = {
   messagesByMode?: Record<string, Message[]>
   questionsByMode?: Record<string, QuestionBatch[]>
   draftByMode?: Record<string, Draft | null>
+  uncertainRetry?: UncertainRetry
 }
 
 const WORKSPACE_STORAGE_KEY = 'anban:assistant-workspace'
@@ -114,6 +118,15 @@ function parsePersistedDrafts(value: unknown): Record<string, Draft | null> | un
     if (draft === null || parsed) result[mode] = parsed ?? null
   }
   return result
+}
+
+function parsePersistedUncertainRetry(value: unknown): UncertainRetry | undefined {
+  const item = recordValue(value)
+  if (!item || (item.kind !== 'message' && item.kind !== 'answer')) return undefined
+  if (item.kind === 'message') return typeof item.text === 'string' && item.text.trim() ? { kind: 'message', text: item.text } : undefined
+  const mode = isMode(item.mode) ? item.mode : undefined
+  const callId = stringValue(item.callId)
+  return mode && callId && Array.isArray(item.answers) ? { kind: 'answer', mode, callId, answers: item.answers as DshQuestionAnswer['answers'] } : undefined
 }
 
 function parseEventData(event: InteractiveStreamEvent): Record<string, unknown> {
@@ -272,6 +285,7 @@ function readPersistedWorkspace(): PersistedWorkspace | null {
       messagesByMode: parsePersistedMessages(candidate.messagesByMode),
       questionsByMode: parsePersistedQuestions(candidate.questionsByMode),
       draftByMode: parsePersistedDrafts(candidate.draftByMode),
+      uncertainRetry: parsePersistedUncertainRetry(candidate.uncertainRetry),
     }
   } catch {
     return null
@@ -310,6 +324,7 @@ export default function AssistantWorkspace() {
   const [messagesByMode, setMessagesByMode] = useState<Record<string, Message[]>>(persisted?.messagesByMode ?? {})
   const [questionsByMode, setQuestionsByMode] = useState<Record<string, QuestionBatch[]>>(persisted?.questionsByMode ?? {})
   const [draftByMode, setDraftByMode] = useState<Record<string, Draft | null>>(persisted?.draftByMode ?? {})
+  const [uncertainRetry, setUncertainRetry] = useState<UncertainRetry | undefined>(persisted?.uncertainRetry)
   const [error, setError] = useState<string | null>(null)
   const [interactionState, dispatchInteraction] = useReducer(assistantInteractionReducer, initialAssistantInteractionState)
   const [, setInteractionSnapshot] = useState<AssistantInteractionSnapshot | null>(null)
@@ -395,11 +410,12 @@ export default function AssistantWorkspace() {
         messagesByMode,
         questionsByMode,
         draftByMode,
+        uncertainRetry,
       } satisfies PersistedWorkspace))
     } catch {
       // Conversation recovery is best effort when browser storage is unavailable or full.
     }
-  }, [workspace, creationType, mode, projectId, contentId, composer, messagesByMode, questionsByMode, draftByMode])
+  }, [workspace, creationType, mode, projectId, contentId, composer, messagesByMode, questionsByMode, draftByMode, uncertainRetry])
 
   const projects = bootstrap?.projects ?? []
   const projectsQuery = useQuery({ queryKey: ['projects', 'assistant-home'], queryFn: () => api.projects.list({ status: 'active' }), staleTime: 30_000 })
@@ -555,6 +571,7 @@ export default function AssistantWorkspace() {
     setError(null)
     dispatchInteraction({ type: 'restart' })
     uncertainRetryRef.current = null
+    setUncertainRetry(undefined)
   }
 
   useEffect(() => {
@@ -709,7 +726,7 @@ export default function AssistantWorkspace() {
 
   const sendMessage = async (override?: string, options?: { forceNewAttempt?: boolean }) => {
     const text = (override ?? composer).trim()
-    if (!text || !canSend || sendInFlight.current) return
+    if (!text || ((!canSend) && !options?.forceNewAttempt) || sendInFlight.current) return
     sendInFlight.current = true
     const resetVersion = workspaceResetVersion.current
     const submittedAttachments = attachmentController.toInputAttachments()
@@ -746,6 +763,7 @@ export default function AssistantWorkspace() {
       if (options?.forceNewAttempt) await api.assistant.workspaceMessage(currentWorkspace.id, mode, messageText, true)
       else await api.assistant.workspaceMessage(currentWorkspace.id, mode, messageText)
       uncertainRetryRef.current = null
+      setUncertainRetry(undefined)
       dispatchInteraction({ type: 'clear_error' })
       if (!workspace && workspaceResetVersion.current === resetVersion) {
         const acceptedWorkspace: AssistantWorkspaceState = {
@@ -782,6 +800,7 @@ export default function AssistantWorkspace() {
       const errorCode = assistantWorkspaceErrorCode(sendError)
       if (errorCode === 'assistant_command_outcome_unknown') {
         uncertainRetryRef.current = () => { void sendMessage(text, { forceNewAttempt: true }) }
+        setUncertainRetry({ kind: 'message', text })
       }
       if (errorCode?.startsWith('assistant_')) dispatchInteraction({ type: 'error', code: errorCode })
       if (isStaleAssistantWorkspaceError(sendError)) {
@@ -907,6 +926,7 @@ export default function AssistantWorkspace() {
       if (forceNewAttempt) await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers, true)
       else await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers)
       uncertainRetryRef.current = null
+      setUncertainRetry(undefined)
       dispatchInteraction({ type: 'clear_error' })
       if (mediaIDs.length > 0) {
         setAttachments((current) => {
@@ -925,6 +945,7 @@ export default function AssistantWorkspace() {
       const errorCode = assistantWorkspaceErrorCode(answerError)
       if (errorCode === 'assistant_command_outcome_unknown') {
         uncertainRetryRef.current = () => { void submitAnswers(batch, answer, true) }
+        setUncertainRetry({ kind: 'answer', mode, callId: batch.callId, answers: answer.answers })
       }
       if (errorCode?.startsWith('assistant_')) dispatchInteraction({ type: 'error', code: errorCode })
       if (isStaleAssistantWorkspaceError(answerError)) {
@@ -1255,7 +1276,14 @@ export default function AssistantWorkspace() {
       <AssistantRecoveryBanner
         state={interactionState}
         onRetry={() => { void refreshInteractionSnapshot() }}
-        onRetryUncertain={() => uncertainRetryRef.current?.()}
+        onRetryUncertain={() => {
+          if (uncertainRetryRef.current) return uncertainRetryRef.current()
+          if (uncertainRetry?.kind === 'message') return void sendMessage(uncertainRetry.text, { forceNewAttempt: true })
+          if (uncertainRetry?.kind === 'answer') {
+            const batch = (questionsByMode[uncertainRetry.mode] ?? []).find((item) => item.callId === uncertainRetry.callId)
+            if (batch) return void submitAnswers(batch, { answers: uncertainRetry.answers }, true)
+          }
+        }}
         onRestoreDraft={() => { void refreshInteractionSnapshot() }}
         onRestart={() => { void restartInteraction() }}
         onViewTask={() => { if (interactionState.taskId) navigate(`/tasks/${encodeURIComponent(interactionState.taskId)}`) }}

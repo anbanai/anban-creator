@@ -71,4 +71,18 @@ describe('assistant interaction state', () => {
 		expect(state.errorCode).toBe('assistant_commit_reconciliation_required')
 		expect(assistantInteractionRecoveryLabel(state)).toContain('核对')
 	})
+
+	it('restores command outcome uncertainty after a page refresh', () => {
+		const state = assistantInteractionReducer(initialAssistantInteractionState, {
+			type: 'snapshot',
+			snapshot: {
+				...snapshot,
+				lifecycle: 'active',
+				recovery_error_code: 'assistant_command_outcome_unknown',
+				available_actions: ['retry_with_new_attempt', 'restart'],
+			},
+		})
+		expect(state.status).toBe('command_uncertain')
+		expect(assistantInteractionRecoveryLabel(state)).toContain('可能重复执行')
+	})
 })
