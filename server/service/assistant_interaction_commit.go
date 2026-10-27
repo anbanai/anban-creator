@@ -81,7 +81,7 @@ func (s *AssistantInteractionService) runRuntimeCommand(ctx context.Context, use
 			return ErrInteractiveIdempotency
 		}
 		if previous.Status == model.AssistantInteractionAttemptPending || (previous.Status == "" && len(previous.Result) == 0 && previous.ErrorCode == "") {
-			return NewInteractionError(InteractionErrorReconnecting, 409, "正在确认上一条操作，请稍候", "wait_for_recovery")
+			return NewInteractionError(InteractionErrorCommandOutcomeUnknown, 409, "上一条操作的发送结果无法确认；重新提交可能重复执行。", "retry_with_new_attempt", "restart")
 		}
 		if previous.Status != model.AssistantInteractionAttemptFailed && len(previous.Result) > 0 {
 			return nil
@@ -127,15 +127,13 @@ func (s *AssistantInteractionService) runRuntimeCommand(ctx context.Context, use
 	if err := binding.runtime.Command(ctx, method, params); err != nil {
 		_, replacementErr := s.replaceRuntimeLocked(ctx, userID, interaction, generation, "runtime_command_failed")
 		if replacementErr != nil {
-			// Command errors are ambiguous: the runtime may have accepted the
-			// request before its acknowledgement was lost. Keep the receipt
-			// pending unless a new generation has fenced the old capability.
+			// Command errors are ambiguous even after a replacement runtime starts:
+			// the failed runtime may have accepted the request before its
+			// acknowledgement was lost. Keep the receipt pending so retries cannot
+			// deliver the same command to the replacement runtime.
 			return s.commandErrorWithSnapshot(ctx, userID, interaction, replacementErr)
 		}
-		if err := s.repo.AssistantInteractions().UpdateAttempt(ctx, interactionID, attemptID, model.AssistantInteractionAttemptFailed, nil, InteractionErrorReconnecting); err != nil {
-			return errors.Join(ErrInteractivePersistence, err)
-		}
-		return s.commandErrorWithSnapshot(ctx, userID, interaction, NewInteractionError(InteractionErrorReconnecting, 409, "正在恢复连接，请稍候", "wait_for_recovery"))
+		return s.commandErrorWithSnapshot(ctx, userID, interaction, NewInteractionError(InteractionErrorCommandOutcomeUnknown, 409, "上一条操作的发送结果无法确认；重新提交可能重复执行。", "retry_with_new_attempt", "restart"))
 	}
 	now := s.clock()
 	if err := s.repo.AssistantInteractions().UpdateAttempt(ctx, interactionID, attemptID, model.AssistantInteractionAttemptCompleted, json.RawMessage(`{"accepted":true}`), ""); err != nil {

@@ -108,6 +108,19 @@ it('reuses a message attempt after an ambiguous request failure until acceptance
   expect(payloads[2]?.client_message_id).not.toBe(payloads[1]?.client_message_id)
 })
 
+it('uses a new message attempt only for an explicit resend decision', async () => {
+  vi.mocked(http.get).mockResolvedValue({ data: { data: { generation: 4 } } })
+  vi.mocked(http.post)
+    .mockRejectedValueOnce(new Error('outcome unknown'))
+    .mockResolvedValueOnce({ data: { data: { accepted: true } } })
+
+  await expect(assistantApi.workspaceMessage('explicit-retry', 'creation', 'same message')).rejects.toThrow('outcome unknown')
+  await assistantApi.workspaceMessage('explicit-retry', 'creation', 'same message', true)
+
+  const payloads = vi.mocked(http.post).mock.calls.map(([, payload]) => payload as { client_message_id: string })
+  expect(payloads[0]?.client_message_id).not.toBe(payloads[1]?.client_message_id)
+})
+
 it('reuses an answer attempt after an ambiguous request failure until acceptance', async () => {
   vi.mocked(http.get).mockResolvedValue({ data: { data: { generation: 4 } } })
   vi.mocked(http.post)
@@ -123,4 +136,18 @@ it('reuses an answer attempt after an ambiguous request failure until acceptance
   const payloads = vi.mocked(http.post).mock.calls.map(([, payload]) => payload as { attempt_id: string })
   expect(payloads[0]?.attempt_id).toBe(payloads[1]?.attempt_id)
   expect(payloads[2]?.attempt_id).not.toBe(payloads[1]?.attempt_id)
+})
+
+it('uses a new answer attempt only for an explicit resend decision', async () => {
+  vi.mocked(http.get).mockResolvedValue({ data: { data: { generation: 4 } } })
+  vi.mocked(http.post)
+    .mockRejectedValueOnce(new Error('outcome unknown'))
+    .mockResolvedValueOnce({ data: { data: { accepted: true } } })
+  const answers = [{ id: 'choice', selected: ['yes'] }]
+
+  await expect(assistantApi.workspaceAnswer('explicit-retry', 'profile', 'call-1', answers)).rejects.toThrow('outcome unknown')
+  await assistantApi.workspaceAnswer('explicit-retry', 'profile', 'call-1', answers, true)
+
+  const payloads = vi.mocked(http.post).mock.calls.map(([, payload]) => payload as { attempt_id: string })
+  expect(payloads[0]?.attempt_id).not.toBe(payloads[1]?.attempt_id)
 })

@@ -189,8 +189,9 @@ export const assistantApi = {
   switchWorkspaceMode: (workspaceId: string, modeId: AssistantModeID, context?: { project_id?: string; content_id?: string; checkpoint_id?: string }) =>
     assistantApi.createInteraction({ mode_id: modeId, project_id: context?.project_id, content_id: context?.content_id, resume_interaction_id: workspaceId }).then(interactionSnapshotAsWorkspace),
 
-  workspaceMessage: async (workspaceId: string, _modeId: AssistantModeID, text: string) => {
+  workspaceMessage: async (workspaceId: string, _modeId: AssistantModeID, text: string, forceNewAttempt = false) => {
     const attemptKey = `${workspaceId}\u0000${text}`
+    if (forceNewAttempt) pendingMessageAttempts.delete(attemptKey)
     const clientMessageID = pendingMessageAttempts.get(attemptKey) ?? crypto.randomUUID()
     pendingMessageAttempts.set(attemptKey, clientMessageID)
     const snapshot = await assistantApi.getInteractionSnapshot(workspaceId)
@@ -199,8 +200,9 @@ export const assistantApi = {
     return result
   },
 
-  workspaceAnswer: async (workspaceId: string, _modeId: AssistantModeID, callId: string, answers: Array<{ id: string; selected: string[]; custom?: string }>) => {
+  workspaceAnswer: async (workspaceId: string, _modeId: AssistantModeID, callId: string, answers: Array<{ id: string; selected: string[]; custom?: string }>, forceNewAttempt = false) => {
     const attemptKey = `${workspaceId}\u0000${callId}\u0000${JSON.stringify(answers)}`
+    if (forceNewAttempt) pendingAnswerAttempts.delete(attemptKey)
     const attemptID = pendingAnswerAttempts.get(attemptKey) ?? crypto.randomUUID()
     pendingAnswerAttempts.set(attemptKey, attemptID)
     const snapshot = await assistantApi.getInteractionSnapshot(workspaceId)

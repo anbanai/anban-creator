@@ -18,6 +18,12 @@ describe('assistant interaction state', () => {
     expect(assistantInteractionRecoveryLabel(state)).toContain('重试暂存')
   })
 
+  it('requires an explicit new attempt when command delivery is uncertain', () => {
+    const state = assistantInteractionReducer(initialAssistantInteractionState, { type: 'error', code: 'assistant_command_outcome_unknown' })
+    expect(state.status).toBe('command_uncertain')
+    expect(assistantInteractionRecoveryLabel(state)).toContain('可能重复执行')
+  })
+
   it('moves to confirmation when a durable draft event arrives', () => {
     const activeSnapshot = { ...snapshot, lifecycle: 'active' as const, drafts: [] }
     const state = assistantInteractionReducer(initialAssistantInteractionState, { type: 'snapshot', snapshot: activeSnapshot })

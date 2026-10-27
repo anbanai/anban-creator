@@ -209,6 +209,7 @@ function assistantInteractionErrorMessage(errorCode: string | undefined, fallbac
     case 'assistant_interaction_generation_changed': return '对话状态已更新，正在恢复最新内容。'
     case 'assistant_interaction_reconnecting': return '正在恢复连接，请稍候。'
     case 'assistant_interaction_restart_required': return '连接已结束，当前计划和输入已保留，请恢复后继续。'
+    case 'assistant_command_outcome_unknown': return '上一条操作的结果无法确认，重新提交可能重复执行。'
     case 'assistant_message_not_accepted': return '刚才的消息未送出，内容已保留，请重试。'
     case 'assistant_draft_saved_retryable': return '计划已保留，但暂存未完成，请重试暂存。'
     case 'assistant_draft_revision_conflict': return '计划版本已更新，请恢复最新计划后再确认。'
@@ -329,6 +330,7 @@ export default function AssistantWorkspace() {
   const modeChosenByUser = useRef(false)
   const imageRatioContextKey = useRef<string | null>(null)
   const conversationOrder = useRef<Record<string, number>>({})
+  const uncertainRetryRef = useRef<(() => void) | null>(null)
   const initialSnapshotRequired = useRef(Boolean(!routeHasContext && persisted?.workspace))
 
   const applyInteractionSnapshot = (snapshot: AssistantInteractionSnapshot) => {
@@ -552,6 +554,7 @@ export default function AssistantWorkspace() {
     setComposer('')
     setError(null)
     dispatchInteraction({ type: 'restart' })
+    uncertainRetryRef.current = null
   }
 
   useEffect(() => {
@@ -704,7 +707,7 @@ export default function AssistantWorkspace() {
     return () => controller.abort()
   }, [interactionSnapshotReady, mode, token, workspace])
 
-  const sendMessage = async (override?: string) => {
+  const sendMessage = async (override?: string, options?: { forceNewAttempt?: boolean }) => {
     const text = (override ?? composer).trim()
     if (!text || !canSend || sendInFlight.current) return
     sendInFlight.current = true
@@ -740,7 +743,10 @@ export default function AssistantWorkspace() {
         workspaceCreateKey.current = null
         createdWorkspace = currentWorkspace
       }
-      await api.assistant.workspaceMessage(currentWorkspace.id, mode, messageText)
+      if (options?.forceNewAttempt) await api.assistant.workspaceMessage(currentWorkspace.id, mode, messageText, true)
+      else await api.assistant.workspaceMessage(currentWorkspace.id, mode, messageText)
+      uncertainRetryRef.current = null
+      dispatchInteraction({ type: 'clear_error' })
       if (!workspace && workspaceResetVersion.current === resetVersion) {
         const acceptedWorkspace: AssistantWorkspaceState = {
           ...currentWorkspace,
@@ -774,6 +780,9 @@ export default function AssistantWorkspace() {
       setComposer(text)
       setMessagesByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).filter((message) => message.id !== optimisticID) }))
       const errorCode = assistantWorkspaceErrorCode(sendError)
+      if (errorCode === 'assistant_command_outcome_unknown') {
+        uncertainRetryRef.current = () => { void sendMessage(text, { forceNewAttempt: true }) }
+      }
       if (errorCode?.startsWith('assistant_')) dispatchInteraction({ type: 'error', code: errorCode })
       if (isStaleAssistantWorkspaceError(sendError)) {
         resetExpiredWorkspace()
@@ -786,7 +795,7 @@ export default function AssistantWorkspace() {
       } else if (errorCode === 'assistant_workspace_mode_mismatch' || errorCode === 'interactive_event_gap') {
         resetExpiredWorkspace(text)
         setError(assistantWorkspaceConflictMessage(errorCode, 'send') ?? '对话状态已变化，输入已保留，请重新建立对话后重试。')
-      } else if (assistantWorkspaceHttpStatus(sendError) === 409) {
+      } else if (assistantWorkspaceHttpStatus(sendError) === 409 && errorCode !== 'assistant_command_outcome_unknown') {
         setError('对话状态刚刚发生变化，输入已保留，请稍后重试。')
       } else {
         setError(assistantInteractionErrorMessage(errorCode, sendError instanceof Error ? sendError.message : '消息发送失败'))
@@ -884,7 +893,7 @@ export default function AssistantWorkspace() {
     }
   }
 
-  const submitAnswers = async (batch: QuestionBatch, answer: DshQuestionAnswer) => {
+  const submitAnswers = async (batch: QuestionBatch, answer: DshQuestionAnswer, forceNewAttempt = false) => {
     if (!workspace) return
     try {
       const mediaIDs = [...new Set(answer.answers.flatMap((item) => item.selected).flatMap((label) => {
@@ -895,7 +904,10 @@ export default function AssistantWorkspace() {
       if (selectedMedia.some((asset) => asset.status !== 'available')) {
         throw new Error('候选素材已不可用，请重新选择或上传素材。')
       }
-      await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers)
+      if (forceNewAttempt) await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers, true)
+      else await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers)
+      uncertainRetryRef.current = null
+      dispatchInteraction({ type: 'clear_error' })
       if (mediaIDs.length > 0) {
         setAttachments((current) => {
           const existing = new Set(current.flatMap((item) => item.assetId ? [item.assetId] : []))
@@ -911,6 +923,9 @@ export default function AssistantWorkspace() {
       const recoveredSnapshot = assistantInteractionSnapshotFromError(answerError)
       if (recoveredSnapshot) applyInteractionSnapshot(recoveredSnapshot)
       const errorCode = assistantWorkspaceErrorCode(answerError)
+      if (errorCode === 'assistant_command_outcome_unknown') {
+        uncertainRetryRef.current = () => { void submitAnswers(batch, answer, true) }
+      }
       if (errorCode?.startsWith('assistant_')) dispatchInteraction({ type: 'error', code: errorCode })
       if (isStaleAssistantWorkspaceError(answerError)) {
         resetExpiredWorkspace()
@@ -1240,6 +1255,7 @@ export default function AssistantWorkspace() {
       <AssistantRecoveryBanner
         state={interactionState}
         onRetry={() => { void refreshInteractionSnapshot() }}
+        onRetryUncertain={() => uncertainRetryRef.current?.()}
         onRestoreDraft={() => { void refreshInteractionSnapshot() }}
         onRestart={() => { void restartInteraction() }}
         onViewTask={() => { if (interactionState.taskId) navigate(`/tasks/${encodeURIComponent(interactionState.taskId)}`) }}

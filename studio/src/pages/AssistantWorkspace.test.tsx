@@ -675,6 +675,26 @@ describe('AssistantWorkspace', () => {
     expect(screen.queryByText('Request failed with status code 409')).not.toBeInTheDocument()
   })
 
+  it('requires explicit confirmation before resending a command with an unknown outcome', async () => {
+    const unknown = Object.assign(new Error('outcome unknown'), {
+      response: { status: 409, data: { error_code: 'assistant_command_outcome_unknown' } },
+    })
+    mocks.workspaceMessage.mockRejectedValueOnce(unknown).mockResolvedValueOnce(undefined)
+    renderPage()
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '继续当前需求' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(await screen.findByText('上一条操作的结果无法确认，重新提交可能重复执行')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '仍然重试' })).toBeInTheDocument()
+    expect(composer).toHaveValue('继续当前需求')
+    expect(mocks.workspaceMessage).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '仍然重试' }))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledTimes(2))
+    expect(mocks.workspaceMessage).toHaveBeenLastCalledWith('workspace-1', 'profile', '继续当前需求', true)
+  })
+
   it('distinguishes workspace mode conflicts from generic conversation conflicts', async () => {
     const conflict = Object.assign(new Error('Request failed with status code 409'), {
       response: { status: 409, data: { error_code: 'assistant_workspace_mode_mismatch' } },

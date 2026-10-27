@@ -43,6 +43,7 @@ func TestInteractionErrorContractExposesRecoveryActions(t *testing.T) {
 		{InteractionErrorReconnecting, []string{"wait_for_recovery"}},
 		{InteractionErrorRestartRequired, []string{"restore_draft", "restart"}},
 		{InteractionErrorMessageNotAccepted, []string{"retry_message"}},
+		{InteractionErrorCommandOutcomeUnknown, []string{"retry_with_new_attempt", "restart"}},
 		{InteractionErrorDraftSavedRetryable, []string{"retry_stage", "confirm_draft"}},
 		{InteractionErrorDraftRevisionConflict, []string{"reload_draft", "confirm_draft"}},
 		{InteractionErrorCommitAlreadyApplied, []string{"view_task"}},
