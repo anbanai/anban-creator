@@ -12,6 +12,7 @@ import type { AssistantBootstrap } from '@/lib/api/assistant'
 const mocks = vi.hoisted(() => ({
   bootstrap: vi.fn(),
   projectsList: vi.fn(),
+  projectUpdate: vi.fn(),
   projectArchive: vi.fn(),
   projectRestore: vi.fn(),
   projectStats: vi.fn(),
@@ -41,7 +42,7 @@ vi.mock('@/lib/api', async () => {
       assistant: { ...actual.api.assistant, ...mocks },
       agentProfiles: { ...actual.api.agentProfiles, list: mocks.agentProfiles },
       imageCapabilities: { ...actual.api.imageCapabilities, list: mocks.imageCapabilities },
-      projects: { ...actual.api.projects, list: mocks.projectsList, platformConfigs: mocks.platformConfigs, archive: mocks.projectArchive, restore: mocks.projectRestore, stats: mocks.projectStats },
+      projects: { ...actual.api.projects, list: mocks.projectsList, update: mocks.projectUpdate, platformConfigs: mocks.platformConfigs, archive: mocks.projectArchive, restore: mocks.projectRestore, stats: mocks.projectStats },
       tasks: { ...actual.api.tasks, get: mocks.taskGet, files: mocks.taskFiles },
     },
   }
@@ -485,11 +486,76 @@ describe('AssistantWorkspace', () => {
     renderPage()
 
     const composer = await screen.findByRole('textbox', { name: '发送消息' })
-    await waitFor(() => expect(composer).toHaveAttribute('placeholder', '当前人设暂不支持首页创作，请选择其他人设'))
+    await waitFor(() => expect(composer).toHaveAttribute('placeholder', '此类型请进入创作页使用，或调整创作类型'))
     expect(composer).toBeDisabled()
-    expect(composer).toHaveAttribute('placeholder', '当前人设暂不支持首页创作，请选择其他人设')
-    expect(within(screen.getByTestId('assistant-context-bar')).getByRole('status')).toHaveTextContent('当前人设暂不支持首页创作，请选择其他人设')
+    expect(composer).toHaveAttribute('placeholder', '此类型请进入创作页使用，或调整创作类型')
+    expect(within(screen.getByTestId('assistant-context-bar')).getByRole('status')).toHaveTextContent('此类型请进入创作页使用，或调整创作类型')
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '前往创作页' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('/tasks/new?project_id=project-unsupported')
+  })
+
+  function setupUnconfiguredPersona() {
+    const persona = activePersona('needs-types', '待设置人设', { platform: '' as Project['platform'], agent_ids: [] })
+    setBootstrap({ defaultModeId: 'creation', modes: [
+      { id: 'creation', displayName: '创作模式', description: '创作', available: true },
+    ], projects: [{ ...persona, profileReady: true, profileRevision: 1, works: [] }] })
+    mocks.projectsList.mockResolvedValue([persona])
+    return persona
+  }
+
+  it('saves creation types inline, retains the brief and can create after a refresh', async () => {
+    const persona = setupUnconfiguredPersona()
+    const saved = { ...persona, platform: 'wechat' as const, agent_ids: ['wechat-picture'] }
+    mocks.projectUpdate.mockImplementation(async () => {
+      mocks.projectsList.mockResolvedValue([saved])
+      return saved
+    })
+    const view = renderPage({ modeId: 'creation', projectId: persona.id, initialMessage: '做一组茶知识图片' })
+    fireEvent.click(await screen.findByRole('button', { name: '选择创作类型' }))
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByRole('button', { name: '保存并继续创作' })).toBeDisabled()
+    fireEvent.click(within(dialog).getByRole('button', { name: '公众号贴图' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存并继续创作' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(mocks.projectUpdate).toHaveBeenCalledWith(persona.id, { agent_ids: ['wechat-picture'], platform: 'wechat' })
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('做一组茶知识图片')
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
+    expect(screen.getByRole('combobox', { name: '本次创作类型' })).toHaveValue('wechat-picture')
+    expect(mocks.createWorkspace).not.toHaveBeenCalled()
+    expect(mocks.workspaceMessage).not.toHaveBeenCalled()
+    view.unmount()
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled())
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('做一组茶知识图片')
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '做一组茶知识图片\n\n创作类型：wechat-picture'))
+  })
+
+  it('does not modify settings when cancelled and keeps a failed save retryable', async () => {
+    const persona = setupUnconfiguredPersona()
+    mocks.projectUpdate.mockRejectedValue(new Error('保存失败'))
+    renderPage({ modeId: 'creation', projectId: persona.id, initialMessage: '保留这段需求' })
+    fireEvent.click(await screen.findByRole('button', { name: '选择创作类型' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '取消' }))
+    expect(mocks.projectUpdate).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '选择创作类型' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '视频生成' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '保存并继续创作' }))
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: '保存并继续创作' })).toBeEnabled()
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '取消' }))
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('保留这段需求')
+    expect(mocks.createWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('allows selecting between the configured article and picture types before sending', async () => {
+    const persona = setupUnconfiguredPersona()
+    mocks.projectsList.mockResolvedValue([{ ...persona, platform: 'wechat', agent_ids: ['wechat-article', 'wechat-picture'] }])
+    renderPage({ modeId: 'creation', projectId: persona.id, initialMessage: '图片创作' })
+    fireEvent.change(await screen.findByRole('combobox', { name: '本次创作类型' }), { target: { value: 'wechat-picture' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '图片创作\n\n创作类型：wechat-picture'))
   })
 
   it('only exposes creation parameters in creation mode', async () => {
@@ -672,7 +738,7 @@ describe('AssistantWorkspace', () => {
     expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('当前模式：人设模式')
   })
 
-  it('does not expose a creation type selector for WeChat personas', async () => {
+  it('exposes the current WeChat creation type beside persona settings', async () => {
     setBootstrap({
       defaultModeId: 'creation',
       modes: [
@@ -686,7 +752,7 @@ describe('AssistantWorkspace', () => {
 
     await screen.findByRole('textbox', { name: '发送消息' })
     expect(screen.queryByRole('combobox', { name: '创作类型' })).not.toBeInTheDocument()
-    expect(screen.queryByText('公众号文章')).not.toBeInTheDocument()
+    expect(await screen.findByRole('combobox', { name: '本次创作类型' })).toHaveValue('wechat-article')
   })
 
   it('keeps the empty and active states on the root route', async () => {

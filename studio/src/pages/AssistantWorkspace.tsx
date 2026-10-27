@@ -23,6 +23,7 @@ import { DshQuestionComposer, type DshQuestion, type DshQuestionAnswer } from '@
 import { AssistantVideoEditInputs } from '@/components/video-edit/AssistantVideoEditInputs'
 import { VideoEditProjectDefaultsPanel } from '@/components/video-edit/VideoEditProjectDefaultsPanel'
 import { TaskResults } from '@/components/tasks/TaskResults'
+import { ProjectOutputSettingsDialog } from '@/components/projects/ProjectOutputSettingsDialog'
 import { AssistantDraftSummary } from '@/components/assistant/AssistantDraftSummary'
 import { SignedImage } from '@/components/ui/SignedImage'
 import type { InputAttachment, PromptAttachment } from '@/types/input-attachment'
@@ -31,7 +32,9 @@ import type { VideoEditDefaults, VideoEditPreferences } from '@/types/video-edit
 import type { Task, TaskFile } from '@/types'
 import type { ImageRatio } from '@/lib/schemas'
 import { platformDisplayName } from '@/lib/labels'
-import { profileLabAgents } from '@/lib/project-capabilities'
+import { profileLabAgents, projectAgentIDs } from '@/lib/project-capabilities'
+import { assistantCreationTypes } from '@/lib/assistant-creation-types'
+import type { Project } from '@/types'
 
 type Message = { id: string; role: 'user' | 'assistant'; text: string; order: number }
 type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers']; order: number }
@@ -51,13 +54,6 @@ type PersistedWorkspace = {
 }
 
 const WORKSPACE_STORAGE_KEY = 'anban:assistant-workspace'
-
-const CREATION_TYPES: Record<string, { value: string; label: string }[]> = {
-  wechat: [{ value: 'wechat-article', label: '公众号文章' }, { value: 'wechat-picture', label: '公众号贴图' }],
-  seednote: [{ value: 'seednote', label: '种草笔记' }],
-  montage: [{ value: 'video', label: '视频生成' }],
-  'video-edit': [{ value: 'video-edit', label: '全自动视频剪辑' }],
-}
 
 function isMode(value: unknown): value is AssistantModeID {
   return value === 'profile' || value === 'creation' || value === 'review'
@@ -222,6 +218,7 @@ export default function AssistantWorkspace() {
   const [attachments, setAttachments] = useState<PromptAttachment[]>([])
   const [executionProfile, setExecutionProfile] = useState<AgentExecutionProfileID | ''>('')
   const [creationType, setCreationType] = useState(routeHasContext ? '' : persisted?.creationType ?? '')
+  const [outputSettingsProject, setOutputSettingsProject] = useState<Project | null>(null)
   const [imageRatio, setImageRatio] = useState<ImageRatio>('auto')
   const [imageCapabilityKey, setImageCapabilityKey] = useState('')
   const [videoEditAssets, setVideoEditAssets] = useState<InputAttachment[]>([])
@@ -312,7 +309,9 @@ export default function AssistantWorkspace() {
   const selectedProject = selectableProjects.find((project) => project.id === (lockedProjectId ?? projectId))
     ?? (lockedProjectId ? projects.find((project) => project.id === lockedProjectId) : undefined)
     ?? (!workspace && !projectId && !newProfile && selectionMode !== 'profile' ? selectableProjects[0] : undefined)
-  const creationTypes = CREATION_TYPES[selectedProject?.platform ?? ''] ?? []
+  const creationTypes = assistantCreationTypes(selectedProject)
+  const selectedProjectRecord = projectsQuery.data?.find(project => project.id === selectedProject?.id)
+  const selectedAgentIDs = selectedProjectRecord ? projectAgentIDs(selectedProjectRecord) : []
   const selectedCreationType = creationTypes.some((item) => item.value === creationType) ? creationType : creationTypes[0]?.value ?? ''
   const isVideoEditCreation = mode === 'creation' && selectedCreationType === 'video-edit'
   const usesImageSettings = mode === 'creation' && Boolean(selectedProject) && !isVideoEditCreation
@@ -356,7 +355,7 @@ export default function AssistantWorkspace() {
     ? mode === 'creation' && !selectedProject
       ? '先选择人设后即可输入消息'
       : mode === 'creation' && selectedProject && creationTypes.length === 0
-        ? '当前人设暂不支持首页创作，请选择其他人设'
+        ? selectedAgentIDs.length ? '此类型请进入创作页使用，或调整创作类型' : '请先选择创作类型，即可继续创作'
       : mode === 'review' && !selectedProject
         ? '先选择人设后即可输入消息'
         : mode === 'review' && !selectedWork
@@ -985,6 +984,15 @@ export default function AssistantWorkspace() {
         <section className="assistant-scroll mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col overflow-y-auto px-4 pb-6 md:px-8">
           <div data-testid="assistant-conversation" className="flex shrink-0 flex-col pb-4 pt-8 md:pb-6 md:pt-14">
             <HomeStage project={selectedProject} hasPersona={completeProjects.length > 0} />
+            {selectedProjectRecord && mode === 'creation' && <section aria-label="人设创作设置" className="mx-auto mb-5 flex w-full max-w-xl flex-wrap items-center gap-3 rounded-xl border bg-muted/30 p-3">
+              {creationTypes.length > 0 ? <label className="flex items-center gap-2 text-sm">本次创作
+                <NativeSelect aria-label="本次创作类型" value={selectedCreationType} disabled={sending || switching || committing} onChange={event => chooseCreationType(event.target.value)}>
+                  {creationTypes.map(item => <NativeSelectOption key={item.value} value={item.value}>{item.label}</NativeSelectOption>)}
+                </NativeSelect>
+              </label> : <p className="flex-1 text-sm text-muted-foreground">{selectedAgentIDs.length ? '已选类型可在创作页使用，也可以添加首页支持的类型。' : '先选想做的内容，再聊创作需求。以后也可以调整。'}</p>}
+              <Button type="button" variant={creationTypes.length ? 'outline' : 'default'} size="sm" disabled={sending || switching || committing} onClick={() => setOutputSettingsProject(selectedProjectRecord)}>{selectedAgentIDs.length ? '调整创作类型' : '选择创作类型'}</Button>
+              {selectedAgentIDs.some(id => !creationTypes.some(type => type.agent === id)) && <Button type="button" variant="outline" size="sm" onClick={() => navigate(`/tasks/new?project_id=${encodeURIComponent(selectedProjectRecord.id)}`)}>前往创作页</Button>}
+            </section>}
             {personaRail}
             {routeHasContext && mode === 'review' && <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} onProject={resetCreationProject} onContent={setContentId} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />}
             {!activeMode?.available && activeMode?.disabledReason && !isRuntimeUnavailable && <div className="mx-auto mt-4 flex w-full max-w-2xl flex-col items-center gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3 sm:flex-row sm:justify-between"><p role="status" className="text-left text-sm leading-6 text-muted-foreground">{activeMode.disabledReason}</p><Button type="button" variant="outline" size="sm" className="shrink-0" onClick={selectModePrerequisiteAction}>{modePrerequisiteAction.label}</Button></div>}
@@ -1013,6 +1021,11 @@ export default function AssistantWorkspace() {
         </section>
       )}
       </main>
+      {outputSettingsProject && <ProjectOutputSettingsDialog key={outputSettingsProject.id} project={outputSettingsProject} syncAssistantPlatform onClose={() => setOutputSettingsProject(null)} onSaved={() => {
+        setOutputSettingsProject(null)
+        setError(null)
+        void queryClient.invalidateQueries({ queryKey: ['assistant-bootstrap'] })
+      }} />}
     </AgentPromptDropProvider>
   )
 }
@@ -1034,8 +1047,8 @@ function platformAgentID(platform: string) {
   return platform
 }
 
-function platformMeta(platform: string) {
-  return { label: platformDisplayName(platform, '创作'), agentID: platformAgentID(platform) }
+function personaAgentIDs(project: AssistantProject) {
+  return projectAgentIDs(project as Pick<Project, 'platform' | 'agent_ids'>)
 }
 
 function platformIntroduction(platform: string) {
@@ -1045,7 +1058,7 @@ function platformIntroduction(platform: string) {
 
 function HomeStage({ project, hasPersona }: { project?: AssistantProject; hasPersona: boolean }) {
   const imageURL = personaImageURL(project)
-  const meta = platformMeta(project?.platform ?? '')
+  const agents = project ? personaAgentIDs(project) : []
   return <section aria-label="当前人设" className="mx-auto flex w-full max-w-xl flex-col px-2 pb-8 text-left md:pb-10">
     <div className="flex shrink-0 items-center justify-center gap-4 sm:gap-6">
     <div className="relative flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-muted/60 shadow-sm sm:size-28">
@@ -1055,7 +1068,7 @@ function HomeStage({ project, hasPersona }: { project?: AssistantProject; hasPer
       <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{project ? '当前人设' : '准备开始'}</p>
       <h1 className="mt-2 text-xl font-semibold tracking-tight sm:text-2xl">{project?.name ?? '神秘人'}</h1>
       <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{project?.description || (hasPersona ? '选择一个人设，开始你的下一次创作。' : '为了创建更好的作品，需要先创建您的人设')}</p>
-      {project && <span className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><AgentIconStack agentIds={[meta.agentID]} maxVisible={1} compact />{meta.label}</span>}
+      {project && <span className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><AgentIconStack agentIds={agents} maxVisible={3} compact emptyLabel="还未选择创作类型" /></span>}
     </div>
     </div>
   </section>
@@ -1105,7 +1118,7 @@ function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWo
           <span className="min-w-0"><span className="block truncate text-sm font-semibold">创建新人设</span><span className="mt-0.5 block truncate text-xs leading-4 text-muted-foreground">聊一聊你的定位与风格</span></span>
         </button>
         {projects.map((project) => {
-          const meta = platformMeta(project.platform)
+          const agents = personaAgentIDs(project)
           const imageURL = personaImageURL(project)
           const selected = selectedProjectId === project.id
           return <article key={project.id} className={`group relative flex h-full min-w-0 flex-col rounded-xl border bg-card p-2 transition-shadow ${selected ? 'border-primary shadow-sm ring-1 ring-primary/25' : 'border-border hover:shadow-sm'}`}>
@@ -1113,7 +1126,7 @@ function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWo
               <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
                 {imageURL ? <SignedImage src={imageURL} alt="" className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-5 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-5 text-muted-foreground" />}
               </div>
-              <span className="min-w-0 flex-1"><span className="flex items-center gap-1 text-sm font-semibold"><span className="truncate">{project.name}</span><AgentIconStack agentIds={[meta.agentID]} maxVisible={1} compact /></span><span className="block truncate text-xs leading-4 text-muted-foreground">{project.description || platformIntroduction(project.platform)}</span></span>
+              <span className="min-w-0 flex-1"><span className="flex items-center gap-1 text-sm font-semibold"><span className="truncate">{project.name}</span><AgentIconStack agentIds={agents} maxVisible={1} compact emptyLabel="还未选择创作类型" /></span><span className="block truncate text-xs leading-4 text-muted-foreground">{project.description || (agents.length ? platformIntroduction(project.platform) : '选择创作类型后即可开始')}</span></span>
             </button>
             <div className="mt-auto flex shrink-0 items-center justify-end gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
               <Button type="button" variant="ghost" size="sm" aria-label={`查看作品：${project.name}`} onClick={() => onViewWorks(project.id)} className="h-7 px-1.5 text-[11px]">查看作品</Button>

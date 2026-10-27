@@ -32,6 +32,8 @@ export interface AssistantProject {
   id: string
   name: string
   platform: string
+  /** Enriched from the active project list; bootstrap may omit this field. */
+  agent_ids?: string[] | null
   profileRevision: number
   profileReady: boolean
   avatar_url?: string
