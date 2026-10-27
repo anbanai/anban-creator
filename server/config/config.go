@@ -293,7 +293,7 @@ func (c DshConfig) Validate() error {
 	}
 	if c.Enabled && executor == "kubernetes" {
 		if !validDshKubernetesImageReference(c.Image) {
-			errs = append(errs, "dsh.image must be a valid immutable container image reference")
+			errs = append(errs, "dsh.image must be a valid container image reference without whitespace")
 		}
 		if strings.TrimSpace(c.KubernetesNamespace) == "" {
 			errs = append(errs, "dsh.kubernetes_namespace is required for kubernetes executor")
@@ -1511,7 +1511,6 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 // expanded, so a literal '$' in a value (e.g. a password) is never touched.
 // Submatch 1 = variable name; submatch 2 = default text (nil when no :-group).
 var envVarRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}`)
-var sha256DigestRe = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 func validDshKubernetesImageReference(image string) bool {
 	if image == "" || image != strings.TrimSpace(image) || strings.IndexFunc(image, unicode.IsSpace) >= 0 {
@@ -1521,12 +1520,7 @@ func validDshKubernetesImageReference(image string) bool {
 	if err != nil {
 		return false
 	}
-	digested, ok := named.(reference.Digested)
-	if !ok {
-		return false
-	}
-	digest := digested.Digest()
-	return string(digest.Algorithm()) == "sha256" && sha256DigestRe.MatchString(digest.Encoded())
+	return named != nil
 }
 
 // expandEnvVars replaces ${VAR} / ${VAR:-default} occurrences in the raw config

@@ -14,7 +14,8 @@ Usage: scripts/agent-runtime-release.sh [--output PATH]
 
 Image references are supplied through SERVER_IMAGE, DSH_IMAGE, and one
 AGENT_IMAGE_* variable for every managed runtime profile. Tags and digests are
-accepted for managed Agent images; DSH_IMAGE must include a sha256 digest.
+accepted for managed Agent images and DSH_IMAGE. DSH_IMAGE must be a valid
+Docker image reference without whitespace.
 EOF
 }
 
@@ -56,7 +57,7 @@ fi
 : "${DSH_IMAGE:?DSH_IMAGE must be set}"
 
 if ! is_valid_dsh_image_reference "$DSH_IMAGE"; then
-  echo "DSH_IMAGE must be a valid immutable sha256 image reference without whitespace" >&2
+  echo "DSH_IMAGE must be a valid container image reference without whitespace" >&2
   exit 1
 fi
 

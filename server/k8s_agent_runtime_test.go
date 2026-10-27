@@ -593,7 +593,7 @@ func TestACKRenderRejectsMalformedDshImageReference(t *testing.T) {
 	cmd := exec.Command("bash", filepath.Join("..", "scripts", "render-ack-server-deployment.sh"))
 	cmd.Env = append(os.Environ(), env...)
 	output, err := cmd.CombinedOutput()
-	if err == nil || !strings.Contains(string(output), "dsh_image_repo must be a valid immutable sha256 image reference without whitespace") {
+	if err == nil || !strings.Contains(string(output), "dsh_image_repo must be a valid container image reference without whitespace") {
 		t.Fatalf("malformed DSH image render result = %v, output = %s", err, output)
 	}
 }
@@ -619,9 +619,10 @@ func TestAgentRuntimeReleaseRejectsMalformedDshImageReference(t *testing.T) {
 		"AGENT_RUNTIME_RELEASE_MANIFEST=" + manifest,
 	}
 	cmd := exec.Command("bash", filepath.Join("..", "scripts", "agent-runtime-release.sh"))
-	cmd.Env = append(os.Environ(), env...)
+	cmd.Env = append(os.Environ(), "AGENT_RUNTIME_CATALOG_PATH="+filepath.Join("agentpack", "catalog.generated.json"))
+	cmd.Env = append(cmd.Env, env...)
 	output, err := cmd.CombinedOutput()
-	if err == nil || !strings.Contains(string(output), "DSH_IMAGE must be a valid immutable sha256 image reference without whitespace") {
+	if err == nil || !strings.Contains(string(output), "DSH_IMAGE must be a valid container image reference without whitespace") {
 		t.Fatalf("malformed DSH image release result = %v, output = %s", err, output)
 	}
 	if _, err := os.Stat(manifest); !os.IsNotExist(err) {
@@ -637,10 +638,12 @@ func TestDshImageReferenceShellValidator(t *testing.T) {
 		valid bool
 	}{
 		{name: "digest only", image: "registry.example.com/runtime-dsh@sha256:" + strings.Repeat("a", 64), valid: true},
+		{name: "bare image name", image: "runtime-dsh", valid: true},
+		{name: "commit tag", image: "crpi-671lgv9lrdyll4t9.cn-chengdu.personal.cr.aliyuncs.com/bx_anbanai/runtime-dsh:e5e395c067ef3fe548347a1e61f292bcdd96dc9b", valid: true},
+		{name: "release tag", image: "registry.example.com/runtime-dsh:release", valid: true},
 		{name: "tag and digest", image: "registry.example.com/runtime-dsh:release@sha256:" + strings.Repeat("b", 64), valid: true},
 		{name: "reported whitespace", image: "registry.example.com/runtime-dsh: release@sha256:" + strings.Repeat("c", 64)},
-		{name: "invalid repository separator", image: "registry.example.com/runtime..dsh@sha256:" + strings.Repeat("d", 64)},
-		{name: "non digest", image: "registry.example.com/runtime-dsh:latest"},
+		{name: "invalid repository separator", image: "registry.example.com/runtime..dsh:latest"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			cmd := exec.Command("bash", "-c", `source "$1" && is_valid_dsh_image_reference "$2"`, "bash", validator, test.image)

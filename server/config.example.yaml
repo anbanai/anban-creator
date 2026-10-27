@@ -143,10 +143,10 @@ search:
 dsh:
   enabled: false
   admin_only: false
-  # When enabled=true with executor=kubernetes, inject ANBAN_DSH_IMAGE with the
-  # pushed image's complete @sha256 digest; a mutable tag is rejected. When DSH
-  # is disabled, its executor/image/resources are ignored and do not block the
-  # Server from starting.
+  # When enabled=true with executor=kubernetes, ANBAN_DSH_IMAGE accepts the
+  # same Docker image references as Agent runtimes: a bare name, registry tag,
+  # digest, or tag+digest. When DSH is disabled, its executor/image/resources
+  # are ignored and do not block the Server from starting.
   executor: "${ANBAN_DSH_EXECUTOR:-container}"
   image: "${ANBAN_DSH_IMAGE:-creator-dsh-runtime:latest}"
   docker_binary: "docker"

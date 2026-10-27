@@ -560,7 +560,7 @@ func TestValidateDshKubernetesRejectsMalformedDigestImageReference(t *testing.T)
 	cfg.Dsh.ServerInstanceID = "server-1"
 
 	err := cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "dsh.image must be a valid immutable container image reference") {
+	if err == nil || !strings.Contains(err.Error(), "dsh.image must be a valid container image reference without whitespace") {
 		t.Fatalf("Config.Validate() error = %v, want malformed DSH image reference rejected", err)
 	}
 }
@@ -572,8 +572,11 @@ func TestValidateDshBaseURLRejectsUnicodeHostname(t *testing.T) {
 	}
 }
 
-func TestValidateDshKubernetesAcceptsImmutableImageReferences(t *testing.T) {
+func TestValidateDshKubernetesAcceptsTaggedAndImmutableImageReferences(t *testing.T) {
 	for _, image := range []string{
+		"crpi-671lgv9lrdyll4t9.cn-chengdu.personal.cr.aliyuncs.com/bx_anbanai/runtime-dsh:e5e395c067ef3fe548347a1e61f292bcdd96dc9b",
+		"registry.example.com/creator-dsh",
+		"registry.example.com/creator-dsh:release",
 		"registry.example.com/creator-dsh@sha256:" + strings.Repeat("a", 64),
 		"registry.example.com/creator-dsh:release@sha256:" + strings.Repeat("b", 64),
 	} {
@@ -594,18 +597,17 @@ func TestValidateDshKubernetesAcceptsImmutableImageReferences(t *testing.T) {
 			cfg.Dsh.ServerInstanceID = "server-1"
 
 			if err := cfg.Validate(); err != nil {
-				t.Fatalf("Config.Validate() error = %v, want immutable image reference accepted", err)
+				t.Fatalf("Config.Validate() error = %v, want tagged or immutable image reference accepted", err)
 			}
 		})
 	}
 }
 
-func TestValidateDshKubernetesRejectsNonDigestAndWhitespaceImageReferences(t *testing.T) {
+func TestValidateDshKubernetesRejectsMalformedAndWhitespaceImageReferences(t *testing.T) {
 	for _, image := range []string{
-		"registry.example.com/creator-dsh:latest",
 		" registry.example.com/creator-dsh@sha256:" + strings.Repeat("a", 64),
 		"registry.example.com/creator-dsh@sha256:" + strings.Repeat("a", 64) + "\n",
-		"registry.example.com/creator-dsh@sha256:" + strings.Repeat("a", 63),
+		"registry.example.com/runtime..dsh:latest",
 	} {
 		t.Run(image, func(t *testing.T) {
 			cfg := baseKubernetesConfigForTest()
@@ -618,7 +620,7 @@ func TestValidateDshKubernetesRejectsNonDigestAndWhitespaceImageReferences(t *te
 			cfg.Dsh.ServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
 			cfg.Dsh.ServerInstanceID = "server-1"
 
-			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "dsh.image must be a valid immutable container image reference") {
+			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "dsh.image must be a valid container image reference without whitespace") {
 				t.Fatalf("Config.Validate() error = %v, want invalid image reference rejected", err)
 			}
 		})
