@@ -47,6 +47,9 @@ func TestKubernetesRuntimeFactoryPodIsolatedAndReadOnly(t *testing.T) {
 	if pod.Spec.RestartPolicy != corev1.RestartPolicyNever || pod.Spec.ServiceAccountName != "creator-agent-runner" {
 		t.Fatalf("pod lifecycle = %q/%q", pod.Spec.RestartPolicy, pod.Spec.ServiceAccountName)
 	}
+	if got := pod.Spec.Containers[0].ImagePullPolicy; got != corev1.PullAlways {
+		t.Fatalf("image pull policy = %q, want Always for updated runtime tags", got)
+	}
 	if pod.Spec.Containers[0].SecurityContext == nil || pod.Spec.Containers[0].SecurityContext.ReadOnlyRootFilesystem == nil || !*pod.Spec.Containers[0].SecurityContext.ReadOnlyRootFilesystem {
 		t.Fatal("DSH container must use a read-only root filesystem")
 	}

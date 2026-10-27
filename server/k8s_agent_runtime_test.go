@@ -645,6 +645,10 @@ func TestDshImageReferenceShellValidator(t *testing.T) {
 		{name: "reported whitespace", image: "registry.example.com/runtime-dsh: release@sha256:" + strings.Repeat("c", 64)},
 		{name: "invalid repository separator", image: "registry.example.com/runtime..dsh:latest"},
 		{name: "short digest", image: "registry.example.com/runtime-dsh@sha256:abc"},
+		{name: "short sha256 digest", image: "registry.example.com/runtime-dsh@sha256:" + strings.Repeat("a", 32)},
+		{name: "sha512 digest", image: "registry.example.com/runtime-dsh@sha512:" + strings.Repeat("a", 128), valid: true},
+		{name: "uppercase registry domain", image: "REGISTRY.example.com/runtime-dsh:release", valid: true},
+		{name: "ipv6 registry domain", image: "[2001:db8::1]/runtime-dsh:release", valid: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			cmd := exec.Command("bash", "-c", `source "$1" && is_valid_dsh_image_reference "$2"`, "bash", validator, test.image)

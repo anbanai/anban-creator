@@ -41,6 +41,10 @@ command -v jq >/dev/null 2>&1 || {
   echo "jq is required to write the release manifest" >&2
   exit 1
 }
+command -v go >/dev/null 2>&1 || {
+  echo "go is required to validate the DSH image reference" >&2
+  exit 1
+}
 
 catalog_digest=$(sha256sum "$catalog_path" | awk '{print $1}')
 runtime_catalog_digest=$(sha256sum "$runtime_catalog_path" | awk '{print $1}')

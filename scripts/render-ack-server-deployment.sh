@@ -53,6 +53,7 @@ while (($# > 0)); do
 done
 
 command -v envsubst >/dev/null 2>&1 || { echo "envsubst is required" >&2; exit 1; }
+command -v go >/dev/null 2>&1 || { echo "go is required to validate the DSH image reference" >&2; exit 1; }
 
 [[ -f "$template_path" ]] || { echo "ACK deployment template not found: $template_path" >&2; exit 1; }
 if [[ "$server_only" != true ]]; then

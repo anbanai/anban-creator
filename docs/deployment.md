@@ -125,6 +125,11 @@ scripts/render-ack-server-deployment.sh \
 kubectl apply -f /tmp/server-release.yaml
 ```
 
+发布机运行这些脚本时需要安装 `go`、`jq` 和 `envsubst`。DSH 镜像引用由
+`go run ./cmd/validate-image-reference` 使用与 Server 相同的 Docker
+reference parser 校验，因此裸名称、registry tag、digest 和 `tag@digest`
+的接受规则保持一致；校验不会强制要求 digest。
+
 The release manifest must include the separate DSH runtime image under
 `images.dsh` and the video editor under `images["video-edit"]`. Set
 `DSH_RUNTIME_IMAGE=...` and `VIDEO_EDIT_AGENT_IMAGE=...` when running

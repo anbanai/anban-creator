@@ -174,6 +174,9 @@ the namespace-scoped ServiceAccount, Role, and RoleBinding required by the Job
 and DSH controllers. Applying only `server/Deployment.yaml` leaves the Server
 unable to verify Agent workload tokens and causes every managed task to fail at
 bootstrap.
+The release host must have Go 1.27+, `jq`, and `envsubst` installed: the
+renderer and runtime manifest script use the Server's Go Docker reference parser
+to validate DSH image names, tags, digests, and tag-plus-digest references.
 
 After the pipeline rollout, the effective permissions can be checked with:
 
