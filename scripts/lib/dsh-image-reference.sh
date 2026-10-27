@@ -9,7 +9,7 @@ is_valid_dsh_image_reference() {
   local domain='[a-z0-9]+([.-][a-z0-9]+)*(:[0-9]+)?'
   local name="(${domain}/)?${component}(/${component})*"
   local tag='(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?'
-  local digest='(@[A-Za-z][A-Za-z0-9+.-]*:[A-Fa-f0-9][A-Fa-f0-9:.-]*)?'
+  local digest='(@[A-Za-z][A-Za-z0-9]*([-_+.][A-Za-z][A-Za-z0-9]*)*:[A-Fa-f0-9]{32,})?'
 
   [[ "$image" =~ ^${name}${tag}${digest}$ && ! "$image" =~ [[:space:]] ]]
 }
