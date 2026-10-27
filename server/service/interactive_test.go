@@ -117,15 +117,23 @@ func (f *interactiveWorkspaceRuntimeFactory) StartSession(_ context.Context, spe
 type interactiveWorkspaceRecordingRuntime struct {
 	mu         sync.Mutex
 	methods    []string
+	prompts    []string
 	closeCount int
 	emit       func(string, any)
 	commandErr map[string]error
 }
 
-func (r *interactiveWorkspaceRecordingRuntime) Command(_ context.Context, method string, _ any) error {
+func (r *interactiveWorkspaceRecordingRuntime) Command(_ context.Context, method string, params any) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.methods = append(r.methods, method)
+	if method == "session/prompt" {
+		if fields, ok := params.(map[string]any); ok {
+			if blocks, ok := fields["contentBlocks"].([]map[string]string); ok && len(blocks) > 0 {
+				r.prompts = append(r.prompts, blocks[0]["text"])
+			}
+		}
+	}
 	return r.commandErr[method]
 }
 

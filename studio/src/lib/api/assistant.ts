@@ -73,6 +73,8 @@ export interface AssistantProject {
   id: string
   name: string
   platform: string
+  /** Enriched from the active project list; bootstrap may omit this field. */
+  agent_ids?: string[] | null
   profileRevision: number
   profileReady: boolean
   avatar_url?: string
@@ -146,6 +148,9 @@ export type AssistantSession = InteractiveSession & {
   content_id?: string
 }
 
+const pendingMessageAttempts = new Map<string, string>()
+const pendingAnswerAttempts = new Map<string, string>()
+
 export const assistantApi = {
   bootstrap: () => unwrap<AssistantBootstrap>(http.get('/assistant/bootstrap')),
 
@@ -185,13 +190,23 @@ export const assistantApi = {
     assistantApi.createInteraction({ mode_id: modeId, project_id: context?.project_id, content_id: context?.content_id, resume_interaction_id: workspaceId }).then(interactionSnapshotAsWorkspace),
 
   workspaceMessage: async (workspaceId: string, _modeId: AssistantModeID, text: string) => {
+    const attemptKey = `${workspaceId}\u0000${text}`
+    const clientMessageID = pendingMessageAttempts.get(attemptKey) ?? crypto.randomUUID()
+    pendingMessageAttempts.set(attemptKey, clientMessageID)
     const snapshot = await assistantApi.getInteractionSnapshot(workspaceId)
-    return assistantApi.sendInteractionMessage(workspaceId, { generation: snapshot.generation, client_message_id: crypto.randomUUID(), text })
+    const result = await assistantApi.sendInteractionMessage(workspaceId, { generation: snapshot.generation, client_message_id: clientMessageID, text })
+    if (pendingMessageAttempts.get(attemptKey) === clientMessageID) pendingMessageAttempts.delete(attemptKey)
+    return result
   },
 
   workspaceAnswer: async (workspaceId: string, _modeId: AssistantModeID, callId: string, answers: Array<{ id: string; selected: string[]; custom?: string }>) => {
+    const attemptKey = `${workspaceId}\u0000${callId}\u0000${JSON.stringify(answers)}`
+    const attemptID = pendingAnswerAttempts.get(attemptKey) ?? crypto.randomUUID()
+    pendingAnswerAttempts.set(attemptKey, attemptID)
     const snapshot = await assistantApi.getInteractionSnapshot(workspaceId)
-    return assistantApi.answerInteractionQuestion(workspaceId, callId, { generation: snapshot.generation, attempt_id: crypto.randomUUID(), answers })
+    const result = await assistantApi.answerInteractionQuestion(workspaceId, callId, { generation: snapshot.generation, attempt_id: attemptID, answers })
+    if (pendingAnswerAttempts.get(attemptKey) === attemptID) pendingAnswerAttempts.delete(attemptKey)
+    return result
   },
 
   workspaceCheckpoint: async (workspaceId: string, modeId: AssistantModeID, checkpoint: AssistantCheckpointRequest) => {

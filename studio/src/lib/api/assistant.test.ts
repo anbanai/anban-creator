@@ -91,3 +91,36 @@ it('answers an interaction using the interaction-scoped answer endpoint', async 
     answers: [{ id: 'choice', selected: ['yes'] }],
   }, { timeout: 15 * 60 * 1000 })
 })
+
+it('reuses a message attempt after an ambiguous request failure until acceptance', async () => {
+  vi.mocked(http.get).mockResolvedValue({ data: { data: { generation: 4 } } })
+  vi.mocked(http.post)
+    .mockRejectedValueOnce(new Error('request timed out'))
+    .mockResolvedValueOnce({ data: { data: { accepted: true } } })
+    .mockResolvedValueOnce({ data: { data: { accepted: true } } })
+
+  await expect(assistantApi.workspaceMessage('retry-interaction', 'creation', 'same message')).rejects.toThrow('request timed out')
+  await assistantApi.workspaceMessage('retry-interaction', 'creation', 'same message')
+  await assistantApi.workspaceMessage('retry-interaction', 'creation', 'same message')
+
+  const payloads = vi.mocked(http.post).mock.calls.map(([, payload]) => payload as { client_message_id: string })
+  expect(payloads[0]?.client_message_id).toBe(payloads[1]?.client_message_id)
+  expect(payloads[2]?.client_message_id).not.toBe(payloads[1]?.client_message_id)
+})
+
+it('reuses an answer attempt after an ambiguous request failure until acceptance', async () => {
+  vi.mocked(http.get).mockResolvedValue({ data: { data: { generation: 4 } } })
+  vi.mocked(http.post)
+    .mockRejectedValueOnce(new Error('request timed out'))
+    .mockResolvedValueOnce({ data: { data: { accepted: true } } })
+    .mockResolvedValueOnce({ data: { data: { accepted: true } } })
+  const answers = [{ id: 'choice', selected: ['yes'] }]
+
+  await expect(assistantApi.workspaceAnswer('retry-interaction', 'profile', 'call-1', answers)).rejects.toThrow('request timed out')
+  await assistantApi.workspaceAnswer('retry-interaction', 'profile', 'call-1', answers)
+  await assistantApi.workspaceAnswer('retry-interaction', 'profile', 'call-1', answers)
+
+  const payloads = vi.mocked(http.post).mock.calls.map(([, payload]) => payload as { attempt_id: string })
+  expect(payloads[0]?.attempt_id).toBe(payloads[1]?.attempt_id)
+  expect(payloads[2]?.attempt_id).not.toBe(payloads[1]?.attempt_id)
+})

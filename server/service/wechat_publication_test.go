@@ -3648,12 +3648,6 @@ func TestReconcileDoesNotOverwriteConcurrentPublishClaim(t *testing.T) {
 		<-releaseSubmit
 	}
 
-	reconcileDone := make(chan error, 1)
-	go func() {
-		reconcileDone <- f.svc.Reconcile(context.Background(), f.userID, f.taskID)
-	}()
-	<-findEntered
-
 	type publishResult struct {
 		publication *model.WechatPublication
 		err         error
@@ -3664,6 +3658,15 @@ func TestReconcileDoesNotOverwriteConcurrentPublishClaim(t *testing.T) {
 		publishDone <- publishResult{publication: publication, err: err}
 	}()
 	<-submitEntered
+
+	// Reconciliation only scans submissions with durable submission evidence.
+	// Start it after Publish has claimed the row and reached the provider so the
+	// test exercises the intended stale-snapshot race.
+	reconcileDone := make(chan error, 1)
+	go func() {
+		reconcileDone <- f.svc.Reconcile(context.Background(), f.userID, f.taskID)
+	}()
+	<-findEntered
 
 	claimed, err := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID)
 	if err != nil {

@@ -1252,7 +1252,6 @@ func (s *InteractiveService) initializeRuntimeSession(ctx context.Context, sess 
 		s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": fmt.Sprintf("interactive runtime failed to initialize: %v", err), "retry_text": s.pendingSessionPrompt(sess)})
 		return
 	}
-	opening := interactiveOpeningPrompt(sess.Intent)
 	sess.mu.Lock()
 	if sess.Closed {
 		sess.mu.Unlock()
@@ -1260,23 +1259,31 @@ func (s *InteractiveService) initializeRuntimeSession(ctx context.Context, sess 
 	}
 	sess.runtimeStarted = true
 	sess.Status = "running"
-	queued := sess.queuedPrompt
+	// Message accepts the first user input while the Bridge is starting and
+	// records it in queuedPrompt. Consume it under the same lock that makes
+	// runtimeStarted visible, so a concurrent Message either queues here or
+	// sends directly to the started session, never between those two states.
+	opening := sess.queuedPrompt
 	sess.queuedPrompt = ""
-	if opening != "" && !sess.initialPromptSent {
-		sess.busy = true
-		sess.openingPromptActive = true
-		sess.commandSequence++
-		sess.activeCommand = sess.commandSequence
-		sess.activeCommandAt = time.Now()
-		if queued != "" && sess.deferredPrompt == "" {
-			sess.deferredPrompt = queued
+	commandSeq := sess.activeCommand
+	automaticOpening := ""
+	if opening == "" && sess.WorkspaceID == "" && !sess.initialPromptSent {
+		automaticOpening = interactiveOpeningPrompt(sess.Intent)
+		opening = automaticOpening
+		if opening != "" {
+			sess.busy = true
+			sess.openingPromptActive = true
+			sess.commandSequence++
+			sess.activeCommand = sess.commandSequence
+			sess.activeCommandAt = time.Now()
+			commandSeq = sess.activeCommand
 		}
-	} else if queued != "" && sess.deferredPrompt == "" {
-		sess.deferredPrompt = queued
 	}
 	sess.mu.Unlock()
 	s.persistAssistantSessionStatus(sess, "running")
 	s.persistWorkspaceRuntimeStatus(sess.WorkspaceID, "running")
+	// Workspace conversations are user-initiated. Do not inject a generic
+	// opening: it would replace queued context or race the first user message.
 	if opening == "" {
 		sess.mu.Lock()
 		sess.busy = false
@@ -1286,14 +1293,16 @@ func (s *InteractiveService) initializeRuntimeSession(ctx context.Context, sess 
 		return
 	}
 	sess.mu.Lock()
-	if sess.initialPromptSent || sess.Closed {
+	if sess.Closed || (automaticOpening != "" && sess.initialPromptSent) {
 		sess.mu.Unlock()
 		return
 	}
-	commandSeq := sess.activeCommand
 	sess.mu.Unlock()
 	if err := rt.Command(ctx, "session/prompt", map[string]any{"sessionId": sess.ID, "contentBlocks": []map[string]string{{"type": "text", "text": opening}}}); err != nil {
 		sess.mu.Lock()
+		if automaticOpening == "" && !sess.Closed && sess.deferredPrompt == "" {
+			sess.deferredPrompt = opening
+		}
 		sess.busy = false
 		sess.openingPromptActive = false
 		sess.activeCommand = 0

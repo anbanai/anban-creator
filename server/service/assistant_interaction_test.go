@@ -121,6 +121,11 @@ type assistantInteractionCommandFailureFactory struct {
 	starts int
 }
 
+type assistantInteractionCommandRecoveryFailureFactory struct {
+	mu     sync.Mutex
+	starts int
+}
+
 type assistantInteractionCommandFailureRuntime struct{}
 
 func (assistantInteractionCommandFailureRuntime) Command(_ context.Context, method string, _ any) error {
@@ -136,6 +141,16 @@ func (f *assistantInteractionCommandFailureFactory) Start(context.Context, strin
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.starts++
+	return assistantInteractionCommandFailureRuntime{}, nil
+}
+
+func (f *assistantInteractionCommandRecoveryFailureFactory) Start(context.Context, string, string, string, func(string, any)) (Runtime, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.starts++
+	if f.starts > 1 {
+		return nil, errors.New("replacement runtime unavailable")
+	}
 	return assistantInteractionCommandFailureRuntime{}, nil
 }
 
@@ -610,6 +625,13 @@ func TestAssistantInteractionCommandFailureFencesGenerationAndReplacesRuntime(t 
 	if recovered.Generation != snapshot.Generation+1 {
 		t.Fatalf("generation after command failure = %d, want %d", recovered.Generation, snapshot.Generation+1)
 	}
+	attempt, err := svc.repo.AssistantInteractions().FindAttempt(context.Background(), snapshot.ID, "message-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempt.Status != model.AssistantInteractionAttemptFailed {
+		t.Fatalf("attempt status after successful generation replacement = %q, want failed/retryable", attempt.Status)
+	}
 	if svc.AcceptRuntimeEvent(snapshot.ID, snapshot.Generation, "assistant.message", map[string]any{"text": "late"}) {
 		t.Fatal("late event from failed generation was accepted")
 	}
@@ -618,6 +640,40 @@ func TestAssistantInteractionCommandFailureFencesGenerationAndReplacesRuntime(t 
 	factory.mu.Unlock()
 	if starts != 2 {
 		t.Fatalf("runtime starts = %d, want replacement runtime", starts)
+	}
+}
+
+func TestAssistantInteractionCommandFailureKeepsAttemptPendingWhenReplacementFails(t *testing.T) {
+	svc, _ := newAssistantInteractionServiceTest(t)
+	factory := &assistantInteractionCommandRecoveryFailureFactory{}
+	svc.factory = factory
+	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "command-recovery-failure")
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := InteractionMessageInput{Generation: snapshot.Generation, ClientMessageID: "message-unknown-delivery", Text: "继续"}
+	err = svc.SendMessage(context.Background(), "user-1", snapshot.ID, input)
+	if err == nil || NormalizeInteractionError(err).Code != InteractionErrorRestartRequired {
+		t.Fatalf("command failure with unavailable replacement = %v, want restart_required", err)
+	}
+	attempt, err := svc.repo.AssistantInteractions().FindAttempt(context.Background(), snapshot.ID, input.ClientMessageID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempt.Status != model.AssistantInteractionAttemptPending {
+		t.Fatalf("attempt status after ambiguous delivery and failed replacement = %q, want pending", attempt.Status)
+	}
+
+	input.Generation = snapshot.Generation + 1
+	err = svc.SendMessage(context.Background(), "user-1", snapshot.ID, input)
+	if err == nil || NormalizeInteractionError(err).Code != InteractionErrorReconnecting {
+		t.Fatalf("retry with unresolved delivery = %v, want reconnecting", err)
+	}
+	factory.mu.Lock()
+	starts := factory.starts
+	factory.mu.Unlock()
+	if starts != 2 {
+		t.Fatalf("runtime starts after unresolved retry = %d, want no additional replacement attempt", starts)
 	}
 }
 

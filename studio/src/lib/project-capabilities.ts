@@ -17,7 +17,7 @@ export const creationObjectLabels: Record<string, string> = {
 }
 
 /** An explicit empty collection must never fall back to legacy capabilities. */
-export function projectAgentIDs(project: Project): string[] {
+export function projectAgentIDs(project: Pick<Project, 'platform' | 'agent_ids'>): string[] {
   if (project.agent_ids != null) return project.agent_ids
   if (project.platform === 'wechat') return ['wechat-article']
   return project.platform ? [project.platform] : []

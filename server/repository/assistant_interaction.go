@@ -33,6 +33,7 @@ type AssistantInteractionRepository interface {
 	CloseRuntime(context.Context, string, time.Time) error
 	CreateDraftIfAttemptNew(context.Context, *model.AssistantInteractionDraft, *model.AssistantInteractionAttempt) (*model.AssistantInteractionDraft, bool, error)
 	CreateDraftIfAttemptNewAtGeneration(context.Context, *model.AssistantInteractionDraft, *model.AssistantInteractionAttempt, int64) (*model.AssistantInteractionDraft, bool, error)
+	CreateDraftAttemptEventAtGeneration(context.Context, *model.AssistantInteractionDraft, *model.AssistantInteractionAttempt, *model.AssistantInteractionEvent, int64) (*model.AssistantInteractionDraft, *model.AssistantInteractionEvent, bool, error)
 	FindDraftForUser(context.Context, string, string) (*model.AssistantInteractionDraft, error)
 	FindLatestDraft(context.Context, string, string, string) (*model.AssistantInteractionDraft, error)
 	ListDrafts(context.Context, string, string) ([]*model.AssistantInteractionDraft, error)
@@ -200,34 +201,40 @@ func (r *assistantInteractionRepository) CloseRuntime(ctx context.Context, id st
 	return r.db.WithContext(ctx).Model(&model.AssistantInteractionRuntime{}).Where("id = ? AND closed_at IS NULL", id).Updates(map[string]any{"status": model.AssistantInteractionRuntimeClosed, "closed_at": at, "updated_at": at}).Error
 }
 func (r *assistantInteractionRepository) CreateDraftIfAttemptNew(ctx context.Context, draft *model.AssistantInteractionDraft, attempt *model.AssistantInteractionAttempt) (*model.AssistantInteractionDraft, bool, error) {
-	return r.createDraftIfAttemptNew(ctx, draft, attempt, 0)
+	persisted, _, created, err := r.createDraftIfAttemptNew(ctx, draft, attempt, nil, 0)
+	return persisted, created, err
 }
 
 func (r *assistantInteractionRepository) CreateDraftIfAttemptNewAtGeneration(ctx context.Context, draft *model.AssistantInteractionDraft, attempt *model.AssistantInteractionAttempt, generation int64) (*model.AssistantInteractionDraft, bool, error) {
-	return r.createDraftIfAttemptNew(ctx, draft, attempt, generation)
+	persisted, _, created, err := r.createDraftIfAttemptNew(ctx, draft, attempt, nil, generation)
+	return persisted, created, err
 }
 
-func (r *assistantInteractionRepository) createDraftIfAttemptNew(ctx context.Context, draft *model.AssistantInteractionDraft, attempt *model.AssistantInteractionAttempt, generation int64) (*model.AssistantInteractionDraft, bool, error) {
+func (r *assistantInteractionRepository) CreateDraftAttemptEventAtGeneration(ctx context.Context, draft *model.AssistantInteractionDraft, attempt *model.AssistantInteractionAttempt, event *model.AssistantInteractionEvent, generation int64) (*model.AssistantInteractionDraft, *model.AssistantInteractionEvent, bool, error) {
+	return r.createDraftIfAttemptNew(ctx, draft, attempt, event, generation)
+}
+
+func (r *assistantInteractionRepository) createDraftIfAttemptNew(ctx context.Context, draft *model.AssistantInteractionDraft, attempt *model.AssistantInteractionAttempt, event *model.AssistantInteractionEvent, generation int64) (*model.AssistantInteractionDraft, *model.AssistantInteractionEvent, bool, error) {
 	if draft == nil || attempt == nil {
-		return nil, false, errors.New("assistant interaction draft and attempt are required")
+		return nil, nil, false, errors.New("assistant interaction draft and attempt are required")
 	}
 	tx := r.db.WithContext(ctx).Begin()
 	if tx.Error != nil {
-		return nil, false, tx.Error
+		return nil, nil, false, tx.Error
 	}
 	if generation > 0 {
 		var interaction model.AssistantInteraction
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", draft.InteractionID).First(&interaction).Error; err != nil {
 			_ = tx.Rollback()
-			return nil, false, err
+			return nil, nil, false, err
 		}
 		if interaction.Generation != generation {
 			_ = tx.Rollback()
-			return nil, false, ErrInteractionGenerationChanged
+			return nil, nil, false, ErrInteractionGenerationChanged
 		}
 		if interaction.Lifecycle == model.AssistantInteractionCompleted || interaction.Lifecycle == model.AssistantInteractionAbandoned {
 			_ = tx.Rollback()
-			return nil, false, ErrInteractionTerminal
+			return nil, nil, false, ErrInteractionTerminal
 		}
 	}
 	var existing model.AssistantInteractionAttempt
@@ -235,31 +242,56 @@ func (r *assistantInteractionRepository) createDraftIfAttemptNew(ctx context.Con
 	if err == nil {
 		if existing.Generation != attempt.Generation || existing.Operation != attempt.Operation || existing.PayloadDigest != attempt.PayloadDigest {
 			_ = tx.Rollback()
-			return nil, false, ErrInteractionAttemptConflict
+			return nil, nil, false, ErrInteractionAttemptConflict
 		}
 		var result assistantInteractionDraftReceipt
 		if decodeErr := json.Unmarshal(existing.Result, &result); decodeErr != nil {
 			_ = tx.Rollback()
-			return nil, false, decodeErr
+			return nil, nil, false, decodeErr
 		}
 		_ = tx.Rollback()
-		return &model.AssistantInteractionDraft{ID: result.DraftID, Revision: result.Revision, Ready: result.Ready, ConfirmationState: result.ConfirmationState}, false, nil
+		return &model.AssistantInteractionDraft{ID: result.DraftID, Revision: result.Revision, Ready: result.Ready, ConfirmationState: result.ConfirmationState}, nil, false, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		_ = tx.Rollback()
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	if draft.Revision <= 0 {
 		var revision struct{ Value int64 }
 		if err := tx.Model(&model.AssistantInteractionDraft{}).Where("interaction_id = ? AND mode_id = ?", draft.InteractionID, draft.ModeID).Select("COALESCE(MAX(revision), 0) AS value").Scan(&revision).Error; err != nil {
 			_ = tx.Rollback()
-			return nil, false, err
+			return nil, nil, false, err
 		}
 		draft.Revision = revision.Value + 1
 	}
 	if err := tx.Create(draft).Error; err != nil {
 		_ = tx.Rollback()
-		return nil, false, err
+		return nil, nil, false, err
+	}
+	if event != nil {
+		var interaction model.AssistantInteraction
+		if err := tx.Model(&model.AssistantInteraction{}).Where("id = ?", draft.InteractionID).UpdateColumn("command_sequence", gorm.Expr("command_sequence + 1")).Error; err != nil {
+			_ = tx.Rollback()
+			return nil, nil, false, err
+		}
+		if err := tx.Select("command_sequence").Where("id = ?", draft.InteractionID).First(&interaction).Error; err != nil {
+			_ = tx.Rollback()
+			return nil, nil, false, err
+		}
+		event.InteractionID = draft.InteractionID
+		event.Generation = attempt.Generation
+		event.Sequence = interaction.CommandSequence
+		if len(event.Data) == 0 {
+			event.Data, err = json.Marshal(map[string]any{"durable": true, "draft_id": draft.ID, "revision": draft.Revision, "mode_id": draft.ModeID, "ready": draft.Ready, "payload_digest": draft.PayloadDigest})
+			if err != nil {
+				_ = tx.Rollback()
+				return nil, nil, false, err
+			}
+		}
+		if err := tx.Create(event).Error; err != nil {
+			_ = tx.Rollback()
+			return nil, nil, false, err
+		}
 	}
 	// Attempts are replay receipts, not a second draft store. Keep only the
 	// identifiers needed to return an idempotent stage result; the full payload
@@ -267,17 +299,17 @@ func (r *assistantInteractionRepository) createDraftIfAttemptNew(ctx context.Con
 	encoded, err := json.Marshal(assistantInteractionDraftReceipt{DraftID: draft.ID, Revision: draft.Revision, ModeID: draft.ModeID, Ready: draft.Ready, ConfirmationState: draft.ConfirmationState})
 	if err != nil {
 		_ = tx.Rollback()
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	attempt.Result = encoded
 	if err := tx.Create(attempt).Error; err != nil {
 		_ = tx.Rollback()
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	if err := tx.Commit().Error; err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
-	return draft, true, nil
+	return draft, event, true, nil
 }
 
 type assistantInteractionDraftReceipt struct {

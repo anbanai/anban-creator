@@ -85,7 +85,8 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 	now := s.clock()
 	draft := &model.AssistantInteractionDraft{ID: uuid.NewString(), InteractionID: in.InteractionID, ModeID: in.ModeID, Revision: revision, Payload: append(json.RawMessage(nil), in.Payload...), PayloadDigest: in.PayloadDigest, Ready: in.Ready, ConfirmationState: model.AssistantInteractionDraftPending, SourceGeneration: in.Generation, ExpiresAt: now.Add(InteractionDraftRetention), CreatedAt: now, UpdatedAt: now}
 	attempt := &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: in.InteractionID, UserID: userID, AttemptID: in.AttemptID, Operation: string(InteractionOperationStage), Generation: in.Generation, PayloadDigest: in.PayloadDigest, CreatedAt: now, ExpiresAt: now.Add(InteractionAttemptRetention)}
-	persisted, created, err := s.repo.AssistantInteractions().CreateDraftIfAttemptNewAtGeneration(ctx, draft, attempt, in.Generation)
+	durableEvent := &model.AssistantInteractionEvent{ID: uuid.NewString(), InteractionID: in.InteractionID, Type: "draft.ready", CreatedAt: now}
+	persisted, durableEvent, created, err := s.repo.AssistantInteractions().CreateDraftAttemptEventAtGeneration(ctx, draft, attempt, durableEvent, in.Generation)
 	if err != nil {
 		if errors.Is(err, repository.ErrInteractionGenerationChanged) {
 			s.metrics.observeStageRetryAfterSessionLoss()
@@ -106,15 +107,6 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 			persisted = full
 		}
 		return InteractionStageResult{DraftID: persisted.ID, Revision: persisted.Revision, ConfirmationRequired: persisted.Ready, AvailableActions: []string{"confirm_draft", "continue_editing"}, Durable: true}, nil
-	}
-	eventData, _ := json.Marshal(map[string]any{"durable": true, "draft_id": persisted.ID, "revision": persisted.Revision, "mode_id": persisted.ModeID, "ready": persisted.Ready, "payload_digest": persisted.PayloadDigest})
-	durableEvent := &model.AssistantInteractionEvent{ID: uuid.NewString(), InteractionID: in.InteractionID, Type: "draft.ready", Data: eventData, CreatedAt: now}
-	accepted, appendErr := s.repo.AssistantInteractions().AppendEvent(ctx, in.InteractionID, in.Generation, durableEvent)
-	if appendErr != nil || !accepted {
-		if appendErr == nil {
-			appendErr = errors.New("interaction event persistence failed")
-		}
-		return InteractionStageResult{}, draftSavedRetryableError(appendErr)
 	}
 	// Keep the rich draft available to an already-connected Studio stream. The
 	// same event sequence is replaced with this process-local form; after a

@@ -77,7 +77,7 @@ func newAssistantWorkspaceTestService(repo repository.Repository) *InteractiveSe
 	return svc
 }
 
-func TestAssistantWorkspaceMessageQueuesBehindOpeningPrompt(t *testing.T) {
+func TestAssistantWorkspaceInitialMessageIsNotReplayedAfterTurnEnd(t *testing.T) {
 	repo := newAssistantTestRepo(t)
 	runtime := &interactiveWorkspaceRecordingRuntime{}
 	startGate := make(chan struct{})
@@ -118,21 +118,13 @@ func TestAssistantWorkspaceMessageQueuesBehindOpeningPrompt(t *testing.T) {
 
 	sessionID := workspace.Sessions[AssistantModeProfile]
 	svc.runtimeEvent(sessionID, "turn.end", map[string]any{"turn": 1})
-	deadline = time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		runtime.mu.Lock()
-		methodCount := len(runtime.methods)
-		runtime.mu.Unlock()
-		if methodCount >= 3 {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	time.Sleep(25 * time.Millisecond)
 	runtime.mu.Lock()
 	methods = append([]string(nil), runtime.methods...)
+	prompts := append([]string(nil), runtime.prompts...)
 	runtime.mu.Unlock()
-	if len(methods) < 3 || methods[2] != "session/prompt" {
-		t.Fatalf("runtime methods after opening turn = %#v, want queued user prompt", methods)
+	if len(methods) != 2 || len(prompts) != 1 || prompts[0] != "继续完善画像" {
+		t.Fatalf("runtime methods/prompts after opening turn = %#v/%#v, want one user prompt without replay", methods, prompts)
 	}
 }
 
