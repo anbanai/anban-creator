@@ -160,7 +160,8 @@ the execution token secret from a Kubernetes Secret.
 For an ACK release, build and push the Server, the independent DSH runtime
 image (`deploy/docker/Dockerfile.runtime-dsh`), and every managed Agent image
 from the same checkout. Set `dsh.image` in the mounted Server `config.yaml` to
-the newly pushed DSH image (prefer its immutable `@sha256` digest) before the
+the newly pushed DSH image, using any Docker-compatible image reference (a
+bare name, registry tag, commit-SHA tag, or digest), before the
 Server rollout. Rebuilding only the Server leaves interactive Pods on the old
 Bridge protocol and can make a session close immediately after `session/start`.
 Image tags and immutable digests are both accepted; digests remain recommended
@@ -367,7 +368,7 @@ Agents use only the execution-scoped `search_web`, `fetch_web_page`, and
 Server. Each capability has its own zero-priced SKU, quote, charge,
 idempotency namespace, and provider-cost evidence.
 
-DSH interactive sessions run in one isolated workload per session and have an independent route table under `dsh.routes`. Use `executor: kubernetes` with a digest-pinned image on ACK; the Server creates a non-restarting Pod and attaches through `pods/exec`. Use `executor: container` for local Docker development.
+DSH interactive sessions run in one isolated workload per session and have an explicitly configured Docker image reference under `dsh.image`; the Server creates a non-restarting Pod and attaches through `pods/exec`. Use `executor: container` for local Docker development.
 `dsh.route` selects one route for the next session; it does not read or modify
 `claude.profiles`. A route declares its provider, wire API, endpoint, model,
 and the credential value using the same `${...}` expansion as Claude:

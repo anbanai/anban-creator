@@ -20,8 +20,8 @@ The output includes the cluster-scoped TokenReview RBAC required by the Server
 and the namespace-scoped Server resources. Use --server-only only for an
 existing workflow that applies deploy/k8s/ack-agent-runtime.yaml separately.
 The caller must provide namespace, agent_service_account, and normal ACK
-variables directly; managed Agent image tags and digests are both accepted,
-but dsh_image_repo must include a sha256 digest.
+variables directly; managed Agent image tags and digests are both accepted.
+dsh_image_repo must be a valid Docker image reference without whitespace.
 EOF
 }
 
@@ -96,7 +96,7 @@ fi
 : "${dsh_image_repo:?dsh_image_repo must be set when the Server config uses ANBAN_DSH_IMAGE}"
 
 if ! is_valid_dsh_image_reference "$dsh_image_repo"; then
-  echo "dsh_image_repo must be a valid immutable sha256 image reference without whitespace" >&2
+  echo "dsh_image_repo must be a valid container image reference without whitespace" >&2
   exit 1
 fi
 
