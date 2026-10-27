@@ -106,6 +106,8 @@ func TestProviderCostCatalogV4(t *testing.T) {
 		"zhipu/glm-5.2":                                 {"token", "CNY", 8_000_000, 2_000_000, 8_000_000, 28_000_000},
 		"volcengine_ark/doubao-seedream-5-0-pro-260628": {pricingType: "output_pixel_tier", currency: "CNY"},
 		"wangcai_openai/gpt-image-2-t":                  {pricingType: "openai_image_usage", currency: "USD"},
+		"wangcai_openai/gpt-image-2.5-sunburst":         {pricingType: "openai_image_usage", currency: "USD"},
+		"wangcai_openai/gpt-image-2.5-flare":           {pricingType: "openai_image_usage", currency: "USD"},
 	}
 	for _, provider := range []string{"tokenplayer_anthropic", "tokenplayer_openai"} {
 		for _, model := range []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"} {
@@ -378,6 +380,8 @@ func initialCatalogMetadataContractError(bundle *Bundle) error {
 		"zhipu/glm-5.2":                                 "https://open.bigmodel.cn/pricing",
 		"volcengine_ark/doubao-seedream-5-0-pro-260628": "pricing-snapshot:volcengine-ark:seedream-output-pixel-prices:2026-07-13",
 		"wangcai_openai/gpt-image-2-t":                  "pricing-snapshot:wangcai-openai:gpt-image-2-t-usage-prices:2026-07-13",
+		"wangcai_openai/gpt-image-2.5-sunburst":         "operator-confirmed:wangcai-openai:gpt-image-2.5-sunburst=inherits-gpt-image-2-t-prices:2026-07-13",
+		"wangcai_openai/gpt-image-2.5-flare":           "operator-confirmed:wangcai-openai:gpt-image-2.5-flare=inherits-gpt-image-2-t-prices:2026-07-13",
 	}
 	for _, provider := range []string{"tokenplayer_anthropic", "tokenplayer_openai"} {
 		for _, model := range []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"} {

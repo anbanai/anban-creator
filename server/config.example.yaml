@@ -35,6 +35,8 @@ logging:
 # All requests require login; the platform pays provider costs within Redis quotas.
 # Omitting this entire section reuses the existing official DeepSeek effective
 # execution profile. An explicit section (including enabled:false) overrides reuse.
+# When enabled, provide the ANBAN_ONBOARDING_*_BASE_URL, *_API_KEY, and *_MODEL
+# variables through the optional anban-onboarding-providers Kubernetes Secret.
 onboarding:
   enabled: ${ANBAN_ONBOARDING_ENABLED:-false}
   daily_user_limit: ${ANBAN_ONBOARDING_DAILY_USER_LIMIT:-60}
@@ -74,6 +76,8 @@ wechat:
 
 # Optional third-party platform configuration for project-scoped QR authorization.
 # Refresh-token encryption key accepts 32 bytes or base64-encoded 32 bytes.
+# Set these values through the optional anban-wechat-open-platform Kubernetes
+# Secret only when project-scoped WeChat QR authorization is configured.
 wechat_open_platform:
   component_app_id: "${ANBAN_WECHAT_COMPONENT_APP_ID}"
   component_app_secret: "${ANBAN_WECHAT_COMPONENT_APP_SECRET}"
@@ -139,7 +143,10 @@ search:
 dsh:
   enabled: false
   admin_only: false
-  # Use kubernetes on ACK and pin image to a complete @sha256 digest in production.
+  # When enabled=true with executor=kubernetes, inject ANBAN_DSH_IMAGE with the
+  # pushed image's complete @sha256 digest; a mutable tag is rejected. When DSH
+  # is disabled, its executor/image/resources are ignored and do not block the
+  # Server from starting.
   executor: "${ANBAN_DSH_EXECUTOR:-container}"
   image: "${ANBAN_DSH_IMAGE:-creator-dsh-runtime:latest}"
   docker_binary: "docker"
@@ -238,6 +245,10 @@ model_routes:
     max_recommended_resolution: "1920x1080"
 
   image_generation:
+    # default_capability names a generation capability (standard or
+    # professional), while min_tier is the account tier (free, pro, or
+    # enterprise). The default capability must be enabled and its min_tier
+    # must be free; do not set the default capability to professional.
     default_capability: "standard"
     capabilities:
       standard:
@@ -247,7 +258,7 @@ model_routes:
         billing_sku: "image.standard"
         sort_order: 10
         provider: "volcengine_ark"
-        model: "doubao-seedream-5-0-pro-260628"
+        model: "${ANBAN_IMAGE_MODEL_STANDARD:-doubao-seedream-5-0-pro-260628}"
         base_url: "https://ark.cn-beijing.volces.com/api/v3"
         api_key: "${VOLCENGINE_ARK_API_KEY}"
         timeout: 5m
@@ -272,13 +283,28 @@ model_routes:
         billing_sku: "image.professional"
         sort_order: 20
         provider: "wangcai_openai"
-        model: "gpt-image-2-t"
+        # Keep this ID aligned with billing/costs.yaml. Override it only after
+        # adding the same provider/model key and verified price data there.
+        # To use the production Sunburst gateway, set:
+        #   ANBAN_IMAGE_MODEL_PROFESSIONAL=gpt-image-2.5-sunburst
+        # or gpt-image-2.5-flare. Both models have billing entries that inherit
+        # gpt-image-2-t pricing. Keep the provider/model key in billing/costs.yaml
+        # aligned with this value or the Server rejects the configuration.
+        # For the supplied production gateway, also set:
+        #   WANGCAI_OPENAI_BASE_URL=http://18.141.196.64:18888/v1
+        model: "${ANBAN_IMAGE_MODEL_PROFESSIONAL:-gpt-image-2-t}"
         base_url: "${WANGCAI_OPENAI_BASE_URL}"
         api_key: "${WANGCAI_OPENAI_API_KEY}"
-        timeout: 8m
-        enabled: true
+        timeout: "${ANBAN_IMAGE_PROFESSIONAL_TIMEOUT:-8m}"
+        # Set ANBAN_IMAGE_PROFESSIONAL_ENABLED=false while billing/provider
+        # rollout is pending; disabled capabilities do not require a billing
+        # model entry and cannot be selected for generation.
+        enabled: ${ANBAN_IMAGE_PROFESSIONAL_ENABLED:-true}
         quality_rank: 200
-        response_format: "b64_json"
+        # The current checked-in provider adapter uses b64_json. Set
+        # ANBAN_IMAGE_RESPONSE_FORMAT=url only when the selected gateway
+        # actually returns URL images and the adapter has been verified.
+        response_format: "${ANBAN_IMAGE_RESPONSE_FORMAT:-b64_json}"
         generation_features:
           quality_levels: ["auto", "low", "medium", "high"]
           size_presets: ["1:1:2K", "3:2:2K", "2:3:2K"]

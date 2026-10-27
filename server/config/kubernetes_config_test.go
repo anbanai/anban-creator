@@ -518,6 +518,7 @@ func TestValidateDshKubernetesUsesClaudeServiceAccount(t *testing.T) {
 	cfg := baseKubernetesConfigForTest()
 	cfg.Claude.Executor = "docker"
 	cfg.Claude.Kubernetes.ServiceAccount = ""
+	cfg.Dsh.Enabled = true
 	cfg.Dsh.Executor = "kubernetes"
 	cfg.Dsh.Image = "registry.example.com/creator-dsh@sha256:" + strings.Repeat("a", 64)
 	cfg.Dsh.KubernetesNamespace = "anbanai-prod"
@@ -532,6 +533,7 @@ func TestValidateDshKubernetesUsesClaudeServiceAccount(t *testing.T) {
 
 func TestValidateDshKubernetesRequiresClaudeNamespace(t *testing.T) {
 	cfg := baseKubernetesConfigForTest()
+	cfg.Dsh.Enabled = true
 	cfg.Dsh.Executor = "kubernetes"
 	cfg.Dsh.Image = "registry.example.com/creator-dsh@sha256:" + strings.Repeat("a", 64)
 	cfg.Dsh.KubernetesNamespace = "other-namespace"
@@ -548,6 +550,7 @@ func TestValidateDshKubernetesRequiresClaudeNamespace(t *testing.T) {
 
 func TestValidateDshKubernetesRejectsMalformedDigestImageReference(t *testing.T) {
 	cfg := baseKubernetesConfigForTest()
+	cfg.Dsh.Enabled = true
 	cfg.Dsh.Executor = "kubernetes"
 	cfg.Dsh.Image = "crpi.example.com/bx_anbanai/runtime-dsh: 4ca2ec7bd14a7981133a648cae01b5982a7d73c9@sha256:" + strings.Repeat("c", 64)
 	cfg.Dsh.KubernetesNamespace = "anbanai-prod"
@@ -576,7 +579,13 @@ func TestValidateDshKubernetesAcceptsImmutableImageReferences(t *testing.T) {
 	} {
 		t.Run(image, func(t *testing.T) {
 			cfg := baseKubernetesConfigForTest()
+			cfg.Dsh.Enabled = true
 			cfg.Dsh.Executor = "kubernetes"
+			cfg.Dsh.Route = "effective"
+			cfg.Dsh.Routes = map[string]DshRouteConfig{"effective": {
+				Provider: "deepseek-official", API: "deepseek-messages",
+				BaseURL: "https://api.deepseek.com/anthropic", APIKey: "test-key", Model: "deepseek-flash",
+			}}
 			cfg.Dsh.Image = image
 			cfg.Dsh.KubernetesNamespace = "anbanai-prod"
 			cfg.Dsh.KubernetesProjectMemoryClaim = "creator-project-memory"
@@ -600,6 +609,7 @@ func TestValidateDshKubernetesRejectsNonDigestAndWhitespaceImageReferences(t *te
 	} {
 		t.Run(image, func(t *testing.T) {
 			cfg := baseKubernetesConfigForTest()
+			cfg.Dsh.Enabled = true
 			cfg.Dsh.Executor = "kubernetes"
 			cfg.Dsh.Image = image
 			cfg.Dsh.KubernetesNamespace = "anbanai-prod"
@@ -612,6 +622,23 @@ func TestValidateDshKubernetesRejectsNonDigestAndWhitespaceImageReferences(t *te
 				t.Fatalf("Config.Validate() error = %v, want invalid image reference rejected", err)
 			}
 		})
+	}
+}
+
+func TestValidateDisabledDshSkipsKubernetesRuntimeRequirements(t *testing.T) {
+	cfg := baseKubernetesConfigForTest()
+	cfg.Dsh.Enabled = false
+	cfg.Claude.Executor = "docker"
+	cfg.Dsh.Executor = "kubernetes"
+	cfg.Dsh.Image = "creator-dsh-runtime:latest"
+	cfg.Dsh.KubernetesNamespace = ""
+	cfg.Dsh.KubernetesProjectMemoryClaim = ""
+	cfg.Dsh.KubernetesProjectMemoryMount = ""
+	cfg.Dsh.Resources = KubernetesResourceConfig{}
+	cfg.Claude.Kubernetes.ServiceAccount = ""
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want disabled DSH to be ignored", err)
 	}
 }
 

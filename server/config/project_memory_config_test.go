@@ -112,6 +112,7 @@ resources:
 
 func TestDshKubernetesResourcesRequireRequestsAndLimits(t *testing.T) {
 	cfg := DshConfig{
+		Enabled:             true,
 		Executor:            "kubernetes",
 		Image:               "registry.example/dsh@sha256:" + strings.Repeat("a", 64),
 		KubernetesNamespace: "anban", KubernetesProjectMemoryClaim: "creator-project-memory",
