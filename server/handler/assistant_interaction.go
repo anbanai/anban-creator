@@ -12,12 +12,13 @@ import (
 )
 
 type assistantInteractionCreateRequest struct {
-	ModeID              string `json:"mode_id"`
-	ProjectID           string `json:"project_id,omitempty"`
-	ContentID           string `json:"content_id,omitempty"`
-	ResumeInteractionID string `json:"resume_interaction_id,omitempty"`
-	AgentID             string `json:"agent_id,omitempty"`
-	Intent              string `json:"intent,omitempty"`
+	ModeID              string          `json:"mode_id"`
+	ProjectID           string          `json:"project_id,omitempty"`
+	ContentID           string          `json:"content_id,omitempty"`
+	ResumeInteractionID string          `json:"resume_interaction_id,omitempty"`
+	AgentID             string          `json:"agent_id,omitempty"`
+	Intent              string          `json:"intent,omitempty"`
+	RecoveryContext     json.RawMessage `json:"recovery_context,omitempty"`
 }
 
 func (h *AssistantHandler) InteractionCreate(c fiber.Ctx) error {
@@ -32,7 +33,7 @@ func (h *AssistantHandler) InteractionCreate(c fiber.Ctx) error {
 	if err := decodeInteractiveJSON(c.Body(), &req); err != nil {
 		return Error(c, 400, "invalid request body")
 	}
-	snapshot, err := h.interactionSvc.CreateOrResume(c.Context(), uid, service.AssistantInteractionInput{ModeID: req.ModeID, ProjectID: req.ProjectID, ContentID: req.ContentID, ResumeInteractionID: req.ResumeInteractionID, AgentID: req.AgentID, Intent: req.Intent}, c.Get("Idempotency-Key"))
+	snapshot, err := h.interactionSvc.CreateOrResume(c.Context(), uid, service.AssistantInteractionInput{ModeID: req.ModeID, ProjectID: req.ProjectID, ContentID: req.ContentID, ResumeInteractionID: req.ResumeInteractionID, AgentID: req.AgentID, Intent: req.Intent, RecoveryContext: req.RecoveryContext}, c.Get("Idempotency-Key"))
 	if err != nil {
 		return interactiveError(c, err)
 	}
@@ -54,6 +55,29 @@ func (h *AssistantHandler) InteractionSnapshot(c fiber.Ctx) error {
 	return Success(c, snapshot)
 }
 
+func (h *AssistantHandler) InteractionRecover(c fiber.Ctx) error {
+	uid := GetUserID(c)
+	if uid == "" {
+		return Error(c, 401, "unauthorized")
+	}
+	if h.interactionSvc == nil {
+		return Error(c, 503, "assistant unavailable")
+	}
+	var req struct {
+		Generation           int64           `json:"generation"`
+		RecoveryContext      json.RawMessage `json:"recovery_context"`
+		ContinueConversation bool            `json:"continue_conversation,omitempty"`
+	}
+	if err := decodeInteractiveJSON(c.Body(), &req); err != nil {
+		return Error(c, 400, "invalid request body")
+	}
+	snapshot, err := h.interactionSvc.Recover(c.Context(), uid, c.Params("id"), req.Generation, req.RecoveryContext, req.ContinueConversation)
+	if err != nil {
+		return interactiveError(c, err)
+	}
+	return Success(c, snapshot)
+}
+
 func (h *AssistantHandler) InteractionMessage(c fiber.Ctx) error {
 	uid := GetUserID(c)
 	if uid == "" {
@@ -63,14 +87,16 @@ func (h *AssistantHandler) InteractionMessage(c fiber.Ctx) error {
 		return Error(c, 503, "assistant unavailable")
 	}
 	var req struct {
-		Generation      int64  `json:"generation"`
-		ClientMessageID string `json:"client_message_id"`
-		Text            string `json:"text"`
+		ModeID          string                                 `json:"mode_id"`
+		Generation      int64                                  `json:"generation"`
+		ClientMessageID string                                 `json:"client_message_id"`
+		Text            string                                 `json:"text"`
+		Attachments     []service.InteractionMessageAttachment `json:"attachments,omitempty"`
 	}
 	if err := decodeInteractiveJSON(c.Body(), &req); err != nil {
 		return Error(c, 400, "invalid request body")
 	}
-	err := h.interactionSvc.SendMessage(c.Context(), uid, c.Params("id"), service.InteractionMessageInput{Generation: req.Generation, ClientMessageID: req.ClientMessageID, Text: req.Text})
+	err := h.interactionSvc.SendMessage(c.Context(), uid, c.Params("id"), service.InteractionMessageInput{ModeID: req.ModeID, Generation: req.Generation, ClientMessageID: req.ClientMessageID, Text: req.Text, Attachments: req.Attachments})
 	if err != nil {
 		return interactiveError(c, err)
 	}
@@ -86,6 +112,7 @@ func (h *AssistantHandler) InteractionAnswer(c fiber.Ctx) error {
 		return Error(c, 503, "assistant unavailable")
 	}
 	var req struct {
+		ModeID     string                      `json:"mode_id"`
 		CallID     string                      `json:"call_id"`
 		Generation int64                       `json:"generation"`
 		AttemptID  string                      `json:"attempt_id"`
@@ -94,7 +121,7 @@ func (h *AssistantHandler) InteractionAnswer(c fiber.Ctx) error {
 	if err := decodeInteractiveJSON(c.Body(), &req); err != nil {
 		return Error(c, 400, "invalid request body")
 	}
-	err := h.interactionSvc.AnswerQuestion(c.Context(), uid, c.Params("id"), service.InteractionAnswerInput{Generation: req.Generation, AttemptID: req.AttemptID, CallID: req.CallID, Answers: req.Answers})
+	err := h.interactionSvc.AnswerQuestion(c.Context(), uid, c.Params("id"), service.InteractionAnswerInput{ModeID: req.ModeID, Generation: req.Generation, AttemptID: req.AttemptID, CallID: req.CallID, Answers: req.Answers})
 	if err != nil {
 		return interactiveError(c, err)
 	}
@@ -114,6 +141,25 @@ func (h *AssistantHandler) InteractionCommit(c fiber.Ctx) error {
 		return Error(c, 400, "invalid request body")
 	}
 	result, err := h.interactionSvc.CommitInteraction(c.Context(), uid, c.Params("id"), req)
+	if err != nil {
+		return interactiveError(c, err)
+	}
+	return Success(c, result)
+}
+
+func (h *AssistantHandler) InteractionDraftUpdate(c fiber.Ctx) error {
+	uid := GetUserID(c)
+	if uid == "" {
+		return Error(c, 401, "unauthorized")
+	}
+	if h.interactionSvc == nil {
+		return Error(c, 503, "assistant unavailable")
+	}
+	var req service.InteractionDraftUpdateInput
+	if err := decodeInteractiveJSON(c.Body(), &req); err != nil {
+		return Error(c, 400, "invalid request body")
+	}
+	result, err := h.interactionSvc.UpdateDraftForInteraction(c.Context(), uid, c.Params("id"), c.Params("draft_id"), req)
 	if err != nil {
 		return interactiveError(c, err)
 	}

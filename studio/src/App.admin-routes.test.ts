@@ -12,8 +12,7 @@ function routeDefinition(path: string): string {
 }
 
 describe('administrator routes', () => {
-	it('preserves legacy chat continuation context while redirecting to the workspace', () => {
-		expect(source).toContain("checkpointId: params.get('checkpoint_id') || undefined")
+	it('preserves the initial chat message while redirecting to the workspace', () => {
 		expect(source).toContain("initialMessage: params.get('initial_message') || params.get('initialMessage') || undefined")
 	})
 

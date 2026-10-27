@@ -1,6 +1,6 @@
 import { useEffect, useState, type ChangeEvent, type KeyboardEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, FileText, Loader2, Maximize2, SkipForward } from 'lucide-react'
+import { ArrowDownToLine, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, FileText, Loader2, Maximize2, SkipForward } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -99,20 +99,32 @@ export function DshQuestionComposer({
   onSubmit,
   submitted = false,
   answers = [],
+  draftAnswers,
+  onDraftChange,
+  recoveryRequired = false,
+  continuedInComposer = false,
+  onContinueInComposer,
   disabled = false,
 }: {
   questions: DshQuestion[]
   onSubmit: (answer: DshQuestionAnswer) => Promise<void>
   submitted?: boolean
   answers?: DshQuestionAnswerItem[]
+  draftAnswers?: DshQuestionAnswerItem[]
+  onDraftChange?: (answers: DshQuestionAnswerItem[]) => void
+  recoveryRequired?: boolean
+  continuedInComposer?: boolean
+  onContinueInComposer?: () => void
   disabled?: boolean
 }) {
-  const [drafts, setDrafts] = useState<DraftAnswer[]>(() => questions.map((question) => ({
-    selected: answers.find((answer) => answer.id === question.id)?.selected
-      ?? [],
-    custom: answers.find((answer) => answer.id === question.id)?.custom ?? '',
-    skipped: answers.some((answer) => answer.id === question.id && answer.selected.length === 0 && !answer.custom),
-  })))
+  const [drafts, setDrafts] = useState<DraftAnswer[]>(() => questions.map((question) => {
+    const saved = (draftAnswers ?? answers).find((answer) => answer.id === question.id)
+    return {
+      selected: saved?.selected ?? [],
+      custom: saved?.custom ?? '',
+      skipped: saved !== undefined && saved.selected.length === 0 && !saved.custom,
+    }
+  }))
   const [index, setIndex] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -135,6 +147,31 @@ export function DshQuestionComposer({
 
   if (questions.length === 0) return null
 
+  if (recoveryRequired) {
+    return (
+      <section className="mx-auto w-full max-w-[760px] space-y-3 rounded-lg border border-border bg-card p-4 shadow-sm" role="status">
+        <div className="space-y-1">
+          <h2 className="text-sm font-semibold leading-6">已保留的问题与回答</h2>
+          <p className="text-sm leading-6 text-muted-foreground">连接恢复后，这道问题需要在当前对话中继续。已填写内容仍然保留。</p>
+        </div>
+        <div className="space-y-2 text-sm leading-6">
+          {questions.map((item) => {
+            const answer = (draftAnswers ?? answers).find((value) => value.id === item.id)
+            const selected = answer?.selected.map((value) => {
+              const option = item.options?.find((candidate) => candidate.label === value)
+              return value.startsWith('media_asset:') ? option?.description || '已选择素材' : option?.label ?? value
+            }) ?? []
+            const summary = [...selected, ...(answer?.custom?.trim() ? [answer.custom.trim()] : [])]
+            return <div key={item.id} className="min-w-0"><p className="font-medium">{item.question}</p>{summary.length > 0 && <p className="break-words text-muted-foreground">{summary.join('；')}</p>}</div>
+          })}
+        </div>
+        {continuedInComposer
+          ? <p className="text-xs text-muted-foreground">已带入输入框，可以继续编辑并发送。</p>
+          : <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={onContinueInComposer}><ArrowDownToLine />把问题和答案带入输入框</Button>}
+      </section>
+    )
+  }
+
   const isSubmitted = submitted || submittedState
   const interactionDisabled = disabled || busy
 
@@ -142,11 +179,6 @@ export function DshQuestionComposer({
   const draft = drafts[index]
   const multi = question.multiSelect ?? question.multi_select ?? false
   const answered = isAnswered(draft)
-  const updateDraft = (update: (value: DraftAnswer) => DraftAnswer, nextIndex = index) => {
-    setDrafts((items) => items.map((item, itemIndex) => itemIndex === index ? update(item) : item))
-    setIndex(nextIndex)
-    setError(null)
-  }
   const buildAnswer = (values: DraftAnswer[]): DshQuestionAnswer => ({
     answers: questions.map((item, itemIndex) => {
       const value = values[itemIndex]
@@ -159,6 +191,13 @@ export function DshQuestionComposer({
       }
     }),
   })
+  const updateDraft = (update: (value: DraftAnswer) => DraftAnswer, nextIndex = index) => {
+    const nextDrafts = drafts.map((item, itemIndex) => itemIndex === index ? update(item) : item)
+    setDrafts(nextDrafts)
+    onDraftChange?.(buildAnswer(nextDrafts).answers)
+    setIndex(nextIndex)
+    setError(null)
+  }
   const submit = async (values = drafts) => {
     const missing = values.findIndex((value) => !isAnswered(value) && !value.skipped)
     if (missing >= 0) {
@@ -195,6 +234,7 @@ export function DshQuestionComposer({
       ? { selected: [], custom: '', skipped: true }
       : value)
     setDrafts(nextDrafts)
+    onDraftChange?.(buildAnswer(nextDrafts).answers)
     setError(null)
     if (index < questions.length - 1) {
       setIndex(index + 1)

@@ -194,6 +194,80 @@ func TestAssistantInteractionSchemaReadiness(t *testing.T) {
 	if err := requireAssistantInteractionSchema(ready); err != nil {
 		t.Fatalf("current interaction schema readiness: %v", err)
 	}
+	if err := ready.Migrator().DropColumn(&model.AssistantInteractionAttempt{}, "ClaimExpiresAt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ready.Migrator().CreateIndex(&model.AssistantInteractionAttempt{}, "idx_assistant_interaction_attempt_user_key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireAssistantInteractionSchema(ready); err == nil || !strings.Contains(err.Error(), "20261027_assistant_interaction_commit_claim_lease.sql") {
+		t.Fatalf("commit claim lease readiness = %v, want fencing migration instruction", err)
+	}
+	if err := model.AutoMigrate(ready); err != nil {
+		t.Fatal(err)
+	}
+	if err := ready.Migrator().DropColumn(&model.AssistantInteractionAttempt{}, "ClaimToken"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ready.Migrator().CreateIndex(&model.AssistantInteractionAttempt{}, "idx_assistant_interaction_attempt_user_key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireAssistantInteractionSchema(ready); err == nil || !strings.Contains(err.Error(), "20261027_assistant_interaction_commit_claim_lease.sql") {
+		t.Fatalf("commit claim token readiness = %v, want fencing migration instruction", err)
+	}
+	if err := model.AutoMigrate(ready); err != nil {
+		t.Fatal(err)
+	}
+	if err := ready.Migrator().DropIndex(&model.AssistantInteractionAttempt{}, "idx_assistant_interaction_attempt_user_key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireAssistantInteractionSchema(ready); err == nil || !strings.Contains(err.Error(), "20261027_assistant_interaction_commit_claim_lease.sql") {
+		t.Fatalf("interaction schema without idempotency index = %v, want migration instruction", err)
+	}
+}
+
+func TestAssistantInteractionSchemaReadinessRequiresAttemptIdentityForwardMigration(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrator().DropIndex(&model.AssistantInteractionAttempt{}, "idx_assistant_interaction_attempt_user_key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrator().DropColumn(&model.AssistantInteractionAttempt{}, "UserID"); err != nil {
+		t.Fatal(err)
+	}
+
+	err = requireAssistantInteractionSchema(db)
+	if err == nil || !strings.Contains(err.Error(), "20261027_assistant_interaction_commit_claim_lease.sql") {
+		t.Fatalf("pre-attempt-identity interaction schema readiness = %v, want the attempt-identity forward migration instruction", err)
+	}
+}
+
+func TestAssistantInteractionSchemaReadinessRequiresCommitClaimForwardMigration(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	for _, column := range []string{"ClaimToken", "ClaimExpiresAt"} {
+		if err := db.Migrator().DropColumn(&model.AssistantInteractionAttempt{}, column); err != nil {
+			t.Fatalf("drop pre-forward-migration column %s: %v", column, err)
+		}
+	}
+	if err := db.Migrator().CreateIndex(&model.AssistantInteractionAttempt{}, "idx_assistant_interaction_attempt_user_key"); err != nil {
+		t.Fatal(err)
+	}
+
+	err = requireAssistantInteractionSchema(db)
+	if err == nil || !strings.Contains(err.Error(), "20261027_assistant_interaction_commit_claim_lease.sql") {
+		t.Fatalf("pre-claim interaction schema readiness = %v, want the commit-claim forward migration instruction", err)
+	}
 }
 
 func TestTaskBillingSchemaReadiness(t *testing.T) {

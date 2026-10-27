@@ -903,6 +903,7 @@ func main() {
 
 	// 14.1. Create MCP handler (using official MCP Go SDK).
 	assistantInteractionSvc := service.NewAssistantInteractionService(repo, assistantInteractionFactory, nil)
+	assistantInteractionSvc.SetServerInstanceID(cfg.Dsh.ServerInstanceID)
 	assistantInteractionSvc.SetTaskService(taskSvc)
 	var mcpHandler http.Handler
 	if projectSvc != nil && taskSvc != nil && planSvc != nil {
@@ -1053,6 +1054,7 @@ func main() {
 		go startPeriodicArtifactCleanup(cleanupCtx, taskSvc, posterSvc, log)
 		if assistantInteractionSvc != nil {
 			go startAssistantInteractionCleanup(cleanupCtx, assistantInteractionSvc, log)
+			go startAssistantInteractionRuntimeHeartbeat(cleanupCtx, assistantInteractionSvc, log)
 		}
 	}
 
@@ -1493,6 +1495,13 @@ func requireAssistantInteractionSchema(db *gorm.DB) error {
 				return fmt.Errorf("existing database requires server/migrations/20261026_assistant_interactions.sql before startup (missing %s.%s)", item.name, column)
 			}
 		}
+	}
+	if !db.Migrator().HasColumn(&model.AssistantInteractionAttempt{}, "UserID") ||
+		!db.Migrator().HasIndex(&model.AssistantInteractionAttempt{}, "idx_assistant_interaction_attempt_user_key") {
+		return fmt.Errorf("existing database requires server/migrations/20261027_assistant_interaction_commit_claim_lease.sql before startup (missing assistant_interaction_attempts user idempotency scope)")
+	}
+	if !db.Migrator().HasColumn(&model.AssistantInteractionAttempt{}, "ClaimToken") || !db.Migrator().HasColumn(&model.AssistantInteractionAttempt{}, "ClaimExpiresAt") {
+		return fmt.Errorf("existing database requires server/migrations/20261027_assistant_interaction_commit_claim_lease.sql before startup (missing commit claim fencing schema)")
 	}
 	legacyMigration := &model.AssistantInteractionLegacyMigration{}
 	if !db.Migrator().HasColumn(legacyMigration, "LegacySessionID") ||
@@ -2040,6 +2049,28 @@ func startAssistantInteractionCleanup(ctx context.Context, interactions *service
 			return
 		case <-ticker.C:
 			run()
+		}
+	}
+}
+
+func startAssistantInteractionRuntimeHeartbeat(ctx context.Context, interactions *service.AssistantInteractionService, log *zerolog.Logger) {
+	if interactions == nil {
+		return
+	}
+	ticker := time.NewTicker(model.AssistantInteractionRuntimeHeartbeatInterval)
+	defer ticker.Stop()
+	heartbeat := func() {
+		if err := interactions.HeartbeatRuntimeBindings(ctx); err != nil && ctx.Err() == nil {
+			log.Error().Err(err).Msg("assistant interaction runtime heartbeat failed")
+		}
+	}
+	heartbeat()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			heartbeat()
 		}
 	}
 }

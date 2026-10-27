@@ -30,9 +30,19 @@ WHERE s.workspace_id <> ''
   );
 
 UPDATE assistant_sessions s
-SET s.status = 'abandoned', s.closed_at = COALESCE(s.closed_at, CURRENT_TIMESTAMP(6)), s.updated_at = CURRENT_TIMESTAMP(6)
+SET status = 'abandoned', closed_at = COALESCE(closed_at, CURRENT_TIMESTAMP(6)), updated_at = CURRENT_TIMESTAMP(6)
 WHERE s.workspace_id <> ''
   AND s.status NOT IN ('closed', 'expired', 'interrupted', 'abandoned');
+
+-- Old workspace rows are also counted by the standalone interactive-session
+-- admission limit. Close them so abandoned homepage sessions cannot consume
+-- capacity after the interaction cutover.
+UPDATE assistant_workspaces w
+JOIN assistant_sessions s ON s.workspace_id = w.id
+SET w.runtime_status = 'closed',
+    w.closed_at = COALESCE(w.closed_at, CURRENT_TIMESTAMP(6)),
+    w.updated_at = CURRENT_TIMESTAMP(6)
+WHERE s.workspace_id <> '';
 
 CREATE TABLE IF NOT EXISTS assistant_interactions (
   id char(36) NOT NULL PRIMARY KEY,

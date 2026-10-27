@@ -11,6 +11,7 @@ export interface InteractiveStreamOptions {
   onConnected?: () => void
   onEvent?: (event: InteractiveStreamEvent) => void
   onGenerationChanged?: (generation: number) => void
+  onEventGap?: () => void
   endpoint?: string
 }
 
@@ -90,6 +91,7 @@ export async function* streamInteractiveSession(sessionId: string, token: string
         // was backgrounded. Reopen from retained history and reconcile the
         // replay against the persisted client timeline.
         await response.body?.cancel()
+        options.onEventGap?.()
         lastEventId = undefined
         reconnects = 0
         continue
@@ -147,6 +149,7 @@ export async function* streamInteractiveSession(sessionId: string, token: string
       if (signal?.aborted) throw error
       if (error instanceof Error && error.message === EVENT_GAP_MESSAGE) {
         await reader.cancel(error).catch(() => undefined)
+        options.onEventGap?.()
         lastEventId = undefined
         reconnects = 0
         historyGap = true

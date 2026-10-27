@@ -25,7 +25,7 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 	if s.repo == nil || s.repo.AssistantInteractions() == nil {
 		return InteractionStageResult{}, ErrInteractivePersistence
 	}
-	if strings.TrimSpace(in.InteractionID) == "" || strings.TrimSpace(in.ModeID) == "" || strings.TrimSpace(in.AttemptID) == "" || len(in.Payload) == 0 {
+	if strings.TrimSpace(in.InteractionID) == "" || strings.TrimSpace(in.ModeID) == "" || strings.TrimSpace(in.AttemptID) == "" || len(in.AttemptID) > 128 || in.Generation < 1 || len(in.Payload) == 0 || len(in.Payload) > assistantCheckpointMaxBytes || !json.Valid(in.Payload) {
 		return InteractionStageResult{}, ErrInteractiveDraftInvalid
 	}
 	switch in.ModeID {
@@ -41,7 +41,7 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return InteractionStageResult{}, NewInteractionError(InteractionErrorRestartRequired, 410, "当前连接已结束，已保留可恢复内容", "restore_draft", "restart")
 		}
-		return InteractionStageResult{}, err
+		return InteractionStageResult{}, errors.Join(ErrInteractivePersistence, err)
 	}
 	if interaction.Generation != in.Generation {
 		s.metrics.observeStageRetryAfterSessionLoss()
@@ -70,6 +70,13 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 		if replay.ModeID != in.ModeID || replay.Ready != in.Ready {
 			return InteractionStageResult{}, s.stageDraftRevisionConflictError(ctx, userID, interaction, ErrInteractiveIdempotency)
 		}
+		persisted, findErr := s.repo.AssistantInteractions().FindDraftForUser(ctx, userID, replay.DraftID)
+		if findErr != nil || persisted.InteractionID != in.InteractionID {
+			return InteractionStageResult{}, errors.Join(ErrInteractivePersistence, findErr)
+		}
+		if err := s.appendInteractionDraftEvent(ctx, interaction, in.AttemptID, persisted, "draft.ready", s.clock()); err != nil {
+			return InteractionStageResult{}, draftSavedRetryableError(err)
+		}
 		if replay.Ready {
 			_ = s.repo.AssistantInteractions().MarkNeedsConfirmation(ctx, in.InteractionID, s.clock())
 		}
@@ -84,7 +91,7 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 	revision := int64(0)
 	now := s.clock()
 	draft := &model.AssistantInteractionDraft{ID: uuid.NewString(), InteractionID: in.InteractionID, ModeID: in.ModeID, Revision: revision, Payload: append(json.RawMessage(nil), in.Payload...), PayloadDigest: in.PayloadDigest, Ready: in.Ready, ConfirmationState: model.AssistantInteractionDraftPending, SourceGeneration: in.Generation, ExpiresAt: now.Add(InteractionDraftRetention), CreatedAt: now, UpdatedAt: now}
-	attempt := &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: in.InteractionID, AttemptID: in.AttemptID, Operation: string(InteractionOperationStage), Generation: in.Generation, PayloadDigest: in.PayloadDigest, CreatedAt: now, ExpiresAt: now.Add(InteractionAttemptRetention)}
+	attempt := &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: in.InteractionID, UserID: userID, AttemptID: in.AttemptID, Operation: string(InteractionOperationStage), Generation: in.Generation, PayloadDigest: in.PayloadDigest, CreatedAt: now, ExpiresAt: now.Add(InteractionAttemptRetention)}
 	persisted, created, err := s.repo.AssistantInteractions().CreateDraftIfAttemptNewAtGeneration(ctx, draft, attempt, in.Generation)
 	if err != nil {
 		if errors.Is(err, repository.ErrInteractionGenerationChanged) {
@@ -100,39 +107,152 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 		return InteractionStageResult{}, draftSavedRetryableError(err)
 	}
 	if !created {
-		// The durable draft and attempt receipt are the authority on replay. Do
-		// not append a second event when the original response was retried.
 		if full, findErr := s.repo.AssistantInteractions().FindDraftForUser(ctx, userID, persisted.ID); findErr == nil {
 			persisted = full
 		}
+		if err := s.appendInteractionDraftEvent(ctx, interaction, in.AttemptID, persisted, "draft.ready", s.clock()); err != nil {
+			return InteractionStageResult{}, draftSavedRetryableError(err)
+		}
 		return InteractionStageResult{DraftID: persisted.ID, Revision: persisted.Revision, ConfirmationRequired: persisted.Ready, AvailableActions: []string{"confirm_draft", "continue_editing"}, Durable: true}, nil
 	}
-	eventData, _ := json.Marshal(map[string]any{"durable": true, "draft_id": persisted.ID, "revision": persisted.Revision, "mode_id": persisted.ModeID, "ready": persisted.Ready, "payload_digest": persisted.PayloadDigest})
-	durableEvent := &model.AssistantInteractionEvent{ID: uuid.NewString(), InteractionID: in.InteractionID, Type: "draft.ready", Data: eventData, CreatedAt: now}
-	accepted, appendErr := s.repo.AssistantInteractions().AppendEvent(ctx, in.InteractionID, in.Generation, durableEvent)
-	if appendErr != nil || !accepted {
-		if appendErr == nil {
-			appendErr = errors.New("interaction event persistence failed")
-		}
-		return InteractionStageResult{}, draftSavedRetryableError(appendErr)
+	if err := s.appendInteractionDraftEvent(ctx, interaction, in.AttemptID, persisted, "draft.ready", now); err != nil {
+		return InteractionStageResult{}, draftSavedRetryableError(err)
 	}
-	// Keep the rich draft available to an already-connected Studio stream. The
-	// same event sequence is replaced with this process-local form; after a
-	// restart, Snapshot supplies the durable draft payload instead.
-	s.cacheLiveEvent(in.InteractionID, in.Generation, durableEvent, map[string]any{
-		"durable": true,
-		"mode_id": persisted.ModeID,
-		"draft": map[string]any{
-			"draft_id": persisted.ID, "mode_id": persisted.ModeID, "revision": persisted.Revision,
-			"payload": persisted.Payload, "payload_digest": persisted.PayloadDigest,
-			"ready": persisted.Ready, "confirmation_state": persisted.ConfirmationState,
-		},
-	}, now)
 	if in.Ready {
 		_ = s.repo.AssistantInteractions().MarkNeedsConfirmation(ctx, in.InteractionID, now)
 	}
 	stageOutcome = "durable"
 	return InteractionStageResult{DraftID: persisted.ID, Revision: persisted.Revision, ConfirmationRequired: persisted.Ready, AvailableActions: []string{"confirm_draft", "continue_editing"}, Durable: true}, nil
+}
+
+// UpdateDraftForInteraction persists confirmation-time Studio choices as a
+// new immutable draft revision. Commit can then depend solely on its receipt.
+func (s *AssistantInteractionService) UpdateDraftForInteraction(ctx context.Context, userID, interactionID, draftID string, in InteractionDraftUpdateInput) (InteractionStageResult, error) {
+	if s.repo == nil || s.repo.AssistantInteractions() == nil || strings.TrimSpace(interactionID) == "" || strings.TrimSpace(draftID) == "" || strings.TrimSpace(in.AttemptID) == "" || len(in.AttemptID) > 128 || in.Generation < 1 || in.Revision < 1 || len(in.Payload) == 0 || len(in.Payload) > assistantCheckpointMaxBytes || !json.Valid(in.Payload) {
+		return InteractionStageResult{}, ErrInteractiveDraftInvalid
+	}
+	lock := s.lockFor(interactionID)
+	lock.Lock()
+	defer lock.Unlock()
+	interaction, err := s.repo.AssistantInteractions().FindByIDForUser(ctx, userID, interactionID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return InteractionStageResult{}, NewInteractionError(InteractionErrorRestartRequired, 410, "当前连接已结束，已保留可恢复内容", "restore_draft", "restart")
+		}
+		return InteractionStageResult{}, errors.Join(ErrInteractivePersistence, err)
+	}
+	if interaction.Generation != in.Generation {
+		return InteractionStageResult{}, NewInteractionError(InteractionErrorGenerationChanged, 409, "对话状态已更新，请加载最新内容", "reload_snapshot")
+	}
+	if terminalErr := interactionRuntimeTerminalError(interaction.Lifecycle); terminalErr != nil {
+		return InteractionStageResult{}, terminalErr
+	}
+	payloadHash := sha256.Sum256(in.Payload)
+	payloadDigest := hex.EncodeToString(payloadHash[:])
+	requestDigest := interactionCommandDigest(string(InteractionOperationDraftUpdate), in.AttemptID, map[string]any{
+		"draft_id": draftID, "revision": in.Revision, "payload_digest": payloadDigest,
+	})
+	if previousAttempt, findErr := s.repo.AssistantInteractions().FindAttempt(ctx, interactionID, in.AttemptID); findErr == nil {
+		if previousAttempt.Generation != in.Generation || previousAttempt.Operation != string(InteractionOperationDraftUpdate) || previousAttempt.PayloadDigest != requestDigest {
+			return InteractionStageResult{}, s.stageDraftRevisionConflictError(ctx, userID, interaction, ErrInteractiveIdempotency)
+		}
+		var receipt struct {
+			DraftID  string `json:"draft_id"`
+			Revision int64  `json:"revision"`
+			Ready    bool   `json:"ready"`
+		}
+		if err := json.Unmarshal(previousAttempt.Result, &receipt); err != nil {
+			return InteractionStageResult{}, errors.Join(ErrInteractivePersistence, err)
+		}
+		persisted, findErr := s.repo.AssistantInteractions().FindDraftForUser(ctx, userID, receipt.DraftID)
+		if findErr != nil || persisted.InteractionID != interactionID {
+			return InteractionStageResult{}, errors.Join(ErrInteractivePersistence, findErr)
+		}
+		if err := s.appendInteractionDraftEvent(ctx, interaction, in.AttemptID, persisted, "draft.updated", s.clock()); err != nil {
+			return InteractionStageResult{}, draftSavedRetryableError(err)
+		}
+		return InteractionStageResult{DraftID: receipt.DraftID, Revision: receipt.Revision, ConfirmationRequired: receipt.Ready, AvailableActions: []string{"confirm_draft", "continue_editing"}, Durable: true}, nil
+	} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
+		return InteractionStageResult{}, errors.Join(ErrInteractivePersistence, findErr)
+	}
+	previous, err := s.repo.AssistantInteractions().FindDraftForUser(ctx, userID, draftID)
+	if err != nil || previous.InteractionID != interactionID || previous.Revision != in.Revision {
+		return InteractionStageResult{}, s.stageDraftRevisionConflictError(ctx, userID, interaction, ErrAssistantCheckpointConflict)
+	}
+	if !previous.Ready || previous.ConfirmationState == model.AssistantInteractionDraftConsumed || previous.ConfirmationState == model.AssistantInteractionDraftSuperseded {
+		return InteractionStageResult{}, s.stageDraftRevisionConflictError(ctx, userID, interaction, ErrAssistantCheckpointConflict)
+	}
+	now := s.clock()
+	updated := &model.AssistantInteractionDraft{
+		ID: uuid.NewString(), InteractionID: interactionID, ModeID: previous.ModeID,
+		Payload: append(json.RawMessage(nil), in.Payload...), PayloadDigest: payloadDigest, Ready: previous.Ready,
+		ConfirmationState: model.AssistantInteractionDraftPending, SourceGeneration: interaction.Generation,
+		ExpiresAt: now.Add(InteractionDraftRetention), CreatedAt: now, UpdatedAt: now,
+	}
+	attempt := &model.AssistantInteractionAttempt{
+		ID: uuid.NewString(), InteractionID: interactionID, UserID: userID, AttemptID: in.AttemptID,
+		Operation: string(InteractionOperationDraftUpdate), Generation: in.Generation, PayloadDigest: requestDigest,
+		CreatedAt: now, ExpiresAt: now.Add(InteractionAttemptRetention),
+	}
+	persisted, created, err := s.repo.AssistantInteractions().UpdateDraftIfAttemptNewAtGeneration(ctx, updated, draftID, attempt, in.Revision, in.Generation, now)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrInteractionGenerationChanged):
+			return InteractionStageResult{}, NewInteractionError(InteractionErrorGenerationChanged, 409, "对话状态已更新，请加载最新内容", "reload_snapshot")
+		case errors.Is(err, repository.ErrInteractionTerminal):
+			return InteractionStageResult{}, interactionRuntimeTerminalError(interaction.Lifecycle)
+		case errors.Is(err, repository.ErrInteractionDraftRevisionChanged), errors.Is(err, repository.ErrInteractionAttemptConflict):
+			return InteractionStageResult{}, s.stageDraftRevisionConflictError(ctx, userID, interaction, ErrAssistantCheckpointConflict)
+		default:
+			return InteractionStageResult{}, draftSavedRetryableError(err)
+		}
+	}
+	if !created {
+		if full, findErr := s.repo.AssistantInteractions().FindDraftForUser(ctx, userID, persisted.ID); findErr == nil {
+			persisted = full
+		}
+		if err := s.appendInteractionDraftEvent(ctx, interaction, in.AttemptID, persisted, "draft.updated", now); err != nil {
+			return InteractionStageResult{}, draftSavedRetryableError(err)
+		}
+		return InteractionStageResult{DraftID: persisted.ID, Revision: persisted.Revision, ConfirmationRequired: persisted.Ready, AvailableActions: []string{"confirm_draft", "continue_editing"}, Durable: true}, nil
+	}
+	if err := s.appendInteractionDraftEvent(ctx, interaction, in.AttemptID, persisted, "draft.updated", now); err != nil {
+		return InteractionStageResult{}, draftSavedRetryableError(err)
+	}
+	_ = s.repo.AssistantInteractions().MarkNeedsConfirmation(ctx, interactionID, now)
+	return InteractionStageResult{DraftID: persisted.ID, Revision: persisted.Revision, ConfirmationRequired: true, AvailableActions: []string{"confirm_draft", "continue_editing"}, Durable: true}, nil
+}
+
+func (s *AssistantInteractionService) appendInteractionDraftEvent(ctx context.Context, interaction *model.AssistantInteraction, attemptID string, draft *model.AssistantInteractionDraft, eventType string, now time.Time) error {
+	if interaction == nil || draft == nil {
+		return errors.New("interaction and draft are required for event persistence")
+	}
+	eventData, err := json.Marshal(map[string]any{
+		"durable": true, "draft_id": draft.ID, "revision": draft.Revision, "mode_id": draft.ModeID,
+		"ready": draft.Ready, "payload_digest": draft.PayloadDigest,
+	})
+	if err != nil {
+		return err
+	}
+	eventID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("assistant-interaction:"+interaction.ID+":"+eventType+":"+attemptID)).String()
+	durableEvent := &model.AssistantInteractionEvent{ID: eventID, InteractionID: interaction.ID, Generation: interaction.Generation, Type: eventType, Data: eventData, CreatedAt: now}
+	accepted, err := s.repo.AssistantInteractions().AppendEvent(ctx, interaction.ID, interaction.Generation, durableEvent)
+	if err != nil {
+		return err
+	}
+	if !accepted {
+		return errors.New("interaction event persistence failed")
+	}
+	s.cacheLiveEvent(interaction.ID, interaction.Generation, durableEvent, map[string]any{
+		"durable": true,
+		"mode_id": draft.ModeID,
+		"draft": map[string]any{
+			"draft_id": draft.ID, "mode_id": draft.ModeID, "revision": draft.Revision,
+			"payload": draft.Payload, "payload_digest": draft.PayloadDigest,
+			"ready": draft.Ready, "confirmation_state": draft.ConfirmationState,
+		},
+	}, now)
+	return nil
 }
 
 func (s *AssistantInteractionService) stageDraftRevisionConflictError(ctx context.Context, userID string, interaction *model.AssistantInteraction, cause error) error {

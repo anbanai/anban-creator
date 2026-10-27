@@ -169,7 +169,7 @@ func (r *userMediaAssetRepository) ListReadyCandidates(ctx context.Context, user
 // for file names while limiting the subquery to the current library row.
 func withUserMediaSearch(q *gorm.DB, query string) *gorm.DB {
 	like := "%" + query + "%"
-	return q.Where("(user_media_assets.description LIKE ? OR user_media_assets.usage_notes LIKE ? OR EXISTS (SELECT 1 FROM assets WHERE assets.id = user_media_assets.asset_id AND assets.file_name LIKE ?))", like, like, like)
+	return q.Where("(user_media_assets.id LIKE ? OR user_media_assets.description LIKE ? OR user_media_assets.usage_notes LIKE ? OR EXISTS (SELECT 1 FROM assets WHERE assets.id = user_media_assets.asset_id AND assets.file_name LIKE ?))", like, like, like, like)
 }
 
 func maxInt(a, b int) int {

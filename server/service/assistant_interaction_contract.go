@@ -18,12 +18,14 @@ const (
 	InteractionCommitReceiptRetention = 30 * 24 * time.Hour
 	InteractionEventRetention         = 24 * time.Hour
 	InteractionAttemptRetention       = 24 * time.Hour
+	InteractionRuntimeLease           = model.AssistantInteractionRuntimeLease
 )
 
 const (
 	InteractionLifecycleActive            = model.AssistantInteractionActive
 	InteractionLifecycleReconnecting      = model.AssistantInteractionReconnecting
 	InteractionLifecycleNeedsConfirmation = model.AssistantInteractionNeedsConfirmation
+	InteractionLifecycleCommitting        = model.AssistantInteractionCommitting
 	InteractionLifecycleCompleted         = model.AssistantInteractionCompleted
 	InteractionLifecycleAbandoned         = model.AssistantInteractionAbandoned
 	InteractionRuntimeStarting            = model.AssistantInteractionRuntimeStarting
@@ -40,9 +42,11 @@ const (
 	InteractionErrorGenerationChanged            = "assistant_interaction_generation_changed"
 	InteractionErrorReconnecting                 = "assistant_interaction_reconnecting"
 	InteractionErrorRestartRequired              = "assistant_interaction_restart_required"
+	InteractionErrorModeChanged                  = "assistant_interaction_mode_changed"
 	InteractionErrorMessageNotAccepted           = "assistant_message_not_accepted"
 	InteractionErrorDraftSavedRetryable          = "assistant_draft_saved_retryable"
 	InteractionErrorDraftRevisionConflict        = "assistant_draft_revision_conflict"
+	InteractionErrorCommitRetryable              = "assistant_commit_retryable"
 	InteractionErrorCommitAlreadyApplied         = "assistant_commit_already_applied"
 	InteractionErrorCommitReconciliationRequired = "assistant_commit_reconciliation_required"
 )
@@ -50,12 +54,30 @@ const (
 type InteractionOperation string
 
 const (
-	InteractionOperationMessage InteractionOperation = "message"
-	InteractionOperationAnswer  InteractionOperation = "answer"
-	InteractionOperationStage   InteractionOperation = "stage"
-	InteractionOperationEvents  InteractionOperation = "events"
-	InteractionOperationCommit  InteractionOperation = "commit"
+	InteractionOperationCreate      InteractionOperation = "create"
+	InteractionOperationMessage     InteractionOperation = "message"
+	InteractionOperationAnswer      InteractionOperation = "answer"
+	InteractionOperationStage       InteractionOperation = "stage"
+	InteractionOperationDraftUpdate InteractionOperation = "draft_update"
+	InteractionOperationEvents      InteractionOperation = "events"
+	InteractionOperationCommit      InteractionOperation = "commit"
 )
+
+func interactionCreateAttemptID(idempotencyKey string) string {
+	digest := sha256.Sum256([]byte(strings.TrimSpace(idempotencyKey)))
+	return "create:" + hex.EncodeToString(digest[:])
+}
+
+func interactionCreatePayloadDigest(input AssistantInteractionInput) string {
+	return interactionCommandDigest("assistant_interaction_create", "", map[string]any{
+		"mode_id":               input.ModeID,
+		"project_id":            input.ProjectID,
+		"content_id":            input.ContentID,
+		"resume_interaction_id": input.ResumeInteractionID,
+		"agent_id":              input.AgentID,
+		"intent":                input.Intent,
+	})
+}
 
 // InteractionError is safe to serialize to the client. Internal causes are
 // retained through Unwrap but are never included in JSON.
@@ -140,6 +162,34 @@ type InteractionStageInput struct {
 	Ready         bool            `json:"ready"`
 }
 
+type InteractionDraftUpdateInput struct {
+	Generation int64           `json:"generation"`
+	Revision   int64           `json:"revision"`
+	AttemptID  string          `json:"attempt_id"`
+	Payload    json.RawMessage `json:"payload"`
+}
+
+type InteractionRecoveryMessage struct {
+	Role string `json:"role"`
+	Text string `json:"text"`
+}
+
+type InteractionRecoveryQuestion struct {
+	Question string   `json:"question"`
+	Answers  []string `json:"answers"`
+}
+
+// InteractionRecoveryContext is supplied from the Studio display cache only
+// when a replacement runtime needs its conversation context rebuilt. It is
+// never stored in the interaction event or attempt ledger.
+type InteractionRecoveryContext struct {
+	Version       int                           `json:"version"`
+	InteractionID string                        `json:"interaction_id"`
+	ModeID        string                        `json:"mode_id"`
+	Messages      []InteractionRecoveryMessage  `json:"messages"`
+	Questions     []InteractionRecoveryQuestion `json:"questions"`
+}
+
 type InteractionStageResult struct {
 	DraftID              string   `json:"draft_id"`
 	Revision             int64    `json:"revision"`
@@ -149,10 +199,9 @@ type InteractionStageResult struct {
 }
 
 type InteractionCommitRequest struct {
-	DraftID        string          `json:"draft_id"`
-	Revision       int64           `json:"revision"`
-	IdempotencyKey string          `json:"idempotency_key"`
-	Options        json.RawMessage `json:"options,omitempty"`
+	DraftID        string `json:"draft_id"`
+	Revision       int64  `json:"revision"`
+	IdempotencyKey string `json:"idempotency_key"`
 }
 
 type InteractionCommitResult struct {

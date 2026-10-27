@@ -5,10 +5,16 @@ import (
 	"time"
 )
 
+const AssistantInteractionRuntimeLease = 24 * time.Hour
+const AssistantInteractionRuntimeHeartbeatInterval = 10 * time.Second
+const AssistantInteractionRuntimeOwnerLease = 45 * time.Second
+const AssistantInteractionCommitClaimLease = 30 * time.Second
+
 const (
 	AssistantInteractionActive            = "active"
 	AssistantInteractionReconnecting      = "reconnecting"
 	AssistantInteractionNeedsConfirmation = "needs_confirmation"
+	AssistantInteractionCommitting        = "committing"
 	AssistantInteractionCompleted         = "completed"
 	AssistantInteractionAbandoned         = "abandoned"
 	AssistantInteractionRuntimeStarting   = "starting"
@@ -96,17 +102,20 @@ type AssistantInteractionEvent struct {
 func (AssistantInteractionEvent) TableName() string { return "assistant_interaction_events" }
 
 type AssistantInteractionAttempt struct {
-	ID            string          `gorm:"type:char(36);primaryKey" json:"id"`
-	InteractionID string          `gorm:"type:char(36);uniqueIndex:idx_assistant_interaction_attempt_key,priority:1;index:idx_assistant_interaction_attempt,priority:1;not null" json:"interaction_id"`
-	AttemptID     string          `gorm:"type:varchar(128);uniqueIndex:idx_assistant_interaction_attempt_key,priority:2;index:idx_assistant_interaction_attempt,priority:2;not null" json:"attempt_id"`
-	Operation     string          `gorm:"type:varchar(24);not null" json:"operation"`
-	Generation    int64           `gorm:"not null" json:"generation"`
-	PayloadDigest string          `gorm:"type:char(64);not null" json:"payload_digest"`
-	Status        string          `gorm:"type:varchar(24);not null;default:'pending'" json:"status"`
-	Result        json.RawMessage `gorm:"type:json" json:"result,omitempty"`
-	ErrorCode     string          `gorm:"type:varchar(96);not null;default:''" json:"error_code,omitempty"`
-	CreatedAt     time.Time       `gorm:"index;not null" json:"created_at"`
-	ExpiresAt     time.Time       `gorm:"index;not null" json:"expires_at"`
+	ID             string          `gorm:"type:char(36);primaryKey" json:"id"`
+	InteractionID  string          `gorm:"type:char(36);uniqueIndex:idx_assistant_interaction_attempt_key,priority:1;index:idx_assistant_interaction_attempt,priority:1;not null" json:"interaction_id"`
+	UserID         string          `gorm:"type:char(36);index:idx_assistant_interaction_attempt_user_key,priority:1;not null;default:''" json:"-"`
+	AttemptID      string          `gorm:"type:varchar(128);uniqueIndex:idx_assistant_interaction_attempt_key,priority:2;index:idx_assistant_interaction_attempt,priority:2;uniqueIndex:idx_assistant_interaction_attempt_user_key,priority:3;not null" json:"attempt_id"`
+	Operation      string          `gorm:"type:varchar(24);uniqueIndex:idx_assistant_interaction_attempt_user_key,priority:2;not null" json:"operation"`
+	Generation     int64           `gorm:"not null" json:"generation"`
+	PayloadDigest  string          `gorm:"type:char(64);not null" json:"payload_digest"`
+	Status         string          `gorm:"type:varchar(24);not null;default:'pending'" json:"status"`
+	ClaimToken     string          `gorm:"type:char(36);not null;default:''" json:"-"`
+	ClaimExpiresAt *time.Time      `json:"-"`
+	Result         json.RawMessage `gorm:"type:json" json:"result,omitempty"`
+	ErrorCode      string          `gorm:"type:varchar(96);not null;default:''" json:"error_code,omitempty"`
+	CreatedAt      time.Time       `gorm:"index;not null" json:"created_at"`
+	ExpiresAt      time.Time       `gorm:"index;not null" json:"expires_at"`
 }
 
 func (AssistantInteractionAttempt) TableName() string { return "assistant_interaction_attempts" }

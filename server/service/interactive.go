@@ -272,7 +272,6 @@ type InteractiveService struct {
 	memory            InteractiveMemoryStore
 	logger            *zerolog.Logger
 	receiptMu         sync.Mutex
-	workspaceCreateMu sync.Mutex
 	createIdempotency map[string]*interactiveCreateReservation
 	serverInstanceID  string
 	workspaceRuntimes map[string]*interactiveWorkspaceRuntime

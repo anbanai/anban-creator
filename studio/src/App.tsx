@@ -53,7 +53,6 @@ function ChatRedirect() {
         modeId: validMode,
         projectId: params.get('project_id') || undefined,
         contentId: params.get('content_id') || undefined,
-        checkpointId: params.get('checkpoint_id') || undefined,
         initialMessage: params.get('initial_message') || params.get('initialMessage') || undefined,
       }}
     />

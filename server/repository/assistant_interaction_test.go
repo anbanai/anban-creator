@@ -49,6 +49,32 @@ func TestAssistantInteractionRepositoryCASAndRuntime(t *testing.T) {
 	}
 }
 
+func TestAssistantInteractionRepositoryFencesRuntimeStartDuringCommit(t *testing.T) {
+	repo, _ := newAssistantInteractionTestRepository(t)
+	now := time.Now().UTC()
+	interaction := &model.AssistantInteraction{ID: "commit-runtime-race", UserID: "user-1", ModeID: "creation", Lifecycle: model.AssistantInteractionCommitting, Generation: 1, ExpiresAt: now.Add(time.Hour), LastActivityAt: now, CreatedAt: now, UpdatedAt: now}
+	if err := repo.AssistantInteractions().Create(context.Background(), interaction); err != nil {
+		t.Fatal(err)
+	}
+	binding := &model.AssistantInteractionRuntime{ID: "commit-runtime-binding", InteractionID: interaction.ID, Generation: 1, ServerInstance: "server-1", RuntimeID: "runtime-1", LogicalSession: "logical-1", TokenHash: "hash", Status: model.AssistantInteractionRuntimeStarting, StartedAt: now, CreatedAt: now, UpdatedAt: now}
+	if err := repo.AssistantInteractions().CreateRuntimeBinding(context.Background(), binding); !errors.Is(err, ErrInteractionCommitInProgress) {
+		t.Fatalf("create runtime binding during commit = %v, want commit-in-progress", err)
+	}
+	interaction.Lifecycle = model.AssistantInteractionActive
+	if err := repo.AssistantInteractions().UpdateLifecycle(context.Background(), interaction.ID, model.AssistantInteractionActive, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AssistantInteractions().CreateRuntimeBinding(context.Background(), binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AssistantInteractions().UpdateLifecycle(context.Background(), interaction.ID, model.AssistantInteractionCommitting, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AssistantInteractions().ActivateRuntimeBinding(context.Background(), binding.ID, now); !errors.Is(err, ErrInteractionCommitInProgress) {
+		t.Fatalf("activate runtime binding during commit = %v, want commit-in-progress", err)
+	}
+}
+
 func TestAssistantInteractionRepositoryAllowsOnlyOneActiveScope(t *testing.T) {
 	repo, _ := newAssistantInteractionTestRepository(t)
 	now := time.Now().UTC()
@@ -67,6 +93,77 @@ func TestAssistantInteractionRepositoryAllowsOnlyOneActiveScope(t *testing.T) {
 	second.ID = "scope-2"
 	if err := repo.AssistantInteractions().Create(context.Background(), &second); err != nil {
 		t.Fatalf("new scope after abandonment: %v", err)
+	}
+}
+
+func TestAssistantInteractionCommitClaimGetsNewOwnerTokenAfterLeaseExpiry(t *testing.T) {
+	repo, db := newAssistantInteractionTestRepository(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	interaction := &model.AssistantInteraction{
+		ID: "claim-fencing-interaction", UserID: "user-1", ModeID: "profile", Lifecycle: model.AssistantInteractionActive,
+		Generation: 1, ExpiresAt: now.Add(time.Hour), LastActivityAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repo.AssistantInteractions().Create(ctx, interaction); err != nil {
+		t.Fatal(err)
+	}
+	draft := &model.AssistantInteractionDraft{
+		ID: "claim-fencing-draft", InteractionID: interaction.ID, ModeID: "profile", Revision: 1,
+		Payload: json.RawMessage(`{"ready":true}`), PayloadDigest: "digest", Ready: true,
+		ConfirmationState: model.AssistantInteractionDraftPending, SourceGeneration: 1,
+		ExpiresAt: now.Add(30 * 24 * time.Hour), CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(draft).Error; err != nil {
+		t.Fatal(err)
+	}
+	claim := func(id string, at time.Time) *model.AssistantInteractionAttempt {
+		return &model.AssistantInteractionAttempt{
+			ID: id, InteractionID: interaction.ID, UserID: "user-1", AttemptID: "commit:lease-recovery",
+			Operation: "commit", Generation: 1, PayloadDigest: "commit-digest", Status: model.AssistantInteractionAttemptPending, ClaimToken: uuid.NewString(),
+			CreatedAt: at, ExpiresAt: at.Add(30 * 24 * time.Hour),
+		}
+	}
+	first, claimed, err := repo.AssistantInteractions().ClaimInteractionCommit(ctx, "user-1", interaction.ID, draft.ID, draft.Revision, claim("claim-owner-one", now))
+	if err != nil || !claimed {
+		t.Fatalf("first claim = %#v, claimed=%v, err=%v", first, claimed, err)
+	}
+	second, claimed, err := repo.AssistantInteractions().ClaimInteractionCommit(ctx, "user-1", interaction.ID, draft.ID, draft.Revision, claim("claim-owner-two", now.Add(model.AssistantInteractionCommitClaimLease+time.Second)))
+	if err != nil || !claimed {
+		t.Fatalf("reclaimed claim = %#v, claimed=%v, err=%v", second, claimed, err)
+	}
+	if first.ClaimToken == "" || second.ClaimToken == "" || first.ClaimToken == second.ClaimToken {
+		t.Fatalf("claim owner tokens = %q then %q, want distinct non-empty tokens", first.ClaimToken, second.ClaimToken)
+	}
+	if err := repo.AssistantInteractions().ReleaseInteractionCommit(ctx, interaction.ID, draft.ID, "commit:lease-recovery", first.ClaimToken, "stale-release", now.Add(model.AssistantInteractionCommitClaimLease+2*time.Second)); !errors.Is(err, ErrInteractionCommitClaimLost) {
+		t.Fatalf("expired owner release = %v, want claim-lost", err)
+	}
+	if err := repo.AssistantInteractions().CompleteInteractionCommit(ctx, interaction.ID, draft.ID, "commit:lease-recovery", first.ClaimToken, json.RawMessage(`{"stale":true}`), now.Add(model.AssistantInteractionCommitClaimLease+2*time.Second)); !errors.Is(err, ErrInteractionCommitClaimLost) {
+		t.Fatalf("expired owner completion = %v, want claim-lost", err)
+	}
+	if err := repo.WithTx(ctx, func(tx Repository) error {
+		if err := tx.AssistantInteractions().UpdateProject(ctx, interaction.ID, "stale-project", now.Add(model.AssistantInteractionCommitClaimLease+2*time.Second)); err != nil {
+			return err
+		}
+		return tx.AssistantInteractions().CompleteInteractionCommitInTransaction(ctx, interaction.ID, draft.ID, "commit:lease-recovery", first.ClaimToken, json.RawMessage(`{"stale":true}`), now.Add(model.AssistantInteractionCommitClaimLease+2*time.Second))
+	}); !errors.Is(err, ErrInteractionCommitClaimLost) {
+		t.Fatalf("stale profile transaction completion = %v, want claim-lost", err)
+	}
+	current, err := repo.AssistantInteractions().FindAttempt(ctx, interaction.ID, "commit:lease-recovery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != model.AssistantInteractionAttemptPending || current.ClaimToken != second.ClaimToken || len(current.Result) != 0 {
+		t.Fatalf("current claim after stale owner writes = %#v", current)
+	}
+	currentInteraction, err := repo.AssistantInteractions().FindByID(ctx, interaction.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if currentInteraction.ProjectID != "" {
+		t.Fatalf("stale profile transaction left project %q committed", currentInteraction.ProjectID)
+	}
+	if err := repo.AssistantInteractions().CompleteInteractionCommit(ctx, interaction.ID, draft.ID, "commit:lease-recovery", second.ClaimToken, json.RawMessage(`{"created":true}`), now.Add(model.AssistantInteractionCommitClaimLease+3*time.Second)); err != nil {
+		t.Fatalf("current owner completion = %v", err)
 	}
 }
 

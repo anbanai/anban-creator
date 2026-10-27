@@ -40,10 +40,14 @@ var (
 	assistantRuntimeGenerationReplaced       = expvar.NewInt("assistant_runtime_generation_replaced_total")
 	assistantDraftDurableLatency             = expvar.NewMap("assistant_draft_durable_latency_ms")
 	assistantDraftDurableLatencyLast         expvar.Int
+	assistantDraftDurableLatencyP50          expvar.Int
+	assistantDraftDurableLatencyP95          expvar.Int
 )
 
 func init() {
 	assistantDraftDurableLatency.Set("last_ms", &assistantDraftDurableLatencyLast)
+	assistantDraftDurableLatency.Set("p50_ms", &assistantDraftDurableLatencyP50)
+	assistantDraftDurableLatency.Set("p95_ms", &assistantDraftDurableLatencyP95)
 }
 
 func (m *interactionMetrics) observeRecovery(cause, outcome string) {
@@ -97,12 +101,16 @@ func (m *interactionMetrics) observeDraftStage(outcome string, latency time.Dura
 			m.durableLatency = m.durableLatency[:2048]
 		}
 		m.durableLatency = append(m.durableLatency, latency.Milliseconds())
+		values := append([]int64(nil), m.durableLatency...)
+		sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
+		assistantDraftDurableLatencyLast.Set(latency.Milliseconds())
+		assistantDraftDurableLatencyP50.Set(nearestRankPercentile(values, 50))
+		assistantDraftDurableLatencyP95.Set(nearestRankPercentile(values, 95))
 	}
 	m.mu.Unlock()
 	assistantDraftStageTotal.Add(outcome, 1)
 	if outcome == "durable" {
 		assistantDraftDurableLatency.Add("count", 1)
-		assistantDraftDurableLatencyLast.Set(latency.Milliseconds())
 	}
 }
 
@@ -158,8 +166,19 @@ func (m *interactionMetrics) snapshot() InteractionMetricsSnapshot {
 	if len(m.durableLatency) > 0 {
 		values := append([]int64(nil), m.durableLatency...)
 		sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
-		snapshot.DraftDurableP50Millis = values[(len(values)-1)*50/100]
-		snapshot.DraftDurableP95Millis = values[(len(values)-1)*95/100]
+		snapshot.DraftDurableP50Millis = nearestRankPercentile(values, 50)
+		snapshot.DraftDurableP95Millis = nearestRankPercentile(values, 95)
 	}
 	return snapshot
+}
+
+func nearestRankPercentile(sortedValues []int64, percentile int) int64 {
+	if len(sortedValues) == 0 {
+		return 0
+	}
+	rank := (percentile*len(sortedValues) + 99) / 100
+	if rank < 1 {
+		rank = 1
+	}
+	return sortedValues[rank-1]
 }

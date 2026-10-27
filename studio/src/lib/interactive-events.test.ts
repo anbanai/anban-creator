@@ -174,12 +174,14 @@ describe('streamAssistantWorkspace', () => {
       .mockResolvedValueOnce(response('event:assistant.message\nid:7\ndata:{"text":"已收到"}\n\n'))
       .mockResolvedValueOnce(response('event:assistant.message\nid:9\ndata:{"text":"跳过了一个事件"}\n\n'))
       .mockResolvedValueOnce(response('event:assistant.message\nid:8\ndata:{"text":"补齐"}\n\nevent:assistant.message\nid:9\ndata:{"text":"继续"}\n\n'))
-    const stream = streamAssistantWorkspace('interaction-1', 'token')
+    const onEventGap = vi.fn()
+    const stream = streamAssistantWorkspace('interaction-1', 'token', undefined, { onEventGap })
 
     await expect(stream.next()).resolves.toMatchObject({ value: { id: '7' }, done: false })
     const nextEvent = stream.next()
     await vi.advanceTimersByTimeAsync(250)
     await expect(nextEvent).resolves.toMatchObject({ value: { id: '8' }, done: false })
+    expect(onEventGap).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/v1/assistant/interactions/interaction-1/events', expect.objectContaining({
       headers: { Authorization: 'Bearer token', Accept: 'text/event-stream' },
     }))

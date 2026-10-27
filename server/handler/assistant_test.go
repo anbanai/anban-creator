@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -62,52 +63,92 @@ func newAssistantHandlerTestApp(h *AssistantHandler) *fiber.App {
 	app.Get("/assistant/projects/:projectId/works", h.Works)
 	app.Get("/assistant/checkpoint", h.LatestCheckpoint)
 	app.Post("/assistant/sessions", h.Create)
-	app.Post("/assistant/workspaces", h.WorkspaceCreate)
-	app.Post("/assistant/workspaces/:id/mode", h.WorkspaceMode)
-	app.Post("/assistant/workspaces/:id/messages", h.WorkspaceMessage)
 	return app
 }
 
-func TestAssistantWorkspaceRoutesCarryModeInBody(t *testing.T) {
-	repo := newAssistantHandlerTestRepo(t)
-	project := &model.Project{ID: uuid.NewString(), UserID: "user-1", Platform: "wechat", Name: "画像", Status: model.ProjectStatusActive, Profile: datatypes.NewJSONType(model.NewProjectProfile())}
-	profile := model.NewProjectProfile()
-	profile.Status = model.ProfileStatusConfirmed
-	profile.InitializationStatus = model.ProfileInitializationReady
-	profile.Version = 1
-	project.Profile = datatypes.NewJSONType(profile)
-	if err := repo.Projects().Create(context.Background(), project); err != nil {
-		t.Fatal(err)
+func TestAssistantRecoveryHasNoLegacyWorkspaceSessionSurface(t *testing.T) {
+	for _, target := range []struct {
+		name string
+		typ  reflect.Type
+	}{
+		{name: "handler", typ: reflect.TypeOf(&AssistantHandler{})},
+		{name: "service", typ: reflect.TypeOf(&service.InteractiveService{})},
+	} {
+		t.Run(target.name, func(t *testing.T) {
+			for _, method := range []string{
+				"WorkspaceCreate",
+				"WorkspaceMode",
+				"WorkspaceEvents",
+				"WorkspaceMessage",
+				"WorkspaceAnswers",
+				"WorkspaceCheckpoint",
+				"WorkspaceCommit",
+				"WorkspaceDelete",
+				"CreateAssistantWorkspace",
+				"SwitchAssistantWorkspaceMode",
+				"SwitchAssistantWorkspaceModeWithContext",
+				"AssistantWorkspaceSession",
+				"WorkspaceState",
+				"WorkspaceAnswer",
+				"CloseAssistantWorkspace",
+			} {
+				if _, ok := target.typ.MethodByName(method); ok {
+					t.Errorf("legacy workspace-session method %s remains on %s", method, target.name)
+				}
+			}
+		})
 	}
-	svc := service.NewInteractiveServiceWithRuntime(repo, &assistantHandlerRuntimeFactory{})
-	svc.SetEnabled(true)
-	app := newAssistantHandlerTestApp(NewAssistantHandler(svc, nil, repo))
-	createReq, err := app.Test(httptest.NewRequest(http.MethodPost, "/assistant/workspaces", strings.NewReader(`{"mode_id":"creation","project_id":"`+project.ID+`"}`)))
+}
+
+func TestInteractionMessageRejectsStaleModeFromAnotherTab(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if createReq.StatusCode != http.StatusOK {
-		t.Fatalf("workspace create status = %d", createReq.StatusCode)
-	}
-	var envelope struct {
-		Data service.AssistantWorkspaceView `json:"data"`
-	}
-	if err := json.NewDecoder(createReq.Body).Decode(&envelope); err != nil {
+	if err := db.AutoMigrate(&model.AssistantInteraction{}, &model.AssistantInteractionRuntime{}, &model.AssistantInteractionDraft{}, &model.AssistantInteractionEvent{}, &model.AssistantInteractionAttempt{}, &model.AssistantInteractionLegacyMigration{}); err != nil {
 		t.Fatal(err)
 	}
-	modeReq, err := app.Test(httptest.NewRequest(http.MethodPost, "/assistant/workspaces/"+envelope.Data.ID+"/mode", strings.NewReader(`{"mode_id":"profile"}`)))
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	factory := &assistantHandlerRuntimeFactory{}
+	svc := service.NewAssistantInteractionService(repo, factory, time.Now)
+	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", service.AssistantInteractionInput{ModeID: service.AssistantModeCreation}, "mode-route")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if modeReq.StatusCode != http.StatusOK {
-		t.Fatalf("workspace mode status = %d", modeReq.StatusCode)
-	}
-	messageReq, err := app.Test(httptest.NewRequest(http.MethodPost, "/assistant/workspaces/"+envelope.Data.ID+"/messages", strings.NewReader(`{"mode_id":"creation","text":"wrong mode"}`)))
+	h := NewAssistantHandler(nil, nil, repo)
+	h.SetInteractionService(svc)
+	app := fiber.New()
+	app.Use(func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return c.Next()
+	})
+	app.Post("/assistant/interactions/:id/messages", h.InteractionMessage)
+	request := httptest.NewRequest(http.MethodPost, "/assistant/interactions/"+snapshot.ID+"/messages", strings.NewReader(`{"mode_id":"profile","generation":1,"client_message_id":"old-tab-message","text":"这条消息来自旧标签"}`))
+	request.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if messageReq.StatusCode != http.StatusConflict {
-		t.Fatalf("workspace mode mismatch status = %d, want 409", messageReq.StatusCode)
+	defer resp.Body.Close()
+	var body struct {
+		ErrorCode string `json:"error_code"`
+		Data      struct {
+			ModeID string `json:"mode_id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusConflict || body.ErrorCode != "assistant_interaction_mode_changed" || body.Data.ModeID != service.AssistantModeCreation {
+		t.Fatalf("stale mode response = status %d body %#v, want mode-changed snapshot for creation", resp.StatusCode, body)
+	}
+	if factory.starts.Load() != 1 {
+		t.Fatalf("runtime starts = %d, expected the original runtime only", factory.starts.Load())
 	}
 }
 

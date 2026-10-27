@@ -4,10 +4,10 @@ import { ArrowLeft, Bot, Check, ChevronDown, Library, Loader2, Plus, Upload, Use
 import { Streamdown } from 'streamdown'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
-import type { AssistantInteractionDraftReceipt, AssistantInteractionSnapshot, AssistantModeID, AssistantWorkspace as AssistantWorkspaceState, AssistantProject } from '@/lib/api/assistant'
+import type { AssistantInteractionDraftReceipt, AssistantInteractionRecoveryContext, AssistantInteractionSnapshot, AssistantModeID, AssistantWorkspace as AssistantWorkspaceState, AssistantProject } from '@/lib/api/assistant'
 import type { InteractiveDraft } from '@/lib/api/interactive'
 import { useAuth } from '@/contexts/AuthContext'
-import { InteractiveStreamError, streamAssistantWorkspace, type InteractiveStreamEvent } from '@/lib/interactive-events'
+import { streamAssistantWorkspace, type InteractiveStreamEvent } from '@/lib/interactive-events'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover'
@@ -29,6 +29,7 @@ import { AssistantDraftSummary } from '@/components/assistant/AssistantDraftSumm
 import { AssistantRecoveryBanner } from '@/components/assistant/AssistantRecoveryBanner'
 import { assistantInteractionReducer, initialAssistantInteractionState } from '@/lib/assistant-interaction-state'
 import { SignedImage } from '@/components/ui/SignedImage'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import type { InputAttachment, PromptAttachment } from '@/types/input-attachment'
 import type { UserMediaAsset } from '@/lib/api/user-media'
 import type { AgentExecutionProfileID } from '@/types'
@@ -39,9 +40,33 @@ import { platformDisplayName } from '@/lib/labels'
 import { profileLabAgents } from '@/lib/project-capabilities'
 import type { AssistantRouteState } from '@/lib/assistant-navigation'
 
-type Message = { id: string; role: 'user' | 'assistant'; text: string; order: number }
-type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers']; order: number }
+type Message = {
+  id: string
+  role: 'user' | 'assistant'
+  text: string
+  order: number
+}
+type QuestionBatch = {
+  callId: string
+  questions: DshQuestion[]
+  answers?: DshQuestionAnswer['answers']
+  answerDrafts?: DshQuestionAnswer['answers']
+  answerAttemptId?: string
+  generation?: number
+  needsConversationRetry?: boolean
+  continuedInComposer?: boolean
+  order: number
+}
 type Draft = Record<string, unknown>
+type RetryableMessage = {
+  workspaceId?: string
+  mode: AssistantModeID
+  contextKey: string
+  composerText: string
+  text: string
+  clientMessageId: string
+  restored?: boolean
+}
 type RouteState = AssistantRouteState
 type PersistedWorkspace = {
   workspace: AssistantWorkspaceState | null
@@ -50,15 +75,23 @@ type PersistedWorkspace = {
   projectId?: string
   contentId?: string
   composer?: string
+  attachments?: InputAttachment[]
+  videoEditAssets?: InputAttachment[]
+  videoEditBrief?: string
+  videoEditPreferences?: VideoEditPreferences
   messagesByMode?: Record<string, Message[]>
   questionsByMode?: Record<string, QuestionBatch[]>
   draftByMode?: Record<string, Draft | null>
+  retryableMessage?: RetryableMessage
 }
 
-const WORKSPACE_STORAGE_KEY = 'anban:assistant-workspace'
+const workspaceStorageKey = (userId: string) => `anban:assistant-workspace:${userId}`
 
 const CREATION_TYPES: Record<string, { value: string; label: string }[]> = {
-  wechat: [{ value: 'wechat-article', label: '公众号文章' }, { value: 'wechat-picture', label: '公众号贴图' }],
+  wechat: [
+    { value: 'wechat-article', label: '公众号文章' },
+    { value: 'wechat-picture', label: '公众号贴图' },
+  ],
   seednote: [{ value: 'seednote', label: '种草笔记' }],
   montage: [{ value: 'video', label: '视频生成' }],
   'video-edit': [{ value: 'video-edit', label: '全自动视频剪辑' }],
@@ -72,7 +105,7 @@ function stringValue(value: unknown) {
 }
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
 }
 
 function parsePersistedMessages(value: unknown): Record<string, Message[]> | undefined {
@@ -86,7 +119,16 @@ function parsePersistedMessages(value: unknown): Record<string, Message[]> | und
       const id = stringValue(item?.id)
       const text = typeof item?.text === 'string' ? item.text : undefined
       const role = item?.role === 'user' || item?.role === 'assistant' ? item.role : undefined
-      return id && text !== undefined && role ? [{ id, role, text, order: typeof item?.order === 'number' ? item.order : index + 1 }] : []
+      return id && text !== undefined && role
+        ? [
+            {
+              id,
+              role,
+              text,
+              order: typeof item?.order === 'number' ? item.order : index + 1,
+            },
+          ]
+        : []
     })
   }
   return result
@@ -103,10 +145,46 @@ function parsePersistedQuestions(value: unknown): Record<string, QuestionBatch[]
       const callId = stringValue(item?.callId)
       const questions = parseQuestions(item?.questions)
       if (!callId || !questions.length) return []
-      return [{ callId, questions, answers: Array.isArray(item?.answers) ? item.answers as DshQuestionAnswer['answers'] : undefined, order: typeof item?.order === 'number' ? item.order : entries.length + index + 1 }]
+      return [
+        {
+          callId,
+          questions,
+          answers: parsePersistedQuestionAnswers(item?.answers),
+          answerDrafts: parsePersistedQuestionAnswers(item?.answerDrafts),
+          answerAttemptId: stringValue(item?.answerAttemptId),
+          generation: typeof item?.generation === 'number' && Number.isSafeInteger(item.generation) && item.generation > 0 ? item.generation : undefined,
+          needsConversationRetry: item?.needsConversationRetry === true,
+          continuedInComposer: item?.continuedInComposer === true,
+          order: typeof item?.order === 'number' ? item.order : entries.length + index + 1,
+        },
+      ]
     })
   }
   return result
+}
+
+function parsePersistedQuestionAnswers(value: unknown): DshQuestionAnswer['answers'] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const answers = value.flatMap((entry) => {
+    const item = recordValue(entry)
+    const id = stringValue(item?.id)
+    if (!id || !Array.isArray(item?.selected) || item.selected.some((selected) => typeof selected !== 'string')) return []
+    return [{
+      id,
+      selected: item.selected as string[],
+      ...(typeof item.custom === 'string' ? { custom: item.custom } : {}),
+    }]
+  })
+  return answers.length ? answers : undefined
+}
+
+function persistQuestionBatches(storageKey: string, questionsByMode: Record<string, QuestionBatch[]>) {
+  try {
+    const saved = recordValue(JSON.parse(sessionStorage.getItem(storageKey) ?? '{}')) ?? {}
+    sessionStorage.setItem(storageKey, JSON.stringify({ ...saved, questionsByMode }))
+  } catch {
+    // The in-memory question draft remains available when browser storage is unavailable or full.
+  }
 }
 
 function parsePersistedDrafts(value: unknown): Record<string, Draft | null> | undefined {
@@ -120,11 +198,205 @@ function parsePersistedDrafts(value: unknown): Record<string, Draft | null> | un
   return result
 }
 
+function parsePersistedRetryableMessage(value: unknown, composer: unknown): RetryableMessage | undefined {
+  const item = recordValue(value)
+  const workspaceId = item?.workspaceId
+  if (!isMode(item?.mode) || typeof item.text !== 'string' || !item.text || typeof item.clientMessageId !== 'string' || !item.clientMessageId) return undefined
+  if (workspaceId !== undefined && typeof workspaceId !== 'string') return undefined
+  const composerText = typeof item.composerText === 'string' ? item.composerText : composer
+  if (typeof composerText !== 'string' || !composerText) return undefined
+  return {
+    workspaceId,
+    mode: item.mode,
+    contextKey: typeof item.contextKey === 'string' ? item.contextKey : '',
+    composerText,
+    text: item.text,
+    clientMessageId: item.clientMessageId,
+    restored: true,
+  }
+}
+
+function assistantMessageContextKey(
+  mode: AssistantModeID,
+  projectId: string,
+  contentId: string,
+  creationType: string,
+  context: {
+    attachments: InputAttachment[]
+    videoEditAssets: InputAttachment[]
+    videoEditBrief: string
+    videoEditPreferences: VideoEditPreferences
+  },
+) {
+  return JSON.stringify({
+    mode,
+    projectId,
+    contentId,
+    creationType,
+    attachments: context.attachments.map((item) => ({
+      type: item.type,
+      asset_id: item.asset_id,
+      upload_id: item.upload_id,
+      key: item.key,
+    })),
+    videoEditAssets: context.videoEditAssets.map((item) => ({
+      type: item.type,
+      asset_id: item.asset_id,
+      upload_id: item.upload_id,
+      key: item.key,
+    })),
+    videoEditBrief: context.videoEditBrief,
+    videoEditPreferences: context.videoEditPreferences,
+  })
+}
+
+function parsePersistedAttachmentReferences(value: unknown): InputAttachment[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry) => {
+    const item = recordValue(entry)
+    if (!item || !['image', 'audio', 'video', 'document', 'text'].includes(String(item.type))) return []
+    const assetId = stringValue(item.asset_id)
+    const uploadId = stringValue(item.upload_id)
+    const key = stringValue(item.key)
+    if (!assetId && !(uploadId && key)) return []
+    return [
+      {
+        type: item.type as InputAttachment['type'],
+        ...(assetId ? { asset_id: assetId } : {}),
+        ...(uploadId && key ? { upload_id: uploadId, key } : {}),
+        ...(stringValue(item.file_name) ? { file_name: stringValue(item.file_name) } : {}),
+        ...(stringValue(item.content_type) ? { content_type: stringValue(item.content_type) } : {}),
+        ...(typeof item.size === 'number' && Number.isFinite(item.size) && item.size >= 0 ? { size: item.size } : {}),
+        ...(stringValue(item.role) ? { role: stringValue(item.role) } : {}),
+        ...(typeof item.instruction === 'string' ? { instruction: item.instruction } : {}),
+      },
+    ]
+  })
+}
+
+function persistedVideoEditPreferences(value: unknown): VideoEditPreferences | undefined {
+  const item = recordValue(value)
+  if (!item) return undefined
+  return {
+    ...(item.quality_tier === 'effective' || item.quality_tier === 'balanced' || item.quality_tier === 'quality' ? { quality_tier: item.quality_tier } : {}),
+    ...(item.subtitle_mode === 'off' || item.subtitle_mode === 'required' ? { subtitle_mode: item.subtitle_mode } : {}),
+    ...(typeof item.style === 'string' ? { style: item.style } : {}),
+    ...(typeof item.max_duration_seconds === 'number' && Number.isFinite(item.max_duration_seconds) ? { max_duration_seconds: item.max_duration_seconds } : {}),
+  }
+}
+
+function promptAttachmentsFromReferences(references: InputAttachment[]): PromptAttachment[] {
+  return references.map((attachment, index) => ({
+    id: `restored-${index}`,
+    type: attachment.type,
+    fileName: attachment.file_name ?? '附件',
+    contentType: attachment.content_type,
+    size: attachment.size ?? 0,
+    status: 'uploaded',
+    progress: 100,
+    uploadId: attachment.upload_id,
+    key: attachment.key,
+    assetId: attachment.asset_id,
+    instruction: attachment.instruction,
+    role: attachment.role,
+  }))
+}
+
+function safeAttachmentReferences(value: readonly InputAttachment[]): InputAttachment[] {
+  return parsePersistedAttachmentReferences(value)
+}
+
+function currentAttachmentReferences(attachments: readonly PromptAttachment[], serialized: readonly InputAttachment[]): InputAttachment[] {
+  const result = [...serialized]
+  const seenAssetIDs = new Set(result.flatMap((attachment) => attachment.asset_id ? [attachment.asset_id] : []))
+  for (const attachment of attachments) {
+    if (attachment.status !== 'uploaded' || !attachment.assetId || seenAssetIDs.has(attachment.assetId)) continue
+    seenAssetIDs.add(attachment.assetId)
+    result.push({
+      type: attachment.type,
+      asset_id: attachment.assetId,
+      file_name: attachment.fileName,
+      content_type: attachment.contentType,
+      size: attachment.size,
+      instruction: attachment.instruction,
+      role: attachment.role,
+    })
+  }
+  return result
+}
+
+function recoveryText(value: string, maxBytes: number) {
+  const encoder = new TextEncoder()
+  let result = ''
+  let bytes = 0
+  for (const character of value) {
+    const size = encoder.encode(character).length
+    if (bytes + size > maxBytes) break
+    result += character
+    bytes += size
+  }
+  return result
+}
+
+function buildInteractionRecoveryContext(
+  interactionID: string,
+  mode: AssistantModeID,
+  messagesByMode: Record<string, Message[]>,
+  questionsByMode: Record<string, QuestionBatch[]>,
+): AssistantInteractionRecoveryContext {
+  const messages = (messagesByMode[mode] ?? [])
+    .slice(-40)
+    .map((message) => ({ role: message.role, text: recoveryText(message.text, 12 * 1024) }))
+    .filter((message) => message.text)
+  const questions = (questionsByMode[mode] ?? [])
+    .slice(-20)
+    .flatMap((batch) => batch.questions.flatMap((question) => {
+      const answer = (batch.answers ?? batch.answerDrafts)?.find((item) => item.id === question.id)
+      const answers = [...(answer?.selected ?? []), ...(answer?.custom?.trim() ? [answer.custom.trim()] : [])]
+        .map((item) => recoveryText(item, 12 * 1024))
+        .filter(Boolean)
+      return [{ question: recoveryText(question.question, 12 * 1024), answers }]
+    }))
+  const context: AssistantInteractionRecoveryContext = {
+    version: 1,
+    interaction_id: interactionID,
+    mode_id: mode,
+    messages,
+    questions,
+  }
+  const encoder = new TextEncoder()
+  while (encoder.encode(JSON.stringify(context)).length > 96 * 1024 && (context.messages.length > 5 || context.questions.length > 0)) {
+    if (context.messages.length > 5) context.messages.shift()
+    else context.questions.shift()
+  }
+  return context
+}
+
+function persistPendingRetryableMessage(storageKey: string, workspace: AssistantWorkspaceState, retryableMessage: RetryableMessage, projectId: string, contentId: string) {
+  try {
+    const saved = recordValue(JSON.parse(sessionStorage.getItem(storageKey) ?? '{}')) ?? {}
+    sessionStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        ...saved,
+        workspace,
+        mode: retryableMessage.mode,
+        projectId: workspace.project_id ?? projectId,
+        contentId: workspace.content_id ?? contentId,
+        composer: retryableMessage.composerText,
+        retryableMessage,
+      }),
+    )
+  } catch {
+    // The in-memory retry remains available when browser storage is unavailable.
+  }
+}
+
 function parseEventData(event: InteractiveStreamEvent): Record<string, unknown> {
   if (typeof event.data !== 'string') return {}
   try {
     const value: unknown = JSON.parse(event.data)
-    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+    return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
   } catch {
     return {}
   }
@@ -138,13 +410,32 @@ function parseQuestions(value: unknown): DshQuestion[] {
     const id = stringValue(candidate.id)
     const question = stringValue(candidate.question)
     if (!id || !question) return []
-    const options = Array.isArray(candidate.options) ? candidate.options.flatMap((option) => {
-      if (!option || typeof option !== 'object' || Array.isArray(option)) return []
-      const item = option as Record<string, unknown>
-      const label = stringValue(item.label)
-      return label ? [{ label, description: stringValue(item.description), recommended: item.recommended === true }] : []
-    }) : undefined
-    return [{ id, question, header: stringValue(candidate.header), detail: stringValue(candidate.detail), options, multiSelect: candidate.multiSelect === true || candidate.multi_select === true }]
+    const options = Array.isArray(candidate.options)
+      ? candidate.options.flatMap((option) => {
+          if (!option || typeof option !== 'object' || Array.isArray(option)) return []
+          const item = option as Record<string, unknown>
+          const label = stringValue(item.label)
+          return label
+            ? [
+                {
+                  label,
+                  description: stringValue(item.description),
+                  recommended: item.recommended === true,
+                },
+              ]
+            : []
+        })
+      : undefined
+    return [
+      {
+        id,
+        question,
+        header: stringValue(candidate.header),
+        detail: stringValue(candidate.detail),
+        options,
+        multiSelect: candidate.multiSelect === true || candidate.multi_select === true,
+      },
+    ]
   })
 }
 
@@ -192,6 +483,12 @@ function assistantWorkspaceHttpStatus(error: unknown): number | undefined {
   return typeof status === 'number' ? status : undefined
 }
 
+function assistantStreamHttpStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object' || !('status' in error)) return undefined
+  const status = (error as { status?: unknown }).status
+  return typeof status === 'number' ? status : undefined
+}
+
 function assistantInteractionSnapshotFromError(error: unknown): AssistantInteractionSnapshot | undefined {
   if (!error || typeof error !== 'object' || !('response' in error)) return undefined
   const body = (error as { response?: { data?: unknown } }).response?.data
@@ -200,36 +497,40 @@ function assistantInteractionSnapshotFromError(error: unknown): AssistantInterac
   const candidate = envelope.data ?? envelope.snapshot
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return undefined
   const snapshot = candidate as Partial<AssistantInteractionSnapshot>
-  return typeof snapshot.interaction_id === 'string' && typeof snapshot.generation === 'number' && typeof snapshot.lifecycle === 'string'
-    ? snapshot as AssistantInteractionSnapshot
-    : undefined
+  return typeof snapshot.interaction_id === 'string' && typeof snapshot.generation === 'number' && typeof snapshot.lifecycle === 'string' ? (snapshot as AssistantInteractionSnapshot) : undefined
 }
 
 function assistantInteractionErrorMessage(errorCode: string | undefined, fallback: string): string {
-  const safeFallback = /session\s+not\s+found|interactive\s+session|runtime\s+token|mcp/i.test(fallback)
-    ? '这次操作未完成，当前内容已保留，请重试。'
-    : fallback
+  const safeFallback = /session\s+not\s+found|interactive\s+session|runtime\s+token|mcp/i.test(fallback) ? '这次操作未完成，当前内容已保留，请重试。' : fallback
   switch (errorCode) {
-    case 'assistant_interaction_generation_changed': return '对话状态已更新，正在恢复最新内容。'
-    case 'assistant_interaction_reconnecting': return '正在恢复连接，请稍候。'
-    case 'assistant_interaction_restart_required': return '连接已结束，当前计划和输入已保留，请恢复后继续。'
-    case 'assistant_message_not_accepted': return '刚才的消息未送出，内容已保留，请重试。'
-    case 'assistant_draft_saved_retryable': return '计划已保留，但暂存未完成，请重试暂存。'
-    case 'assistant_draft_revision_conflict': return '计划版本已更新，请恢复最新计划后再确认。'
-    case 'assistant_commit_reconciliation_required': return '创建结果需要核对，请查看任务状态。'
-    case 'assistant_commit_already_applied': return '任务已经创建，请查看任务。'
-    default: return safeFallback
+    case 'assistant_interaction_generation_changed':
+      return '对话状态已更新，正在恢复最新内容。'
+    case 'assistant_interaction_reconnecting':
+      return '正在恢复连接，请稍候。'
+    case 'assistant_interaction_restart_required':
+      return '连接已结束，当前计划和输入已保留，请恢复后继续。'
+    case 'assistant_interaction_mode_changed':
+      return '当前模式已在其他标签页更新，输入已保留。请检查模式后重试。'
+    case 'assistant_message_not_accepted':
+      return '刚才的消息未送出，内容已保留，请重试。'
+    case 'assistant_draft_saved_retryable':
+      return '计划已保留，但暂存未完成，请重试暂存。'
+    case 'assistant_draft_revision_conflict':
+      return '计划版本已更新，请恢复最新计划后再确认。'
+    case 'assistant_commit_retryable':
+      return '计划已保留，创建暂时未完成，可以安全重试。'
+    case 'assistant_commit_reconciliation_required':
+      return '创建结果需要核对，请查看任务状态。'
+    case 'assistant_commit_already_applied':
+      return '任务已经创建，请查看任务。'
+    default:
+      return safeFallback
   }
 }
 
 function isStaleAssistantWorkspaceError(error: unknown) {
   const errorCode = assistantWorkspaceErrorCode(error)
-  return errorCode === 'assistant_workspace_expired'
-    || errorCode === 'assistant_workspace_not_found'
-    || errorCode === 'interactive_session_closed'
-    || errorCode === 'assistant_interaction_restart_required'
-    || assistantWorkspaceHttpStatus(error) === 404
-    || assistantWorkspaceHttpStatus(error) === 410
+  return errorCode === 'assistant_workspace_expired' || errorCode === 'assistant_workspace_not_found' || errorCode === 'interactive_session_closed' || errorCode === 'assistant_interaction_restart_required' || assistantWorkspaceHttpStatus(error) === 404 || assistantWorkspaceHttpStatus(error) === 410
 }
 
 function assistantWorkspaceConflictMessage(errorCode: string | undefined, action: 'send' | 'switch' | 'answer' | 'commit') {
@@ -237,9 +538,7 @@ function assistantWorkspaceConflictMessage(errorCode: string | undefined, action
     case 'assistant_workspace_mode_mismatch':
       return '当前对话模式已变化，输入已保留，请重新建立对话后重试。'
     case 'assistant_checkpoint_conflict':
-      return action === 'commit'
-        ? '草稿版本已更新，请重新加载最新草稿后再确认。'
-        : '草稿版本已更新，输入已保留，请重新加载后重试。'
+      return action === 'commit' ? '草稿版本已更新，请重新加载最新草稿后再确认。' : '草稿版本已更新，输入已保留，请重新加载后重试。'
     case 'project_profile_revision_conflict':
       return '人设已在其他窗口更新，输入已保留，请刷新后核对再继续。'
     case 'interactive_idempotency_conflict':
@@ -255,9 +554,9 @@ function assistantWorkspaceConflictMessage(errorCode: string | undefined, action
   }
 }
 
-function readPersistedWorkspace(): PersistedWorkspace | null {
+function readPersistedWorkspace(storageKey: string): PersistedWorkspace | null {
   try {
-    const raw = sessionStorage.getItem(WORKSPACE_STORAGE_KEY)
+    const raw = sessionStorage.getItem(storageKey)
     if (!raw) return null
     const value: unknown = JSON.parse(raw)
     if (!value || typeof value !== 'object' || !('workspace' in value)) return null
@@ -272,9 +571,14 @@ function readPersistedWorkspace(): PersistedWorkspace | null {
       projectId: typeof candidate.projectId === 'string' ? candidate.projectId : undefined,
       contentId: typeof candidate.contentId === 'string' ? candidate.contentId : undefined,
       composer: typeof candidate.composer === 'string' ? candidate.composer : undefined,
+      attachments: parsePersistedAttachmentReferences(candidate.attachments),
+      videoEditAssets: parsePersistedAttachmentReferences(candidate.videoEditAssets),
+      videoEditBrief: typeof candidate.videoEditBrief === 'string' ? candidate.videoEditBrief : undefined,
+      videoEditPreferences: persistedVideoEditPreferences(candidate.videoEditPreferences),
       messagesByMode: parsePersistedMessages(candidate.messagesByMode),
       questionsByMode: parsePersistedQuestions(candidate.questionsByMode),
       draftByMode: parsePersistedDrafts(candidate.draftByMode),
+      retryableMessage: parsePersistedRetryableMessage(candidate.retryableMessage, candidate.composer),
     }
   } catch {
     return null
@@ -282,33 +586,48 @@ function readPersistedWorkspace(): PersistedWorkspace | null {
 }
 
 export default function AssistantWorkspace() {
+  const { user } = useAuth()
+  const userId = user?.id ?? 'anonymous'
+  return <AssistantWorkspaceContent key={userId} userId={userId} />
+}
+
+function AssistantWorkspaceContent({ userId }: { userId: string }) {
   const { token } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const routeState = (location.state ?? {}) as RouteState
-  const routeHasContext = Boolean(routeState.modeId || routeState.projectId || routeState.contentId || routeState.checkpointId || routeState.initialMessage)
-  const persisted = readPersistedWorkspace()
-  const bootstrapQuery = useQuery({ queryKey: ['assistant-bootstrap'], queryFn: api.assistant.bootstrap, staleTime: 30_000 })
+  const routeHasContext = Boolean(routeState.modeId || routeState.projectId || routeState.contentId || routeState.initialMessage)
+  const storageKey = workspaceStorageKey(userId)
+  const persisted = readPersistedWorkspace(storageKey)
+  const bootstrapQuery = useQuery({
+    queryKey: ['assistant-bootstrap'],
+    queryFn: api.assistant.bootstrap,
+    staleTime: 30_000,
+  })
   const queryClient = useQueryClient()
   const bootstrap = bootstrapQuery.data
-  const [mode, setMode] = useState<AssistantModeID>(() => isMode(routeState.modeId) ? routeState.modeId : persisted?.mode ?? persisted?.workspace?.mode_id ?? 'profile')
+  const [mode, setMode] = useState<AssistantModeID>(() => (isMode(routeState.modeId) ? routeState.modeId : (persisted?.mode ?? persisted?.workspace?.mode_id ?? 'profile')))
+  const preservedQuestionAttachmentsMode = useRef<AssistantModeID | null>(
+    mode !== 'creation' && persisted?.attachments?.length && (persisted.mode === mode || persisted.workspace?.mode_id === mode) ? mode : null,
+  )
   const [projectId, setProjectId] = useState(routeState.projectId ?? persisted?.projectId ?? persisted?.workspace?.project_id ?? '')
   const [contentId, setContentId] = useState(routeState.contentId ?? persisted?.contentId ?? persisted?.workspace?.content_id ?? '')
   const [composer, setComposer] = useState(routeState.initialMessage ?? persisted?.composer ?? '')
-  const [attachments, setAttachments] = useState<PromptAttachment[]>([])
+  const [attachments, setAttachments] = useState<PromptAttachment[]>(() => promptAttachmentsFromReferences(persisted?.attachments ?? []))
   const [executionProfile, setExecutionProfile] = useState<AgentExecutionProfileID | ''>('')
-  const [creationType, setCreationType] = useState(routeHasContext ? '' : persisted?.creationType ?? '')
+  const [creationType, setCreationType] = useState(routeHasContext ? '' : (persisted?.creationType ?? ''))
   const [imageRatio, setImageRatio] = useState<ImageRatio>('auto')
   const [imageCapabilityKey, setImageCapabilityKey] = useState('')
-  const [videoEditAssets, setVideoEditAssets] = useState<InputAttachment[]>([])
-  const [videoEditBrief, setVideoEditBrief] = useState('')
-  const [videoEditPreferences, setVideoEditPreferences] = useState<VideoEditPreferences>({})
+  const [videoEditAssets, setVideoEditAssets] = useState<InputAttachment[]>(() => persisted?.videoEditAssets ?? [])
+  const [videoEditBrief, setVideoEditBrief] = useState(() => persisted?.videoEditBrief ?? '')
+  const [videoEditPreferences, setVideoEditPreferences] = useState<VideoEditPreferences>(() => persisted?.videoEditPreferences ?? {})
   const [videoEditDefaults, setVideoEditDefaults] = useState<VideoEditDefaults>({})
   const [videoEditUploading, setVideoEditUploading] = useState(false)
   const [videoEditUploadFailed, setVideoEditUploadFailed] = useState(false)
-  const [workspace, setWorkspace] = useState<AssistantWorkspaceState | null>(() => routeHasContext ? null : persisted?.workspace ?? null)
+  const [restoringQuestionAttachments, setRestoringQuestionAttachments] = useState(false)
+  const [workspace, setWorkspace] = useState<AssistantWorkspaceState | null>(() => (routeHasContext ? null : (persisted?.workspace ?? null)))
   const [newProfile, setNewProfile] = useState(false)
-  const [conversationPhase, setConversationPhase] = useState<'setup' | 'active'>(() => routeHasContext ? 'setup' : persisted?.workspace ? 'active' : 'setup')
+  const [conversationPhase, setConversationPhase] = useState<'setup' | 'active'>(() => (routeHasContext ? 'setup' : persisted?.workspace ? 'active' : 'setup'))
   const [messagesByMode, setMessagesByMode] = useState<Record<string, Message[]>>(persisted?.messagesByMode ?? {})
   const [questionsByMode, setQuestionsByMode] = useState<Record<string, QuestionBatch[]>>(persisted?.questionsByMode ?? {})
   const [draftByMode, setDraftByMode] = useState<Record<string, Draft | null>>(persisted?.draftByMode ?? {})
@@ -321,22 +640,53 @@ export default function AssistantWorkspace() {
   const [switching, setSwitching] = useState(false)
   const [pendingMode, setPendingMode] = useState<AssistantModeID | null>(null)
   const [committing, setCommitting] = useState(false)
+  const [restartDialogOpen, setRestartDialogOpen] = useState(false)
   const [lastEventIds, setLastEventIds] = useState<Record<string, string | undefined>>({})
+  const [retryableMessage, setRetryableMessage] = useState<RetryableMessage | null>(() => persisted?.retryableMessage ?? null)
   const streamAbort = useRef<AbortController | null>(null)
-  const userMessageCounter = useRef(0)
+  const messagesByModeRef = useRef(messagesByMode)
+  messagesByModeRef.current = messagesByMode
+  const questionsByModeRef = useRef(questionsByMode)
+  questionsByModeRef.current = questionsByMode
   const lastSubmittedMessage = useRef('')
   const workspaceResetVersion = useRef(0)
   const workspaceCreateKey = useRef<string | null>(null)
   const sendInFlight = useRef(false)
-  const commitIdempotencyKeys = useRef<Record<string, string>>({})
   const imageRatioContextKey = useRef<string | null>(null)
   const conversationOrder = useRef<Record<string, number>>({})
   const initialSnapshotRequired = useRef(Boolean(!routeHasContext && persisted?.workspace))
 
+  const preserveQuestionDraftsForGeneration = (targetMode: AssistantModeID, generation: number) => {
+    setQuestionsByMode((current) => ({
+      ...current,
+      [targetMode]: (current[targetMode] ?? []).map((batch) => batch.answers || batch.generation === generation
+        ? batch
+        : { ...batch, generation, answerAttemptId: undefined, needsConversationRetry: true }),
+    }))
+  }
+
   const applyInteractionSnapshot = (snapshot: AssistantInteractionSnapshot) => {
+    if (workspace?.id === snapshot.interaction_id && workspace.generation !== undefined && workspace.generation !== snapshot.generation) {
+      // A fenced message attempt has an unknown outcome. Keep its text in the
+      // composer, but use a fresh identity for the next explicit send.
+      setRetryableMessage(null)
+      preserveQuestionDraftsForGeneration(snapshot.mode_id, snapshot.generation)
+    }
     setInteractionSnapshot(snapshot)
     setInteractionSnapshotReady(true)
-    setWorkspace((current) => current ? { ...current, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, generation: snapshot.generation, runtime_status: snapshot.runtime_status, expires_at: snapshot.expires_at } : current)
+    setWorkspace((current) =>
+      current
+        ? {
+            ...current,
+            mode_id: snapshot.mode_id,
+            project_id: snapshot.project_id,
+            content_id: snapshot.content_id,
+            generation: snapshot.generation,
+            runtime_status: snapshot.runtime_status,
+            expires_at: snapshot.expires_at,
+          }
+        : current,
+    )
     setMode(snapshot.mode_id)
     setProjectId(snapshot.project_id ?? '')
     setContentId(snapshot.content_id ?? '')
@@ -345,28 +695,84 @@ export default function AssistantWorkspace() {
     setConversationPhase('active')
   }
 
+  const recoverInteractionSnapshot = async (interactionID: string, generation: number, recoveryMode: AssistantModeID, continueConversation = false) => {
+    const recovery_context = buildInteractionRecoveryContext(
+      interactionID,
+      recoveryMode,
+      messagesByModeRef.current,
+      questionsByModeRef.current,
+    )
+    try {
+      const request = { generation, recovery_context, ...(continueConversation ? { continue_conversation: true } : {}) }
+      const snapshot = await api.assistant.recoverInteraction(interactionID, request)
+      return snapshot
+    } catch (error) {
+      const latest = assistantInteractionSnapshotFromError(error)
+      if (latest && latest.generation !== generation) {
+        const latestContext = buildInteractionRecoveryContext(
+          interactionID,
+          latest.mode_id,
+          messagesByModeRef.current,
+          questionsByModeRef.current,
+        )
+        const snapshot = await api.assistant.recoverInteraction(interactionID, {
+          generation: latest.generation,
+          recovery_context: latestContext,
+          ...(continueConversation ? { continue_conversation: true } : {}),
+        })
+        return snapshot
+      }
+      throw error
+    }
+  }
+
   useEffect(() => {
     if (!workspace || !initialSnapshotRequired.current) return
     let cancelled = false
-    void api.assistant.getInteractionSnapshot(workspace.id).then((snapshot) => {
-      if (cancelled) return
-      initialSnapshotRequired.current = false
-      setInteractionSnapshot(snapshot)
-      setInteractionSnapshotReady(true)
-      setWorkspace((current) => current ? { ...current, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, generation: snapshot.generation, runtime_status: snapshot.runtime_status, expires_at: snapshot.expires_at } : current)
-      setDraftByMode(draftsFromSnapshot(snapshot))
-      dispatchInteraction({ type: 'snapshot', snapshot })
-    }).catch((snapshotError) => {
-      if (cancelled) return
-      setInteractionSnapshotReady(false)
-      const status = assistantWorkspaceHttpStatus(snapshotError)
-      dispatchInteraction({ type: 'error', code: status === 404 || status === 410 ? 'assistant_interaction_restart_required' : 'assistant_interaction_reconnecting' })
-    })
-    return () => { cancelled = true }
+    void recoverInteractionSnapshot(workspace.id, workspace.generation ?? 1, workspace.mode_id)
+      .then((snapshot) => {
+        if (cancelled) return
+        if (workspace.generation !== undefined && workspace.generation !== snapshot.generation) setRetryableMessage(null)
+        if (workspace.generation !== undefined && workspace.generation !== snapshot.generation) preserveQuestionDraftsForGeneration(snapshot.mode_id, snapshot.generation)
+        initialSnapshotRequired.current = false
+        setInteractionSnapshot(snapshot)
+        setInteractionSnapshotReady(true)
+        setWorkspace((current) =>
+          current
+            ? {
+                ...current,
+                mode_id: snapshot.mode_id,
+                project_id: snapshot.project_id,
+                content_id: snapshot.content_id,
+                generation: snapshot.generation,
+                runtime_status: snapshot.runtime_status,
+                expires_at: snapshot.expires_at,
+              }
+            : current,
+        )
+        setDraftByMode(draftsFromSnapshot(snapshot))
+        dispatchInteraction({ type: 'snapshot', snapshot })
+      })
+      .catch((snapshotError) => {
+        if (cancelled) return
+        setInteractionSnapshotReady(false)
+        const status = assistantWorkspaceHttpStatus(snapshotError)
+        dispatchInteraction({
+          type: 'error',
+          code: status === 404 || status === 410 ? 'assistant_interaction_restart_required' : 'assistant_interaction_reconnecting',
+        })
+      })
+    return () => {
+      cancelled = true
+    }
   }, [workspace?.id])
 
   useEffect(() => {
-    if (error && interactionState.status === 'connecting') dispatchInteraction({ type: 'error', code: error.includes('计划') ? 'assistant_draft_saved_retryable' : 'assistant_message_not_accepted' })
+    if (error && interactionState.status === 'connecting')
+      dispatchInteraction({
+        type: 'error',
+        code: error.includes('计划') ? 'assistant_draft_saved_retryable' : 'assistant_message_not_accepted',
+      })
   }, [error, interactionState.status])
 
   const nextConversationOrder = (conversationMode: AssistantModeID) => {
@@ -383,50 +789,68 @@ export default function AssistantWorkspace() {
     }
   }, [messagesByMode, questionsByMode])
 
-  useEffect(() => {
-    try {
-      sessionStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({
-        workspace,
-        creationType,
-        mode,
-        projectId,
-        contentId,
-        composer,
-        messagesByMode,
-        questionsByMode,
-        draftByMode,
-      } satisfies PersistedWorkspace))
-    } catch {
-      // Conversation recovery is best effort when browser storage is unavailable or full.
-    }
-  }, [workspace, creationType, mode, projectId, contentId, composer, messagesByMode, questionsByMode, draftByMode])
-
   const projects = bootstrap?.projects ?? []
-  const projectsQuery = useQuery({ queryKey: ['projects', 'assistant-home'], queryFn: () => api.projects.list({ status: 'active' }), staleTime: 30_000 })
+  const projectsQuery = useQuery({
+    queryKey: ['projects', 'assistant-home'],
+    queryFn: () => api.projects.list({ status: 'active' }),
+    staleTime: 30_000,
+  })
   const executionProfilesQuery = useAgentExecutionProfiles()
-  const platformConfigsQuery = useQuery({ queryKey: ['platform-configs'], queryFn: api.projects.platformConfigs, staleTime: Infinity })
+  const platformConfigsQuery = useQuery({
+    queryKey: ['platform-configs'],
+    queryFn: api.projects.platformConfigs,
+    staleTime: Infinity,
+  })
   const attachmentController = usePromptAttachments({
     adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
     policy: GENERAL_AGENT_ATTACHMENT_POLICY,
     attachments,
     onAttachmentsChange: setAttachments,
   })
+  const toInputAttachments = attachmentController.toInputAttachments
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          workspace,
+          creationType,
+          mode,
+          projectId,
+          contentId,
+          composer: sending ? (retryableMessage?.composerText ?? lastSubmittedMessage.current) : composer,
+          attachments: safeAttachmentReferences(currentAttachmentReferences(attachments, toInputAttachments())),
+          videoEditAssets: safeAttachmentReferences(videoEditAssets),
+          videoEditBrief,
+          videoEditPreferences,
+          messagesByMode,
+          questionsByMode,
+          draftByMode,
+          retryableMessage: retryableMessage ?? undefined,
+        } satisfies PersistedWorkspace),
+      )
+    } catch {
+      // Conversation recovery is best effort when browser storage is unavailable or full.
+    }
+  }, [storageKey, workspace, creationType, mode, projectId, contentId, composer, attachments, videoEditAssets, videoEditBrief, videoEditPreferences, messagesByMode, questionsByMode, draftByMode, retryableMessage, sending, toInputAttachments])
   const completeProjects = projects.map((project) => {
     const full = projectsQuery.data?.find((candidate) => candidate.id === project.id)
-    return full ? {
-      ...project,
-      avatar_url: full.avatar_url,
-      description: full.description,
-      image_ratio: full.image_ratio,
-      portrait_reference_image: full.portrait_reference_image,
-    } : project
+    return full
+      ? {
+          ...project,
+          avatar_url: full.avatar_url,
+          description: full.description,
+          image_ratio: full.image_ratio,
+          portrait_reference_image: full.portrait_reference_image,
+        }
+      : project
   })
   const readyProjects = completeProjects.filter((project) => project.profileReady)
   const selectionMode = pendingMode ?? mode
   const selectableProjects = selectionMode === 'profile' ? completeProjects : readyProjects
   const selectedProject = selectableProjects.find((project) => project.id === projectId) ?? (selectionMode !== 'profile' && selectableProjects.length === 1 ? selectableProjects[0] : undefined)
   const creationTypes = CREATION_TYPES[selectedProject?.platform ?? ''] ?? []
-  const selectedCreationType = creationTypes.some((item) => item.value === creationType) ? creationType : creationTypes[0]?.value ?? ''
+  const selectedCreationType = creationTypes.some((item) => item.value === creationType) ? creationType : (creationTypes[0]?.value ?? '')
   const isVideoEditCreation = mode === 'creation' && selectedCreationType === 'video-edit'
   const usesImageSettings = mode === 'creation' && Boolean(selectedProject) && !isVideoEditCreation
   const imageCapabilitiesQuery = useImageCapabilities(usesImageSettings)
@@ -437,14 +861,12 @@ export default function AssistantWorkspace() {
     queryKey: ['assistant-workspace-works', selectedProject?.id],
     initialPageParam: undefined as { created_at: string; id: string } | undefined,
     queryFn: ({ pageParam }) => api.assistant.works(selectedProject!.id, pageParam, 25),
-    getNextPageParam: (page) => page.has_more ? page.next_cursor : undefined,
+    getNextPageParam: (page) => (page.has_more ? page.next_cursor : undefined),
     enabled: selectionMode === 'review' && Boolean(selectedProject),
     staleTime: 30_000,
   })
   const works = worksQuery.data?.pages.flatMap((page) => page.items) ?? []
-  const resolvedContentId = pendingMode === 'review'
-    ? contentId
-    : conversationPhase === 'active' ? workspace?.content_id ?? contentId : contentId
+  const resolvedContentId = pendingMode === 'review' ? contentId : conversationPhase === 'active' ? (workspace?.content_id ?? contentId) : contentId
   const selectedWork = works.find((work) => work.id === resolvedContentId) ?? (selectionMode === 'review' && works.length === 1 ? works[0] : undefined)
   const reviewVideoQuery = useQuery({
     queryKey: ['assistant-review-video', selectedWork?.id],
@@ -454,36 +876,20 @@ export default function AssistantWorkspace() {
   })
   const activeMessages = messagesByMode[mode] ?? []
   const activeQuestions = questionsByMode[mode] ?? []
-  const pendingQuestions = activeQuestions.filter((question) => !question.answers)
+  const pendingQuestions = activeQuestions.filter((question) => !question.answers && !question.needsConversationRetry)
   const activeDraft = draftByMode[mode]
   const draftPending = Boolean(activeDraft)
   const activeMode = bootstrap?.modes.find((candidate) => candidate.id === mode)
   const isRuntimeUnavailable = activeMode?.disabledReason === '助手运行环境暂不可用，请稍后重试'
   const modePrerequisiteBlocked = Boolean(activeMode && !activeMode.available && activeMode.disabledReason && !isRuntimeUnavailable)
-  const missingContextInstruction = activeMode?.available
-    ? mode === 'creation' && !selectedProject
-      ? '先选择人设后即可输入消息'
-      : mode === 'creation' && selectedProject && creationTypes.length === 0
-        ? '当前人设暂不支持首页创作，请选择其他人设'
-      : mode === 'review' && !selectedProject
-        ? '先选择人设后即可输入消息'
-        : mode === 'review' && !selectedWork
-          ? '先选择作品后即可输入消息'
-          : undefined
-    : undefined
+  const missingContextInstruction = activeMode?.available ? (mode === 'creation' && !selectedProject ? '先选择人设后即可输入消息' : mode === 'creation' && selectedProject && creationTypes.length === 0 ? '当前人设暂不支持首页创作，请选择其他人设' : mode === 'review' && !selectedProject ? '先选择人设后即可输入消息' : mode === 'review' && !selectedWork ? '先选择作品后即可输入消息' : undefined) : undefined
   const composerBlocked = modePrerequisiteBlocked || Boolean(missingContextInstruction) || Boolean(activeMode && !activeMode.available)
-  const composerPlaceholder = modePrerequisiteBlocked
-    ? mode === 'creation' ? '先完成新人设创建后即可输入消息' : '先完成当前模式所需条件后即可输入消息'
-    : missingContextInstruction ?? modePlaceholder(mode)
-  const modePrerequisiteAction = mode === 'review' && selectableProjects.length > 0
-    ? { mode: 'creation' as const, label: '开始创作' }
-    : { mode: 'profile' as const, label: '去建立人设' }
-  const draftProject = activeDraft?.project && typeof activeDraft.project === 'object' && !Array.isArray(activeDraft.project)
-    ? activeDraft.project as Record<string, unknown>
-    : undefined
+  const composerPlaceholder = modePrerequisiteBlocked ? (mode === 'creation' ? '先完成新人设创建后即可输入消息' : '先完成当前模式所需条件后即可输入消息') : (missingContextInstruction ?? modePlaceholder(mode))
+  const modePrerequisiteAction = mode === 'review' && selectableProjects.length > 0 ? { mode: 'creation' as const, label: '开始创作' } : { mode: 'profile' as const, label: '去建立人设' }
+  const draftProject = activeDraft?.project && typeof activeDraft.project === 'object' && !Array.isArray(activeDraft.project) ? (activeDraft.project as Record<string, unknown>) : undefined
   const profilePlatform = selectedProject?.platform ?? stringValue(draftProject?.platform)
   const isVideoEditProfile = mode === 'profile' && profilePlatform === 'video-edit'
-  const canSend = Boolean(composer.trim()) && Boolean(activeMode?.available) && (mode === 'profile' || Boolean(selectedProject)) && (mode !== 'review' || Boolean(selectedWork)) && !sending && !responding && !committing && !composerBlocked && !draftPending
+  const canSend = Boolean(composer.trim()) && Boolean(activeMode?.available) && (mode === 'profile' || Boolean(selectedProject)) && (mode !== 'review' || Boolean(selectedWork)) && (!initialSnapshotRequired.current || interactionSnapshotReady) && !sending && !responding && !committing && !restoringQuestionAttachments && !composerBlocked && !draftPending
 
   const resetExpiredWorkspace = (preservedComposer?: string) => {
     workspaceResetVersion.current += 1
@@ -492,32 +898,50 @@ export default function AssistantWorkspace() {
     setError('连接已结束，当前计划和输入已保留，请恢复后继续。')
     const preserved = preservedComposer ?? lastSubmittedMessage.current
     if (preserved) setComposer((current) => current || preserved)
-    dispatchInteraction({ type: 'error', code: 'assistant_interaction_restart_required' })
+    dispatchInteraction({
+      type: 'error',
+      code: 'assistant_interaction_restart_required',
+    })
   }
 
   const refreshInteractionSnapshot = async () => {
     if (!workspace) return
+    setInteractionSnapshotReady(false)
     try {
-      const snapshot = await api.assistant.getInteractionSnapshot(workspace.id)
-      setInteractionSnapshot(snapshot)
-      setInteractionSnapshotReady(true)
-      setWorkspace((current) => current ? { ...current, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, generation: snapshot.generation, runtime_status: snapshot.runtime_status, expires_at: snapshot.expires_at } : current)
-      setDraftByMode(draftsFromSnapshot(snapshot))
-      dispatchInteraction({ type: 'snapshot', snapshot })
+      const snapshot = await recoverInteractionSnapshot(workspace.id, workspace.generation ?? 1, mode)
+      applyInteractionSnapshot(snapshot)
       setError(null)
     } catch (snapshotError) {
       const recovered = assistantInteractionSnapshotFromError(snapshotError)
       if (recovered) {
-        setInteractionSnapshotReady(true)
-        setInteractionSnapshot(recovered)
-        setWorkspace((current) => current ? { ...current, mode_id: recovered.mode_id, project_id: recovered.project_id, content_id: recovered.content_id, generation: recovered.generation, runtime_status: recovered.runtime_status, expires_at: recovered.expires_at } : current)
-        setDraftByMode(draftsFromSnapshot(recovered))
-        dispatchInteraction({ type: 'snapshot', snapshot: recovered })
+        applyInteractionSnapshot(recovered)
         setError(null)
         return
       }
       setInteractionSnapshotReady(false)
-      dispatchInteraction({ type: 'error', code: assistantWorkspaceHttpStatus(snapshotError) === 404 || assistantWorkspaceHttpStatus(snapshotError) === 410 ? 'assistant_interaction_restart_required' : 'assistant_interaction_reconnecting' })
+      dispatchInteraction({
+        type: 'error',
+        code: assistantWorkspaceHttpStatus(snapshotError) === 404 || assistantWorkspaceHttpStatus(snapshotError) === 410 ? 'assistant_interaction_restart_required' : 'assistant_interaction_reconnecting',
+      })
+    }
+  }
+
+  const continueConversationFromDraft = async () => {
+    if (!workspace || switching || committing || sending || responding) return
+    setSwitching(true)
+    setError(null)
+    try {
+      const snapshot = await recoverInteractionSnapshot(workspace.id, workspace.generation ?? 1, mode, true)
+      applyInteractionSnapshot(snapshot)
+      setDraftByMode((current) => ({ ...current, [mode]: null }))
+    } catch (recoveryError) {
+      const recoveredSnapshot = assistantInteractionSnapshotFromError(recoveryError)
+      if (recoveredSnapshot) applyInteractionSnapshot(recoveredSnapshot)
+      const errorCode = assistantWorkspaceErrorCode(recoveryError)
+      if (errorCode?.startsWith('assistant_')) dispatchInteraction({ type: 'error', code: errorCode })
+      setError(assistantInteractionErrorMessage(errorCode, recoveryError instanceof Error ? recoveryError.message : '恢复失败，计划仍然保留。'))
+    } finally {
+      setSwitching(false)
     }
   }
 
@@ -581,9 +1005,7 @@ export default function AssistantWorkspace() {
     }
     const contextKey = `${selectedProject?.id ?? ''}:${selectedProject?.platform ?? ''}:${selectedProject?.image_ratio ?? ''}:${selectedPlatformConfig?.default_image_ratio ?? ''}`
     const configuredRatio = selectedProject?.image_ratio || selectedPlatformConfig?.default_image_ratio || 'auto'
-    const nextRatio = configuredRatio === 'auto' || supportedImageRatios.length === 0 || supportedImageRatios.includes(configuredRatio)
-      ? configuredRatio as ImageRatio
-      : 'auto'
+    const nextRatio = configuredRatio === 'auto' || supportedImageRatios.length === 0 || supportedImageRatios.includes(configuredRatio) ? (configuredRatio as ImageRatio) : 'auto'
     if (imageRatioContextKey.current !== contextKey) {
       imageRatioContextKey.current = contextKey
       if (imageRatio !== nextRatio) setImageRatio(nextRatio)
@@ -593,7 +1015,13 @@ export default function AssistantWorkspace() {
   }, [imageCapabilityKey, imageRatio, selectedPlatformConfig?.default_image_ratio, selectedProject?.id, selectedProject?.image_ratio, supportedImageRatios, usesImageSettings])
 
   useEffect(() => {
-    if (mode !== 'creation' && attachments.length) setAttachments([])
+    if (!attachments.length) return
+    if (preservedQuestionAttachmentsMode.current && preservedQuestionAttachmentsMode.current !== mode) {
+      preservedQuestionAttachmentsMode.current = null
+      setAttachments([])
+      return
+    }
+    if (mode !== 'creation' && preservedQuestionAttachmentsMode.current !== mode) setAttachments([])
   }, [mode, attachments.length])
 
   useEffect(() => {
@@ -610,13 +1038,19 @@ export default function AssistantWorkspace() {
       generation: workspace.generation,
       onGenerationChanged: (generation) => {
         dispatchInteraction({ type: 'generation_changed', generation })
-        void api.assistant.getInteractionSnapshot(workspace.id).then((snapshot) => {
-          setInteractionSnapshot(snapshot)
-          setInteractionSnapshotReady(true)
-          setWorkspace((current) => current ? { ...current, generation: snapshot.generation, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, runtime_status: snapshot.runtime_status } : current)
-          setDraftByMode(draftsFromSnapshot(snapshot))
-          dispatchInteraction({ type: 'snapshot', snapshot })
-        }).catch(() => undefined)
+        setInteractionSnapshotReady(false)
+        void recoverInteractionSnapshot(workspace.id, generation, mode)
+          .then((snapshot) => {
+            applyInteractionSnapshot(snapshot)
+          })
+          .catch(() => {
+            setInteractionSnapshotReady(false)
+            dispatchInteraction({ type: 'error', code: 'assistant_interaction_reconnecting' })
+          })
+      },
+      onEventGap: () => {
+        setLastEventIds((current) => ({ ...current, [mode]: undefined }))
+        void refreshInteractionSnapshot()
       },
     })
     void (async () => {
@@ -657,26 +1091,59 @@ export default function AssistantWorkspace() {
                 const optimisticIndex = list.findIndex((item) => item.id.startsWith('optimistic-') && item.text === text)
                 if (optimisticIndex >= 0) {
                   const next = [...list]
-                  next[optimisticIndex] = { ...next[optimisticIndex], id: event.id, role, text }
+                  next[optimisticIndex] = {
+                    ...next[optimisticIndex],
+                    id: event.id,
+                    role,
+                    text,
+                  }
                   return { ...current, [eventMode]: next }
                 }
               }
-              return { ...current, [eventMode]: [...list, { id: event.id ?? `${role}-${Date.now()}-${list.length}`, role, text, order }] }
+              return {
+                ...current,
+                [eventMode]: [
+                  ...list,
+                  {
+                    id: event.id ?? `${role}-${Date.now()}-${list.length}`,
+                    role,
+                    text,
+                    order,
+                  },
+                ],
+              }
             })
           } else if (event.event === 'question.opened') {
             const callId = stringValue(data.call_id)
             const questions = parseQuestions(data.questions)
             if (callId && questions.length) {
               const order = nextConversationOrder(eventMode)
-              setQuestionsByMode((current) => ({ ...current, [eventMode]: [...(current[eventMode] ?? []).filter((item) => item.callId !== callId), { callId, questions, order }] }))
+              setQuestionsByMode((current) => ({
+                ...current,
+                [eventMode]: [
+                  ...(current[eventMode] ?? []).filter((item) => item.callId !== callId),
+                  {
+                    ...(current[eventMode] ?? []).find((item) => item.callId === callId),
+                    callId,
+                    questions,
+                    generation: typeof data.generation === 'number' ? data.generation : workspace?.generation ?? 1,
+                    order: (current[eventMode] ?? []).find((item) => item.callId === callId)?.order ?? order,
+                  },
+                ],
+              }))
             }
           } else if (event.event === 'draft.ready') {
-            const stagedDraft = recordValue(data.draft) ?? recordValue(data.value)
-              ?? (data.ready === true || data.confirmation_token ? data : undefined)
+            const stagedDraft = recordValue(data.draft) ?? recordValue(data.value) ?? (data.ready === true ? data : undefined)
             if (stagedDraft) {
-              setDraftByMode((current) => ({ ...current, [eventMode]: stagedDraft }))
+              setDraftByMode((current) => ({
+                ...current,
+                [eventMode]: stagedDraft,
+              }))
               if (typeof stagedDraft.draft_id === 'string' && typeof stagedDraft.mode_id === 'string' && typeof stagedDraft.revision === 'number' && typeof stagedDraft.payload_digest === 'string' && typeof stagedDraft.ready === 'boolean' && typeof stagedDraft.confirmation_state === 'string') {
-                dispatchInteraction({ type: 'draft_ready', draft: stagedDraft as unknown as AssistantInteractionDraftReceipt })
+                dispatchInteraction({
+                  type: 'draft_ready',
+                  draft: stagedDraft as unknown as AssistantInteractionDraftReceipt,
+                })
               }
             }
           }
@@ -684,10 +1151,15 @@ export default function AssistantWorkspace() {
       } catch (streamError) {
         if (!controller.signal.aborted) {
           setResponding(false)
-          if (streamError instanceof InteractiveStreamError && (streamError.status === 404 || streamError.status === 410)) {
+          const streamStatus = assistantStreamHttpStatus(streamError)
+          if (streamStatus === 404 || streamStatus === 410) {
             resetExpiredWorkspace(lastSubmittedMessage.current || undefined)
           } else {
-            setError(streamError instanceof Error ? assistantInteractionErrorMessage(undefined, streamError instanceof InteractiveStreamError ? '助手连接已中断，正在恢复。' : streamError.message) : '助手连接已中断，正在恢复。')
+            dispatchInteraction({
+              type: 'error',
+              code: 'assistant_interaction_reconnecting',
+            })
+            setError('助手连接已中断，正在恢复。')
           }
         }
       }
@@ -700,38 +1172,94 @@ export default function AssistantWorkspace() {
     if (!text || !canSend || sendInFlight.current) return
     sendInFlight.current = true
     const resetVersion = workspaceResetVersion.current
-    const submittedAttachments = attachmentController.toInputAttachments()
-    const contextLines = mode === 'creation' && selectedCreationType
-      ? [
-          ...(selectedCreationType === 'seednote' ? [] : [`创作类型：${selectedCreationType}`]),
-          ...(isVideoEditCreation ? [
-            `剪辑要求：${videoEditBrief.trim() || '按本次创作需求自动决定'}`,
-            `剪辑偏好：${JSON.stringify(videoEditPreferences)}`,
-            `已上传素材：${videoEditAssets.map((asset) => asset.file_name).filter(Boolean).join('、') || '待上传'}`,
-          ] : []),
-        ]
-      : []
+    const submittedAttachments = currentAttachmentReferences(attachments, attachmentController.toInputAttachments())
+    const contextLines =
+      mode === 'creation' && selectedCreationType
+        ? [
+            ...(selectedCreationType === 'seednote' ? [] : [`创作类型：${selectedCreationType}`]),
+            ...(isVideoEditCreation
+              ? [
+                  `剪辑要求：${videoEditBrief.trim() || '按本次创作需求自动决定'}`,
+                  `剪辑偏好：${JSON.stringify(videoEditPreferences)}`,
+                  `已上传素材：${
+                    videoEditAssets
+                      .map((asset) => asset.file_name)
+                      .filter(Boolean)
+                      .join('、') || '待上传'
+                  }`,
+                ]
+              : []),
+          ]
+        : []
     if (submittedAttachments.length) {
       contextLines.push(`已附加素材：${submittedAttachments.map((asset) => asset.file_name || asset.type).join('、')}`)
     }
-    const messageText = contextLines.length ? `${text}\n\n${contextLines.join('\n')}` : text
-    const optimisticID = `optimistic-${++userMessageCounter.current}`
+    const composedMessageText = contextLines.length ? `${text}\n\n${contextLines.join('\n')}` : text
+    const contextKey = assistantMessageContextKey(mode, selectedProject?.id ?? projectId, selectedWork?.id ?? contentId, selectedCreationType, {
+      attachments: submittedAttachments,
+      videoEditAssets,
+      videoEditBrief,
+      videoEditPreferences,
+    })
+    const previousAttempt = retryableMessage
+    const matchesRetry = previousAttempt && previousAttempt.mode === mode && previousAttempt.contextKey === contextKey && previousAttempt.composerText === text && previousAttempt.workspaceId === workspace?.id
+    const retryAttempt = matchesRetry && previousAttempt.text === composedMessageText ? previousAttempt : null
+    const messageText = retryAttempt?.text ?? composedMessageText
+    const clientMessageId = retryAttempt?.clientMessageId ?? crypto.randomUUID()
+    const optimisticID = `optimistic-${crypto.randomUUID()}`
     const order = nextConversationOrder(mode)
     setSending(true)
     setError(null)
     lastSubmittedMessage.current = text
     setComposer('')
-    setMessagesByMode((current) => ({ ...current, [mode]: [...(current[mode] ?? []), { id: optimisticID, role: 'user', text: messageText, order }] }))
+    setMessagesByMode((current) => {
+      const previous = current[mode] ?? []
+      const alreadyConfirmed = retryAttempt && previous.some((message) => message.role === 'user' && !message.id.startsWith('optimistic-') && message.text === retryAttempt.text)
+      if (alreadyConfirmed) return current
+      const withoutRetriedMessage = retryAttempt ? previous.filter((message) => !(message.role === 'user' && message.id.startsWith('optimistic-') && message.text === retryAttempt.text)) : previous
+      return {
+        ...current,
+        [mode]: [...withoutRetriedMessage, { id: optimisticID, role: 'user', text: messageText, order }],
+      }
+    })
     let createdWorkspace: AssistantWorkspaceState | null = null
     try {
       let currentWorkspace = workspace
       if (!currentWorkspace) {
         if (!workspaceCreateKey.current) workspaceCreateKey.current = crypto.randomUUID()
-        currentWorkspace = await api.assistant.createWorkspace({ mode_id: mode, ...(selectedProject ? { project_id: selectedProject.id } : {}), ...(selectedWork ? { content_id: selectedWork.id } : {}), ...(routeState.checkpointId ? { checkpoint_id: routeState.checkpointId } : {}) }, workspaceCreateKey.current)
+        currentWorkspace = await api.assistant.createWorkspace(
+          {
+            mode_id: mode,
+            ...(selectedProject ? { project_id: selectedProject.id } : {}),
+            ...(selectedWork ? { content_id: selectedWork.id } : {}),
+          },
+          workspaceCreateKey.current,
+        )
         workspaceCreateKey.current = null
         createdWorkspace = currentWorkspace
+        setWorkspace({
+          ...currentWorkspace,
+          mode_id: mode,
+          ...(selectedProject ? { project_id: selectedProject.id } : {}),
+          ...(selectedWork ? { content_id: selectedWork.id } : {}),
+        })
       }
-      await api.assistant.workspaceMessage(currentWorkspace.id, mode, messageText)
+      const pendingRetry = {
+        workspaceId: currentWorkspace.id,
+        mode,
+        contextKey,
+        composerText: text,
+        text: messageText,
+        clientMessageId,
+      }
+      setRetryableMessage(pendingRetry)
+      persistPendingRetryableMessage(storageKey, currentWorkspace, pendingRetry, projectId, contentId)
+      await api.assistant.workspaceMessage(currentWorkspace.id, mode, messageText, clientMessageId, submittedAttachments)
+      setRetryableMessage(null)
+      if (preservedQuestionAttachmentsMode.current === mode) {
+        preservedQuestionAttachmentsMode.current = null
+        setAttachments([])
+      }
       if (!workspace && workspaceResetVersion.current === resetVersion) {
         const acceptedWorkspace: AssistantWorkspaceState = {
           ...currentWorkspace,
@@ -742,7 +1270,10 @@ export default function AssistantWorkspace() {
         if (currentWorkspace.interaction_snapshot) {
           setInteractionSnapshot(currentWorkspace.interaction_snapshot)
           setDraftByMode(draftsFromSnapshot(currentWorkspace.interaction_snapshot))
-          dispatchInteraction({ type: 'snapshot', snapshot: currentWorkspace.interaction_snapshot })
+          dispatchInteraction({
+            type: 'snapshot',
+            snapshot: currentWorkspace.interaction_snapshot,
+          })
         }
         setInteractionSnapshotReady(true)
         setWorkspace(acceptedWorkspace)
@@ -750,6 +1281,14 @@ export default function AssistantWorkspace() {
       }
       setResponding(true)
     } catch (sendError) {
+      setRetryableMessage({
+        workspaceId: createdWorkspace?.id ?? workspace?.id,
+        mode,
+        contextKey,
+        composerText: text,
+        text: messageText,
+        clientMessageId,
+      })
       const recoveredSnapshot = assistantInteractionSnapshotFromError(sendError)
       if (recoveredSnapshot) applyInteractionSnapshot(recoveredSnapshot)
       if (createdWorkspace) {
@@ -757,23 +1296,32 @@ export default function AssistantWorkspace() {
         if (createdWorkspace.interaction_snapshot) {
           setInteractionSnapshot(createdWorkspace.interaction_snapshot)
           setDraftByMode(draftsFromSnapshot(createdWorkspace.interaction_snapshot))
-          dispatchInteraction({ type: 'snapshot', snapshot: createdWorkspace.interaction_snapshot })
+          dispatchInteraction({
+            type: 'snapshot',
+            snapshot: createdWorkspace.interaction_snapshot,
+          })
         }
         setWorkspace(createdWorkspace)
         setConversationPhase('active')
       }
       setComposer(text)
-      setMessagesByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).filter((message) => message.id !== optimisticID) }))
+      setMessagesByMode((current) => ({
+        ...current,
+        [mode]: (current[mode] ?? []).filter((message) => message.id !== optimisticID),
+      }))
       const errorCode = assistantWorkspaceErrorCode(sendError)
+      if (errorCode === 'assistant_interaction_generation_changed') {
+        // The Server has fenced an attempt whose side effect may already have
+        // reached the runtime. Preserve the text, but never replay its ID.
+        setRetryableMessage(null)
+      }
       if (errorCode?.startsWith('assistant_')) dispatchInteraction({ type: 'error', code: errorCode })
       if (isStaleAssistantWorkspaceError(sendError)) {
         resetExpiredWorkspace()
       } else if (errorCode === 'assistant_workspace_busy') {
         setError('助手正在处理上一条消息，输入已保留，请稍后重试。')
       } else if (errorCode === 'interactive_session_busy' || errorCode === 'interactive_question_pending') {
-        setError(errorCode === 'interactive_question_pending'
-          ? '请先完成上方的问题，再发送新消息。输入已保留。'
-          : '助手正在处理上一条消息，输入已保留，请稍后重试。')
+        setError(errorCode === 'interactive_question_pending' ? '请先完成上方的问题，再发送新消息。输入已保留。' : '助手正在处理上一条消息，输入已保留，请稍后重试。')
       } else if (errorCode === 'assistant_workspace_mode_mismatch' || errorCode === 'interactive_event_gap') {
         resetExpiredWorkspace(text)
         setError(assistantWorkspaceConflictMessage(errorCode, 'send') ?? '对话状态已变化，输入已保留，请重新建立对话后重试。')
@@ -783,12 +1331,13 @@ export default function AssistantWorkspace() {
         setError(assistantInteractionErrorMessage(errorCode, sendError instanceof Error ? sendError.message : '消息发送失败'))
       }
       const conflictMessage = assistantWorkspaceConflictMessage(errorCode, 'send')
-      if (conflictMessage && errorCode !== 'assistant_workspace_mode_mismatch' && errorCode !== 'interactive_event_gap'
-        && errorCode !== 'assistant_workspace_busy' && errorCode !== 'interactive_session_busy' && errorCode !== 'interactive_question_pending') {
+      if (conflictMessage && errorCode !== 'assistant_workspace_mode_mismatch' && errorCode !== 'interactive_event_gap' && errorCode !== 'assistant_workspace_busy' && errorCode !== 'interactive_session_busy' && errorCode !== 'interactive_question_pending') {
         setError(conflictMessage)
       }
       if (errorCode === 'project_profile_revision_conflict') {
-        void queryClient.invalidateQueries({ queryKey: ['assistant-bootstrap'] })
+        void queryClient.invalidateQueries({
+          queryKey: ['assistant-bootstrap'],
+        })
       }
     } finally {
       sendInFlight.current = false
@@ -799,7 +1348,7 @@ export default function AssistantWorkspace() {
   const chooseMode = async (nextMode: AssistantModeID, context?: { projectId?: string; contentId?: string }) => {
     const contextProjectChanged = context && Object.prototype.hasOwnProperty.call(context, 'projectId') && (context.projectId ?? '') !== projectId
     const contextContentChanged = context && Object.prototype.hasOwnProperty.call(context, 'contentId') && (context.contentId ?? '') !== contentId
-    if (nextMode === mode && !pendingMode && !contextProjectChanged && !contextContentChanged || switching || committing || sending || responding) return
+    if ((nextMode === mode && !pendingMode && !contextProjectChanged && !contextContentChanged) || switching || committing || sending || responding) return
     const candidate = bootstrap?.modes.find((item) => item.id === nextMode)
     if (!candidate) {
       setError('当前模式暂时无法加载，请稍后重试')
@@ -817,8 +1366,8 @@ export default function AssistantWorkspace() {
       return
     }
     if (!workspace) return
-    const requestedProjectId = context && Object.prototype.hasOwnProperty.call(context, 'projectId') ? context.projectId ?? '' : selectedProject?.id ?? projectId
-    const requestedContentId = context && Object.prototype.hasOwnProperty.call(context, 'contentId') ? context.contentId ?? '' : selectedWork?.id ?? contentId
+    const requestedProjectId = context && Object.prototype.hasOwnProperty.call(context, 'projectId') ? (context.projectId ?? '') : (selectedProject?.id ?? projectId)
+    const requestedContentId = context && Object.prototype.hasOwnProperty.call(context, 'contentId') ? (context.contentId ?? '') : (selectedWork?.id ?? contentId)
     if (nextMode === 'review' && (!requestedProjectId || !requestedContentId)) {
       setPendingMode(nextMode)
       setProjectId(requestedProjectId)
@@ -830,6 +1379,12 @@ export default function AssistantWorkspace() {
       const nextWorkspace = await api.assistant.switchWorkspaceMode(workspace.id, nextMode, {
         ...(requestedProjectId ? { project_id: requestedProjectId } : {}),
         ...(requestedContentId ? { content_id: requestedContentId } : {}),
+        recovery_context: buildInteractionRecoveryContext(
+          workspace.id,
+          nextMode,
+          messagesByModeRef.current,
+          questionsByModeRef.current,
+        ),
       })
       const contextChanged = (workspace.project_id ?? '') !== (nextWorkspace.project_id ?? '') || (workspace.content_id ?? '') !== (nextWorkspace.content_id ?? '')
       const generationChanged = workspace.generation !== nextWorkspace.generation
@@ -838,7 +1393,10 @@ export default function AssistantWorkspace() {
         setQuestionsByMode((current) => ({ ...current, [nextMode]: [] }))
         setDraftByMode((current) => ({ ...current, [nextMode]: null }))
       }
-      if (generationChanged) setLastEventIds((current) => ({ ...current, [nextMode]: undefined }))
+      if (generationChanged) {
+        setLastEventIds((current) => ({ ...current, [nextMode]: undefined }))
+        preserveQuestionDraftsForGeneration(nextMode, nextWorkspace.generation ?? 1)
+      }
       setMode(nextMode)
       setPendingMode(null)
       setProjectId(nextWorkspace.project_id ?? projectId)
@@ -846,8 +1404,14 @@ export default function AssistantWorkspace() {
       setWorkspace(nextWorkspace)
       if (nextWorkspace.interaction_snapshot) {
         setInteractionSnapshot(nextWorkspace.interaction_snapshot)
-        setDraftByMode((current) => ({ ...current, ...draftsFromSnapshot(nextWorkspace.interaction_snapshot!) }))
-        dispatchInteraction({ type: 'snapshot', snapshot: nextWorkspace.interaction_snapshot })
+        setDraftByMode((current) => ({
+          ...current,
+          ...draftsFromSnapshot(nextWorkspace.interaction_snapshot!),
+        }))
+        dispatchInteraction({
+          type: 'snapshot',
+          snapshot: nextWorkspace.interaction_snapshot,
+        })
       }
       setInteractionSnapshotReady(true)
       setResponding(false)
@@ -864,11 +1428,10 @@ export default function AssistantWorkspace() {
         resetExpiredWorkspace()
         setError(assistantWorkspaceConflictMessage(errorCode, 'switch') ?? '对话状态已变化，请重新建立对话后重试。')
       } else {
-        setError(switchError instanceof Error ? switchError.message : '当前模式正在处理，请稍后切换')
+        setError(assistantInteractionErrorMessage(errorCode, '当前模式正在处理，请稍后切换'))
       }
       const conflictMessage = assistantWorkspaceConflictMessage(errorCode, 'switch')
-      if (conflictMessage && errorCode !== 'assistant_workspace_mode_mismatch' && errorCode !== 'interactive_event_gap'
-        && errorCode !== 'assistant_workspace_busy') setError(conflictMessage)
+      if (conflictMessage && errorCode !== 'assistant_workspace_mode_mismatch' && errorCode !== 'interactive_event_gap' && errorCode !== 'assistant_workspace_busy') setError(conflictMessage)
     } finally {
       setSwitching(false)
     }
@@ -876,27 +1439,59 @@ export default function AssistantWorkspace() {
 
   const submitAnswers = async (batch: QuestionBatch, answer: DshQuestionAnswer) => {
     if (!workspace) return
+    if (batch.needsConversationRetry || (batch.generation !== undefined && batch.generation !== (workspace.generation ?? 1))) {
+      setError('连接已恢复，这个问题需要在当前对话中继续。已填写的回答仍然保留。')
+      return
+    }
     try {
-      const mediaIDs = [...new Set(answer.answers.flatMap((item) => item.selected).flatMap((label) => {
-        const match = /^media_asset:(.+)$/.exec(label.trim())
-        return match?.[1]?.trim() ? [match[1].trim()] : []
-      }))]
+      const attemptId = batch.answerAttemptId ?? crypto.randomUUID()
+      const generation = batch.generation ?? workspace.generation ?? 1
+      const pendingQuestions = {
+        ...questionsByModeRef.current,
+        [mode]: (questionsByModeRef.current[mode] ?? []).map((item) => item.callId === batch.callId
+          ? { ...item, answerDrafts: answer.answers, answerAttemptId: attemptId, generation }
+          : item),
+      }
+      questionsByModeRef.current = pendingQuestions
+      setQuestionsByMode(pendingQuestions)
+      persistQuestionBatches(storageKey, pendingQuestions)
+      const mediaIDs = [
+        ...new Set(
+          answer.answers
+            .flatMap((item) => item.selected)
+            .flatMap((label) => {
+              const match = /^media_asset:(.+)$/.exec(label.trim())
+              return match?.[1]?.trim() ? [match[1].trim()] : []
+            }),
+        ),
+      ]
       const selectedMedia = mediaIDs.length > 0 ? await Promise.all(mediaIDs.map((id) => api.userMedia.get(id))) : []
       if (selectedMedia.some((asset) => asset.status !== 'available')) {
         throw new Error('候选素材已不可用，请重新选择或上传素材。')
       }
-      await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers)
+      await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers, attemptId, generation)
       if (mediaIDs.length > 0) {
         setAttachments((current) => {
-          const existing = new Set(current.flatMap((item) => item.assetId ? [item.assetId] : []))
-          const additions = selectedMedia.filter((asset) => !existing.has(asset.id)).map((asset) => ({
-            id: `media-${asset.id}`, type: asset.media_type, fileName: asset.file_name, contentType: asset.content_type, size: asset.size,
-            status: 'uploaded' as const, progress: 100, assetId: asset.id,
-          }))
+          const existing = new Set(current.flatMap((item) => (item.assetId ? [item.assetId] : [])))
+          const additions = selectedMedia
+            .filter((asset) => !existing.has(asset.id))
+            .map((asset) => ({
+              id: `media-${asset.id}`,
+              type: asset.media_type,
+              fileName: asset.file_name,
+              contentType: asset.content_type,
+              size: asset.size,
+              status: 'uploaded' as const,
+              progress: 100,
+              assetId: asset.id,
+            }))
           return [...current, ...additions]
         })
       }
-      setQuestionsByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).map((item) => item.callId === batch.callId ? { ...item, answers: answer.answers } : item) }))
+      setQuestionsByMode((current) => ({
+        ...current,
+        [mode]: (current[mode] ?? []).map((item) => (item.callId === batch.callId ? { ...item, answers: answer.answers, answerDrafts: answer.answers, answerAttemptId: attemptId, generation } : item)),
+      }))
     } catch (answerError) {
       const recoveredSnapshot = assistantInteractionSnapshotFromError(answerError)
       if (recoveredSnapshot) applyInteractionSnapshot(recoveredSnapshot)
@@ -914,63 +1509,155 @@ export default function AssistantWorkspace() {
     }
   }
 
+  const updateQuestionAnswerDraft = (batch: QuestionBatch, answers: DshQuestionAnswer['answers']) => {
+    setQuestionsByMode((current) => ({
+      ...current,
+      [mode]: (current[mode] ?? []).map((item) => item.callId === batch.callId
+        ? {
+            ...item,
+            answerDrafts: answers,
+            answerAttemptId: JSON.stringify(item.answerDrafts ?? []) === JSON.stringify(answers) ? item.answerAttemptId : undefined,
+            generation: item.generation ?? workspace?.generation ?? 1,
+          }
+        : item),
+    }))
+  }
+
+  const continueQuestionInComposer = async (batch: QuestionBatch) => {
+    const mediaIDs = [...new Set((batch.answerDrafts ?? [])
+      .flatMap((answer) => answer.selected)
+      .flatMap((selection) => {
+        const match = /^media_asset:(.+)$/.exec(selection.trim())
+        return match?.[1]?.trim() ? [match[1].trim()] : []
+      }))]
+    let selectedMedia: Awaited<ReturnType<typeof api.userMedia.get>>[] = []
+    setRestoringQuestionAttachments(true)
+    try {
+      selectedMedia = mediaIDs.length ? await Promise.all(mediaIDs.map((id) => api.userMedia.get(id))) : []
+      if (selectedMedia.some((asset) => asset.status !== 'available')) throw new Error('所选素材已不可用，请重新选择或上传素材。')
+    } catch (assetError) {
+      setError(assetError instanceof Error ? assetError.message : '所选素材无法恢复，请重新选择或上传素材。')
+      setRestoringQuestionAttachments(false)
+      return
+    }
+    const continuation = [
+      '请根据助手之前的问题继续：',
+      ...batch.questions.map((question) => {
+        const answer = batch.answerDrafts?.find((item) => item.id === question.id)
+        const selected = answer?.selected.map((value) => {
+          const option = question.options?.find((item) => item.label === value)
+          if (value.startsWith('media_asset:')) return `素材引用 ${value}${option?.description ? `（${option.description}）` : ''}`
+          return option?.label ?? value
+        }) ?? []
+        const details = [...selected, ...(answer?.custom?.trim() ? [answer.custom.trim()] : [])]
+        return `- ${question.question}${details.length ? `\n  当前回答：${details.join('；')}` : ''}`
+      }),
+    ].join('\n')
+    if (selectedMedia.length) {
+      preservedQuestionAttachmentsMode.current = mode
+      const existing = currentAttachmentReferences(attachments, attachmentController.toInputAttachments())
+      const existingIDs = new Set(existing.flatMap((item) => item.asset_id ? [item.asset_id] : []))
+      const restored = selectedMedia.filter((asset) => !existingIDs.has(asset.id)).map((asset): InputAttachment => ({
+        type: asset.media_type,
+        asset_id: asset.id,
+        file_name: asset.file_name,
+        content_type: asset.content_type,
+        size: asset.size,
+      }))
+      if (restored.length) attachmentController.reset([...existing, ...restored])
+    }
+    setComposer((current) => current.trim() ? `${current}\n\n${continuation}` : continuation)
+    const next = {
+      ...questionsByModeRef.current,
+      [mode]: (questionsByModeRef.current[mode] ?? []).map((item) => item.callId === batch.callId
+        ? { ...item, continuedInComposer: true }
+        : item),
+    }
+    questionsByModeRef.current = next
+    setQuestionsByMode(next)
+    persistQuestionBatches(storageKey, next)
+    setRestoringQuestionAttachments(false)
+  }
+
   const commitDraft = async () => {
     if (!workspace || !activeDraft || committing) return
     setCommitting(true)
     try {
       const draftID = stringValue(activeDraft.draft_id) ?? stringValue(activeDraft.id) ?? 'draft'
       const draftRevision = typeof activeDraft.revision === 'number' ? activeDraft.revision : 0
-      const commitKeyID = `${workspace.id}:${draftID}:${draftRevision}`
-      const idempotencyKey = commitIdempotencyKeys.current[commitKeyID] ?? crypto.randomUUID()
-      commitIdempotencyKeys.current[commitKeyID] = idempotencyKey
-      const tokenValue = stringValue(activeDraft.confirmation_token)
+      const commitKeyFor = (receiptID: string, revision: number) => `assistant-commit:${workspace.id}:${receiptID}:${revision}`
       let result: Awaited<ReturnType<typeof api.assistant.workspaceCommit>>
-      if (mode === 'profile' && tokenValue) {
+      if (mode === 'profile') {
+        let snapshot = await api.assistant.getInteractionSnapshot(workspace.id)
+        let durableDraft = snapshot.drafts.find((candidate) => candidate.mode_id === mode && candidate.draft_id === draftID && candidate.ready)
+        if (!durableDraft || durableDraft.revision !== draftRevision) throw new Error('计划已更新，请恢复最新计划后重试')
+        if (isVideoEditProfile && Object.keys(videoEditDefaults).length > 0) {
+          const draftPayload = durableDraft.payload && typeof durableDraft.payload === 'object' && !Array.isArray(durableDraft.payload) ? (structuredClone(durableDraft.payload) as Record<string, unknown>) : {}
+          draftPayload.video_edit_defaults = videoEditDefaults
+          if (JSON.stringify(draftPayload) !== JSON.stringify(durableDraft.payload)) {
+            const updated = await api.assistant.updateInteractionDraft(workspace.id, durableDraft.draft_id, {
+              generation: snapshot.generation,
+              revision: durableDraft.revision,
+              attempt_id: crypto.randomUUID(),
+              payload: draftPayload,
+            })
+            snapshot = await api.assistant.getInteractionSnapshot(workspace.id)
+            durableDraft = snapshot.drafts.find((candidate) => candidate.mode_id === mode && candidate.draft_id === updated.draft_id && candidate.revision === updated.revision && candidate.ready)
+            if (!durableDraft) throw new Error('计划已更新，请恢复最新计划后重试')
+          }
+        }
+        setDraftByMode((current) => ({ ...current, [mode]: draftReceiptToDraft(durableDraft) }))
+        const idempotencyKey = commitKeyFor(durableDraft.draft_id, durableDraft.revision)
         result = await api.assistant.workspaceCommit(workspace.id, mode, {
-          confirmation_token: tokenValue,
+          draft_id: durableDraft.draft_id,
+          revision: durableDraft.revision,
           idempotency_key: idempotencyKey,
-          ...(isVideoEditProfile ? { video_edit_defaults: videoEditDefaults } : {}),
         })
       } else {
-        const draftPayload = activeDraft.payload && typeof activeDraft.payload === 'object' && !Array.isArray(activeDraft.payload)
-          ? activeDraft.payload
-          : activeDraft
+        const draftPayload = activeDraft.payload && typeof activeDraft.payload === 'object' && !Array.isArray(activeDraft.payload) ? activeDraft.payload : activeDraft
         const payload = structuredClone(draftPayload) as Draft
-        let commitOptions: Record<string, unknown> | undefined
         if (mode === 'creation') {
           if (!selectedCreationType) {
             setError('当前人设不支持可用的创作类型')
             return
           }
-          const plan = payload.plan && typeof payload.plan === 'object' && !Array.isArray(payload.plan) ? payload.plan as Record<string, unknown> : payload
+          const plan = payload.plan && typeof payload.plan === 'object' && !Array.isArray(payload.plan) ? (payload.plan as Record<string, unknown>) : payload
           plan.content_type = selectedCreationType
           if (executionProfile) plan.execution_profile = executionProfile
           if (usesImageSettings) {
             if (imageRatio) plan.image_ratio = imageRatio
             if (effectiveImageCapabilityKey) plan.image_capability_key = effectiveImageCapabilityKey
           }
-          const composerAssets = selectedCreationType === 'video-edit' ? [] : attachmentController.toInputAttachments().map((asset) => ({
-            type: asset.type,
-            ...(asset.asset_id ? { asset_id: asset.asset_id } : {}),
-            ...(asset.upload_id ? { upload_id: asset.upload_id } : {}),
-            ...(asset.file_name ? { file_name: asset.file_name } : {}),
-            ...(asset.content_type ? { mime_type: asset.content_type } : {}),
-            ...(asset.size !== undefined ? { file_size: asset.size } : {}),
-            ...(asset.instruction ? { instruction: asset.instruction } : {}),
-          }))
+          const composerAssets =
+            selectedCreationType === 'video-edit'
+              ? []
+              : attachmentController.toInputAttachments().map((asset) => ({
+                  type: asset.type,
+                  ...(asset.asset_id ? { asset_id: asset.asset_id } : {}),
+                  ...(asset.upload_id ? { upload_id: asset.upload_id } : {}),
+                  ...(asset.file_name ? { file_name: asset.file_name } : {}),
+                  ...(asset.content_type ? { mime_type: asset.content_type } : {}),
+                  ...(asset.size !== undefined ? { file_size: asset.size } : {}),
+                  ...(asset.instruction ? { instruction: asset.instruction } : {}),
+                }))
           if (composerAssets.length) {
             const existingAssets = Array.isArray(plan.assets) ? plan.assets : []
-            const existingKeys = new Set(existingAssets.flatMap((asset) => {
-              if (!asset || typeof asset !== 'object' || Array.isArray(asset)) return []
-              const item = asset as Record<string, unknown>
-              return [stringValue(item.asset_id), stringValue(item.upload_id), stringValue(item.file_name)].filter(Boolean)
-            }))
-            plan.assets = [...existingAssets, ...composerAssets.filter((asset) => {
-              const identity = asset.asset_id || asset.upload_id || asset.file_name
-              if (!identity || existingKeys.has(identity)) return false
-              existingKeys.add(identity)
-              return true
-            })]
+            const existingKeys = new Set(
+              existingAssets.flatMap((asset) => {
+                if (!asset || typeof asset !== 'object' || Array.isArray(asset)) return []
+                const item = asset as Record<string, unknown>
+                return [stringValue(item.asset_id), stringValue(item.upload_id), stringValue(item.file_name)].filter(Boolean)
+              }),
+            )
+            plan.assets = [
+              ...existingAssets,
+              ...composerAssets.filter((asset) => {
+                const identity = asset.asset_id || asset.upload_id || asset.file_name
+                if (!identity || existingKeys.has(identity)) return false
+                existingKeys.add(identity)
+                return true
+              }),
+            ]
           }
           if (selectedCreationType === 'video-edit') {
             const uploadedAssets = videoEditAssets.filter((asset) => asset.upload_id && asset.key)
@@ -989,12 +1676,36 @@ export default function AssistantWorkspace() {
             plan.video_edit_preferences = Object.fromEntries(Object.entries(videoEditPreferences).filter(([, value]) => value !== undefined && value !== ''))
           }
           if (plan !== payload) payload.plan = plan
-          const optionKeys = ['content_type', 'execution_profile', 'image_ratio', 'image_capability_key', 'assets', 'video_edit_brief', 'video_edit_preferences']
-          const planOptions = Object.fromEntries(optionKeys.filter((key) => Object.prototype.hasOwnProperty.call(plan, key)).map((key) => [key, plan[key]]))
-          commitOptions = { plan: planOptions }
         }
-        const checkpoint = await api.assistant.workspaceCheckpoint(workspace.id, mode, { schema_version: '1.0', payload, summary: `${modeLabel(mode)}草稿`, status: 'ready' })
-        result = await api.assistant.workspaceCommit(workspace.id, mode, { checkpoint_id: checkpoint.id, checkpoint_digest: checkpoint.payload_digest, idempotency_key: idempotencyKey, options: commitOptions })
+        const checkpoint = await api.assistant.workspaceCheckpoint(workspace.id, mode, {
+          schema_version: '1.0',
+          payload,
+          summary: `${modeLabel(mode)}草稿`,
+          status: 'ready',
+        })
+        if (JSON.stringify(payload) !== JSON.stringify(checkpoint.payload)) {
+          const snapshot = await api.assistant.getInteractionSnapshot(workspace.id)
+          const update = await api.assistant.updateInteractionDraft(workspace.id, checkpoint.id, {
+            generation: snapshot.generation,
+            revision: checkpoint.revision ?? 0,
+            attempt_id: crypto.randomUUID(),
+            payload,
+          })
+          const latest = await api.assistant.getInteractionSnapshot(workspace.id)
+          const updatedDraft = latest.drafts.find((candidate) => candidate.draft_id === update.draft_id)
+          if (!updatedDraft || updatedDraft.revision !== update.revision) throw new Error('计划已更新，请恢复最新计划后重试')
+          result = await api.assistant.workspaceCommit(workspace.id, mode, {
+            draft_id: updatedDraft.draft_id,
+            revision: updatedDraft.revision,
+            idempotency_key: commitKeyFor(updatedDraft.draft_id, updatedDraft.revision),
+          })
+        } else {
+          result = await api.assistant.workspaceCommit(workspace.id, mode, {
+            draft_id: checkpoint.id,
+            revision: checkpoint.revision ?? 0,
+            idempotency_key: commitKeyFor(checkpoint.id, checkpoint.revision ?? 0),
+          })
+        }
       }
       const committedProjectID = stringValue(result.project?.id)
       if (mode === 'profile' && committedProjectID) {
@@ -1010,14 +1721,26 @@ export default function AssistantWorkspace() {
         setProjectId(committedProjectID)
         setNewProfile(false)
         setContentId('')
-        setWorkspace((current) => current ? { ...current, project_id: committedProjectID, content_id: '' } : current)
-        queryClient.setQueryData<{ projects: AssistantProject[] } | undefined>(['assistant-bootstrap'], (current) => current ? { ...current, projects: [...current.projects.filter((project) => project.id !== committedProjectID), committedProject] } : current)
-        void queryClient.invalidateQueries({ queryKey: ['assistant-bootstrap'] })
+        setWorkspace((current) => (current ? { ...current, project_id: committedProjectID, content_id: '' } : current))
+        queryClient.setQueryData<{ projects: AssistantProject[] } | undefined>(['assistant-bootstrap'], (current) =>
+          current
+            ? {
+                ...current,
+                projects: [...current.projects.filter((project) => project.id !== committedProjectID), committedProject],
+              }
+            : current,
+        )
+        void queryClient.invalidateQueries({
+          queryKey: ['assistant-bootstrap'],
+        })
       }
       if (mode !== 'creation') setAttachments([])
       const committedTaskID = stringValue(result.task?.id) ?? stringValue((result as { task_id?: unknown }).task_id)
       const interactionStatus = stringValue((result as { interaction_status?: unknown }).interaction_status) ?? 'created'
-      dispatchInteraction({ type: 'commit_result', result: { status: interactionStatus, task_id: committedTaskID } })
+      dispatchInteraction({
+        type: 'commit_result',
+        result: { status: interactionStatus, task_id: committedTaskID },
+      })
       setDraftByMode((current) => ({ ...current, [mode]: null }))
       if (mode === 'creation' && committedTaskID) navigate(`/tasks/${encodeURIComponent(committedTaskID)}`)
     } catch (commitError) {
@@ -1027,7 +1750,9 @@ export default function AssistantWorkspace() {
       if (errorCode?.startsWith('assistant_')) dispatchInteraction({ type: 'error', code: errorCode })
       setError(assistantWorkspaceConflictMessage(errorCode, 'commit') ?? assistantInteractionErrorMessage(errorCode, commitError instanceof Error ? commitError.message : '确认失败'))
       if (errorCode === 'project_profile_revision_conflict') {
-        void queryClient.invalidateQueries({ queryKey: ['assistant-bootstrap'] })
+        void queryClient.invalidateQueries({
+          queryKey: ['assistant-bootstrap'],
+        })
       }
     } finally {
       setCommitting(false)
@@ -1044,14 +1769,19 @@ export default function AssistantWorkspace() {
     }
   }
 
-  const creationTypeSelector = mode === 'creation' && selectedProject?.platform === 'video-edit' ? (
-    <label className="flex w-full max-w-xs min-w-0 items-center gap-1.5 text-xs text-muted-foreground sm:w-auto">
-      <span className="sr-only">创作类型</span>
-      <NativeSelect className="h-8 w-full min-w-28 max-w-44 text-xs sm:w-auto" aria-label="创作类型" value={selectedCreationType} disabled={switching || committing || sending || responding || draftPending} onChange={(event) => chooseCreationType(event.target.value)}>
-        {creationTypes.map((item) => <NativeSelectOption key={item.value} value={item.value}>{item.label}</NativeSelectOption>)}
-      </NativeSelect>
-    </label>
-  ) : null
+  const creationTypeSelector =
+    mode === 'creation' && selectedProject?.platform === 'video-edit' ? (
+      <label className="flex w-full max-w-xs min-w-0 items-center gap-1.5 text-xs text-muted-foreground sm:w-auto">
+        <span className="sr-only">创作类型</span>
+        <NativeSelect className="h-8 w-full min-w-28 max-w-44 text-xs sm:w-auto" aria-label="创作类型" value={selectedCreationType} disabled={switching || committing || sending || responding || draftPending} onChange={(event) => chooseCreationType(event.target.value)}>
+          {creationTypes.map((item) => (
+            <NativeSelectOption key={item.value} value={item.value}>
+              {item.label}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </label>
+    ) : null
 
   const resetCreationProject = (value: string | null) => {
     const nextValue = value ?? ''
@@ -1070,20 +1800,7 @@ export default function AssistantWorkspace() {
       void chooseMode('review', { projectId, contentId: value })
     }
   }
-  const videoEditInputs = isVideoEditCreation && selectedProject ? (
-    <AssistantVideoEditInputs
-      assets={videoEditAssets}
-      brief={videoEditBrief}
-      preferences={videoEditPreferences}
-      defaults={selectedProject.video_edit_defaults}
-      uploading={videoEditUploading}
-      onAssetsChange={setVideoEditAssets}
-      onBriefChange={setVideoEditBrief}
-      onPreferencesChange={setVideoEditPreferences}
-      onUploadingChange={setVideoEditUploading}
-      onFailuresChange={setVideoEditUploadFailed}
-    />
-  ) : null
+  const videoEditInputs = isVideoEditCreation && selectedProject ? <AssistantVideoEditInputs assets={videoEditAssets} brief={videoEditBrief} preferences={videoEditPreferences} defaults={selectedProject.video_edit_defaults} uploading={videoEditUploading} onAssetsChange={setVideoEditAssets} onBriefChange={setVideoEditBrief} onPreferencesChange={setVideoEditPreferences} onUploadingChange={setVideoEditUploading} onFailuresChange={setVideoEditUploadFailed} /> : null
   const selectModePrerequisiteAction = () => {
     setError(null)
     setMode(modePrerequisiteAction.mode)
@@ -1167,16 +1884,20 @@ export default function AssistantWorkspace() {
         disabled: executionProfilesQuery.isError,
         taskType: selectedProject?.platform,
       }}
-      image={usesImageSettings ? {
-        ratios: supportedImageRatios,
-        ratio: imageRatio,
-        onRatioChange: (value) => setImageRatio(value),
-        capabilities: imageCapabilitiesQuery.items,
-        capabilityKey: effectiveImageCapabilityKey,
-        onCapabilityChange: setImageCapabilityKey,
-        loading: imageCapabilitiesQuery.isLoading,
-        disabled: imageCapabilitiesQuery.isError,
-      } : undefined}
+      image={
+        usesImageSettings
+          ? {
+              ratios: supportedImageRatios,
+              ratio: imageRatio,
+              onRatioChange: (value) => setImageRatio(value),
+              capabilities: imageCapabilitiesQuery.items,
+              capabilityKey: effectiveImageCapabilityKey,
+              onCapabilityChange: setImageCapabilityKey,
+              loading: imageCapabilitiesQuery.isLoading,
+              disabled: imageCapabilitiesQuery.isError,
+            }
+          : undefined
+      }
       disabled={switching || committing || sending || responding || draftPending}
       label="选择参数"
     />
@@ -1195,81 +1916,202 @@ export default function AssistantWorkspace() {
       creationTypeOptions={creationTypes}
       loadingProjects={!selectedProject && (bootstrapQuery.isLoading || projectsQuery.isLoading)}
       loadingWorks={worksQuery.isLoading}
-      status={missingContextInstruction ? <span role="status" className="text-xs text-muted-foreground">{missingContextInstruction}</span> : undefined}
+      status={
+        missingContextInstruction ? (
+          <span role="status" className="text-xs text-muted-foreground">
+            {missingContextInstruction}
+          </span>
+        ) : undefined
+      }
     />
   )
   const activeReviewSelectors = workspace && pendingMode === 'review' ? <WorkspaceSelectors mode="review" projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={contentId} works={works} disabled={switching} onProject={selectPersona} onContent={selectReviewContent} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} /> : null
 
-  const personaRail = bootstrap ? (
-    <PersonaRail
-      projects={readyProjects}
-      selectedProjectId={selectedProject?.id ?? (newProfile ? '' : projectId)}
-      onSelect={selectPersona}
-      onCreate={startNewProfile}
-      onViewWorks={viewPersonaWorks}
-      onEditProfile={editPersona}
-    />
-  ) : null
-  const confirmationDraft = activeDraft && mode === 'creation'
-    ? withCreationConfirmationSettings(activeDraft, {
-      execution_profile: executionProfile || undefined,
-      ...(usesImageSettings ? {
-        image_ratio: imageRatio,
-        image_capability_key: effectiveImageCapabilityKey || undefined,
-      } : {}),
-    })
-    : activeDraft
+  const personaRail = bootstrap ? <PersonaRail projects={readyProjects} selectedProjectId={selectedProject?.id ?? (newProfile ? '' : projectId)} onSelect={selectPersona} onCreate={startNewProfile} onViewWorks={viewPersonaWorks} onEditProfile={editPersona} /> : null
+  const confirmationDraft =
+    activeDraft && mode === 'creation'
+      ? withCreationConfirmationSettings(activeDraft, {
+          execution_profile: executionProfile || undefined,
+          ...(usesImageSettings
+            ? {
+                image_ratio: imageRatio,
+                image_capability_key: effectiveImageCapabilityKey || undefined,
+              }
+            : {}),
+        })
+      : activeDraft
 
   return (
     <AgentPromptDropProvider>
       <main data-testid="assistant-workspace" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
-      <AssistantRecoveryBanner
-        state={interactionState}
-        onRetry={() => { void refreshInteractionSnapshot() }}
-        onRestoreDraft={() => { void refreshInteractionSnapshot() }}
-        onRestart={() => { void restartInteraction() }}
-        onViewTask={() => { if (interactionState.taskId) navigate(`/tasks/${encodeURIComponent(interactionState.taskId)}`) }}
-      />
-      {!workspace ? (
-        <section className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col px-4 pb-3 md:px-8">
-          <div data-testid="assistant-conversation" className="assistant-scroll min-h-0 flex flex-1 flex-col overflow-y-auto pb-1 pt-5 md:pb-2 md:pt-8">
-            <HomeStage project={selectedProject} hasReadyPersona={readyProjects.length > 0} />
-            {personaRail}
-            {routeHasContext && mode === 'review' && <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} onProject={resetCreationProject} onContent={setContentId} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />}
-            {!activeMode?.available && activeMode?.disabledReason && !isRuntimeUnavailable && <div className="mx-auto mt-4 flex w-full max-w-2xl flex-col items-center gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3 sm:flex-row sm:justify-between"><p role="status" className="text-left text-sm leading-6 text-muted-foreground">{activeMode.disabledReason}</p><Button type="button" variant="outline" size="sm" className="shrink-0" onClick={selectModePrerequisiteAction}>{modePrerequisiteAction.label}</Button></div>}
-            {bootstrapQuery.isError && <div className="mt-3 flex flex-wrap items-center justify-center gap-3"><p role="alert" className="text-sm text-destructive">首页暂时无法加载，请稍后重试。</p><Button type="button" variant="outline" size="sm" disabled={bootstrapQuery.isFetching} onClick={() => void bootstrapQuery.refetch()}>{bootstrapQuery.isFetching ? <Loader2 className="size-4 animate-spin" /> : '重试加载'}</Button></div>}
-            {bootstrapQuery.isLoading && <p role="status" className="sr-only">正在加载首页</p>}
-            {isVideoEditProfile && <VideoEditProjectDefaultsPanel value={videoEditDefaults} onChange={setVideoEditDefaults} />}
-            {error && <p role="alert" className="mt-4 text-center text-sm text-destructive">{error}</p>}
-            {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && <VideoEditReviewResults query={reviewVideoQuery} />}
-            {videoEditInputs}
-          </div>
-          <Composer fadeAbove={false} value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || composerBlocked} /> : undefined} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
-        </section>
-      ) : (
-        <section className="mx-auto flex min-h-0 w-full max-w-6xl min-w-0 flex-1 flex-col px-4 pb-3 md:px-8">
-          <div data-testid="assistant-conversation" className="assistant-scroll min-h-0 flex-1 overflow-y-auto py-4" aria-live="polite">
-            {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && (
-              <VideoEditReviewResults query={reviewVideoQuery} />
-            )}
-            <Conversation messages={activeMessages} questions={activeQuestions} responding={responding} disabled={draftPending} userAvatarURL={personaImageURL(selectedProject)} onAnswer={submitAnswers} />
-            {activeReviewSelectors}
-            {activeDraft && confirmationDraft && <DraftConfirmationCard mode={mode} draft={confirmationDraft} committing={committing} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => { setDraftByMode((current) => ({ ...current, [mode]: null })); setError(null) }} />}
-            {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
-          </div>
-          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} /> : undefined} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
-        </section>
-      )}
+        <AssistantRecoveryBanner
+          state={interactionState}
+          onRetry={() => {
+            if (interactionState.status === 'input_retryable') {
+              void sendMessage(retryableMessage?.composerText ?? composer)
+              return
+            }
+            void refreshInteractionSnapshot()
+          }}
+          onRetryCommit={() => {
+            void commitDraft()
+          }}
+          onRestoreDraft={() => {
+            void refreshInteractionSnapshot()
+          }}
+          onReconcileCommit={() => {
+            void commitDraft()
+          }}
+          reconciling={committing}
+          onRestart={() => {
+            setRestartDialogOpen(true)
+          }}
+          onViewTask={() => {
+            if (interactionState.taskId) navigate(`/tasks/${encodeURIComponent(interactionState.taskId)}`)
+          }}
+        />
+        <AlertDialog open={restartDialogOpen} onOpenChange={setRestartDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>重新开始对话？</AlertDialogTitle>
+              <AlertDialogDescription>当前对话、未发送输入和问题回答将从此页清除。已保存的计划仍可恢复。</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>继续恢复</AlertDialogCancel>
+              <AlertDialogAction onClick={() => void restartInteraction()}>确认重新开始</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        {!workspace ? (
+          <section className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col px-4 pb-3 md:px-8">
+            <div data-testid="assistant-conversation" className="assistant-scroll min-h-0 flex flex-1 flex-col overflow-y-auto pb-1 pt-5 md:pb-2 md:pt-8">
+              <HomeStage project={selectedProject} hasReadyPersona={readyProjects.length > 0} />
+              {personaRail}
+              {routeHasContext && mode === 'review' && <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} onProject={resetCreationProject} onContent={setContentId} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />}
+              {!activeMode?.available && activeMode?.disabledReason && !isRuntimeUnavailable && (
+                <div className="mx-auto mt-4 flex w-full max-w-2xl flex-col items-center gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3 sm:flex-row sm:justify-between">
+                  <p role="status" className="text-left text-sm leading-6 text-muted-foreground">
+                    {activeMode.disabledReason}
+                  </p>
+                  <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={selectModePrerequisiteAction}>
+                    {modePrerequisiteAction.label}
+                  </Button>
+                </div>
+              )}
+              {bootstrapQuery.isError && (
+                <div className="mt-3 flex flex-wrap items-center justify-center gap-3">
+                  <p role="alert" className="text-sm text-destructive">
+                    首页暂时无法加载，请稍后重试。
+                  </p>
+                  <Button type="button" variant="outline" size="sm" disabled={bootstrapQuery.isFetching} onClick={() => void bootstrapQuery.refetch()}>
+                    {bootstrapQuery.isFetching ? <Loader2 className="size-4 animate-spin" /> : '重试加载'}
+                  </Button>
+                </div>
+              )}
+              {bootstrapQuery.isLoading && (
+                <p role="status" className="sr-only">
+                  正在加载首页
+                </p>
+              )}
+              {isVideoEditProfile && <VideoEditProjectDefaultsPanel value={videoEditDefaults} onChange={setVideoEditDefaults} />}
+              {error && (
+                <p role="alert" className="mt-4 text-center text-sm text-destructive">
+                  {error}
+                </p>
+              )}
+              {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && <VideoEditReviewResults query={reviewVideoQuery} />}
+              {videoEditInputs}
+            </div>
+            <Composer
+              fadeAbove={false}
+              value={composer}
+              attachments={attachments}
+              attachmentController={attachmentController}
+              attachmentsEnabled={mode === 'creation'}
+              contextBar={composerContextBar}
+              placeholder={composerPlaceholder}
+              inputDisabled={sending || switching || committing || composerBlocked}
+              sendDisabled={!canSend}
+              leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || composerBlocked} /> : undefined}
+              trailingTools={
+                <>
+                  {creationTypeSelector}
+                  {creationComposerParameters}
+                </>
+              }
+              onChange={setComposer}
+              onAttachmentsChange={setAttachments}
+              onSend={() => void sendMessage()}
+            />
+          </section>
+        ) : (
+          <section className="mx-auto flex min-h-0 w-full max-w-6xl min-w-0 flex-1 flex-col px-4 pb-3 md:px-8">
+            <div data-testid="assistant-conversation" className="assistant-scroll min-h-0 flex-1 overflow-y-auto py-4" aria-live="polite">
+              {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && <VideoEditReviewResults query={reviewVideoQuery} />}
+              <Conversation messages={activeMessages} questions={activeQuestions} responding={responding} disabled={draftPending} userAvatarURL={personaImageURL(selectedProject)} onAnswer={submitAnswers} onDraftChange={updateQuestionAnswerDraft} onContinueQuestion={continueQuestionInComposer} />
+              {activeReviewSelectors}
+              {activeDraft && confirmationDraft && (
+                <DraftConfirmationCard
+                  mode={mode}
+                  draft={confirmationDraft}
+                  committing={committing}
+                  disabled={switching || (mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0))}
+                  onCommit={() => void commitDraft()}
+                  onContinue={() => void continueConversationFromDraft()}
+                />
+              )}
+              {error && (
+                <p role="alert" className="mt-4 text-sm text-destructive">
+                  {error}
+                </p>
+              )}
+            </div>
+            <Composer
+              value={composer}
+              attachments={attachments}
+              attachmentController={attachmentController}
+              attachmentsEnabled={mode === 'creation'}
+              contextBar={composerContextBar}
+              placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'}
+              inputDisabled={sending || switching || committing || draftPending || pendingQuestions.length > 0}
+              sendDisabled={!canSend || pendingQuestions.length > 0}
+              leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} /> : undefined}
+              trailingTools={
+                <>
+                  {creationTypeSelector}
+                  {creationComposerParameters}
+                </>
+              }
+              onChange={setComposer}
+              onAttachmentsChange={setAttachments}
+              onSend={() => void sendMessage()}
+            />
+          </section>
+        )}
       </main>
     </AgentPromptDropProvider>
   )
 }
 
 function VideoEditReviewResults({ query }: { query: { data?: [Task, TaskFile[]]; isLoading: boolean; isError: boolean } }) {
-  if (query.isLoading) return <p role="status" className="py-4 text-sm text-muted-foreground">正在加载作品产物</p>
-  if (query.isError) return <p role="alert" className="py-4 text-sm text-destructive">作品产物暂时无法加载。</p>
+  if (query.isLoading)
+    return (
+      <p role="status" className="py-4 text-sm text-muted-foreground">
+        正在加载作品产物
+      </p>
+    )
+  if (query.isError)
+    return (
+      <p role="alert" className="py-4 text-sm text-destructive">
+        作品产物暂时无法加载。
+      </p>
+    )
   if (!query.data) return null
-  return <div className="mb-6"><TaskResults task={query.data[0]} files={query.data[1]} /></div>
+  return (
+    <div className="mb-6">
+      <TaskResults task={query.data[0]} files={query.data[1]} />
+    </div>
+  )
 }
 
 function personaImageURL(project?: AssistantProject) {
@@ -1283,7 +2125,10 @@ function platformAgentID(platform: string) {
 }
 
 function platformMeta(platform: string) {
-  return { label: platformDisplayName(platform, '创作'), agentID: platformAgentID(platform) }
+  return {
+    label: platformDisplayName(platform, '创作'),
+    agentID: platformAgentID(platform),
+  }
 }
 
 function platformIntroduction(platform: string) {
@@ -1294,29 +2139,27 @@ function platformIntroduction(platform: string) {
 function HomeStage({ project, hasReadyPersona }: { project?: AssistantProject; hasReadyPersona: boolean }) {
   const imageURL = personaImageURL(project)
   const meta = platformMeta(project?.platform ?? '')
-  return <section aria-label="当前人设" className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-end px-2 pb-8 pt-6 text-left md:pb-10">
-    <div className="flex shrink-0 items-center justify-center gap-4 sm:gap-6">
-    <div className="relative flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-muted/60 shadow-sm sm:size-28">
-      {imageURL ? <SignedImage src={imageURL} alt={`${project?.name ?? '当前人设'}形象`} className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-10 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-12 text-muted-foreground" />}
-    </div>
-    <div className="min-w-0">
-      <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{project ? '当前人设' : '准备开始'}</p>
-      <h1 className="mt-2 text-xl font-semibold tracking-tight sm:text-2xl">{project?.name ?? '神秘人'}</h1>
-      <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{project?.description || (hasReadyPersona ? '选择一个人设，开始你的下一次创作。' : '为了创建更好的作品，需要先创建您的人设')}</p>
-      {project && <span className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><AgentIconStack agentIds={[meta.agentID]} maxVisible={1} compact />{meta.label}</span>}
-    </div>
-    </div>
-  </section>
+  return (
+    <section aria-label="当前人设" className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-end px-2 pb-8 pt-6 text-left md:pb-10">
+      <div className="flex shrink-0 items-center justify-center gap-4 sm:gap-6">
+        <div className="relative flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-muted/60 shadow-sm sm:size-28">{imageURL ? <SignedImage src={imageURL} alt={`${project?.name ?? '当前人设'}形象`} className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-10 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-12 text-muted-foreground" />}</div>
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{project ? '当前人设' : '准备开始'}</p>
+          <h1 className="mt-2 text-xl font-semibold tracking-tight sm:text-2xl">{project?.name ?? '神秘人'}</h1>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{project?.description || (hasReadyPersona ? '选择一个人设，开始你的下一次创作。' : '为了创建更好的作品，需要先创建您的人设')}</p>
+          {project && (
+            <span className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+              <AgentIconStack agentIds={[meta.agentID]} maxVisible={1} compact />
+              {meta.label}
+            </span>
+          )}
+        </div>
+      </div>
+    </section>
+  )
 }
 
-function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWorks, onEditProfile }: {
-  projects: AssistantProject[]
-  selectedProjectId: string
-  onSelect: (projectId: string) => void
-  onCreate: () => void
-  onViewWorks: (projectId: string) => void
-  onEditProfile: (projectId: string) => void
-}) {
+function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWorks, onEditProfile }: { projects: AssistantProject[]; selectedProjectId: string; onSelect: (projectId: string) => void; onCreate: () => void; onViewWorks: (projectId: string) => void; onEditProfile: (projectId: string) => void }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [hasContentAbove, setHasContentAbove] = useState(false)
   const [hasContentBelow, setHasContentBelow] = useState(false)
@@ -1341,39 +2184,56 @@ function PersonaRail({ projects, selectedProjectId, onSelect, onCreate, onViewWo
     }
   }, [projects.length])
 
-  return <section aria-label="首页人设选择" className="mx-auto mt-auto w-full max-w-5xl shrink-0 pb-1">
-    <div data-testid="persona-rail-header" className="mb-3 flex items-center gap-2 px-1">
-      <p className="text-sm font-medium">选择人设</p>
-      <span className="text-xs text-muted-foreground">{projects.length ? `${projects.length} 个可用人设` : '还没有可用人设'}</span>
-    </div>
-    <div className="relative">
-      <div ref={scrollRef} className="assistant-scroll persona-card-scroll grid min-h-[5.25rem] max-h-[14.125rem] grid-cols-2 min-[700px]:grid-cols-3 min-[1600px]:grid-cols-4 min-[1900px]:grid-cols-5 min-[2200px]:grid-cols-6 auto-rows-[5.25rem] gap-2 overflow-y-auto pr-1" data-testid="persona-card-scroll" tabIndex={0}>
-        <button type="button" aria-label="创建新人设" onClick={onCreate} className={`group flex h-full min-w-0 items-center gap-2 rounded-xl border border-dashed px-2.5 py-2 text-left transition-colors hover:border-primary/60 hover:bg-primary/[0.04] ${selectedProjectId === '' ? 'border-primary bg-primary/[0.05]' : 'border-border'}`}>
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Plus className="size-4" /></span>
-          <span className="min-w-0"><span className="block truncate text-sm font-semibold">创建新人设</span><span className="mt-0.5 block truncate text-xs leading-4 text-muted-foreground">聊一聊你的定位与风格</span></span>
-        </button>
-        {projects.map((project) => {
-          const meta = platformMeta(project.platform)
-          const imageURL = personaImageURL(project)
-          const selected = selectedProjectId === project.id
-          return <article key={project.id} className={`group relative flex h-full min-w-0 flex-col rounded-xl border bg-card p-2 transition-shadow ${selected ? 'border-primary shadow-sm ring-1 ring-primary/25' : 'border-border hover:shadow-sm'}`}>
-            <button type="button" aria-label={`选择人设：${project.name}`} aria-pressed={selected} onClick={() => onSelect(project.id)} className="flex w-full shrink-0 items-start gap-2 text-left">
-              <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
-                {imageURL ? <SignedImage src={imageURL} alt="" className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-5 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-5 text-muted-foreground" />}
-              </div>
-              <span className="min-w-0 flex-1"><span className="flex items-center gap-1 text-sm font-semibold"><span className="truncate">{project.name}</span><AgentIconStack agentIds={[meta.agentID]} maxVisible={1} compact /></span><span className="block truncate text-xs leading-4 text-muted-foreground">{project.description || platformIntroduction(project.platform)}</span></span>
-            </button>
-            <div className="mt-auto flex shrink-0 items-center justify-end gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-              <Button type="button" variant="ghost" size="sm" aria-label={`查看作品：${project.name}`} onClick={() => onViewWorks(project.id)} className="h-7 px-1.5 text-[11px]">查看作品</Button>
-              <Button type="button" variant="ghost" size="sm" aria-label={`调整人设：${project.name}`} onClick={() => onEditProfile(project.id)} className="h-7 px-1.5 text-[11px]">调整人设</Button>
-            </div>
-          </article>
-        })}
+  return (
+    <section aria-label="首页人设选择" className="mx-auto mt-auto w-full max-w-5xl shrink-0 pb-1">
+      <div data-testid="persona-rail-header" className="mb-3 flex items-center gap-2 px-1">
+        <p className="text-sm font-medium">选择人设</p>
+        <span className="text-xs text-muted-foreground">{projects.length ? `${projects.length} 个可用人设` : '还没有可用人设'}</span>
       </div>
-      {hasContentAbove && <div data-testid="persona-card-fade-top" aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-background via-background/80 to-transparent" />}
-      {hasContentBelow && <div data-testid="persona-card-fade-bottom" aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-background via-background/80 to-transparent" />}
-    </div>
-  </section>
+      <div className="relative">
+        <div ref={scrollRef} className="assistant-scroll persona-card-scroll grid min-h-[5.25rem] max-h-[14.125rem] grid-cols-2 min-[700px]:grid-cols-3 min-[1600px]:grid-cols-4 min-[1900px]:grid-cols-5 min-[2200px]:grid-cols-6 auto-rows-[5.25rem] gap-2 overflow-y-auto pr-1" data-testid="persona-card-scroll" tabIndex={0}>
+          <button type="button" aria-label="创建新人设" onClick={onCreate} className={`group flex h-full min-w-0 items-center gap-2 rounded-xl border border-dashed px-2.5 py-2 text-left transition-colors hover:border-primary/60 hover:bg-primary/[0.04] ${selectedProjectId === '' ? 'border-primary bg-primary/[0.05]' : 'border-border'}`}>
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Plus className="size-4" />
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-semibold">创建新人设</span>
+              <span className="mt-0.5 block truncate text-xs leading-4 text-muted-foreground">聊一聊你的定位与风格</span>
+            </span>
+          </button>
+          {projects.map((project) => {
+            const meta = platformMeta(project.platform)
+            const imageURL = personaImageURL(project)
+            const selected = selectedProjectId === project.id
+            return (
+              <article key={project.id} className={`group relative flex h-full min-w-0 flex-col rounded-xl border bg-card p-2 transition-shadow ${selected ? 'border-primary shadow-sm ring-1 ring-primary/25' : 'border-border hover:shadow-sm'}`}>
+                <button type="button" aria-label={`选择人设：${project.name}`} aria-pressed={selected} onClick={() => onSelect(project.id)} className="flex w-full shrink-0 items-start gap-2 text-left">
+                  <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">{imageURL ? <SignedImage src={imageURL} alt="" className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-5 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-5 text-muted-foreground" />}</div>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-1 text-sm font-semibold">
+                      <span className="truncate">{project.name}</span>
+                      <AgentIconStack agentIds={[meta.agentID]} maxVisible={1} compact />
+                    </span>
+                    <span className="block truncate text-xs leading-4 text-muted-foreground">{project.description || platformIntroduction(project.platform)}</span>
+                  </span>
+                </button>
+                <div className="mt-auto flex shrink-0 items-center justify-end gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+                  <Button type="button" variant="ghost" size="sm" aria-label={`查看作品：${project.name}`} onClick={() => onViewWorks(project.id)} className="h-7 px-1.5 text-[11px]">
+                    查看作品
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" aria-label={`调整人设：${project.name}`} onClick={() => onEditProfile(project.id)} className="h-7 px-1.5 text-[11px]">
+                    调整人设
+                  </Button>
+                </div>
+              </article>
+            )
+          })}
+        </div>
+        {hasContentAbove && <div data-testid="persona-card-fade-top" aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-background via-background/80 to-transparent" />}
+        {hasContentBelow && <div data-testid="persona-card-fade-bottom" aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-background via-background/80 to-transparent" />}
+      </div>
+    </section>
+  )
 }
 
 function DraftConfirmationCard({ mode, draft, committing, disabled, onCommit, onContinue }: { mode: AssistantModeID; draft: Draft; committing: boolean; disabled: boolean; onCommit: () => void; onContinue: () => void }) {
@@ -1382,24 +2242,37 @@ function DraftConfirmationCard({ mode, draft, committing, disabled, onCommit, on
   const title = isCreation ? '确认创作' : isProfile ? '保存人设' : '确认复盘结论'
   const buttonLabel = isCreation ? '创作作品' : isProfile ? '保存人设' : '保存复盘结论'
   const continueLabel = isCreation ? '继续讨论' : '继续深入访谈'
-  return <section role="region" aria-label={title} className="mt-6 rounded-xl border border-primary/30 bg-primary/[0.04] p-4">
-    <div className="flex items-center gap-2 text-sm font-medium"><Check className="size-4 text-emerald-600" />{title}</div>
-    <p className="mt-2 text-xs leading-5 text-muted-foreground">{isCreation ? '确认后会按这份计划创建作品，也可以继续讨论细节。' : isProfile ? '确认后保存当前人设，也可以继续补充访谈内容。' : '确认后保存当前结构化结果。'}</p>
-    {isCreation || mode === 'review' ? <div className="mt-4 rounded-lg border border-border/70 bg-background/70 p-3"><AssistantDraftSummary draft={draft as unknown as InteractiveDraft} mode={mode} compact /></div> : <ProfileDraftSummary draft={draft} />}
-    <div className="mt-4 flex flex-wrap items-center gap-2">
-      <Button size="sm" disabled={committing || disabled} onClick={onCommit}>{committing ? <Loader2 className="size-4 animate-spin" /> : buttonLabel}</Button>
-      {isCreation || isProfile ? <Button type="button" variant="outline" size="sm" disabled={committing} onClick={onContinue}>{continueLabel}</Button> : null}
-    </div>
-  </section>
+  return (
+    <section role="region" aria-label={title} className="mt-6 rounded-xl border border-primary/30 bg-primary/[0.04] p-4">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <Check className="size-4 text-emerald-600" />
+        {title}
+      </div>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground">{isCreation ? '确认后会按这份计划创建作品，也可以继续讨论细节。' : isProfile ? '确认后保存当前人设，也可以继续补充访谈内容。' : '确认后保存当前结构化结果。'}</p>
+      {isCreation || mode === 'review' ? (
+        <div className="mt-4 rounded-lg border border-border/70 bg-background/70 p-3">
+          <AssistantDraftSummary draft={draft as unknown as InteractiveDraft} mode={mode} compact />
+        </div>
+      ) : (
+        <ProfileDraftSummary draft={draft} />
+      )}
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Button size="sm" disabled={committing || disabled} onClick={onCommit}>
+          {committing ? <Loader2 className="size-4 animate-spin" /> : buttonLabel}
+        </Button>
+        {isCreation || isProfile ? (
+          <Button type="button" variant="outline" size="sm" disabled={committing} onClick={onContinue}>
+            {continueLabel}
+          </Button>
+        ) : null}
+      </div>
+    </section>
+  )
 }
 
 function withCreationConfirmationSettings(draft: Draft, settings: Record<string, unknown>): Draft {
-  const sourcePayload = draft.payload && typeof draft.payload === 'object' && !Array.isArray(draft.payload)
-    ? draft.payload as Record<string, unknown>
-    : draft
-  const sourcePlan = sourcePayload.plan && typeof sourcePayload.plan === 'object' && !Array.isArray(sourcePayload.plan)
-    ? sourcePayload.plan as Record<string, unknown>
-    : sourcePayload
+  const sourcePayload = draft.payload && typeof draft.payload === 'object' && !Array.isArray(draft.payload) ? (draft.payload as Record<string, unknown>) : draft
+  const sourcePlan = sourcePayload.plan && typeof sourcePayload.plan === 'object' && !Array.isArray(sourcePayload.plan) ? (sourcePayload.plan as Record<string, unknown>) : sourcePayload
   const nextPlan = { ...sourcePlan }
   for (const [key, value] of Object.entries(settings)) {
     if (value !== undefined && value !== '') nextPlan[key] = value
@@ -1411,14 +2284,41 @@ function withCreationConfirmationSettings(draft: Draft, settings: Record<string,
 }
 
 function ProfileDraftSummary({ draft }: { draft: Draft }) {
-  const project = draft.project && typeof draft.project === 'object' && !Array.isArray(draft.project) ? draft.project as Record<string, unknown> : undefined
-  const profile = draft.profile && typeof draft.profile === 'object' && !Array.isArray(draft.profile) ? draft.profile as Record<string, unknown> : undefined
+  const project = draft.project && typeof draft.project === 'object' && !Array.isArray(draft.project) ? (draft.project as Record<string, unknown>) : undefined
+  const profile = draft.profile && typeof draft.profile === 'object' && !Array.isArray(draft.profile) ? (draft.profile as Record<string, unknown>) : undefined
   const values = [stringValue(project?.name), stringValue(project?.platform), stringValue(profile?.identity), stringValue(profile?.positioning)].filter(Boolean)
   return values.length ? <p className="mt-4 text-sm leading-6 text-muted-foreground">{values.join(' · ')}</p> : null
 }
 
 function WorkspaceSelectors({ mode, projects, projectId, contentId, works, disabled = false, onProject, onContent, onMore, hasMore }: { mode: AssistantModeID; projects: AssistantProject[]; projectId: string; contentId: string; works: AssistantProject['works']; disabled?: boolean; onProject: (value: string) => void; onContent: (value: string) => void; onMore: () => void; hasMore: boolean }) {
-  return <div className="mx-auto mt-6 flex w-full max-w-xs flex-col items-stretch gap-3"><NativeSelect className="w-full" aria-label="选择人设" value={projectId} disabled={disabled} onChange={(event) => onProject(event.target.value)}><NativeSelectOption value="">{mode === 'profile' ? '新建人设' : '选择人设'}</NativeSelectOption>{projects.map((project) => <NativeSelectOption key={project.id} value={project.id}>{project.name}</NativeSelectOption>)}</NativeSelect>{mode === 'review' && <NativeSelect className="w-full" aria-label="选择作品" value={contentId} disabled={disabled} onChange={(event) => onContent(event.target.value)}><NativeSelectOption value="">选择作品</NativeSelectOption>{works.map((work) => <NativeSelectOption key={work.id} value={work.id}>{work.title}</NativeSelectOption>)}</NativeSelect>}{mode === 'review' && hasMore && <Button type="button" variant="ghost" size="sm" className="self-end" aria-label="加载更多作品" disabled={disabled} onClick={onMore}><ChevronDown className="size-4" />加载更多作品</Button>}</div>
+  return (
+    <div className="mx-auto mt-6 flex w-full max-w-xs flex-col items-stretch gap-3">
+      <NativeSelect className="w-full" aria-label="选择人设" value={projectId} disabled={disabled} onChange={(event) => onProject(event.target.value)}>
+        <NativeSelectOption value="">{mode === 'profile' ? '新建人设' : '选择人设'}</NativeSelectOption>
+        {projects.map((project) => (
+          <NativeSelectOption key={project.id} value={project.id}>
+            {project.name}
+          </NativeSelectOption>
+        ))}
+      </NativeSelect>
+      {mode === 'review' && (
+        <NativeSelect className="w-full" aria-label="选择作品" value={contentId} disabled={disabled} onChange={(event) => onContent(event.target.value)}>
+          <NativeSelectOption value="">选择作品</NativeSelectOption>
+          {works.map((work) => (
+            <NativeSelectOption key={work.id} value={work.id}>
+              {work.title}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      )}
+      {mode === 'review' && hasMore && (
+        <Button type="button" variant="ghost" size="sm" className="self-end" aria-label="加载更多作品" disabled={disabled} onClick={onMore}>
+          <ChevronDown className="size-4" />
+          加载更多作品
+        </Button>
+      )}
+    </div>
+  )
 }
 
 function MediaLibraryPicker({ projectId, attachments, onChange, attachmentController, disabled }: { projectId?: string; attachments: PromptAttachment[]; onChange: (attachments: PromptAttachment[]) => void; attachmentController: ReturnType<typeof usePromptAttachments>; disabled?: boolean }) {
@@ -1428,7 +2328,12 @@ function MediaLibraryPicker({ projectId, attachments, onChange, attachmentContro
   const fileRef = useRef<HTMLInputElement | null>(null)
   const media = useQuery({
     queryKey: ['user-media-picker', projectId, query],
-    queryFn: () => api.userMedia.list({ q: query || undefined, status: 'available', limit: 30 }),
+    queryFn: () =>
+      api.userMedia.list({
+        q: query || undefined,
+        status: 'available',
+        limit: 30,
+      }),
     enabled: open,
     staleTime: 10_000,
   })
@@ -1449,73 +2354,119 @@ function MediaLibraryPicker({ projectId, attachments, onChange, attachmentContro
       onChange(attachments.filter((item) => item.assetId !== asset.id))
       return
     }
-    onChange([...attachments, { id: `media-${asset.id}`, type: asset.media_type, fileName: asset.file_name, contentType: asset.content_type, size: asset.size, status: 'uploaded', progress: 100, assetId: asset.id }])
+    onChange([
+      ...attachments,
+      {
+        id: `media-${asset.id}`,
+        type: asset.media_type,
+        fileName: asset.file_name,
+        contentType: asset.content_type,
+        size: asset.size,
+        status: 'uploaded',
+        progress: 100,
+        assetId: asset.id,
+      },
+    ])
   }
-  return <Popover open={open} onOpenChange={handleOpenChange}>
-    <PopoverTrigger render={<Button type="button" variant="ghost" size="icon-xs" aria-label="从素材库选择" disabled={disabled} />}><Plus /></PopoverTrigger>
-    <PopoverContent align="start" className="w-[min(24rem,calc(100vw-2rem))]">
-      {view === 'menu' ? <>
-        <PopoverTitle>添加创作素材</PopoverTitle>
-        <input ref={fileRef} type="file" accept="image/*,video/*" className="sr-only" aria-label="上传创作素材" onChange={(event) => { const file = event.target.files?.[0]; if (file) handleUpload(file); event.target.value = '' }} />
-        <div className="mt-2 grid gap-1">
-          <button type="button" aria-label="上传素材" className="flex items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-muted" onClick={() => fileRef.current?.click()}><Upload className="size-4" /><span><span className="block text-sm font-medium">上传素材</span><span className="block text-xs text-muted-foreground">上传图片或视频到本次创作</span></span></button>
-          <button type="button" aria-label="从素材库选择" className="flex items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-muted" onClick={() => setView('library')}><Library className="size-4" /><span><span className="block text-sm font-medium">从素材库选择</span><span className="block text-xs text-muted-foreground">选择已解析、可复用的素材</span></span></button>
-        </div>
-      </> : <>
-        <div className="flex items-center gap-2"><Button type="button" variant="ghost" size="icon-xs" aria-label="返回添加创作素材" onClick={() => setView('menu')}><ArrowLeft /></Button><PopoverTitle>从素材库选择</PopoverTitle></div>
-        <Input className="mt-3" aria-label="搜索素材库" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索已解析素材" />
-        <div className="mt-3 max-h-64 space-y-1 overflow-y-auto">
-          {media.isPending && <p className="py-4 text-center text-xs text-muted-foreground">正在加载…</p>}
-          {!media.isPending && (media.data?.items ?? []).length === 0 && <p className="py-4 text-center text-xs text-muted-foreground">没有可用素材，请先上传或重新解析。</p>}
-          {(media.data?.items ?? []).map((asset) => { const selected = attachments.some((item) => item.assetId === asset.id); return <button key={asset.id} type="button" className={`flex w-full items-start gap-2 rounded-md border px-2 py-2 text-left ${selected ? 'border-primary bg-primary/5' : 'border-transparent hover:bg-muted/70'}`} onClick={() => toggle(asset)}><span className="mt-0.5 size-4 shrink-0 rounded border border-input text-center text-[10px] leading-3">{selected ? '✓' : ''}</span><span className="min-w-0"><span className="block truncate text-sm font-medium">{asset.file_name}</span><span className="block line-clamp-2 text-xs text-muted-foreground">{asset.description || '暂无描述'}</span></span></button> })}
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground">已选择 {attachments.filter((item) => item.assetId).length} 个；确认后会随本次创作提交，不会重复上传。</p>
-      </>}
-    </PopoverContent>
-  </Popover>
+  return (
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger render={<Button type="button" variant="ghost" size="icon-xs" aria-label="从素材库选择" disabled={disabled} />}>
+        <Plus />
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[min(24rem,calc(100vw-2rem))]">
+        {view === 'menu' ? (
+          <>
+            <PopoverTitle>添加创作素材</PopoverTitle>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*,video/*"
+              className="sr-only"
+              aria-label="上传创作素材"
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (file) handleUpload(file)
+                event.target.value = ''
+              }}
+            />
+            <div className="mt-2 grid gap-1">
+              <button type="button" aria-label="上传素材" className="flex items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-muted" onClick={() => fileRef.current?.click()}>
+                <Upload className="size-4" />
+                <span>
+                  <span className="block text-sm font-medium">上传素材</span>
+                  <span className="block text-xs text-muted-foreground">上传图片或视频到本次创作</span>
+                </span>
+              </button>
+              <button type="button" aria-label="从素材库选择" className="flex items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-muted" onClick={() => setView('library')}>
+                <Library className="size-4" />
+                <span>
+                  <span className="block text-sm font-medium">从素材库选择</span>
+                  <span className="block text-xs text-muted-foreground">选择已解析、可复用的素材</span>
+                </span>
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="ghost" size="icon-xs" aria-label="返回添加创作素材" onClick={() => setView('menu')}>
+                <ArrowLeft />
+              </Button>
+              <PopoverTitle>从素材库选择</PopoverTitle>
+            </div>
+            <Input className="mt-3" aria-label="搜索素材库" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索已解析素材" />
+            <div className="mt-3 max-h-64 space-y-1 overflow-y-auto">
+              {media.isPending && <p className="py-4 text-center text-xs text-muted-foreground">正在加载…</p>}
+              {!media.isPending && (media.data?.items ?? []).length === 0 && <p className="py-4 text-center text-xs text-muted-foreground">没有可用素材，请先上传或重新解析。</p>}
+              {(media.data?.items ?? []).map((asset) => {
+                const selected = attachments.some((item) => item.assetId === asset.id)
+                return (
+                  <button key={asset.id} type="button" className={`flex w-full items-start gap-2 rounded-md border px-2 py-2 text-left ${selected ? 'border-primary bg-primary/5' : 'border-transparent hover:bg-muted/70'}`} onClick={() => toggle(asset)}>
+                    <span className="mt-0.5 size-4 shrink-0 rounded border border-input text-center text-[10px] leading-3">{selected ? '✓' : ''}</span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium">{asset.file_name}</span>
+                      <span className="block line-clamp-2 text-xs text-muted-foreground">{asset.description || '暂无描述'}</span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">已选择 {attachments.filter((item) => item.assetId).length} 个；确认后会随本次创作提交，不会重复上传。</p>
+          </>
+        )}
+      </PopoverContent>
+    </Popover>
+  )
 }
 
-function Composer({ value, attachments, attachmentController, attachmentsEnabled = true, fadeAbove = true, contextBar, placeholder, inputDisabled, sendDisabled, leadingTools, trailingTools, onChange, onAttachmentsChange, onSend }: {
-  value: string
-  attachments: PromptAttachment[]
-  attachmentController: ReturnType<typeof usePromptAttachments>
-  attachmentsEnabled?: boolean
-  fadeAbove?: boolean
-  contextBar?: ReactNode
-  placeholder: string
-  inputDisabled: boolean
-  sendDisabled: boolean
-  leadingTools?: ReactNode
-  trailingTools?: ReactNode
-  onChange: (value: string) => void
-  onAttachmentsChange: (attachments: PromptAttachment[]) => void
-  onSend: () => void
-}) {
-  return <div data-slot="input-group" className={`relative shrink-0 pt-2 ${fadeAbove ? 'before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-gradient-to-b before:from-transparent before:via-background/75 before:to-background' : ''}`}>
-    <AgentPromptInput
-      value={{ prompt: value, attachments }}
-      onChange={(next) => {
-        onChange(next.prompt)
-        onAttachmentsChange(next.attachments)
-      }}
-      onSubmit={() => onSend()}
-      attachmentController={attachmentController}
-      attachmentPolicy={GENERAL_AGENT_ATTACHMENT_POLICY}
-      attachmentsEnabled={attachmentsEnabled}
-      contextBar={contextBar}
-      placeholder={placeholder}
-      submitLabel="发送消息"
-      ariaLabel="发送消息"
-      submitting={attachmentController.uploading}
-      disabled={inputDisabled}
-      submitDisabled={sendDisabled || !value.trim()}
-      leadingTools={leadingTools}
-      trailingTools={trailingTools}
-    />
-  </div>
+function Composer({ value, attachments, attachmentController, attachmentsEnabled = true, fadeAbove = true, contextBar, placeholder, inputDisabled, sendDisabled, leadingTools, trailingTools, onChange, onAttachmentsChange, onSend }: { value: string; attachments: PromptAttachment[]; attachmentController: ReturnType<typeof usePromptAttachments>; attachmentsEnabled?: boolean; fadeAbove?: boolean; contextBar?: ReactNode; placeholder: string; inputDisabled: boolean; sendDisabled: boolean; leadingTools?: ReactNode; trailingTools?: ReactNode; onChange: (value: string) => void; onAttachmentsChange: (attachments: PromptAttachment[]) => void; onSend: () => void }) {
+  return (
+    <div data-slot="input-group" className={`relative shrink-0 pt-2 ${fadeAbove ? 'before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-gradient-to-b before:from-transparent before:via-background/75 before:to-background' : ''}`}>
+      <AgentPromptInput
+        value={{ prompt: value, attachments }}
+        onChange={(next) => {
+          onChange(next.prompt)
+          onAttachmentsChange(next.attachments)
+        }}
+        onSubmit={() => onSend()}
+        attachmentController={attachmentController}
+        attachmentPolicy={GENERAL_AGENT_ATTACHMENT_POLICY}
+        attachmentsEnabled={attachmentsEnabled}
+        contextBar={contextBar}
+        placeholder={placeholder}
+        submitLabel="发送消息"
+        ariaLabel="发送消息"
+        submitting={attachmentController.uploading}
+        disabled={inputDisabled}
+        submitDisabled={sendDisabled || !value.trim()}
+        leadingTools={leadingTools}
+        trailingTools={trailingTools}
+      />
+    </div>
+  )
 }
 
-function Conversation({ messages, questions, responding, disabled, userAvatarURL, onAnswer }: { messages: Message[]; questions: QuestionBatch[]; responding: boolean; disabled: boolean; userAvatarURL?: string; onAnswer: (batch: QuestionBatch, answer: DshQuestionAnswer) => Promise<void> }) {
+function Conversation({ messages, questions, responding, disabled, userAvatarURL, onAnswer, onDraftChange, onContinueQuestion }: { messages: Message[]; questions: QuestionBatch[]; responding: boolean; disabled: boolean; userAvatarURL?: string; onAnswer: (batch: QuestionBatch, answer: DshQuestionAnswer) => Promise<void>; onDraftChange: (batch: QuestionBatch, answers: DshQuestionAnswer['answers']) => void; onContinueQuestion: (batch: QuestionBatch) => void }) {
   const endRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -1524,10 +2475,41 @@ function Conversation({ messages, questions, responding, disabled, userAvatarURL
 
   if (messages.length === 0 && questions.length === 0) return <div className="flex min-h-[18rem] items-center justify-center text-sm text-muted-foreground">输入你的需求后开始</div>
   const entries = [
-    ...messages.map((message) => ({ kind: 'message' as const, order: message.order, message })),
-    ...questions.filter((batch) => !batch.answers).map((batch) => ({ kind: 'question' as const, order: batch.order, batch })),
+    ...messages.map((message) => ({
+      kind: 'message' as const,
+      order: message.order,
+      message,
+    })),
+    ...questions.filter((batch) => !batch.answers).map((batch) => ({
+      kind: 'question' as const,
+      order: batch.order,
+      batch,
+    })),
   ].sort((left, right) => left.order - right.order)
-  return <div className="min-w-0 space-y-5">{entries.map((entry) => entry.kind === 'message'
-    ? <div key={entry.message.id} className={`flex min-w-0 gap-3 ${entry.message.role === 'user' ? 'justify-end' : ''}`}><div className={`flex min-w-0 max-w-[min(900px,100%)] gap-3 ${entry.message.role === 'user' ? 'flex-row-reverse' : ''}`}><div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{entry.message.role === 'user' ? userAvatarURL ? <SignedImage src={userAvatarURL} alt="当前人设头像" className="size-7 rounded-full object-cover" fallbackIcon={<UserRound className="size-3.5" />} fallbackClassName="bg-primary text-primary-foreground" /> : <UserRound className="size-3.5" /> : <Bot className="size-3.5" />}</div><div className={`min-w-0 max-w-full rounded-2xl px-4 py-3 text-sm leading-6 ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'} [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto`}><Streamdown>{entry.message.text}</Streamdown></div></div></div>
-    : <DshQuestionComposer key={entry.batch.callId} questions={entry.batch.questions} submitted={Boolean(entry.batch.answers)} answers={entry.batch.answers} disabled={disabled} onSubmit={(answer) => onAnswer(entry.batch, answer)} />)}{responding && <div role="status" className="flex items-center gap-2 px-10 text-sm text-muted-foreground"><Bot className="size-4" /><Loader2 className="size-4 animate-spin" />AI 正在处理…</div>}<div ref={endRef} aria-hidden="true" className="h-px" /></div>
+  return (
+    <div className="min-w-0 space-y-5">
+      {entries.map((entry) =>
+        entry.kind === 'message' ? (
+          <div key={entry.message.id} className={`flex min-w-0 gap-3 ${entry.message.role === 'user' ? 'justify-end' : ''}`}>
+            <div className={`flex min-w-0 max-w-[min(900px,100%)] gap-3 ${entry.message.role === 'user' ? 'flex-row-reverse' : ''}`}>
+              <div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{entry.message.role === 'user' ? userAvatarURL ? <SignedImage src={userAvatarURL} alt="当前人设头像" className="size-7 rounded-full object-cover" fallbackIcon={<UserRound className="size-3.5" />} fallbackClassName="bg-primary text-primary-foreground" /> : <UserRound className="size-3.5" /> : <Bot className="size-3.5" />}</div>
+              <div className={`min-w-0 max-w-full rounded-2xl px-4 py-3 text-sm leading-6 ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'} [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto`}>
+                <Streamdown>{entry.message.text}</Streamdown>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <DshQuestionComposer key={entry.batch.callId} questions={entry.batch.questions} submitted={Boolean(entry.batch.answers)} answers={entry.batch.answers} draftAnswers={entry.batch.answerDrafts} recoveryRequired={entry.batch.needsConversationRetry} continuedInComposer={entry.batch.continuedInComposer} onContinueInComposer={() => onContinueQuestion(entry.batch)} disabled={disabled} onDraftChange={(answers) => onDraftChange(entry.batch, answers)} onSubmit={(answer) => onAnswer(entry.batch, answer)} />
+        ),
+      )}
+      {responding && (
+        <div role="status" className="flex items-center gap-2 px-10 text-sm text-muted-foreground">
+          <Bot className="size-4" />
+          <Loader2 className="size-4 animate-spin" />
+          AI 正在处理…
+        </div>
+      )}
+      <div ref={endRef} aria-hidden="true" className="h-px" />
+    </div>
+  )
 }

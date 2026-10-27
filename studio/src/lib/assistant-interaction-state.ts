@@ -50,8 +50,8 @@ export function assistantInteractionReducer(state: AssistantInteractionState, ac
     }
     case 'generation_changed': return { ...state, generation: action.generation, status: 'reconnecting', availableActions: ['reload_snapshot'], errorCode: 'assistant_interaction_generation_changed' }
     case 'error': {
-      const status: AssistantInteractionStatus = action.code === 'assistant_draft_saved_retryable' || action.code === 'assistant_draft_revision_conflict' ? 'draft_retryable' : action.code === 'assistant_interaction_restart_required' || action.code === 'assistant_commit_reconciliation_required' ? 'restart_required' : action.code === 'assistant_interaction_reconnecting' || action.code === 'assistant_interaction_generation_changed' ? 'reconnecting' : action.code === 'assistant_commit_already_applied' ? 'completed' : 'input_retryable'
-      const availableActions = action.code === 'assistant_commit_reconciliation_required' ? ['view_task', 'reconcile_commit'] : action.code === 'assistant_interaction_generation_changed' || action.code === 'assistant_interaction_reconnecting' ? ['reload_snapshot'] : action.code === 'assistant_draft_saved_retryable' || action.code === 'assistant_draft_revision_conflict' ? ['retry_stage', 'restore_draft'] : state.availableActions
+      const status: AssistantInteractionStatus = action.code === 'assistant_draft_saved_retryable' || action.code === 'assistant_draft_revision_conflict' ? 'draft_retryable' : action.code === 'assistant_interaction_restart_required' || action.code === 'assistant_commit_reconciliation_required' ? 'restart_required' : action.code === 'assistant_interaction_reconnecting' || action.code === 'assistant_interaction_generation_changed' ? 'reconnecting' : action.code === 'assistant_commit_already_applied' ? 'completed' : action.code === 'assistant_commit_retryable' ? 'needs_confirmation' : 'input_retryable'
+      const availableActions = action.code === 'assistant_commit_reconciliation_required' ? ['view_task', 'reconcile_commit'] : action.code === 'assistant_commit_retryable' ? ['retry_commit'] : action.code === 'assistant_interaction_generation_changed' || action.code === 'assistant_interaction_reconnecting' ? ['reload_snapshot'] : action.code === 'assistant_draft_saved_retryable' || action.code === 'assistant_draft_revision_conflict' ? ['retry_stage', 'restore_draft'] : state.availableActions
       return { ...state, status, availableActions, errorCode: action.code }
     }
     case 'commit_result': return { ...state, status: action.result.status === 'already_created' || action.result.status === 'created' ? 'completed' : action.result.status === 'needs_reconciliation' ? 'restart_required' : state.status, taskId: action.result.task_id }
@@ -63,7 +63,7 @@ export function assistantInteractionReducer(state: AssistantInteractionState, ac
 export function assistantInteractionRecoveryLabel(state: AssistantInteractionState): string {
   switch (state.status) {
     case 'reconnecting': return '正在恢复连接'
-    case 'needs_confirmation': return '计划已准备好，请确认'
+    case 'needs_confirmation': return state.errorCode === 'assistant_commit_retryable' ? '计划已保留，创建暂时未完成，可以安全重试' : '计划已准备好，请确认'
     case 'input_retryable': return '刚才的消息未送出，内容已保留'
     case 'draft_retryable': return state.errorCode === 'assistant_draft_revision_conflict' ? '计划版本已更新，请恢复最新计划' : '计划已保留，可以重试暂存'
     case 'restart_required': return state.errorCode === 'assistant_commit_reconciliation_required' ? '创建结果需要核对，请查看任务状态' : '连接已结束，计划仍然保留'

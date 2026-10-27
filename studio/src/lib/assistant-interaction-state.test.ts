@@ -18,6 +18,17 @@ describe('assistant interaction state', () => {
     expect(assistantInteractionRecoveryLabel(state)).toContain('重试暂存')
   })
 
+  it('keeps a retryable commit in confirmation state with a retry action', () => {
+    const state = assistantInteractionReducer(
+      { ...initialAssistantInteractionState, status: 'needs_confirmation' },
+      { type: 'error', code: 'assistant_commit_retryable' },
+    )
+
+    expect(state.status).toBe('needs_confirmation')
+    expect(state.availableActions).toContain('retry_commit')
+    expect(assistantInteractionRecoveryLabel(state)).toContain('安全重试')
+  })
+
   it('moves to confirmation when a durable draft event arrives', () => {
     const activeSnapshot = { ...snapshot, lifecycle: 'active' as const, drafts: [] }
     const state = assistantInteractionReducer(initialAssistantInteractionState, { type: 'snapshot', snapshot: activeSnapshot })
