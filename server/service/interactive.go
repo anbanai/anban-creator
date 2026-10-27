@@ -1255,23 +1255,26 @@ func (s *InteractiveService) initializeRuntimeSession(ctx context.Context, sess 
 	}
 	sess.runtimeStarted = true
 	sess.Status = "running"
+	// Message accepts the first user input while the Bridge is starting and
+	// records it in queuedPrompt. Consume it under the same lock that makes
+	// runtimeStarted visible, so a concurrent Message either queues here or
+	// sends directly to the started session, never between those two states.
+	opening := sess.queuedPrompt
+	sess.queuedPrompt = ""
+	commandSeq := sess.activeCommand
 	sess.mu.Unlock()
 	s.persistAssistantSessionStatus(sess, "running")
 	s.persistWorkspaceRuntimeStatus(sess.WorkspaceID, "running")
-	opening := interactiveOpeningPrompt(sess.Intent)
+	// Workspace conversations are user-initiated. Do not inject a generic
+	// opening: it would replace queued context or race the first user message.
 	if opening == "" {
 		return
 	}
 	sess.mu.Lock()
-	if sess.initialPromptSent || sess.Closed {
+	if sess.Closed {
 		sess.mu.Unlock()
 		return
 	}
-	sess.busy = true
-	sess.commandSequence++
-	sess.activeCommand = sess.commandSequence
-	sess.activeCommandAt = time.Now()
-	commandSeq := sess.activeCommand
 	sess.mu.Unlock()
 	if err := rt.Command(ctx, "session/prompt", map[string]any{"sessionId": sess.ID, "contentBlocks": []map[string]string{{"type": "text", "text": opening}}}); err != nil {
 		sess.mu.Lock()
