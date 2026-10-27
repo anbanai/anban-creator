@@ -3068,7 +3068,7 @@
     },
     {
       "id": "viral-ip-video-editor",
-      "version": "1.0.4",
+      "version": "1.0.5",
       "kind": "plugin",
       "display_name": "爆款 IP 视频剪辑",
       "description": "基于 Montage 运行时处理真人 IP 口播素材，完成留存导向的剪辑规划、制作指导和成片质量复核。",
@@ -3079,7 +3079,8 @@
           "content-tagging",
           "montage",
           "portrait-cover-design",
-          "viral-ip-editing"
+          "viral-ip-editing",
+          "wechat-video-account-review"
         ],
         "max_turns": 250
       },
@@ -3127,6 +3128,54 @@
           "role": "plan_review",
           "path": "output/plan_review.md",
           "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "wechat_video_account_review",
+          "path": "output/wechat-video-account-review.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "wechat_video_account_review_json",
+          "path": "output/wechat-video-account-review.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "wechat_video_account_review_plan",
+          "path": "output/wechat-video-account-review-plan.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "wechat_video_account_review_plan_json",
+          "path": "output/wechat-video-account-review-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "wechat_video_account_review_revision",
+          "path": "output/wechat-video-account-review-revision-*.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "wechat_video_account_review_revision_json",
+          "path": "output/wechat-video-account-review-revision-*.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "wechat_video_account_review_final",
+          "path": "output/wechat-video-account-review-final-*.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "wechat_video_account_review_final_json",
+          "path": "output/wechat-video-account-review-final-*.json",
+          "mime_type": "application/json",
           "required": false
         },
         {
@@ -3275,7 +3324,7 @@
         }
       ],
       "ui": {},
-      "digest": "6e8d1922a20d8888b8ae83ae4e0ed3ae4c51eed2650edbfd0ecef8f8b5db3484"
+      "digest": "7d1d2150c99f87e8cb83ec8ffb34c6489abdf45661fb9332ab1864bc7176a86a"
     },
     {
       "id": "wechat-article",
