@@ -412,14 +412,14 @@ func TestBootstrapSignsOwnedReferenceAsset(t *testing.T) {
 	}
 }
 
-func TestAgentBootstrapDoesNotProjectUnconfirmedProfileIntoRuntimeFiles(t *testing.T) {
+func TestAgentBootstrapProjectsSavedDraftProfileIntoRuntimeFiles(t *testing.T) {
 	repo := openBootstrapTestRepository(t)
 	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
 	if err != nil {
 		t.Fatal(err)
 	}
 	profile := model.NewProjectProfile()
-	profile.Dimensions.Identity.Content["private_draft"] = "only visible before user confirmation"
+	profile.Dimensions.Identity.Content["summary"] = "saved draft context"
 	project := &model.Project{ID: "project-draft", UserID: "user-1", Platform: model.PlatformSeednote, Profile: datatypes.NewJSONType(profile)}
 	task := &model.Task{ID: "task-draft", UserID: project.UserID, ProjectID: project.ID, Type: model.PlatformSeednote}
 	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{TokenTTL: time.Hour}, zerolog.Nop())
@@ -429,10 +429,11 @@ func TestAgentBootstrapDoesNotProjectUnconfirmedProfileIntoRuntimeFiles(t *testi
 		t.Fatalf("buildResponse: %v", err)
 	}
 	for _, file := range response.Files {
-		if strings.HasPrefix(file.Path, "profile/") && strings.Contains(file.Text, "only visible before user confirmation") {
-			t.Fatalf("unconfirmed profile leaked into runtime file %q: %s", file.Path, file.Text)
+		if strings.HasPrefix(file.Path, "profile/") && strings.Contains(file.Text, "saved draft context") {
+			return
 		}
 	}
+	t.Fatalf("saved draft missing from runtime profile files: %#v", response.Files)
 }
 
 func TestBootstrapBuildsMontagePromptFromFrozenTaskImageSettings(t *testing.T) {

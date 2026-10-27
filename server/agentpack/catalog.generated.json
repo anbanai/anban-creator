@@ -1334,7 +1334,7 @@
         "interactive-creation-clarification"
       ],
       "ui": {},
-      "digest": "c179fb77a787273779354a3513c3328d255aca0ab12c8d8474fbed4f616b8cc8"
+      "digest": "b25a3fd3c5e11a35cc4a6c4d8e28e85963a466646d9668fd75f76b7481f35c5f"
     },
     {
       "id": "feedback-analysis",
@@ -2381,7 +2381,7 @@
       "ui": {
         "renderer": "custom:profile-analysis"
       },
-      "digest": "044845feeba1f905e9863f67f17b372de218759bf8bf9e06f79d5d26ec22b78a"
+      "digest": "3b9887d5a9f763d6dc567bca4a1fd4031b36bccc213840405909f51c8f500850"
     },
     {
       "id": "project-creator",
@@ -2653,7 +2653,7 @@
       "ui": {
         "renderer": "custom:project-creator"
       },
-      "digest": "518f94383a4efe9216e06a07522153991c8be609860a21cdd6c88a01a5800c81"
+      "digest": "8bc3104094076a744b85e685c489956f3048dcd8281d0e4ce8f2f6c04bb461e3"
     },
     {
       "id": "seednote",

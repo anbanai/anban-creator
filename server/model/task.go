@@ -361,7 +361,7 @@ func SnapshotProject(p *Project) ProjectSnapshot {
 		return ProjectSnapshot{}
 	}
 	profile := p.Profile.Data()
-	if !profile.IsConfirmed() {
+	if profile.SchemaVersion == 0 {
 		profile = NewProjectProfile()
 	}
 	return ProjectSnapshot{

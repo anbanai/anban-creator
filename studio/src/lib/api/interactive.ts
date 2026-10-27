@@ -82,7 +82,6 @@ export interface InteractionEventStreamOptions {
   generation?: number
   lastEventId?: string
   onGenerationChanged?: (generation: number) => void
-  onEventGap?: () => void
   onEvent?: (event: { event: string; id?: string; data: string }) => void
 }
 
@@ -143,10 +142,7 @@ export function streamAssistantInteraction(interactionId: string, token: string,
       }
       if (!response.ok) {
         if (response.status === 404 || response.status === 410) throw new AssistantInteractionStreamError(response.status)
-        if (response.status === 409) {
-          options.onEventGap?.()
-          cursor = undefined
-        }
+        if (response.status === 409) cursor = undefined
         await waitForInteractionRetry(Math.min(10_000, 250 * 2 ** Math.min(reconnects, 6)), signal)
         reconnects += 1
         continue
@@ -178,7 +174,6 @@ export function streamAssistantInteraction(interactionId: string, token: string,
             }
             if (!generationChanged && interactionEventGap(cursor, event.id)) {
               gapDetected = true
-              options.onEventGap?.()
               break
             }
             if (event.id) cursor = event.id
@@ -201,7 +196,6 @@ export function streamAssistantInteraction(interactionId: string, token: string,
               }
               if (!generationChanged && interactionEventGap(cursor, event.id)) {
                 gapDetected = true
-                options.onEventGap?.()
               } else {
                 if (event.id) cursor = event.id
                 options.onEvent?.(event)

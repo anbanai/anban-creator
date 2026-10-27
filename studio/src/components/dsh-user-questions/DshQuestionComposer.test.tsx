@@ -58,7 +58,7 @@ describe('DshQuestionComposer', () => {
         { id: 'tone', selected: ['克制'] },
       ],
     }))
-    await waitFor(() => expect(screen.getByText('已回答')).toBeInTheDocument())
+    expect(screen.getByText('已回答')).toBeInTheDocument()
   })
 
   it('marks a structured recommendation without selecting it for the user', () => {
@@ -75,24 +75,6 @@ describe('DshQuestionComposer', () => {
     expect(screen.getByText('推荐')).toBeInTheDocument()
     expect(screen.getByText('适合沉淀深度内容')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '提交回答' })).toBeDisabled()
-  })
-
-  it('restores an unfinished answer draft and reports edits to its owner', () => {
-    const onDraftChange = vi.fn()
-    render(
-      <DshQuestionComposer
-        questions={[questions[0]]}
-        onSubmit={vi.fn()}
-        draftAnswers={[{ id: 'platform', selected: ['小红书'], custom: '品牌账号' }]}
-        onDraftChange={onDraftChange}
-      />,
-    )
-
-    expect(screen.getByRole('radio', { name: '小红书' })).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByRole('textbox', { name: '平台补充说明' })).toHaveValue('品牌账号')
-
-    fireEvent.click(screen.getByRole('radio', { name: '微信公众号' }))
-    expect(onDraftChange).toHaveBeenLastCalledWith([{ id: 'platform', selected: ['微信公众号 (推荐)'] }])
   })
 
   it('makes a custom single-select answer mutually exclusive', async () => {

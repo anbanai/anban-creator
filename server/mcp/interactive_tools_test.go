@@ -52,114 +52,6 @@ func TestStageAssistantDraftUsesInteractionCapabilityAndReturnsDurableReceipt(t 
 	}
 }
 
-func TestInteractionDraftStageSanitizesRepositoryErrors(t *testing.T) {
-	testCases := []struct {
-		name    string
-		modeID  string
-		handler func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error)
-	}{
-		{name: "assistant", modeID: service.AssistantModeCreation, handler: stageAssistantDraftHandler},
-		{name: "project creator", modeID: service.AssistantModeProfile, handler: stageProjectCreatorDraftHandler},
-	}
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := db.AutoMigrate(&model.AssistantInteraction{}, &model.AssistantInteractionRuntime{}, &model.AssistantInteractionDraft{}, &model.AssistantInteractionEvent{}, &model.AssistantInteractionAttempt{}); err != nil {
-				t.Fatal(err)
-			}
-			interactionSvc := service.NewAssistantInteractionService(repository.New(db), nil, nil)
-			snapshot, err := interactionSvc.CreateOrResume(context.Background(), "user-1", service.AssistantInteractionInput{ModeID: testCase.modeID}, "create-sanitize-"+testCase.name)
-			if err != nil {
-				t.Fatal(err)
-			}
-			old := svcs
-			svcs = &Services{InteractionSvc: interactionSvc}
-			t.Cleanup(func() { svcs = old })
-			sqlDB, err := db.DB()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := sqlDB.Close(); err != nil {
-				t.Fatal(err)
-			}
-
-			payload := json.RawMessage(`{"plan":{"goal":"write"}}`)
-			digest := sha256.Sum256(payload)
-			args := map[string]any{
-				"interaction_id": snapshot.ID, "generation": snapshot.Generation,
-				"attempt_id": "sanitize-" + testCase.name, "mode_id": testCase.modeID,
-				"payload": payload, "payload_digest": hex.EncodeToString(digest[:]), "ready": true,
-			}
-			result, err := testCase.handler(withMCPInteractionCapability(context.Background(), "user-1", snapshot.ID, snapshot.Generation), interactiveMCPRequest(t, args))
-			if err != nil {
-				t.Fatal(err)
-			}
-			text := toolResultText(result)
-			if result == nil || !result.IsError || !strings.Contains(text, service.InteractionErrorMessageNotAccepted) {
-				t.Fatalf("stage error result = %#v, want sanitized interaction error", result)
-			}
-			if strings.Contains(strings.ToLower(text), "database") || strings.Contains(strings.ToLower(text), "closed") || strings.Contains(strings.ToLower(text), "sql:") {
-				t.Fatalf("stage error leaked repository details: %q", text)
-			}
-		})
-	}
-}
-
-func TestDraftStagingRejectsLegacySessionOnlyService(t *testing.T) {
-	t.Run("assistant draft", func(t *testing.T) {
-		repo, project := newAssistantMCPProject(t, "user-1", "创作画像")
-		svc := service.NewInteractiveServiceWithRuntimeAndAgents(repo, &interactiveMCPFactory{tokens: make(chan string, 1)}, []service.InteractiveAgent{
-			{ID: "creation-planner", Available: true, Intents: []string{"plan-creation"}},
-		})
-		svc.SetEnabled(true)
-		session, err := svc.CreateSession(context.Background(), "user-1", "creation-planner", "plan-creation", project.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		old := svcs
-		svcs = &Services{InteractiveSvc: svc}
-		t.Cleanup(func() { svcs = old })
-		result, err := stageAssistantDraftHandler(withMCPInteractiveIdentity(context.Background(), "user-1", session.ID), interactiveMCPRequest(t, map[string]any{
-			"name": "新品计划", "payload": map[string]any{"plan": map[string]any{"goal": "发布新品"}}, "ready": true,
-		}))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if result == nil || !result.IsError || strings.Contains(toolResultText(result), "session_id") {
-			t.Fatalf("legacy assistant stage = %#v, want fail-closed interaction-service error", result)
-		}
-	})
-
-	t.Run("project creator draft", func(t *testing.T) {
-		repo, project := newAssistantMCPProject(t, "user-1", "创作画像")
-		svc := service.NewInteractiveServiceWithRuntimeAndAgents(repo, &interactiveMCPFactory{tokens: make(chan string, 1)}, []service.InteractiveAgent{
-			{ID: "project-creator", Available: true, Intents: []string{"create-project"}},
-		})
-		svc.SetEnabled(true)
-		session, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project", project.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		old := svcs
-		svcs = &Services{InteractiveSvc: svc}
-		t.Cleanup(func() { svcs = old })
-		input := interactiveMCPStageInput()
-		result, err := stageProjectCreatorDraftHandler(withMCPInteractiveIdentity(context.Background(), "user-1", session.ID), interactiveMCPRequest(t, map[string]any{
-			"project": input.Project, "profile": input.Profile, "progress": input.Progress, "ready": true,
-			"missing_fields": []string{}, "inferred_fields": []string{},
-		}))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if result == nil || !result.IsError || strings.Contains(toolResultText(result), "session_id") {
-			t.Fatalf("legacy project-creator stage = %#v, want fail-closed interaction-service error", result)
-		}
-	})
-}
-
 func TestStageAssistantDraftFillsInteractionCapabilityMetadata(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -199,21 +91,6 @@ func TestStageAssistantDraftFillsInteractionCapabilityMetadata(t *testing.T) {
 	}
 	if firstResult.DraftID == "" || replayResult.DraftID != firstResult.DraftID || replayResult.Revision != firstResult.Revision {
 		t.Fatalf("implicit metadata replay = %#v then %#v, want same durable receipt", firstResult, replayResult)
-	}
-	if err := db.Model(&model.AssistantInteraction{}).Where("id = ?", snapshot.ID).Update("generation", snapshot.Generation+1).Error; err != nil {
-		t.Fatal(err)
-	}
-	nextGenerationCtx := withMCPInteractionCapabilityMode(context.Background(), "user-1", snapshot.ID, snapshot.Generation+1, service.AssistantModeCreation)
-	nextGeneration, err := stageAssistantDraftHandler(nextGenerationCtx, request)
-	if err != nil || nextGeneration == nil || nextGeneration.IsError {
-		t.Fatalf("implicit metadata stage after runtime replacement = %#v, %v", nextGeneration, err)
-	}
-	var nextGenerationResult service.InteractionStageResult
-	if err := json.Unmarshal([]byte(toolResultText(nextGeneration)), &nextGenerationResult); err != nil {
-		t.Fatal(err)
-	}
-	if nextGenerationResult.DraftID == firstResult.DraftID || nextGenerationResult.Revision <= firstResult.Revision {
-		t.Fatalf("new generation stage = %#v after %#v, want a newer durable receipt", nextGenerationResult, firstResult)
 	}
 }
 
@@ -412,89 +289,78 @@ func TestStageAssistantDraftToolSchema(t *testing.T) {
 	t.Fatal("stage_assistant_draft tool not registered")
 }
 
-func TestStageAssistantDraftUsesProtectedInteractionMode(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+func TestStageAssistantDraftUsesProtectedSessionMode(t *testing.T) {
+	repo, project := newAssistantMCPProject(t, "user-1", "创作画像")
+	factory := &interactiveMCPFactory{tokens: make(chan string, 2)}
+	svc := service.NewInteractiveServiceWithRuntimeAndAgents(repo, factory, []service.InteractiveAgent{
+		{ID: "creation-planner", Available: true, Intents: []string{"plan-creation"}},
+		{ID: "project-creator", Available: true, Intents: []string{"create-project"}},
+	})
+	svc.SetEnabled(true)
+	session, err := svc.CreateSession(context.Background(), "user-1", "creation-planner", "plan-creation", project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.AssistantInteraction{}, &model.AssistantInteractionRuntime{}, &model.AssistantInteractionDraft{}, &model.AssistantInteractionEvent{}, &model.AssistantInteractionAttempt{}); err != nil {
-		t.Fatal(err)
-	}
-	repo := repository.New(db)
-	svc := service.NewAssistantInteractionService(repo, nil, nil)
-	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", service.AssistantInteractionInput{ModeID: service.AssistantModeCreation}, "protected-mode")
-	if err != nil {
-		t.Fatal(err)
-	}
+	sessionID := session.ID
 	old := svcs
-	svcs = &Services{InteractionSvc: svc}
+	svcs = &Services{InteractiveSvc: svc}
 	t.Cleanup(func() { svcs = old })
 	payload := map[string]any{"plan": map[string]any{
 		"goal": "发布新品", "content_type": "公众号文章", "topic": "新品的真实使用场景", "target_audience": "潜在客户", "angle": "真实使用问题", "expression_form": "案例型", "profile_context": []string{}, "temporary_overrides": []string{},
 		"outline": []string{"问题", "方案"}, "style_constraints": "具体", "asset_plan": "产品图",
 		"acceptance_criteria": "事实准确", "cost_estimate": "低", "execution_options": []string{"生成完整初稿"},
 	}}
-	ctx := withMCPInteractionCapabilityMode(context.Background(), "user-1", snapshot.ID, snapshot.Generation, service.AssistantModeCreation)
-	spoofed, err := stageAssistantDraftHandler(ctx, interactiveMCPRequest(t, map[string]any{
-		"mode_id": service.AssistantModeProfile, "payload": payload, "ready": true,
+	result, err := stageAssistantDraftHandler(withMCPInteractiveIdentity(context.Background(), "user-1", sessionID), interactiveMCPRequest(t, map[string]any{
+		"name": "新品计划", "payload": payload, "ready": true,
 	}))
-	if err != nil || spoofed == nil || !spoofed.IsError || !strings.Contains(toolResultText(spoofed), service.InteractionErrorGenerationChanged) {
-		t.Fatalf("spoofed mode staging = %#v, %v, want capability mode rejection", spoofed, err)
+	if err != nil || result == nil || result.IsError {
+		t.Fatalf("stage assistant draft = %#v, %v", result, err)
 	}
-	if drafts, err := repo.AssistantInteractions().ListDrafts(context.Background(), "user-1", snapshot.ID); err != nil || len(drafts) != 0 {
-		t.Fatalf("spoofed mode drafts = %#v, %v", drafts, err)
+	if session.Draft.Name != "新品计划" || !session.Draft.Ready {
+		t.Fatalf("staged assistant draft = %#v", session.Draft)
 	}
-	result, err := stageAssistantDraftHandler(ctx, interactiveMCPRequest(t, map[string]any{"payload": payload, "ready": true}))
-	if err != nil || result == nil || result.IsError || !strings.Contains(toolResultText(result), `"durable":true`) {
-		t.Fatalf("interaction-scoped stage = %#v, %v, want durable receipt", result, err)
+	if err := svc.Close("user-1", session.ID); err != nil {
+		t.Fatalf("close creation session before mode check: %v", err)
 	}
-	drafts, err := repo.AssistantInteractions().ListDrafts(context.Background(), "user-1", snapshot.ID)
-	if err != nil || len(drafts) != 1 || drafts[0].ModeID != service.AssistantModeCreation || !drafts[0].Ready {
-		t.Fatalf("interaction-scoped drafts = %#v, %v", drafts, err)
+
+	profileSession, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project", project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spoofed, err := stageAssistantDraftHandler(withMCPInteractiveIdentity(context.Background(), "user-1", profileSession.ID), interactiveMCPRequest(t, map[string]any{
+		"mode_id": "creation", "agent_id": "creation-planner", "payload": payload, "ready": true,
+	}))
+	if err != nil || spoofed == nil || !spoofed.IsError || !strings.Contains(toolResultText(spoofed), `unknown assistant draft field "mode_id"`) {
+		t.Fatalf("spoofed mode staging = %#v, %v, want server-owned profile mode rejection", spoofed, err)
+	}
+	if profileSession.Draft.Ready {
+		t.Fatalf("spoofed request altered profile mode draft: %#v", profileSession.Draft)
 	}
 }
 
-func TestStageProjectCreatorDraftPersistsInteractionDraft(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.AutoMigrate(&model.AssistantInteraction{}, &model.AssistantInteractionRuntime{}, &model.AssistantInteractionDraft{}, &model.AssistantInteractionEvent{}, &model.AssistantInteractionAttempt{}); err != nil {
-		t.Fatal(err)
-	}
-	repo := repository.New(db)
-	svc := service.NewAssistantInteractionService(repo, nil, nil)
-	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", service.AssistantInteractionInput{ModeID: service.AssistantModeProfile}, "profile-stage")
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestStageProjectCreatorDraftReturnsValidationCause(t *testing.T) {
+	svc := service.NewInteractiveServiceWithRuntime(nil, &interactiveMCPFactory{tokens: make(chan string, 1)})
+	svc.SetEnabled(true)
 	old := svcs
-	svcs = &Services{InteractionSvc: svc}
+	svcs = &Services{InteractiveSvc: svc}
 	t.Cleanup(func() { svcs = old })
 
+	sess, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project")
+	if err != nil {
+		t.Fatal(err)
+	}
 	in := interactiveMCPStageInput()
 	in.Profile.Dimensions.Identity.Content = nil
-	ctx := withMCPInteractionCapabilityMode(context.Background(), "user-1", snapshot.ID, snapshot.Generation, service.AssistantModeProfile)
-	result, err := stageProjectCreatorDraftHandler(ctx, interactiveMCPRequest(t, map[string]any{
-		"project": in.Project, "profile": in.Profile, "progress": in.Progress, "ready": false,
-		"missing_fields": []string{"identity.content"}, "inferred_fields": []string{},
+	result, err := stageProjectCreatorDraftHandler(withMCPInteractiveIdentity(context.Background(), "user-1", sess.ID), interactiveMCPRequest(t, map[string]any{
+		"project": in.Project, "profile": in.Profile, "progress": in.Progress, "ready": true,
+		"missing_fields": []string{}, "inferred_fields": []string{},
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result == nil || result.IsError || !strings.Contains(toolResultText(result), `"durable":true`) {
-		t.Fatalf("project creator interaction stage = %#v, want durable receipt", result)
-	}
-	drafts, err := repo.AssistantInteractions().ListDrafts(context.Background(), "user-1", snapshot.ID)
-	if err != nil || len(drafts) != 1 || drafts[0].ModeID != service.AssistantModeProfile || drafts[0].Ready {
-		t.Fatalf("profile interaction drafts = %#v, %v", drafts, err)
-	}
-	var persisted map[string]any
-	if err := json.Unmarshal(drafts[0].Payload, &persisted); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := persisted["missing_fields"]; !ok {
-		t.Fatalf("durable profile draft omitted tool metadata: %#v", persisted)
+	message := toolResultText(result)
+	if !result.IsError || !strings.Contains(message, "interactive project draft is invalid") || !strings.Contains(message, "profile dimension identity") || !strings.Contains(message, "content") {
+		t.Fatalf("draft error = %#v, want root cause details", result)
 	}
 }
 
@@ -522,6 +388,147 @@ func TestStageProjectCreatorDraftKeepsProfileMetadataAtToolLevel(t *testing.T) {
 	}
 	if _, ok := identityProperties["missing_fields"]; !ok {
 		t.Fatal("profile dimensions must accept dimension-level missing_fields")
+	}
+}
+
+func TestStageProjectCreatorDraftRejectsProfileLevelInferenceFields(t *testing.T) {
+	svc := service.NewInteractiveServiceWithRuntime(nil, &interactiveMCPFactory{tokens: make(chan string, 1)})
+	svc.SetEnabled(true)
+	old := svcs
+	svcs = &Services{InteractiveSvc: svc}
+	t.Cleanup(func() { svcs = old })
+	sess, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := interactiveMCPStageInput()
+	rawProfile, err := json.Marshal(in.Profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var profile map[string]any
+	if err := json.Unmarshal(rawProfile, &profile); err != nil {
+		t.Fatal(err)
+	}
+	profile["missing_fields"] = []string{"style.tone"}
+	profile["inferred_fields"] = []string{"audience.primary"}
+	result, err := stageProjectCreatorDraftHandler(withMCPInteractiveIdentity(context.Background(), "user-1", sess.ID), interactiveMCPRequest(t, map[string]any{
+		"project": in.Project, "profile": profile, "progress": in.Progress, "ready": false,
+		"missing_fields": []string{}, "inferred_fields": []string{},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := toolResultText(result)
+	if !result.IsError || !strings.Contains(message, "unknown field") || (!strings.Contains(message, `"missing_fields"`) && !strings.Contains(message, `"inferred_fields"`)) {
+		t.Fatalf("profile-level metadata result = %#v, want explicit unknown field", result)
+	}
+}
+
+func TestStageProjectCreatorDraftRejectsLegacyRootDimensionShape(t *testing.T) {
+	svc := service.NewInteractiveServiceWithRuntime(nil, &interactiveMCPFactory{tokens: make(chan string, 1)})
+	svc.SetEnabled(true)
+	old := svcs
+	svcs = &Services{InteractiveSvc: svc}
+	t.Cleanup(func() { svcs = old })
+	sess, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := interactiveMCPStageInput()
+	rawProfile, err := json.Marshal(in.Profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacy map[string]any
+	if err := json.Unmarshal(rawProfile, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	legacy["identity"] = map[string]any{"content": map[string]any{"summary": "x"}}
+	result, err := stageProjectCreatorDraftHandler(withMCPInteractiveIdentity(context.Background(), "user-1", sess.ID), interactiveMCPRequest(t, map[string]any{
+		"project": in.Project, "profile": legacy, "progress": in.Progress, "ready": false,
+		"missing_fields": []string{}, "inferred_fields": []string{},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError || !strings.Contains(toolResultText(result), "unknown field") {
+		t.Fatalf("legacy profile result = %#v, want unknown field error", result)
+	}
+}
+
+func TestStageProjectCreatorDraftUsesProtectedInteractiveIdentity(t *testing.T) {
+	factory := &interactiveMCPFactory{tokens: make(chan string, 1)}
+	svc := service.NewInteractiveServiceWithRuntime(nil, factory)
+	svc.SetEnabled(true)
+	old := svcs
+	svcs = &Services{InteractiveSvc: svc}
+	t.Cleanup(func() { svcs = old })
+
+	sess, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var runtimeToken string
+	select {
+	case runtimeToken = <-factory.tokens:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for runtime token")
+	}
+	in := interactiveMCPStageInput()
+	args := map[string]any{
+		"project":         in.Project,
+		"profile":         in.Profile,
+		"progress":        in.Progress,
+		"ready":           in.Ready,
+		"missing_fields":  []string{"线下门店地址"},
+		"inferred_fields": []string{"主要受众为一二线城市白领"},
+	}
+	ctx := withMCPInteractiveIdentity(context.Background(), "user-1", sess.ID)
+	result, err := stageProjectCreatorDraftHandler(ctx, interactiveMCPRequest(t, args))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("result = %#v, want success", result)
+	}
+	if sess.Draft.Project.Name != in.Project.Name || !sess.Draft.Ready {
+		t.Fatalf("staged draft = %#v, want ready project draft", sess.Draft)
+	}
+	history, _, closeEvents, err := svc.Events("user-1", sess.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeEvents()
+	var staged map[string]any
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Type != "draft.updated" && history[i].Type != "draft.ready" {
+			continue
+		}
+		if err := json.Unmarshal(interactiveTestJSON(t, history[i].Data), &staged); err != nil {
+			t.Fatal(err)
+		}
+		break
+	}
+	if staged == nil {
+		t.Fatal("staged draft event was not found in event history")
+	}
+	if got := staged["missing_fields"]; got == nil {
+		t.Fatalf("staged event = %#v, missing missing_fields", staged)
+	}
+	if got := staged["inferred_fields"]; got == nil {
+		t.Fatalf("staged event = %#v, missing inferred_fields", staged)
+	}
+
+	if runtimeToken == "" {
+		t.Fatal("runtime token was empty")
+	}
+	resolvedID, resolvedUser, expiresAt, err := svc.ResolveRuntimeSession(runtimeToken)
+	if err != nil || resolvedID != sess.ID || resolvedUser != "user-1" || !expiresAt.After(time.Now()) {
+		t.Fatalf("resolved runtime identity = %q/%q/%v, want session/user/future expiry", resolvedID, resolvedUser, expiresAt)
+	}
+	if _, _, _, err := svc.ResolveRuntimeSession("wrong-token"); err == nil {
+		t.Fatal("wrong runtime token was accepted")
 	}
 }
 
@@ -607,26 +614,62 @@ func TestInteractiveProfileCredentialCannotSearchUserMediaAssets(t *testing.T) {
 	}
 }
 
-func TestAssistantInteractionRuntimeCapabilityCanStageDraftOverMCP(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.AutoMigrate(&model.AssistantInteraction{}, &model.AssistantInteractionRuntime{}, &model.AssistantInteractionDraft{}, &model.AssistantInteractionEvent{}, &model.AssistantInteractionAttempt{}); err != nil {
-		t.Fatal(err)
-	}
-	repo := repository.New(db)
+func TestInteractiveRuntimeCredentialCanStageOwnDraftOverMCP(t *testing.T) {
 	factory := &interactiveMCPFactory{tokens: make(chan string, 1)}
-	svc := service.NewAssistantInteractionService(repo, factory, nil)
-	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", service.AssistantInteractionInput{ModeID: service.AssistantModeCreation}, "mcp-stage")
+	svc := service.NewInteractiveServiceWithRuntime(nil, factory)
+	svc.SetEnabled(true)
+	old := svcs
+	svcs = &Services{InteractiveSvc: svc}
+	t.Cleanup(func() { svcs = old })
+
+	sess, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.EnsureRuntime(context.Background(), "user-1", snapshot.ID, snapshot.Generation); err != nil {
+	var runtimeToken string
+	select {
+	case runtimeToken = <-factory.tokens:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for runtime token")
+	}
+
+	handler := NewMCPHandler(nil, "", nil, WithInteractiveAuthentication(svc))
+	sessionID := initializeMCPExecutionSession(t, handler, runtimeToken)
+	input := interactiveMCPStageInput()
+	args, err := json.Marshal(map[string]any{
+		"project":         input.Project,
+		"profile":         input.Profile,
+		"progress":        input.Progress,
+		"ready":           input.Ready,
+		"missing_fields":  []string{"门店地址"},
+		"inferred_fields": []string{"受众偏好短内容"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := callMCPToolForScopeTest(handler, runtimeToken, sessionID, "stage_project_creator_draft", string(args))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("interactive staging status = %d, body = %s; want 200", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `\"staged\":true`) {
+		t.Fatalf("interactive staging response = %s, want staged result", rec.Body.String())
+	}
+	if sess.Draft.Project.Name != input.Project.Name || !sess.Draft.Ready {
+		t.Fatalf("staged draft = %#v, want ready project draft", sess.Draft)
+	}
+}
+
+func TestInteractiveRuntimeCredentialCanStageAssistantDraftOverMCP(t *testing.T) {
+	repo, project := newAssistantMCPProject(t, "user-1", "创作画像")
+	factory := &interactiveMCPFactory{tokens: make(chan string, 1)}
+	svc := service.NewInteractiveServiceWithRuntimeAndAgents(repo, factory, []service.InteractiveAgent{{ID: "creation-planner", Available: true, Intents: []string{"plan-creation"}}})
+	svc.SetEnabled(true)
+	session, err := svc.CreateSession(context.Background(), "user-1", "creation-planner", "plan-creation", project.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	old := svcs
-	svcs = &Services{InteractionSvc: svc}
+	svcs = &Services{InteractiveSvc: svc}
 	t.Cleanup(func() { svcs = old })
 	var runtimeToken string
 	select {
@@ -634,19 +677,28 @@ func TestAssistantInteractionRuntimeCapabilityCanStageDraftOverMCP(t *testing.T)
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for runtime token")
 	}
-	handler := NewMCPHandler(nil, "", nil, WithInteractionAuthentication(svc))
+	handler := NewMCPHandler(nil, "", nil, WithInteractiveAuthentication(svc))
 	sessionID := initializeMCPExecutionSession(t, handler, runtimeToken)
+	mediaSearch := callMCPToolForScopeTest(handler, runtimeToken, sessionID, "search_user_media_assets", `{}`)
+	if mediaSearch.Code != http.StatusOK {
+		t.Fatalf("interactive creation media search status = %d, body = %s; want 200", mediaSearch.Code, mediaSearch.Body.String())
+	}
+	for _, tool := range []string{"list_projects", "get_project", "list_drafts"} {
+		rec := callMCPToolForScopeTest(handler, runtimeToken, sessionID, tool, `{"project_id":"foreign-project"}`)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("%s status=%d; frozen-context token must not read user-wide data", tool, rec.Code)
+		}
+	}
 	args, err := json.Marshal(map[string]any{"payload": map[string]any{"plan": map[string]any{"goal": "目标"}}, "ready": false})
 	if err != nil {
 		t.Fatal(err)
 	}
 	rec := callMCPToolForScopeTest(handler, runtimeToken, sessionID, "stage_assistant_draft", string(args))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `\"durable\":true`) {
-		t.Fatalf("interaction assistant draft status/body = %d/%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `\"staged\":true`) {
+		t.Fatalf("interactive assistant draft status/body = %d/%s", rec.Code, rec.Body.String())
 	}
-	drafts, err := repo.AssistantInteractions().ListDrafts(context.Background(), "user-1", snapshot.ID)
-	if err != nil || len(drafts) != 1 || drafts[0].Ready || !strings.Contains(string(drafts[0].Payload), `"goal":"目标"`) {
-		t.Fatalf("durable interaction drafts = %#v, %v", drafts, err)
+	if session.Draft.Name != "创作需求" || session.Draft.Fields["goal"] != "目标" {
+		t.Fatalf("staged assistant draft = %#v", session.Draft)
 	}
 }
 

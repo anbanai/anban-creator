@@ -82,33 +82,3 @@ func TestSearchUserMediaAssetsUsesAuthenticatedIdentityAndReadyOnlyRows(t *testi
 		t.Fatalf("project spoof result = %#v, %v", spoofed, err)
 	}
 }
-
-func TestSearchUserMediaAssetsResolvesExactRestoredAssetID(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.AutoMigrate(&model.Asset{}, &model.UserMediaAsset{}); err != nil {
-		t.Fatal(err)
-	}
-	repo := repository.New(db)
-	selectedID := uuid.NewString()
-	assetID := uuid.NewString()
-	if err := repo.Assets().Create(t.Context(), &model.Asset{ID: assetID, UserID: "user-1", Purpose: service.DirectUploadPurposeMediaLibrary, StorageKey: "product.png", FileName: "product.png", ContentType: "image/png", Size: 1, ETag: "product"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.UserMediaAssets().Create(t.Context(), &model.UserMediaAsset{ID: selectedID, UserID: "user-1", AssetID: assetID, MediaType: "image", Status: model.UserMediaAssetStatusAvailable, Description: "品牌视觉素材"}); err != nil {
-		t.Fatal(err)
-	}
-	old := svcs
-	svcs = &Services{UserMediaSvc: service.NewUserMediaLibraryService(repo, userMediaMCPStorage{}, nil)}
-	t.Cleanup(func() { svcs = old })
-	ctx := withMCPInteractiveIdentity(context.Background(), "user-1", "interaction-1", "project-1")
-	result, err := searchUserMediaAssetsHandler(ctx, &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{"query":"` + selectedID + `"}`)}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result == nil || result.IsError || !strings.Contains(toolResultText(result), `"asset_id":"`+selectedID+`"`) {
-		t.Fatalf("exact restored asset search result = %#v, %q", result, toolResultText(result))
-	}
-}

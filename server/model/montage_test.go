@@ -67,14 +67,32 @@ func TestProjectSnapshotDerivesPlatformFromCanonicalChannel(t *testing.T) {
 	}
 }
 
-func TestProjectSnapshotExcludesUnconfirmedProfileButKeepsConfirmedProfile(t *testing.T) {
+func TestProjectSnapshotPreservesSavedDraftProfileAndFreezesTaskContext(t *testing.T) {
 	draft := NewProjectProfile()
-	draft.Dimensions.Identity.Content["private_draft"] = "waiting for confirmation"
+	draft.Version = 7
+	draft.Dimensions.Identity.Content["summary"] = "saved context"
+	draft.Dimensions.Identity.Sources = []string{"[推断待确认]"}
+	draft.Dimensions.Identity.Evidence = []string{"saved evidence"}
 	project := &Project{ID: "project-1", Name: "Profile snapshot", Profile: datatypes.NewJSONType(draft)}
 
 	snapshot := SnapshotProject(project)
-	if snapshot.Profile.IsConfirmed() || snapshot.Profile.Dimensions.Identity.Content["private_draft"] != nil {
-		t.Fatalf("unconfirmed profile entered task snapshot: %+v", snapshot.Profile)
+	if snapshot.Profile.Status != ProfileStatusDraft || snapshot.Profile.Version != 7 || snapshot.Profile.Dimensions.Identity.Content["summary"] != "saved context" || snapshot.Profile.Dimensions.Identity.Sources[0] != "[推断待确认]" || snapshot.Profile.Dimensions.Identity.Evidence[0] != "saved evidence" {
+		t.Fatalf("saved draft missing from task snapshot: %+v", snapshot.Profile)
+	}
+	task := &Task{}
+	task.SetProjectSnapshot(snapshot)
+	stored, err := json.Marshal(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frozenTask := &Task{}
+	if err := json.Unmarshal(stored, frozenTask); err != nil {
+		t.Fatal(err)
+	}
+	draft.Dimensions.Identity.Content["summary"] = "later edit"
+	project.Profile = datatypes.NewJSONType(draft)
+	if got := frozenTask.ProjectSnapshot.Data().Profile.Dimensions.Identity.Content["summary"]; got != "saved context" {
+		t.Fatalf("frozen task profile changed: %v", got)
 	}
 
 	confirmed := draft
@@ -85,5 +103,12 @@ func TestProjectSnapshotExcludesUnconfirmedProfileButKeepsConfirmedProfile(t *te
 	snapshot = SnapshotProject(project)
 	if !snapshot.Profile.IsConfirmed() || snapshot.Profile.Dimensions.Identity.Content["confirmed"] != "usable context" {
 		t.Fatalf("confirmed profile was not frozen into task snapshot: %+v", snapshot.Profile)
+	}
+}
+
+func TestProjectSnapshotNormalizesAbsentProfile(t *testing.T) {
+	profile := SnapshotProject(&Project{Name: "No saved profile"}).Profile
+	if profile.SchemaVersion != 1 || profile.Status != ProfileStatusDraft || profile.InitializationStatus != ProfileInitializationNotStarted || profile.Dimensions.Identity.Content == nil {
+		t.Fatalf("absent profile = %#v", profile)
 	}
 }

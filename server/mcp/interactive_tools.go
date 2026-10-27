@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -17,7 +16,7 @@ import (
 func registerInteractiveTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "stage_assistant_draft",
-		Description: "Stage a structured creation plan or postmortem review draft for the authenticated Assistant interaction. For creation, send payload.plan with only the documented fields: goal, content_type, topic, angle, expression_form, expected_result, requirements, constraints, assets, missing_inputs, agent_decisions, target_audience, profile_context, temporary_overrides, outline (string array), style_constraints, asset_plan, acceptance_criteria, cost_estimate, execution_options, and optional image/video fields. A ready creation plan must include profile_context and temporary_overrides as string arrays, using [] when there is nothing to record. Keep all metadata inside plan; do not invent nested objects or fields.",
+		Description: "Stage a structured creation plan or postmortem review draft for the authenticated Assistant session. For creation, send payload.plan with only the documented fields: goal, content_type, topic, angle, expression_form, expected_result, requirements, constraints, assets, missing_inputs, agent_decisions, target_audience, profile_context, temporary_overrides, outline (string array), style_constraints, asset_plan, acceptance_criteria, cost_estimate, execution_options, and optional image/video fields. A ready creation plan must include profile_context and temporary_overrides as string arrays, using [] when there is nothing to record. Keep all metadata inside plan; do not invent nested objects or fields.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
@@ -99,8 +98,8 @@ func assistantDraftPayloadSchema() map[string]any {
 }
 
 func stageAssistantDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.InteractionSvc == nil {
-		return errorResult("assistant interaction service not available"), nil
+	if svcs == nil || (svcs.InteractiveSvc == nil && svcs.InteractionSvc == nil) {
+		return errorResult("interactive service not available"), nil
 	}
 	identity, ok := getMCPInteractiveIdentity(ctx)
 	if !ok {
@@ -110,31 +109,60 @@ func stageAssistantDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (
 		return errorResult("payload and ready are required"), nil
 	}
 	args := parseArgs(req.Params.Arguments)
-	var payload json.RawMessage
-	if err := decodeInteractiveArgumentStrict(args, "payload", &payload); err != nil {
+	if svcs.InteractionSvc != nil {
+		var payload json.RawMessage
+		if err := decodeInteractiveArgumentStrict(args, "payload", &payload); err != nil {
+			return errorResult(fmt.Sprintf("payload is invalid: %v", err)), nil
+		}
+		ready, ok := args["ready"].(bool)
+		if !ok {
+			return errorResult("ready must be a boolean"), nil
+		}
+		interactionID, generation, attemptID, modeID, payloadDigest, metadataErr := resolveInteractionStageMetadata(identity, args, payload, ready)
+		if metadataErr != nil {
+			return errorResult(metadataErr.Error()), nil
+		}
+		if identity.InteractionID != interactionID || identity.Generation != generation || (identity.ModeID != "" && identity.ModeID != modeID) {
+			return errorResult(service.InteractionErrorGenerationChanged), nil
+		}
+		result, err := svcs.InteractionSvc.StageDraftForInteraction(ctx, identity.UserID, service.InteractionStageInput{InteractionID: interactionID, Generation: generation, AttemptID: attemptID, ModeID: modeID, Payload: payload, PayloadDigest: payloadDigest, Ready: ready})
+		if err != nil {
+			return errorResult(fmt.Sprintf("stage assistant draft: %v", err)), nil
+		}
+		return textResult(result)
+	}
+	// Mode and Agent selection are Server-owned. Prefer this explicit error
+	// when a caller attempts to smuggle mode metadata alongside other fields so
+	// the contract remains deterministic despite Go map iteration order.
+	if _, exists := args["mode_id"]; exists {
+		return errorResult(`unknown assistant draft field "mode_id"`), nil
+	}
+	for key := range args {
+		if key != "name" && key != "payload" && key != "ready" {
+			return errorResult(fmt.Sprintf("unknown assistant draft field %q", key)), nil
+		}
+	}
+	var input service.AssistantDraftStageInput
+	if raw, exists := args["name"]; exists && raw != nil {
+		if err := decodeInteractiveArgumentStrict(args, "name", &input.Name); err != nil {
+			return errorResult(fmt.Sprintf("name is invalid: %v", err)), nil
+		}
+	}
+	if err := decodeInteractiveArgumentStrict(args, "payload", &input.Payload); err != nil {
 		return errorResult(fmt.Sprintf("payload is invalid: %v", err)), nil
 	}
-	ready, ok := args["ready"].(bool)
-	if !ok {
-		return errorResult("ready must be a boolean"), nil
+	if err := decodeInteractiveArgumentStrict(args, "ready", &input.Ready); err != nil {
+		return errorResult(fmt.Sprintf("ready is invalid: %v", err)), nil
 	}
-	interactionID, generation, attemptID, modeID, payloadDigest, metadataErr := resolveInteractionStageMetadata(identity, args, payload, ready)
-	if metadataErr != nil {
-		return errorResult(metadataErr.Error()), nil
+	if err := stageLegacyAssistantDraft(ctx, svcs.InteractiveSvc, identity.SessionID, input); err != nil {
+		return errorResult(fmt.Sprintf("stage assistant draft: %v", err)), nil
 	}
-	if identity.InteractionID != interactionID || identity.Generation != generation || (identity.ModeID != "" && identity.ModeID != modeID) {
-		return errorResult(service.InteractionErrorGenerationChanged), nil
-	}
-	result, err := svcs.InteractionSvc.StageDraftForInteraction(ctx, identity.UserID, service.InteractionStageInput{InteractionID: interactionID, Generation: generation, AttemptID: attemptID, ModeID: modeID, Payload: payload, PayloadDigest: payloadDigest, Ready: ready})
-	if err != nil {
-		return interactionToolError(err), nil
-	}
-	return textResult(result)
+	return textResult(map[string]any{"staged": true, "session_id": identity.SessionID, "ready": input.Ready})
 }
 
 func stageProjectCreatorDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if svcs == nil || svcs.InteractionSvc == nil {
-		return errorResult("assistant interaction service not available"), nil
+	if svcs == nil || (svcs.InteractiveSvc == nil && svcs.InteractionSvc == nil) {
+		return errorResult("interactive service not available"), nil
 	}
 	identity, ok := getMCPInteractiveIdentity(ctx)
 	if !ok {
@@ -144,47 +172,78 @@ func stageProjectCreatorDraftHandler(ctx context.Context, req *mcp.CallToolReque
 		return errorResult("project, profile, progress, and ready are required"), nil
 	}
 	args := parseArgs(req.Params.Arguments)
-	var payload json.RawMessage
-	if raw, exists := args["payload"]; exists {
-		encoded, encodeErr := json.Marshal(raw)
-		if encodeErr != nil {
-			return errorResult(fmt.Sprintf("payload is invalid: %v", encodeErr)), nil
+	if svcs.InteractionSvc != nil {
+		var payload json.RawMessage
+		if raw, exists := args["payload"]; exists {
+			encoded, encodeErr := json.Marshal(raw)
+			if encodeErr != nil {
+				return errorResult(fmt.Sprintf("payload is invalid: %v", encodeErr)), nil
+			}
+			payload = encoded
+		} else {
+			encoded, encodeErr := json.Marshal(map[string]any{"project": args["project"], "profile": args["profile"], "progress": args["progress"], "missing_fields": args["missing_fields"], "inferred_fields": args["inferred_fields"], "memory_append": args["memory_append"], "ready": args["ready"]})
+			if encodeErr != nil {
+				return errorResult(fmt.Sprintf("payload is invalid: %v", encodeErr)), nil
+			}
+			payload = encoded
 		}
-		payload = encoded
-	} else {
-		encoded, encodeErr := json.Marshal(map[string]any{"project": args["project"], "profile": args["profile"], "progress": args["progress"], "missing_fields": args["missing_fields"], "inferred_fields": args["inferred_fields"], "memory_append": args["memory_append"], "ready": args["ready"]})
-		if encodeErr != nil {
-			return errorResult(fmt.Sprintf("payload is invalid: %v", encodeErr)), nil
+		ready, ok := args["ready"].(bool)
+		if !ok {
+			return errorResult("ready must be a boolean"), nil
 		}
-		payload = encoded
+		interactionID, generation, attemptID, modeID, payloadDigest, metadataErr := resolveInteractionStageMetadata(identity, args, payload, ready)
+		if metadataErr != nil {
+			return errorResult(metadataErr.Error()), nil
+		}
+		if identity.InteractionID != interactionID || identity.Generation != generation || (identity.ModeID != "" && identity.ModeID != modeID) {
+			return errorResult(service.InteractionErrorGenerationChanged), nil
+		}
+		result, err := svcs.InteractionSvc.StageDraftForInteraction(ctx, identity.UserID, service.InteractionStageInput{InteractionID: interactionID, Generation: generation, AttemptID: attemptID, ModeID: modeID, Payload: payload, PayloadDigest: payloadDigest, Ready: ready})
+		if err != nil {
+			return errorResult(fmt.Sprintf("stage project creator draft: %v", err)), nil
+		}
+		return textResult(result)
+	}
+
+	var input service.InteractiveStageInput
+	if err := decodeInteractiveArgument(args, "project", &input.Project); err != nil {
+		return errorResult(fmt.Sprintf("project is invalid: %v", err)), nil
+	}
+	if err := decodeInteractiveArgumentStrict(args, "profile", &input.Profile); err != nil {
+		return errorResult(fmt.Sprintf("profile is invalid: %v", err)), nil
+	}
+	if err := decodeInteractiveArgument(args, "progress", &input.Progress); err != nil {
+		return errorResult(fmt.Sprintf("progress is invalid: %v", err)), nil
 	}
 	ready, ok := args["ready"].(bool)
 	if !ok {
 		return errorResult("ready must be a boolean"), nil
 	}
-	interactionID, generation, attemptID, modeID, payloadDigest, metadataErr := resolveInteractionStageMetadata(identity, args, payload, ready)
-	if metadataErr != nil {
-		return errorResult(metadataErr.Error()), nil
+	input.Ready = ready
+	if err := decodeInteractiveArgument(args, "missing_fields", &input.MissingFields); err != nil {
+		return errorResult(fmt.Sprintf("missing_fields is invalid: %v", err)), nil
 	}
-	if identity.InteractionID != interactionID || identity.Generation != generation || (identity.ModeID != "" && identity.ModeID != modeID) {
-		return errorResult(service.InteractionErrorGenerationChanged), nil
+	if err := decodeInteractiveArgument(args, "inferred_fields", &input.InferredFields); err != nil {
+		return errorResult(fmt.Sprintf("inferred_fields is invalid: %v", err)), nil
 	}
-	result, err := svcs.InteractionSvc.StageDraftForInteraction(ctx, identity.UserID, service.InteractionStageInput{InteractionID: interactionID, Generation: generation, AttemptID: attemptID, ModeID: modeID, Payload: payload, PayloadDigest: payloadDigest, Ready: ready})
-	if err != nil {
-		return interactionToolError(err), nil
+	if raw, exists := args["memory_append"]; exists && raw != nil {
+		if err := decodeInteractiveArgument(args, "memory_append", &input.MemoryAppend); err != nil {
+			return errorResult(fmt.Sprintf("memory_append is invalid: %v", err)), nil
+		}
 	}
-	return textResult(result)
+
+	if err := stageLegacyProjectCreatorDraft(ctx, svcs.InteractiveSvc, identity.SessionID, input); err != nil {
+		return errorResult(fmt.Sprintf("stage project creator draft: %v", err)), nil
+	}
+	return textResult(map[string]any{"staged": true, "session_id": identity.SessionID, "ready": input.Ready})
 }
 
-func interactionToolError(err error) *mcp.CallToolResult {
-	if err == nil {
-		return errorResult(service.InteractionErrorMessageNotAccepted)
-	}
-	var interactionErr *service.InteractionError
-	if errors.As(err, &interactionErr) && interactionErr != nil {
-		return errorResult(interactionErr.String())
-	}
-	return errorResult(service.InteractionErrorMessageNotAccepted + ": 这次操作未完成，当前内容已保留，请重试")
+func stageLegacyAssistantDraft(ctx context.Context, interactiveSvc *service.InteractiveService, sessionID string, input service.AssistantDraftStageInput) error {
+	return interactiveSvc.StageAssistantDraftForSessionContext(ctx, sessionID, input)
+}
+
+func stageLegacyProjectCreatorDraft(ctx context.Context, interactiveSvc *service.InteractiveService, sessionID string, input service.InteractiveStageInput) error {
+	return interactiveSvc.StageDraftForSessionContext(ctx, sessionID, input)
 }
 
 func interactionGeneration(raw any) (int64, bool) {
@@ -252,7 +311,7 @@ func resolveInteractionStageMetadata(identity mcpInteractiveIdentity, args map[s
 		}
 		payloadDigest = strings.TrimSpace(value)
 	}
-	attemptID := defaultInteractionStageAttemptID(interactionID, generation, modeID, payloadDigest, ready)
+	attemptID := "stage:" + modeID + ":" + payloadDigest + ":" + fmt.Sprint(ready)
 	if raw, exists := args["attempt_id"]; exists {
 		value, ok := raw.(string)
 		if !ok || strings.TrimSpace(value) == "" {
@@ -261,12 +320,6 @@ func resolveInteractionStageMetadata(identity mcpInteractiveIdentity, args map[s
 		attemptID = strings.TrimSpace(value)
 	}
 	return interactionID, generation, attemptID, modeID, payloadDigest, nil
-}
-
-func defaultInteractionStageAttemptID(interactionID string, generation int64, modeID, payloadDigest string, ready bool) string {
-	seed := fmt.Sprintf("assistant-interaction-stage\x00%s\x00%d\x00%s\x00%s\x00%t", interactionID, generation, modeID, payloadDigest, ready)
-	digest := sha256.Sum256([]byte(seed))
-	return "stage:" + hex.EncodeToString(digest[:])
 }
 
 func decodeInteractiveArgument(args map[string]any, key string, target any) error {

@@ -116,81 +116,15 @@ func (assistantInteractionFailingFactory) Start(context.Context, string, string,
 	return nil, errors.New("runtime unavailable")
 }
 
-type assistantInteractionBlockingFactory struct {
-	starts  atomic.Int32
-	entered chan struct{}
-	release <-chan struct{}
-}
-
-func (f *assistantInteractionBlockingFactory) Start(ctx context.Context, _, _, _ string, _ func(string, any)) (Runtime, error) {
-	f.starts.Add(1)
-	select {
-	case f.entered <- struct{}{}:
-	default:
-	}
-	select {
-	case <-f.release:
-		return assistantInteractionTestRuntime{}, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
 type assistantInteractionCommandFailureFactory struct {
 	mu     sync.Mutex
 	starts int
 }
 
-type assistantInteractionCloseTrackingRuntime struct {
-	closeErr   error
-	closeCalls int
-}
-
-func (assistantInteractionCloseTrackingRuntime) Command(context.Context, string, any) error {
-	return nil
-}
-
-func (r *assistantInteractionCloseTrackingRuntime) Close() error {
-	r.closeCalls++
-	return r.closeErr
-}
-
-type assistantInteractionCloseTrackingFactory struct {
-	closeErr error
-	runtimes []*assistantInteractionCloseTrackingRuntime
-}
-
-func (f *assistantInteractionCloseTrackingFactory) Start(context.Context, string, string, string, func(string, any)) (Runtime, error) {
-	runtime := &assistantInteractionCloseTrackingRuntime{closeErr: f.closeErr}
-	f.runtimes = append(f.runtimes, runtime)
-	return runtime, nil
-}
-
-type assistantInteractionCASFailingRepository struct {
-	repository.Repository
-	interactions repository.AssistantInteractionRepository
-}
-
-func (r *assistantInteractionCASFailingRepository) AssistantInteractions() repository.AssistantInteractionRepository {
-	return r.interactions
-}
-
-type assistantInteractionCASFailingRepositoryOperations struct {
-	repository.AssistantInteractionRepository
-	compareAndSwapErr error
-}
-
-func (r *assistantInteractionCASFailingRepositoryOperations) CompareAndSwapGeneration(ctx context.Context, id string, expected, next int64, at time.Time) (bool, error) {
-	if r.compareAndSwapErr != nil {
-		return false, r.compareAndSwapErr
-	}
-	return r.AssistantInteractionRepository.CompareAndSwapGeneration(ctx, id, expected, next, at)
-}
-
 type assistantInteractionCommandFailureRuntime struct{}
 
 func (assistantInteractionCommandFailureRuntime) Command(_ context.Context, method string, _ any) error {
-	if method == "session/start" || method == "interaction/capability-refresh" {
+	if method == "session/start" {
 		return nil
 	}
 	return errors.New("runtime command failed")
@@ -211,112 +145,13 @@ func newAssistantInteractionServiceTest(t *testing.T) (*AssistantInteractionServ
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.AssistantInteraction{}, &model.AssistantInteractionRuntime{}, &model.AssistantInteractionDraft{}, &model.AssistantInteractionEvent{}, &model.AssistantInteractionAttempt{}, &model.Project{}, &model.ProjectProfileState{}, &model.ProjectProfileRevision{}, &model.Asset{}, &model.UserMediaAsset{}); err != nil {
+	if err := db.AutoMigrate(&model.AssistantInteraction{}, &model.AssistantInteractionRuntime{}, &model.AssistantInteractionDraft{}, &model.AssistantInteractionEvent{}, &model.AssistantInteractionAttempt{}, &model.Project{}, &model.ProjectProfileState{}, &model.ProjectProfileRevision{}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { sqlDB, _ := db.DB(); _ = sqlDB.Close() })
 	factory := &assistantInteractionTestFactory{}
 	clock := func() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
 	return NewAssistantInteractionService(repository.New(db), factory, clock), factory
-}
-
-func TestExpiredInteractionReplacesRuntimeAndRenewsCapability(t *testing.T) {
-	svc, _ := newAssistantInteractionServiceTest(t)
-	now := svc.clock()
-	svc.clock = func() time.Time { return now }
-	first, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "expiry-create")
-	if err != nil {
-		t.Fatal(err)
-	}
-	now = now.Add(25 * time.Hour)
-	resumed, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{
-		ModeID: AssistantModeCreation, ResumeInteractionID: first.ID,
-	}, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resumed.Generation != first.Generation+1 {
-		t.Fatalf("resumed generation = %d, want %d after runtime lease expiry", resumed.Generation, first.Generation+1)
-	}
-	interaction, err := svc.repo.AssistantInteractions().FindByIDForUser(context.Background(), "user-1", first.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !interaction.ExpiresAt.After(now) {
-		t.Fatalf("resumed interaction expiry = %s, want an active lease after %s", interaction.ExpiresAt, now)
-	}
-	svc.runtimeMu.RLock()
-	defer svc.runtimeMu.RUnlock()
-	for _, capability := range svc.capabilities {
-		if capability.InteractionID == first.ID && capability.Generation == resumed.Generation && !capability.ExpiresAt.After(now) {
-			t.Fatalf("resumed runtime capability expired at %s", capability.ExpiresAt)
-		}
-	}
-}
-
-func TestConcurrentServersReserveRuntimeBeforeStartingIt(t *testing.T) {
-	base := newAssistantInteractionCommitRecoveryServiceTest(t)
-	snapshot, err := base.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "concurrent-runtime-start")
-	if err != nil {
-		t.Fatal(err)
-	}
-	release := make(chan struct{})
-	var releaseOnce sync.Once
-	closeRelease := func() { releaseOnce.Do(func() { close(release) }) }
-	t.Cleanup(closeRelease)
-	firstFactory := &assistantInteractionBlockingFactory{entered: make(chan struct{}, 1), release: release}
-	secondFactory := &assistantInteractionBlockingFactory{entered: make(chan struct{}, 1), release: release}
-	firstServer := NewAssistantInteractionService(base.repo, firstFactory, base.clock)
-	firstServer.SetServerInstanceID("runtime-server-a")
-	secondServer := NewAssistantInteractionService(base.repo, secondFactory, base.clock)
-	secondServer.SetServerInstanceID("runtime-server-b")
-
-	firstDone := make(chan error, 1)
-	go func() {
-		_, ensureErr := firstServer.EnsureRuntime(context.Background(), "user-1", snapshot.ID, snapshot.Generation)
-		firstDone <- ensureErr
-	}()
-	select {
-	case <-firstFactory.entered:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first server did not begin runtime startup")
-	}
-	reserved, err := base.repo.AssistantInteractions().FindCurrentRuntime(context.Background(), snapshot.ID, snapshot.Generation)
-	if err != nil {
-		t.Fatalf("runtime binding while startup is blocked: %v", err)
-	}
-	if reserved.ServerInstance != "runtime-server-a" || reserved.Status != model.AssistantInteractionRuntimeStarting {
-		t.Fatalf("runtime reservation while startup is blocked = %#v, want first owner in starting state", reserved)
-	}
-
-	secondDone := make(chan error, 1)
-	go func() {
-		_, ensureErr := secondServer.EnsureRuntime(context.Background(), "user-1", snapshot.ID, snapshot.Generation)
-		secondDone <- ensureErr
-	}()
-	select {
-	case secondErr := <-secondDone:
-		if secondErr == nil || NormalizeInteractionError(secondErr).Code != InteractionErrorReconnecting {
-			t.Fatalf("second server runtime error = %v, want reconnecting while startup lease is active", secondErr)
-		}
-	case <-secondFactory.entered:
-		closeRelease()
-		<-firstDone
-		<-secondDone
-		t.Fatal("second server started another runtime for the same generation")
-	case <-time.After(2 * time.Second):
-		closeRelease()
-		<-firstDone
-		<-secondDone
-		t.Fatal("second server did not resolve the active startup lease")
-	}
-	closeRelease()
-	if err := <-firstDone; err != nil {
-		t.Fatalf("first server runtime startup: %v", err)
-	}
-	if got := secondFactory.starts.Load(); got != 0 {
-		t.Fatalf("second server starts = %d, want 0", got)
-	}
 }
 
 func TestCommitInteractionCreatesProfileProjectAndReplaysDurableReceipt(t *testing.T) {
@@ -421,68 +256,14 @@ func TestAssistantInteractionStartsLogicalSessionBeforeCommands(t *testing.T) {
 	if len(commands) != 1 || commands[0] != "session/start" {
 		t.Fatalf("runtime commands = %#v, want one session/start before interaction commands", commands)
 	}
-	if err := svc.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{ModeID: snapshot.ModeID, Generation: snapshot.Generation, ClientMessageID: "handshake-message", Text: "继续"}); err != nil {
+	if err := svc.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{Generation: snapshot.Generation, ClientMessageID: "handshake-message", Text: "继续"}); err != nil {
 		t.Fatal(err)
 	}
 	factory.mu.Lock()
 	commands = append([]string(nil), factory.commands...)
 	factory.mu.Unlock()
-	if len(commands) != 3 || commands[1] != "interaction/capability-refresh" || commands[2] != "session/prompt" {
-		t.Fatalf("runtime commands after message = %#v, want session/start, capability-refresh, then session/prompt", commands)
-	}
-}
-
-func TestInteractionMessageCarriesOnlyVerifiedMediaLibraryReferencesToRuntime(t *testing.T) {
-	base, _ := newAssistantInteractionServiceTest(t)
-	factory := &assistantInteractionModeFactory{}
-	svc := NewAssistantInteractionService(base.repo, factory, base.clock)
-	assetID := uuid.NewString()
-	mediaID := uuid.NewString()
-	if err := svc.repo.Assets().Create(context.Background(), &model.Asset{ID: assetID, UserID: "user-1", Purpose: DirectUploadPurposeMediaLibrary, StorageKey: "media/tea.mp4", FileName: "茶品展示.mp4", ContentType: "video/mp4", Size: 4096, ETag: "tea"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.repo.UserMediaAssets().Create(context.Background(), &model.UserMediaAsset{ID: mediaID, UserID: "user-1", AssetID: assetID, MediaType: "video", Status: model.UserMediaAssetStatusAvailable, Description: "展示茶叶冲泡过程"}); err != nil {
-		t.Fatal(err)
-	}
-	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "message-with-media")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{
-		ModeID: snapshot.ModeID, Generation: snapshot.Generation, ClientMessageID: "media-message", Text: "继续使用刚才选中的素材",
-		Attachments: []InteractionMessageAttachment{{AssetID: mediaID}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	commands := factory.commandSnapshot()
-	var prompt map[string]any
-	for _, command := range commands {
-		if command.method == "session/prompt" {
-			prompt = command.params
-		}
-	}
-	if prompt == nil {
-		t.Fatalf("runtime commands = %#v, want session/prompt", commands)
-	}
-	blocks, ok := prompt["contentBlocks"].([]any)
-	if !ok || len(blocks) != 2 {
-		t.Fatalf("prompt contentBlocks = %#v, want text plus verified media references", prompt["contentBlocks"])
-	}
-	encoded, err := json.Marshal(blocks[1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, expected := range []string{mediaID, "茶品展示.mp4", "展示茶叶冲泡过程"} {
-		if !strings.Contains(string(encoded), expected) {
-			t.Fatalf("runtime media reference %s missing %q", encoded, expected)
-		}
-	}
-
-	if err := svc.SendMessage(context.Background(), "user-2", snapshot.ID, InteractionMessageInput{
-		ModeID: snapshot.ModeID, Generation: snapshot.Generation, ClientMessageID: "foreign-media-message", Text: "不要接受其他用户的素材",
-		Attachments: []InteractionMessageAttachment{{AssetID: mediaID}},
-	}); err == nil || NormalizeInteractionError(err).Code != InteractionErrorMessageNotAccepted {
-		t.Fatalf("cross-user media reference error = %v, want safe message-not-accepted", err)
+	if len(commands) != 2 || commands[1] != "session/prompt" {
+		t.Fatalf("runtime commands after message = %#v, want session/start then session/prompt", commands)
 	}
 }
 
@@ -492,7 +273,7 @@ func TestInteractionMessageAttemptConflictsWhenPayloadChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := InteractionMessageInput{ModeID: snapshot.ModeID, Generation: snapshot.Generation, ClientMessageID: "message-1", Text: "第一条需求"}
+	input := InteractionMessageInput{Generation: snapshot.Generation, ClientMessageID: "message-1", Text: "第一条需求"}
 	if err := svc.SendMessage(context.Background(), "user-1", snapshot.ID, input); err != nil {
 		t.Fatal(err)
 	}
@@ -502,7 +283,7 @@ func TestInteractionMessageAttemptConflictsWhenPayloadChanges(t *testing.T) {
 	}
 }
 
-func TestInteractionMessageRetryReplacesRuntimeForPendingAttemptAfterRestart(t *testing.T) {
+func TestInteractionMessageDoesNotReplayPendingAttempt(t *testing.T) {
 	svc, _ := newAssistantInteractionServiceTest(t)
 	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "pending-message")
 	if err != nil {
@@ -516,186 +297,9 @@ func TestInteractionMessageRetryReplacesRuntimeForPendingAttemptAfterRestart(t *
 	}); err != nil {
 		t.Fatal(err)
 	}
-	restartFactory := &assistantInteractionTestFactory{}
-	restarted := NewAssistantInteractionService(svc.repo, restartFactory, svc.clock)
-	err = restarted.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{ModeID: snapshot.ModeID, Generation: snapshot.Generation, ClientMessageID: "message-1", Text: "需求"})
-	if err == nil || NormalizeInteractionError(err).Code != InteractionErrorGenerationChanged {
-		t.Fatalf("pending message retry error = %v, want generation changed after runtime replacement", err)
-	}
-	current, err := svc.repo.AssistantInteractions().FindByIDForUser(context.Background(), "user-1", snapshot.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if current.Generation != snapshot.Generation+1 {
-		t.Fatalf("interaction generation = %d, want %d", current.Generation, snapshot.Generation+1)
-	}
-	attempt, err := svc.repo.AssistantInteractions().FindAttempt(context.Background(), snapshot.ID, "message-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if attempt.Status != model.AssistantInteractionAttemptFailed || attempt.ErrorCode != InteractionErrorGenerationChanged {
-		t.Fatalf("stale pending attempt = %#v, want failed generation-change receipt", attempt)
-	}
-	beforeReplay := len(restartFactory.commands)
-	err = restarted.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{ModeID: snapshot.ModeID, Generation: current.Generation, ClientMessageID: "message-1", Text: "需求"})
-	if err == nil || NormalizeInteractionError(err).Code != InteractionErrorGenerationChanged {
-		t.Fatalf("same-attempt retry after generation change = %v, want generation changed", err)
-	}
-	if got := len(restartFactory.commands); got != beforeReplay {
-		t.Fatalf("same-attempt retry sent a duplicate runtime command: before=%d after=%d", beforeReplay, got)
-	}
-	if err := restarted.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{ModeID: snapshot.ModeID, Generation: current.Generation, ClientMessageID: "message-2", Text: "需求"}); err != nil {
-		t.Fatalf("message after runtime replacement = %v", err)
-	}
-}
-
-func TestInteractionMessagePendingAttemptIsNotReplayedWhenRuntimeStillExists(t *testing.T) {
-	svc, factory := newAssistantInteractionServiceTest(t)
-	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "pending-message-same-runtime")
-	if err != nil {
-		t.Fatal(err)
-	}
-	params := map[string]any{"contentBlocks": []map[string]string{{"type": "text", "text": "需求"}}}
-	digest := interactionCommandDigest("session/prompt", "message-pending", params)
-	if err := svc.repo.AssistantInteractions().CreateAttempt(context.Background(), &model.AssistantInteractionAttempt{
-		ID: uuid.NewString(), InteractionID: snapshot.ID, AttemptID: "message-pending", Operation: string(InteractionOperationMessage), Generation: snapshot.Generation,
-		PayloadDigest: digest, Status: model.AssistantInteractionAttemptPending, CreatedAt: svc.clock(), ExpiresAt: svc.clock().Add(InteractionAttemptRetention),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	factory.mu.Lock()
-	countPrompts := func() int {
-		count := 0
-		for _, command := range factory.commands {
-			if command == "session/prompt" {
-				count++
-			}
-		}
-		return count
-	}
-	before := countPrompts()
-	factory.mu.Unlock()
-	for attempt := 0; attempt < 2; attempt++ {
-		err = svc.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{ModeID: snapshot.ModeID, Generation: snapshot.Generation, ClientMessageID: "message-pending", Text: "需求"})
-		if err == nil || NormalizeInteractionError(err).Code != InteractionErrorGenerationChanged {
-			t.Fatalf("pending attempt retry %d = %v, want generation changed after fencing the uncertain runtime", attempt, err)
-		}
-	}
-	factory.mu.Lock()
-	after := countPrompts()
-	factory.mu.Unlock()
-	if after != before {
-		t.Fatalf("pending attempt replayed prompt after fencing: before=%d after=%d", before, after)
-	}
-	attempt, err := svc.repo.AssistantInteractions().FindAttempt(context.Background(), snapshot.ID, "message-pending")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if attempt.Status != model.AssistantInteractionAttemptFailed || attempt.ErrorCode != InteractionErrorGenerationChanged {
-		t.Fatalf("pending attempt receipt = %#v, want non-replayable generation-change receipt", attempt)
-	}
-	current, err := svc.repo.AssistantInteractions().FindByIDForUser(context.Background(), "user-1", snapshot.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if current.Generation != snapshot.Generation+1 {
-		t.Fatalf("runtime generation = %d, want fenced generation %d", current.Generation, snapshot.Generation+1)
-	}
-}
-
-func TestPendingAttemptDoesNotFenceRuntimeWhenGenerationCASFails(t *testing.T) {
-	closeErr := errors.New("runtime close failed")
-	casErr := errors.New("generation CAS unavailable")
-	factory := &assistantInteractionCloseTrackingFactory{closeErr: closeErr}
-	svc, _ := newAssistantInteractionServiceTest(t)
-	svc.factory = factory
-	var err error
-	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "cas-failure")
-	if err != nil {
-		t.Fatal(err)
-	}
-	params := map[string]any{"contentBlocks": []map[string]string{{"type": "text", "text": "需求"}}}
-	digest := interactionCommandDigest("session/prompt", "message-cas-failure", params)
-	if err := svc.repo.AssistantInteractions().CreateAttempt(context.Background(), &model.AssistantInteractionAttempt{
-		ID: uuid.NewString(), InteractionID: snapshot.ID, UserID: "user-1", AttemptID: "message-cas-failure",
-		Operation: string(InteractionOperationMessage), Generation: snapshot.Generation, PayloadDigest: digest,
-		Status: model.AssistantInteractionAttemptPending, CreatedAt: svc.clock(), ExpiresAt: svc.clock().Add(InteractionAttemptRetention),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	baseInteractions := svc.repo.AssistantInteractions()
-	casRepository := &assistantInteractionCASFailingRepositoryOperations{AssistantInteractionRepository: baseInteractions, compareAndSwapErr: casErr}
-	svc.repo = &assistantInteractionCASFailingRepository{Repository: svc.repo, interactions: casRepository}
-
-	err = svc.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{
-		ModeID: snapshot.ModeID, Generation: snapshot.Generation, ClientMessageID: "message-cas-failure", Text: "需求",
-	})
+	err = svc.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{Generation: snapshot.Generation, ClientMessageID: "message-1", Text: "需求"})
 	if err == nil || NormalizeInteractionError(err).Code != InteractionErrorReconnecting {
-		t.Fatalf("CAS failure result = %v, want retryable reconnecting error", err)
-	}
-	if got := factory.runtimes[0].closeCalls; got != 0 {
-		t.Fatalf("runtime close calls after failed CAS = %d, want 0", got)
-	}
-	if _, err := baseInteractions.FindCurrentRuntime(context.Background(), snapshot.ID, snapshot.Generation); err != nil {
-		t.Fatalf("current runtime binding after failed CAS = %v, want current binding preserved", err)
-	}
-	attempt, err := baseInteractions.FindAttempt(context.Background(), snapshot.ID, "message-cas-failure")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if attempt.Status != model.AssistantInteractionAttemptPending || attempt.ErrorCode != "" {
-		t.Fatalf("attempt after failed CAS = %#v, want pending receipt", attempt)
-	}
-
-	casRepository.compareAndSwapErr = nil
-	err = svc.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{
-		ModeID: snapshot.ModeID, Generation: snapshot.Generation, ClientMessageID: "message-cas-failure", Text: "需求",
-	})
-	if err == nil || NormalizeInteractionError(err).Code != InteractionErrorGenerationChanged {
-		t.Fatalf("retry after CAS recovery = %v, want generation changed after fencing", err)
-	}
-	current, err := baseInteractions.FindByIDForUser(context.Background(), "user-1", snapshot.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if current.Generation != snapshot.Generation+1 {
-		t.Fatalf("generation after CAS retry = %d, want %d", current.Generation, snapshot.Generation+1)
-	}
-	if got := factory.runtimes[0].closeCalls; got != 1 {
-		t.Fatalf("old runtime close calls after successful CAS = %d, want 1", got)
-	}
-}
-
-func TestServerRestartKeepsRuntimeBindingWhenGenerationCASFails(t *testing.T) {
-	casErr := errors.New("generation CAS unavailable")
-	original, _ := newAssistantInteractionServiceTest(t)
-	snapshot, err := original.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "restart-cas-failure")
-	if err != nil {
-		t.Fatal(err)
-	}
-	baseRepository := original.repo
-	baseInteractions := baseRepository.AssistantInteractions()
-	restarted := NewAssistantInteractionService(baseRepository, &assistantInteractionCloseTrackingFactory{}, original.clock)
-	casRepository := &assistantInteractionCASFailingRepositoryOperations{AssistantInteractionRepository: baseInteractions, compareAndSwapErr: casErr}
-	restarted.repo = &assistantInteractionCASFailingRepository{Repository: baseRepository, interactions: casRepository}
-
-	_, err = restarted.EnsureRuntime(context.Background(), "user-1", snapshot.ID, snapshot.Generation)
-	if err == nil || NormalizeInteractionError(err).Code != InteractionErrorReconnecting {
-		t.Fatalf("runtime recovery after CAS failure = %v, want retryable reconnecting error", err)
-	}
-	current, err := baseInteractions.FindCurrentRuntime(context.Background(), snapshot.ID, snapshot.Generation)
-	if err != nil {
-		t.Fatalf("runtime binding after CAS failure = %v, want binding preserved", err)
-	}
-	if current.Status != model.AssistantInteractionRuntimeRunning {
-		t.Fatalf("runtime status after CAS failure = %q, want running", current.Status)
-	}
-	interaction, err := baseInteractions.FindByIDForUser(context.Background(), "user-1", snapshot.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if interaction.Generation != snapshot.Generation {
-		t.Fatalf("generation after CAS failure = %d, want %d", interaction.Generation, snapshot.Generation)
+		t.Fatalf("pending message retry error = %v, want reconnecting", err)
 	}
 }
 
@@ -706,7 +310,6 @@ func TestInteractionAnswerRequiresAttemptIDForRetrySafety(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = svc.AnswerQuestion(context.Background(), "user-1", snapshot.ID, InteractionAnswerInput{
-		ModeID:     snapshot.ModeID,
 		Generation: snapshot.Generation,
 		CallID:     "call-1",
 		Answers:    []InteractiveAnswer{{ID: "q-1", Selected: []string{"option-1"}}},
@@ -801,42 +404,6 @@ func TestInteractionModeSwitchUsesOneRuntimeAndModeScopedLogicalSessions(t *test
 	}
 }
 
-func TestSendMessageRefreshesInteractionCapabilityBeforePrompt(t *testing.T) {
-	svc, _ := newAssistantInteractionServiceTest(t)
-	factory := &assistantInteractionModeFactory{}
-	svc.factory = factory
-	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "capability-refresh")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{ModeID: snapshot.ModeID, Generation: snapshot.Generation, ClientMessageID: "capability-refresh-message", Text: "继续"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.AnswerQuestion(context.Background(), "user-1", snapshot.ID, InteractionAnswerInput{
-		ModeID:     snapshot.ModeID,
-		Generation: snapshot.Generation, AttemptID: "capability-refresh-answer", CallID: "question-1",
-		Answers: []InteractiveAnswer{{ID: "question-1", Selected: []string{"continue"}}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	commands := factory.commandSnapshot()
-	want := []string{"session/start", "interaction/capability-refresh", "session/prompt", "interaction/capability-refresh", "session/answer"}
-	if len(commands) != len(want) {
-		t.Fatalf("runtime command count = %#v, want %v", commands, want)
-	}
-	for index, method := range want {
-		if commands[index].method != method {
-			t.Fatalf("runtime command %d = %q, want %q", index, commands[index].method, method)
-		}
-	}
-	if commands[1].params["interaction_id"] != snapshot.ID || commands[1].params["generation"] != float64(snapshot.Generation) {
-		t.Fatalf("capability refresh params = %#v, want current interaction and generation", commands[1].params)
-	}
-	if commands[3].params["interaction_id"] != snapshot.ID || commands[3].params["generation"] != float64(snapshot.Generation) {
-		t.Fatalf("answer capability refresh params = %#v, want current interaction and generation", commands[3].params)
-	}
-}
-
 func TestAssistantInteractionCreateOrResumeReusesScope(t *testing.T) {
 	svc, factory := newAssistantInteractionServiceTest(t)
 	input := AssistantInteractionInput{ModeID: "creation", ProjectID: "project-1", ContentID: "content-1", AgentID: "project-creator", Intent: "create"}
@@ -850,88 +417,6 @@ func TestAssistantInteractionCreateOrResumeReusesScope(t *testing.T) {
 	}
 	if first.ID != second.ID || first.Generation != 1 || factory.starts != 1 {
 		t.Fatalf("first=%#v second=%#v starts=%d", first, second, factory.starts)
-	}
-}
-
-func TestAssistantInteractionRuntimeBindingUsesConfiguredServerInstance(t *testing.T) {
-	svc, _ := newAssistantInteractionServiceTest(t)
-	svc.SetServerInstanceID("server-instance-42")
-	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "runtime-owner")
-	if err != nil {
-		t.Fatal(err)
-	}
-	runtime, err := svc.repo.AssistantInteractions().FindCurrentRuntime(context.Background(), snapshot.ID, snapshot.Generation)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if runtime.ServerInstance != "server-instance-42" {
-		t.Fatalf("runtime server instance = %q, want configured instance %q", runtime.ServerInstance, "server-instance-42")
-	}
-}
-
-func TestAssistantInteractionDoesNotReplaceAnotherServerRuntime(t *testing.T) {
-	owner, _ := newAssistantInteractionServiceTest(t)
-	now := owner.clock()
-	owner.clock = func() time.Time { return now }
-	owner.SetServerInstanceID("server-a")
-	snapshot, err := owner.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "multi-server-owner")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	foreignFactory := &assistantInteractionTestFactory{}
-	otherServer := NewAssistantInteractionService(owner.repo, foreignFactory, owner.clock)
-	otherServer.SetServerInstanceID("server-b")
-	_, err = otherServer.EnsureRuntime(context.Background(), "user-1", snapshot.ID, snapshot.Generation)
-	if err == nil || NormalizeInteractionError(err).Code != InteractionErrorReconnecting {
-		t.Fatalf("foreign runtime ensure error = %v, want retryable reconnecting", err)
-	}
-
-	current, err := owner.repo.AssistantInteractions().FindByIDForUser(context.Background(), "user-1", snapshot.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if current.Generation != snapshot.Generation {
-		t.Fatalf("foreign server changed generation to %d, want %d", current.Generation, snapshot.Generation)
-	}
-	binding, err := owner.repo.AssistantInteractions().FindCurrentRuntime(context.Background(), snapshot.ID, snapshot.Generation)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if binding.ServerInstance != "server-a" || foreignFactory.starts != 0 {
-		t.Fatalf("binding owner = %q, foreign runtime starts = %d; want server-a and 0", binding.ServerInstance, foreignFactory.starts)
-	}
-
-	now = now.Add(model.AssistantInteractionRuntimeOwnerLease + time.Second)
-	if err := owner.HeartbeatRuntimeBindings(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := otherServer.EnsureRuntime(context.Background(), "user-1", snapshot.ID, snapshot.Generation); err == nil || NormalizeInteractionError(err).Code != InteractionErrorReconnecting {
-		t.Fatalf("heartbeat-protected runtime error = %v, want reconnecting", err)
-	}
-	now = now.Add(model.AssistantInteractionRuntimeOwnerLease + time.Second)
-	replaced, err := otherServer.EnsureRuntime(context.Background(), "user-1", snapshot.ID, snapshot.Generation)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if replaced.Generation != snapshot.Generation+1 || foreignFactory.starts != 1 {
-		t.Fatalf("expired runtime replacement = %#v, starts=%d, want next generation and one runtime", replaced, foreignFactory.starts)
-	}
-}
-
-func TestAssistantInteractionCreateAttemptUsesAttemptRetention(t *testing.T) {
-	svc, _ := newAssistantInteractionServiceTest(t)
-	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "short-lived-create")
-	if err != nil {
-		t.Fatal(err)
-	}
-	attempt, err := svc.repo.AssistantInteractions().FindAttempt(context.Background(), snapshot.ID, interactionCreateAttemptID("short-lived-create"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantExpiry := svc.clock().Add(InteractionAttemptRetention)
-	if !attempt.ExpiresAt.Equal(wantExpiry) {
-		t.Fatalf("create attempt expiry = %s, want %s", attempt.ExpiresAt, wantExpiry)
 	}
 }
 
@@ -957,22 +442,15 @@ func TestAssistantInteractionCreateOrResumeReplaysIdempotencyAfterCompletion(t *
 
 func TestAssistantInteractionCreateOrResumeRejectsIdempotencyKeyReuseWithDifferentInput(t *testing.T) {
 	svc, _ := newAssistantInteractionServiceTest(t)
-	first, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation, ProjectID: "project-1"}, "stable-create")
-	if err != nil {
+	if _, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation, ProjectID: "project-1"}, "stable-create"); err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation, ProjectID: "project-2"}, "stable-create")
+	_, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation, ProjectID: "project-2"}, "stable-create")
 	if !errors.Is(err, ErrInteractiveIdempotency) {
 		t.Fatalf("idempotency key reuse error = %v, want ErrInteractiveIdempotency", err)
 	}
-	current, findErr := svc.repo.AssistantInteractions().FindByIDForUser(context.Background(), "user-1", first.ID)
-	if findErr != nil {
-		t.Fatal(findErr)
-	}
-	if current.Lifecycle == model.AssistantInteractionAbandoned {
-		t.Fatalf("idempotency conflict abandoned the original interaction %q", first.ID)
-	}
 }
+
 func TestAssistantInteractionCreateOrResumeRejectsUnknownMode(t *testing.T) {
 	svc, _ := newAssistantInteractionServiceTest(t)
 	_, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: "unknown"}, "unknown-mode")
@@ -1053,7 +531,7 @@ func TestCompletedInteractionRejectsRuntimeWritesAndReplaysExistingCommit(t *tes
 	if svc.AcceptRuntimeEvent(snapshot.ID, snapshot.Generation, "assistant.message", map[string]any{"text": "late"}) {
 		t.Fatal("late runtime event was accepted after completion")
 	}
-	if err := svc.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{ModeID: snapshot.ModeID, Generation: snapshot.Generation, ClientMessageID: "late-message", Text: "late"}); err == nil || NormalizeInteractionError(err).Code != InteractionErrorRestartRequired {
+	if err := svc.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{Generation: snapshot.Generation, ClientMessageID: "late-message", Text: "late"}); err == nil || NormalizeInteractionError(err).Code != InteractionErrorRestartRequired {
 		t.Fatalf("late message error = %v, want restart_required", err)
 	}
 	if _, err := svc.StageDraftForInteraction(context.Background(), "user-1", InteractionStageInput{InteractionID: snapshot.ID, Generation: snapshot.Generation, AttemptID: "late-stage", ModeID: AssistantModeProfile, Payload: payload, PayloadDigest: hex.EncodeToString(digest[:]), Ready: true}); err == nil || NormalizeInteractionError(err).Code != InteractionErrorRestartRequired {
@@ -1121,7 +599,7 @@ func TestAssistantInteractionCommandFailureFencesGenerationAndReplacesRuntime(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = svc.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{ModeID: snapshot.ModeID, Generation: snapshot.Generation, ClientMessageID: "message-1", Text: "继续"})
+	err = svc.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{Generation: snapshot.Generation, ClientMessageID: "message-1", Text: "继续"})
 	if err == nil || NormalizeInteractionError(err).Code != InteractionErrorReconnecting {
 		t.Fatalf("command failure = %v, want reconnecting", err)
 	}
@@ -1143,47 +621,6 @@ func TestAssistantInteractionCommandFailureFencesGenerationAndReplacesRuntime(t 
 	}
 }
 
-func TestCommandFailureKeepsAttemptPendingUntilGenerationIsFenced(t *testing.T) {
-	svc, _ := newAssistantInteractionServiceTest(t)
-	factory := &assistantInteractionCommandFailureFactory{}
-	svc.factory = factory
-	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "command-cas-failure")
-	if err != nil {
-		t.Fatal(err)
-	}
-	baseInteractions := svc.repo.AssistantInteractions()
-	casRepository := &assistantInteractionCASFailingRepositoryOperations{
-		AssistantInteractionRepository: baseInteractions,
-		compareAndSwapErr:              errors.New("generation CAS unavailable"),
-	}
-	svc.repo = &assistantInteractionCASFailingRepository{Repository: svc.repo, interactions: casRepository}
-	input := InteractionMessageInput{ModeID: snapshot.ModeID, Generation: snapshot.Generation, ClientMessageID: "message-command-cas-failure", Text: "继续"}
-
-	if err := svc.SendMessage(context.Background(), "user-1", snapshot.ID, input); err == nil {
-		t.Fatal("command failure with unavailable CAS unexpectedly succeeded")
-	}
-	attempt, err := baseInteractions.FindAttempt(context.Background(), snapshot.ID, input.ClientMessageID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if attempt.Status != model.AssistantInteractionAttemptPending || attempt.ErrorCode != "" {
-		t.Fatalf("attempt after unavailable fence = %#v, want an unresolved pending receipt", attempt)
-	}
-
-	casRepository.compareAndSwapErr = nil
-	err = svc.SendMessage(context.Background(), "user-1", snapshot.ID, input)
-	if err == nil || NormalizeInteractionError(err).Code != InteractionErrorGenerationChanged {
-		t.Fatalf("retry after CAS recovery = %v, want generation changed after fencing", err)
-	}
-	current, err := baseInteractions.FindByIDForUser(context.Background(), "user-1", snapshot.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if current.Generation != snapshot.Generation+1 {
-		t.Fatalf("generation after retry = %d, want %d", current.Generation, snapshot.Generation+1)
-	}
-}
-
 func TestAssistantInteractionCommandRecoveryFailureIncludesSnapshot(t *testing.T) {
 	svc, _ := newAssistantInteractionServiceTest(t)
 	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "command-recovery-snapshot")
@@ -1195,7 +632,7 @@ func TestAssistantInteractionCommandRecoveryFailureIncludesSnapshot(t *testing.T
 	// runtime cannot be started. The command error must still carry the
 	// interaction snapshot so Studio can preserve the user's recovery state.
 	restarted := NewAssistantInteractionService(svc.repo, assistantInteractionFailingFactory{}, svc.clock)
-	err = restarted.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{ModeID: snapshot.ModeID, Generation: snapshot.Generation, ClientMessageID: "message-recovery-snapshot", Text: "继续"})
+	err = restarted.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{Generation: snapshot.Generation, ClientMessageID: "message-recovery-snapshot", Text: "继续"})
 	structured := NormalizeInteractionError(err)
 	if structured == nil || structured.Code != InteractionErrorRestartRequired {
 		t.Fatalf("runtime recovery failure = %v, want restart_required", err)
@@ -1331,110 +768,6 @@ func TestAssistantInteractionSnapshotRecoversAfterServerRestart(t *testing.T) {
 	}
 	if recovered.Generation != snapshot.Generation+1 {
 		t.Fatalf("recovered snapshot generation = %d, want %d", recovered.Generation, snapshot.Generation+1)
-	}
-}
-
-func TestAssistantInteractionRuntimeRecoveryRestoresClientConversationContext(t *testing.T) {
-	svc, _ := newAssistantInteractionServiceTest(t)
-	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "recover-context")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	contextJSON := json.RawMessage(`{"version":1,"interaction_id":"` + snapshot.ID + `","mode_id":"creation","messages":[{"role":"user","text":"我想做乌龙茶品鉴装"},{"role":"assistant","text":"我们继续补充规格。"}],"questions":[]}`)
-	restartedFactory := &assistantInteractionModeFactory{}
-	restarted := NewAssistantInteractionService(svc.repo, restartedFactory, svc.clock)
-	recovered, err := restarted.Recover(context.Background(), "user-1", snapshot.ID, snapshot.Generation, contextJSON, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if recovered.Generation != snapshot.Generation+1 {
-		t.Fatalf("recovered generation = %d, want %d", recovered.Generation, snapshot.Generation+1)
-	}
-	if len(restartedFactory.specs) != 1 || !strings.Contains(restartedFactory.specs[0].InitialContext, "我想做乌龙茶品鉴装") {
-		t.Fatalf("runtime initial context = %#v, want the preserved conversation", restartedFactory.specs)
-	}
-	events, err := svc.repo.AssistantInteractions().ListEventsAfter(context.Background(), snapshot.ID, recovered.Generation, 0, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, event := range events {
-		if strings.Contains(string(event.Data), "我想做乌龙茶品鉴装") {
-			t.Fatalf("recovery context leaked into durable event: %s", event.Data)
-		}
-	}
-}
-
-func TestAssistantInteractionCanContinueConversationWithReadyDraft(t *testing.T) {
-	svc, _ := newAssistantInteractionServiceTest(t)
-	factory := &assistantInteractionModeFactory{}
-	svc.factory = factory
-	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeProfile}, "continue-ready-draft")
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload := json.RawMessage(`{"ready":true,"project":{"name":"茶饮账号"}}`)
-	digest := sha256.Sum256(payload)
-	stage, err := svc.StageDraftForInteraction(context.Background(), "user-1", InteractionStageInput{
-		InteractionID: snapshot.ID,
-		Generation:    snapshot.Generation,
-		AttemptID:     "continue-ready-draft-stage",
-		ModeID:        AssistantModeProfile,
-		Payload:       payload,
-		PayloadDigest: hex.EncodeToString(digest[:]),
-		Ready:         true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	contextJSON := json.RawMessage(`{"version":1,"interaction_id":"` + snapshot.ID + `","mode_id":"profile","messages":[{"role":"user","text":"之前确定了乌龙茶品鉴装的方向"}],"questions":[]}`)
-	recovered, err := svc.Recover(context.Background(), "user-1", snapshot.ID, snapshot.Generation, contextJSON, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if recovered.Generation <= snapshot.Generation || recovered.Lifecycle != model.AssistantInteractionActive || recovered.RuntimeStatus != model.AssistantInteractionRuntimeRunning {
-		t.Fatalf("continued snapshot = %#v, want active runtime on a fresh generation", recovered)
-	}
-	if len(recovered.Drafts) != 1 || recovered.Drafts[0].ID != stage.DraftID || recovered.Drafts[0].Revision != stage.Revision {
-		t.Fatalf("durable draft after continuation = %#v, want original receipt retained", recovered.Drafts)
-	}
-	factory.mu.Lock()
-	defer factory.mu.Unlock()
-	if len(factory.specs) < 2 || !strings.Contains(factory.specs[len(factory.specs)-1].InitialContext, "之前确定了乌龙茶品鉴装的方向") {
-		t.Fatalf("replacement runtime context = %#v, want cached conversation", factory.specs)
-	}
-}
-
-func TestAssistantInteractionRuntimeRecoveryStartsSharedRuntimeModeWithItsContext(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.AutoMigrate(&model.AssistantInteraction{}, &model.AssistantInteractionRuntime{}, &model.AssistantInteractionDraft{}, &model.AssistantInteractionEvent{}, &model.AssistantInteractionAttempt{}); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { sqlDB, _ := db.DB(); _ = sqlDB.Close() })
-	factory := &assistantInteractionModeFactory{}
-	svc := NewAssistantInteractionService(repository.New(db), factory, func() time.Time { return time.Unix(1_700_000_000, 0).UTC() })
-	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeProfile}, "shared-mode-context")
-	if err != nil {
-		t.Fatal(err)
-	}
-	creationContext := json.RawMessage(`{"version":1,"interaction_id":"` + snapshot.ID + `","mode_id":"creation","messages":[{"role":"user","text":"创作模式上下文"}],"questions":[]}`)
-	if _, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{
-		ModeID: AssistantModeCreation, ResumeInteractionID: snapshot.ID, RecoveryContext: creationContext,
-	}, ""); err != nil {
-		t.Fatal(err)
-	}
-	commands := factory.commandSnapshot()
-	var found bool
-	for _, command := range commands {
-		if command.method == "session/start" && strings.Contains(command.params["initialContext"].(string), "创作模式上下文") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("runtime commands = %#v, want creation mode session initialized with its context", commands)
 	}
 }
 

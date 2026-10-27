@@ -191,10 +191,9 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		if projectStyleReferenceAssetID(task) != "" {
 			resolved["project_style_reference_path"] = serveragent.ProjectStyleReferenceImagePath
 		}
-		if projectProfile.IsConfirmed() {
-			p["account_profile"] = projectProfile
-			resolved["account_profile"] = projectProfile
-		} else {
+		p["account_profile"] = projectProfile
+		resolved["account_profile"] = projectProfile
+		if !projectProfile.IsConfirmed() {
 			resolved["account_profile_status"] = projectProfile.Status
 		}
 		p["resolved_profile"] = resolved
@@ -241,11 +240,8 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 			profile["wechat_delivery_instructions"] = instructions
 		}
 	}
-	// Server-applied profiles are usable during refreshes. Their source labels
-	// remain intact so inferred content cannot be treated as verified facts.
-	if projectProfile.IsConfirmed() {
-		profile["account_profile"] = projectProfile
-	}
+	// Preserve source labels so inferred content cannot be treated as verified facts.
+	profile["account_profile"] = projectProfile
 	resolvedProfile := map[string]any{
 		"id": project.ID, "name": project.Name, "platform": project.Platform,
 		"profile_url": project.ProfileURL, "avatar_url": project.AvatarURL,
@@ -261,9 +257,8 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 			"keywords":     agentProfileSource(usesProjectSnapshot),
 		},
 	}
-	if projectProfile.IsConfirmed() {
-		resolvedProfile["account_profile"] = projectProfile
-	} else {
+	resolvedProfile["account_profile"] = projectProfile
+	if !projectProfile.IsConfirmed() {
 		resolvedProfile["account_profile_status"] = projectProfile.Status
 	}
 	hasTaskReference := taskReferenceAssetID(task) != ""

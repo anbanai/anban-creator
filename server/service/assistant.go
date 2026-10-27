@@ -13,6 +13,7 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -31,7 +32,30 @@ var (
 	ErrAssistantCreationAssetUnavailable = errors.New("assistant creation request references an unavailable asset")
 	ErrAssistantCheckpointNotFound       = errors.New("assistant checkpoint not found")
 	ErrAssistantCheckpointConflict       = errors.New("assistant checkpoint scope does not match session")
+	ErrAssistantWorkspaceBusy            = errors.New("assistant_workspace_busy")
+	ErrAssistantWorkspaceModeMismatch    = errors.New("assistant workspace mode does not match request")
+	ErrAssistantWorkspaceNotFound        = errors.New("assistant workspace not found")
+	ErrAssistantWorkspaceExpired         = errors.New("assistant workspace expired")
 )
+
+type AssistantWorkspaceInput struct {
+	ModeID       string `json:"mode_id"`
+	ProjectID    string `json:"project_id,omitempty"`
+	ContentID    string `json:"content_id,omitempty"`
+	CheckpointID string `json:"checkpoint_id,omitempty"`
+}
+
+type AssistantWorkspaceView struct {
+	ID            string            `json:"id"`
+	ModeID        string            `json:"mode_id"`
+	ProjectID     string            `json:"project_id,omitempty"`
+	ContentID     string            `json:"content_id,omitempty"`
+	RuntimeID     string            `json:"runtime_id,omitempty"`
+	RuntimeStatus string            `json:"runtime_status"`
+	SessionID     string            `json:"session_id"`
+	Sessions      map[string]string `json:"sessions"`
+	ExpiresAt     time.Time         `json:"expires_at"`
+}
 
 type AssistantMode struct {
 	ID             string `json:"id"`
@@ -87,6 +111,501 @@ type AssistantBootstrap struct {
 	Modes         []AssistantMode    `json:"modes"`
 	DefaultModeID string             `json:"defaultModeId"`
 	Projects      []AssistantProject `json:"projects"`
+}
+
+func assistantWorkspaceSessions(workspace *model.AssistantWorkspace) map[string]string {
+	return map[string]string{
+		AssistantModeProfile:  strings.TrimSpace(workspace.ProfileSessionID),
+		AssistantModeCreation: strings.TrimSpace(workspace.CreationSessionID),
+		AssistantModeReview:   strings.TrimSpace(workspace.ReviewSessionID),
+	}
+}
+
+func assistantWorkspaceSessionID(workspace *model.AssistantWorkspace, modeID string) string {
+	if workspace == nil {
+		return ""
+	}
+	return assistantWorkspaceSessions(workspace)[modeID]
+}
+
+func setAssistantWorkspaceSessionID(workspace *model.AssistantWorkspace, modeID, sessionID string) error {
+	switch modeID {
+	case AssistantModeProfile:
+		workspace.ProfileSessionID = sessionID
+	case AssistantModeCreation:
+		workspace.CreationSessionID = sessionID
+	case AssistantModeReview:
+		workspace.ReviewSessionID = sessionID
+	default:
+		return ErrAssistantModeUnavailable
+	}
+	return nil
+}
+
+func (s *InteractiveService) assistantWorkspaceView(workspace *model.AssistantWorkspace) *AssistantWorkspaceView {
+	sessions := assistantWorkspaceSessions(workspace)
+	return &AssistantWorkspaceView{
+		ID: workspace.ID, ModeID: workspace.ModeID, ProjectID: workspace.ProjectID, ContentID: workspace.ContentID,
+		RuntimeID: workspace.RuntimeID, RuntimeStatus: workspace.RuntimeStatus,
+		SessionID: sessions[workspace.ModeID], Sessions: sessions, ExpiresAt: workspace.ExpiresAt,
+	}
+}
+
+func (s *InteractiveService) findAssistantWorkspace(ctx context.Context, userID, workspaceID string) (*model.AssistantWorkspace, error) {
+	if s.repo == nil || s.repo.AssistantWorkspaces() == nil {
+		return nil, ErrInteractivePersistence
+	}
+	workspace, err := s.repo.AssistantWorkspaces().FindByIDForUser(ctx, strings.TrimSpace(userID), strings.TrimSpace(workspaceID))
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrAssistantWorkspaceNotFound
+	}
+	if err != nil {
+		return nil, errors.Join(ErrInteractivePersistence, err)
+	}
+	if !workspace.ExpiresAt.After(time.Now().UTC()) {
+		return nil, ErrAssistantWorkspaceExpired
+	}
+	if workspace.ClosedAt != nil {
+		return nil, ErrAssistantWorkspaceNotFound
+	}
+	return workspace, nil
+}
+
+func (s *InteractiveService) workspaceSessionBusy(sessionID string) bool {
+	if strings.TrimSpace(sessionID) == "" {
+		return false
+	}
+	s.mu.RLock()
+	sess := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if sess == nil {
+		return false
+	}
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	return sess.busy || sess.committing || sess.pendingCall != "" || sess.activeCommand != 0 || sess.Status == "waiting_answer"
+}
+
+func (s *InteractiveService) findLiveWorkspaceSession(workspaceID, modeID string) *InteractiveSession {
+	s.mu.RLock()
+	sessions := make([]*InteractiveSession, 0, len(s.sessions))
+	for _, sess := range s.sessions {
+		sessions = append(sessions, sess)
+	}
+	s.mu.RUnlock()
+	for _, sess := range sessions {
+		sess.mu.Lock()
+		live := !sess.Closed && sess.ExpiresAt.After(time.Now()) && sess.WorkspaceID == workspaceID && sess.ModeID == modeID
+		sess.mu.Unlock()
+		if live {
+			return sess
+		}
+	}
+	return nil
+}
+
+func (s *InteractiveService) bindAssistantWorkspaceSession(ctx context.Context, userID string, workspace *model.AssistantWorkspace, sess *InteractiveSession) (*model.AssistantWorkspace, error) {
+	if workspace == nil || sess == nil || workspace.ID != sess.WorkspaceID || workspace.ModeID != sess.ModeID {
+		return nil, ErrAssistantWorkspaceNotFound
+	}
+	workspace.ProjectID = sess.ProjectID
+	workspace.ContentID = sess.ContentID
+	sess.mu.Lock()
+	expiresAt := sess.ExpiresAt.UTC()
+	sess.mu.Unlock()
+	bound, err := s.repo.AssistantWorkspaces().BindSession(ctx, userID, workspace.ID, workspace.ModeID, sess.ID, workspace.ProjectID, workspace.ContentID, expiresAt, time.Now().UTC())
+	if err != nil {
+		return nil, errors.Join(ErrInteractivePersistence, err)
+	}
+	if !bound {
+		return nil, ErrAssistantWorkspaceBusy
+	}
+	if err := setAssistantWorkspaceSessionID(workspace, workspace.ModeID, sess.ID); err != nil {
+		return nil, err
+	}
+	if expiresAt.After(workspace.ExpiresAt) {
+		workspace.ExpiresAt = expiresAt
+	}
+	workspace.UpdatedAt = time.Now().UTC()
+	s.setWorkspaceRuntimeActive(workspace.ID, sess.ID)
+	return workspace, nil
+}
+
+func (s *InteractiveService) recoverUnboundAssistantWorkspace(ctx context.Context, userID string, workspace *model.AssistantWorkspace, input AssistantWorkspaceInput) (*model.AssistantWorkspace, error) {
+	if workspace == nil || workspace.ClosedAt != nil || !workspace.ExpiresAt.After(time.Now().UTC()) {
+		return nil, ErrAssistantWorkspaceNotFound
+	}
+	if workspace.RequestFingerprint != assistantWorkspaceRequestFingerprint(input) {
+		return nil, ErrInteractiveIdempotency
+	}
+	if assistantWorkspaceSessionID(workspace, workspace.ModeID) != "" {
+		return workspace, nil
+	}
+	sess := s.findLiveWorkspaceSession(workspace.ID, workspace.ModeID)
+	if sess == nil {
+		previous, err := s.repo.AssistantSessions().FindLatestByWorkspaceMode(ctx, userID, workspace.ID, workspace.ModeID)
+		if err == nil {
+			sessionID, recreateErr := s.recreateWorkspaceSession(ctx, userID, workspace, workspace.ModeID, workspace.ProjectID, workspace.ContentID, previous.ID)
+			if recreateErr != nil {
+				return nil, recreateErr
+			}
+			s.mu.RLock()
+			sess = s.sessions[sessionID]
+			s.mu.RUnlock()
+			if sess == nil {
+				return nil, ErrInteractivePersistence
+			}
+		} else if errors.Is(err, gorm.ErrRecordNotFound) {
+			sess, err = s.CreateAssistantSessionWithIdempotency(ctx, userID, AssistantSessionInput{
+				ModeID: workspace.ModeID, ProjectID: input.ProjectID, ContentID: input.ContentID,
+				CheckpointID: input.CheckpointID, WorkspaceID: workspace.ID, WorkspaceNew: true,
+			}, workspace.ID+":session")
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, errors.Join(ErrInteractivePersistence, err)
+		}
+	}
+	return s.bindAssistantWorkspaceSession(ctx, userID, workspace, sess)
+}
+
+func (s *InteractiveService) CreateAssistantWorkspace(ctx context.Context, userID string, input AssistantWorkspaceInput, idempotencyKey string) (*AssistantWorkspaceView, error) {
+	modeID := strings.TrimSpace(input.ModeID)
+	if modeID == "" {
+		modeID = AssistantModeProfile
+	}
+	input.ModeID = modeID
+	input.ProjectID = strings.TrimSpace(input.ProjectID)
+	input.ContentID = strings.TrimSpace(input.ContentID)
+	input.CheckpointID = strings.TrimSpace(input.CheckpointID)
+	key := strings.TrimSpace(idempotencyKey)
+	if len([]byte(key)) > 200 {
+		return nil, ErrInteractiveIdempotency
+	}
+	s.workspaceCreateMu.Lock()
+	defer s.workspaceCreateMu.Unlock()
+	requestFingerprint := assistantWorkspaceRequestFingerprint(input)
+	var keyHash *string
+	if key != "" {
+		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.TrimSpace(userID)+"\x00"+key)))
+		keyHash = &hash
+		if existing, lookupErr := s.repo.AssistantWorkspaces().FindByIdempotencyKeyHash(ctx, strings.TrimSpace(userID), hash); lookupErr == nil {
+			if existing.RequestFingerprint != requestFingerprint || existing.ClosedAt != nil || !existing.ExpiresAt.After(time.Now().UTC()) {
+				return nil, ErrInteractiveIdempotency
+			}
+			if assistantWorkspaceSessionID(existing, existing.ModeID) == "" {
+				existing, lookupErr = s.recoverUnboundAssistantWorkspace(ctx, userID, existing, input)
+				if lookupErr != nil {
+					return nil, lookupErr
+				}
+			}
+			return s.assistantWorkspaceView(existing), nil
+		} else if !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+			return nil, errors.Join(ErrInteractivePersistence, lookupErr)
+		}
+	}
+	workspaceID := uuid.NewString()
+	now := time.Now().UTC()
+	s.mu.RLock()
+	initialTTL := s.ttl
+	if s.idleTimeout > 0 && s.idleTimeout < initialTTL {
+		initialTTL = s.idleTimeout
+	}
+	s.mu.RUnlock()
+	workspace := &model.AssistantWorkspace{
+		ID: workspaceID, UserID: userID, ProjectID: input.ProjectID, ContentID: input.ContentID,
+		ModeID: modeID, RuntimeID: workspaceID, RuntimeStatus: "starting", ExpiresAt: now.Add(initialTTL), CreatedAt: now, UpdatedAt: now,
+		IdempotencyKeyHash: keyHash, RequestFingerprint: requestFingerprint,
+	}
+	if err := s.repo.AssistantWorkspaces().Create(ctx, workspace); err != nil {
+		if keyHash != nil {
+			if existing, lookupErr := s.repo.AssistantWorkspaces().FindByIdempotencyKeyHash(ctx, strings.TrimSpace(userID), *keyHash); lookupErr == nil {
+				if existing.RequestFingerprint != requestFingerprint || existing.ClosedAt != nil || !existing.ExpiresAt.After(time.Now().UTC()) {
+					return nil, ErrInteractiveIdempotency
+				}
+				if assistantWorkspaceSessionID(existing, existing.ModeID) == "" {
+					existing, lookupErr = s.recoverUnboundAssistantWorkspace(ctx, userID, existing, input)
+					if lookupErr != nil {
+						return nil, lookupErr
+					}
+				}
+				return s.assistantWorkspaceView(existing), nil
+			}
+		}
+		return nil, errors.Join(ErrInteractivePersistence, err)
+	}
+	session, err := s.CreateAssistantSessionWithIdempotency(ctx, userID, AssistantSessionInput{
+		ModeID: modeID, ProjectID: input.ProjectID, ContentID: input.ContentID, CheckpointID: input.CheckpointID, WorkspaceID: workspaceID, WorkspaceNew: true,
+	}, workspaceID+":session")
+	if err != nil {
+		_ = s.repo.AssistantWorkspaces().Delete(ctx, userID, workspaceID, time.Now().UTC())
+		return nil, err
+	}
+	workspace.ProjectID = session.ProjectID
+	workspace.ContentID = session.ContentID
+	workspace.ExpiresAt = session.ExpiresAt.UTC()
+	workspace, err = s.bindAssistantWorkspaceSession(ctx, userID, workspace, session)
+	if err != nil {
+		return nil, err
+	}
+	return s.assistantWorkspaceView(workspace), nil
+}
+
+func assistantWorkspaceRequestFingerprint(input AssistantWorkspaceInput) string {
+	payload, _ := json.Marshal(struct {
+		ModeID, ProjectID, ContentID, CheckpointID string
+	}{input.ModeID, input.ProjectID, input.ContentID, input.CheckpointID})
+	return fmt.Sprintf("%x", sha256.Sum256(payload))
+}
+
+func (s *InteractiveService) updateAssistantWorkspaceProject(ctx context.Context, userID, workspaceID, projectID string) error {
+	workspaceID = strings.TrimSpace(workspaceID)
+	projectID = strings.TrimSpace(projectID)
+	if workspaceID == "" || projectID == "" || s.repo == nil || s.repo.AssistantWorkspaces() == nil {
+		return nil
+	}
+	workspace, err := s.repo.AssistantWorkspaces().FindByIDForUser(ctx, strings.TrimSpace(userID), workspaceID)
+	if err != nil {
+		return errors.Join(ErrInteractivePersistence, err)
+	}
+	if workspace.ProjectID == projectID {
+		return nil
+	}
+	workspace.ProjectID = projectID
+	workspace.UpdatedAt = time.Now().UTC()
+	if err := s.repo.AssistantWorkspaces().Update(ctx, workspace); err != nil {
+		return errors.Join(ErrInteractivePersistence, err)
+	}
+	return nil
+}
+
+func (s *InteractiveService) SwitchAssistantWorkspaceMode(ctx context.Context, userID, workspaceID, modeID string) (*AssistantWorkspaceView, error) {
+	return s.SwitchAssistantWorkspaceModeWithContext(ctx, userID, workspaceID, AssistantWorkspaceInput{ModeID: modeID})
+}
+
+func (s *InteractiveService) SwitchAssistantWorkspaceModeWithContext(ctx context.Context, userID, workspaceID string, input AssistantWorkspaceInput) (*AssistantWorkspaceView, error) {
+	modeID := strings.TrimSpace(input.ModeID)
+	if modeID != AssistantModeProfile && modeID != AssistantModeCreation && modeID != AssistantModeReview {
+		return nil, ErrAssistantModeUnavailable
+	}
+	workspace, err := s.findAssistantWorkspace(ctx, userID, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if s.workspaceSessionBusy(assistantWorkspaceSessionID(workspace, workspace.ModeID)) {
+		return nil, ErrAssistantWorkspaceBusy
+	}
+	projectID := strings.TrimSpace(input.ProjectID)
+	if projectID == "" {
+		projectID = strings.TrimSpace(workspace.ProjectID)
+	}
+	contentID := strings.TrimSpace(input.ContentID)
+	if contentID == "" {
+		contentID = strings.TrimSpace(workspace.ContentID)
+	}
+	if modeID != AssistantModeReview {
+		contentID = ""
+	}
+	if modeID == AssistantModeProfile {
+		// Profile sessions may create a new project or update the selected one.
+		// Keep the workspace's project context when the caller omits it.
+	}
+	if modeID == AssistantModeReview && (projectID == "" || contentID == "") {
+		return nil, ErrAssistantModeUnavailable
+	}
+	sessionID := assistantWorkspaceSessionID(workspace, modeID)
+	if sessionID != "" && s.workspaceSessionBusy(sessionID) {
+		return nil, ErrAssistantWorkspaceBusy
+	}
+
+	// A committed/expired/interrupted logical session cannot be reused. The
+	// replacement inherits its durable checkpoint so a fresh DSH session can
+	// resume the last server-owned structured state.
+	reusable, reusableErr := s.workspaceSessionReusable(ctx, userID, sessionID, modeID, projectID, contentID)
+	if reusableErr != nil {
+		return nil, reusableErr
+	}
+	if !reusable {
+		var createErr error
+		sessionID, createErr = s.recreateWorkspaceSession(ctx, userID, workspace, modeID, projectID, contentID, sessionID)
+		if createErr != nil {
+			return nil, createErr
+		}
+		if err := setAssistantWorkspaceSessionID(workspace, modeID, sessionID); err != nil {
+			return nil, err
+		}
+	}
+	workspace.ProjectID = projectID
+	if modeID == AssistantModeReview {
+		workspace.ContentID = contentID
+	}
+	workspace.ModeID = modeID
+	workspace.UpdatedAt = time.Now().UTC()
+	if err := s.repo.AssistantWorkspaces().Update(ctx, workspace); err != nil {
+		return nil, errors.Join(ErrInteractivePersistence, err)
+	}
+	s.setWorkspaceRuntimeActive(workspace.ID, sessionID)
+	return s.assistantWorkspaceView(workspace), nil
+}
+
+func (s *InteractiveService) workspaceSessionReusable(ctx context.Context, userID, sessionID, modeID, projectID, contentID string) (bool, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return false, nil
+	}
+	s.mu.RLock()
+	sess := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if sess == nil {
+		return false, nil
+	}
+	sess.mu.Lock()
+	closed := sess.Closed || sess.ModeID != modeID || sess.ProjectID != projectID || sess.ContentID != contentID || !sess.ExpiresAt.After(time.Now())
+	sess.mu.Unlock()
+	if closed {
+		return false, nil
+	}
+	if s.repo == nil || s.repo.AssistantSessions() == nil {
+		return false, ErrInteractivePersistence
+	}
+	row, err := s.repo.AssistantSessions().FindByIDForUser(ctx, userID, sessionID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, errors.Join(ErrInteractivePersistence, err)
+	}
+	return row.ClosedAt == nil && row.Status != "interrupted" && row.ExpiresAt.After(time.Now().UTC()), nil
+}
+
+func (s *InteractiveService) recreateWorkspaceSession(ctx context.Context, userID string, workspace *model.AssistantWorkspace, modeID, projectID, contentID, previousID string) (string, error) {
+	checkpointID := ""
+	if previousID != "" && s.repo != nil && s.repo.AssistantSessions() != nil {
+		if previous, err := s.repo.AssistantSessions().FindByIDForUser(ctx, userID, previousID); err == nil {
+			checkpointID = strings.TrimSpace(previous.CheckpointID)
+			if previous.ClosedAt == nil {
+				s.mu.RLock()
+				_, inMemory := s.sessions[previous.ID]
+				s.mu.RUnlock()
+				if inMemory {
+					_ = s.Close(userID, previous.ID)
+				} else {
+					_ = s.repo.AssistantSessions().Close(ctx, previous.ID, "replaced", time.Now().UTC())
+				}
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", errors.Join(ErrInteractivePersistence, err)
+		}
+	}
+	if checkpointID != "" && s.repo != nil && s.repo.AssistantCheckpoints() != nil {
+		checkpoint, err := s.repo.AssistantCheckpoints().FindByIDForUser(ctx, userID, checkpointID)
+		if errors.Is(err, gorm.ErrRecordNotFound) || err == nil && (!assistantCheckpointRequestStatusAllowed(checkpoint.Status) || !checkpoint.ExpiresAt.After(time.Now().UTC())) {
+			// Committed checkpoints are receipts for completed work, not resumable
+			// session input. A replacement logical session starts with a clean
+			// runtime context unless a draft/ready checkpoint is still recoverable.
+			checkpointID = ""
+		} else if err != nil {
+			return "", errors.Join(ErrInteractivePersistence, err)
+		}
+	}
+	if checkpointID == "" && s.repo != nil && s.repo.AssistantCheckpoints() != nil {
+		if checkpoint, err := s.repo.AssistantCheckpoints().FindLatest(ctx, userID, modeID, projectID, contentID, time.Now().UTC()); err == nil {
+			checkpointID = checkpoint.ID
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", errors.Join(ErrInteractivePersistence, err)
+		}
+	}
+	session, err := s.CreateAssistantSessionWithIdempotency(ctx, userID, AssistantSessionInput{
+		ModeID: modeID, ProjectID: projectID, ContentID: contentID, CheckpointID: checkpointID, WorkspaceID: workspace.ID,
+	}, workspace.ID+":"+modeID+":"+uuid.NewString())
+	if err != nil {
+		return "", err
+	}
+	return session.ID, nil
+}
+
+func (s *InteractiveService) AssistantWorkspaceSession(ctx context.Context, userID, workspaceID, modeID string) (string, error) {
+	workspace, err := s.findAssistantWorkspace(ctx, userID, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(modeID) != workspace.ModeID {
+		return "", ErrAssistantWorkspaceModeMismatch
+	}
+	sessionID := assistantWorkspaceSessionID(workspace, modeID)
+	projectID, contentID := workspace.ProjectID, workspace.ContentID
+	if modeID != AssistantModeReview {
+		contentID = ""
+	}
+	reusable, reusableErr := s.workspaceSessionReusable(ctx, userID, sessionID, modeID, projectID, contentID)
+	if reusableErr != nil {
+		return "", reusableErr
+	}
+	if !reusable {
+		newID, err := s.recreateWorkspaceSession(ctx, userID, workspace, modeID, projectID, contentID, sessionID)
+		if err != nil {
+			return "", err
+		}
+		sessionID = newID
+		if err := setAssistantWorkspaceSessionID(workspace, modeID, sessionID); err != nil {
+			return "", err
+		}
+		workspace.UpdatedAt = time.Now().UTC()
+		if err := s.repo.AssistantWorkspaces().Update(ctx, workspace); err != nil {
+			return "", errors.Join(ErrInteractivePersistence, err)
+		}
+	}
+	if sessionID == "" {
+		return "", ErrAssistantWorkspaceNotFound
+	}
+	return sessionID, nil
+}
+
+func (s *InteractiveService) WorkspaceState(ctx context.Context, userID, workspaceID string) (*AssistantWorkspaceView, error) {
+	workspace, err := s.findAssistantWorkspace(ctx, userID, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.AssistantWorkspaceSession(ctx, userID, workspaceID, workspace.ModeID); err != nil {
+		return nil, err
+	}
+	workspace, err = s.findAssistantWorkspace(ctx, userID, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return s.assistantWorkspaceView(workspace), nil
+}
+
+func (s *InteractiveService) WorkspaceMessage(ctx context.Context, userID, workspaceID, modeID, text string) error {
+	sessionID, err := s.AssistantWorkspaceSession(ctx, userID, workspaceID, modeID)
+	if err != nil {
+		return err
+	}
+	return s.Message(ctx, userID, sessionID, text)
+}
+
+func (s *InteractiveService) WorkspaceAnswer(ctx context.Context, userID, workspaceID, modeID, callID string, answers []InteractiveAnswer) error {
+	sessionID, err := s.AssistantWorkspaceSession(ctx, userID, workspaceID, modeID)
+	if err != nil {
+		return err
+	}
+	return s.Answer(ctx, userID, sessionID, callID, answers)
+}
+
+func (s *InteractiveService) CloseAssistantWorkspace(ctx context.Context, userID, workspaceID string) error {
+	workspace, err := s.findAssistantWorkspace(ctx, userID, workspaceID)
+	if err != nil {
+		return err
+	}
+	for _, sessionID := range assistantWorkspaceSessions(workspace) {
+		if sessionID != "" {
+			_ = s.Close(userID, sessionID)
+		}
+	}
+	if err := s.repo.AssistantWorkspaces().Delete(ctx, userID, workspaceID, time.Now().UTC()); err != nil {
+		return errors.Join(ErrInteractivePersistence, err)
+	}
+	return nil
 }
 
 type AssistantCheckpointInput struct {
@@ -150,36 +669,33 @@ func (s *InteractiveService) AssistantBootstrap(ctx context.Context, userID stri
 		},
 		Projects: make([]AssistantProject, 0, len(projects)),
 	}
-	confirmedProjectIDs := make([]string, 0, len(projects))
+	activeProjectIDs := make([]string, 0, len(projects))
 	for _, project := range projects {
 		profile := projectProfileFor(project)
-		profileReady := profile.IsConfirmed()
-		if profileReady {
-			confirmedProjectIDs = append(confirmedProjectIDs, project.ID)
-		}
-		projectItem := AssistantProject{ID: project.ID, Name: project.Name, Platform: project.Platform, ProfileReady: profileReady, ProfileRevision: profile.Version, Works: []AssistantWork{}}
+		activeProjectIDs = append(activeProjectIDs, project.ID)
+		projectItem := AssistantProject{ID: project.ID, Name: project.Name, Platform: project.Platform, ProfileReady: true, ProfileRevision: profile.Version, Works: []AssistantWork{}}
 		if model.IsVideoEditPlatform(project.Platform) {
 			defaults := project.VideoEditDefaults.Data()
 			projectItem.VideoEditDefaults = &defaults
 		}
 		out.Projects = append(out.Projects, projectItem)
 	}
-	if len(confirmedProjectIDs) > 0 {
+	if len(activeProjectIDs) > 0 {
 		out.DefaultModeID = AssistantModeCreation
 		out.Modes[1].Available = true
 	} else {
 		out.DefaultModeID = AssistantModeProfile
-		out.Modes[1].DisabledReason = "先完成人设初始化，之后即可澄清创作需求"
+		out.Modes[1].DisabledReason = "先创建一个人设，之后即可澄清创作需求"
 	}
-	hasCompletedWork, err := s.repo.Tasks().HasCompletedWorkInProjects(ctx, userID, confirmedProjectIDs)
+	hasCompletedWork, err := s.repo.Tasks().HasCompletedWorkInProjects(ctx, userID, activeProjectIDs)
 	if err != nil {
 		return nil, errors.Join(ErrInteractivePersistence, err)
 	}
 	if hasCompletedWork {
 		out.Modes[2].Available = true
 	} else {
-		if len(confirmedProjectIDs) == 0 {
-			out.Modes[2].DisabledReason = "先完成人设初始化并完成一件作品，之后即可复盘"
+		if len(activeProjectIDs) == 0 {
+			out.Modes[2].DisabledReason = "先创建一个人设并完成一件作品，之后即可复盘"
 		} else {
 			out.Modes[2].DisabledReason = "先通过创作模式创建并完成一件作品"
 		}
@@ -215,9 +731,6 @@ func (s *InteractiveService) AssistantWorks(ctx context.Context, userID, project
 	}
 	if project.UserID != userID || project.Status != model.ProjectStatusActive {
 		return nil, ErrInteractiveSessionOwner
-	}
-	if !projectProfileFor(project).IsConfirmed() {
-		return nil, ErrAssistantModeUnavailable
 	}
 	var tasks []*model.Task
 	if cursor == nil {
@@ -550,9 +1063,6 @@ func (s *InteractiveService) LatestAssistantCheckpoint(ctx context.Context, user
 		if project.UserID != userID || project.Status != model.ProjectStatusActive {
 			return nil, ErrInteractiveSessionOwner
 		}
-		if modeID != AssistantModeProfile && !projectProfileFor(project).IsConfirmed() {
-			return nil, ErrAssistantModeUnavailable
-		}
 	}
 	if modeID == AssistantModeReview {
 		task, err := s.repo.Tasks().FindByID(ctx, contentID)
@@ -794,9 +1304,6 @@ func (s *InteractiveService) CreateAssistantSessionWithIdempotency(ctx context.C
 	}
 	if projectID != "" && selectedProject == nil {
 		return nil, ErrInteractiveSessionOwner
-	}
-	if selectedProject != nil && input.ModeID != AssistantModeProfile && !selectedProject.ProfileReady {
-		return nil, ErrAssistantModeUnavailable
 	}
 	var selectedWork *AssistantWork
 	if input.ModeID == AssistantModeReview {

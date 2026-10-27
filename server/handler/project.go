@@ -1483,15 +1483,14 @@ func profileAgentInput(project *model.Project, answers map[string]any, samples [
 		samples = setup.Samples
 	}
 	profile := project.Profile.Data()
+	if profile.SchemaVersion == 0 {
+		profile = model.NewProjectProfile()
+	}
 	if profile.AnalysisLimits == nil {
 		profile.AnalysisLimits = []string{}
 	}
 	if profile.FollowUpQuestions == nil {
 		profile.FollowUpQuestions = []string{}
-	}
-	var currentProfile any
-	if profile.IsConfirmed() {
-		currentProfile = profile
 	}
 	payload := map[string]any{
 		"project_id":        project.ID,
@@ -1501,7 +1500,7 @@ func profileAgentInput(project *model.Project, answers map[string]any, samples [
 		"platform_accounts": setup.PlatformAccounts,
 		"profile_setup":     setup,
 		"expected_revision": profile.Version,
-		"current_profile":   currentProfile,
+		"current_profile":   profile,
 		"answers":           grouped,
 		"samples":           samples,
 	}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,6 +57,136 @@ func createAssistantProject(t *testing.T, repo repository.Repository, userID, na
 		t.Fatal(err)
 	}
 	return project
+}
+
+type blockingAssistantWorkspaceFactory struct{}
+
+func (blockingAssistantWorkspaceFactory) Start(context.Context, string, string, string, func(string, any)) (Runtime, error) {
+	return nil, errors.New("standalone runtime is not used by workspace tests")
+}
+
+func (blockingAssistantWorkspaceFactory) StartSession(ctx context.Context, _ InteractiveRuntimeSpec, _ func(string, any)) (Runtime, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func newAssistantWorkspaceTestService(repo repository.Repository) *InteractiveService {
+	factory := blockingAssistantWorkspaceFactory{}
+	svc := NewInteractiveServiceWithRuntime(repo, factory)
+	svc.SetEnabled(true)
+	return svc
+}
+
+func TestAssistantWorkspaceMessageQueuesBehindOpeningPrompt(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	runtime := &interactiveWorkspaceRecordingRuntime{}
+	startGate := make(chan struct{})
+	factory := &interactiveWorkspaceRuntimeFactory{runtime: runtime, spec: make(chan InteractiveRuntimeSpec, 1), startGate: startGate}
+	svc := NewInteractiveServiceWithRuntime(repo, factory)
+	svc.SetEnabled(true)
+	workspace, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", AssistantWorkspaceInput{ModeID: AssistantModeProfile}, "opening-race")
+	if err != nil {
+		t.Fatalf("CreateAssistantWorkspace() error = %v", err)
+	}
+	t.Cleanup(func() { _ = svc.CloseAssistantWorkspace(context.Background(), "user-1", workspace.ID) })
+	select {
+	case <-factory.spec:
+	case <-time.After(time.Second):
+		t.Fatal("runtime factory did not start")
+	}
+	if err := svc.WorkspaceMessage(context.Background(), "user-1", workspace.ID, AssistantModeProfile, "继续完善画像"); err != nil {
+		t.Fatalf("WorkspaceMessage() while runtime is starting = %v", err)
+	}
+	close(startGate)
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		runtime.mu.Lock()
+		methodCount := len(runtime.methods)
+		runtime.mu.Unlock()
+		if methodCount >= 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	runtime.mu.Lock()
+	methods := append([]string(nil), runtime.methods...)
+	runtime.mu.Unlock()
+	if len(methods) < 2 || !reflect.DeepEqual(methods[:2], []string{"session/start", "session/prompt"}) {
+		t.Fatalf("runtime methods = %#v, want startup and opening prompt", methods)
+	}
+
+	sessionID := workspace.Sessions[AssistantModeProfile]
+	svc.runtimeEvent(sessionID, "turn.end", map[string]any{"turn": 1})
+	deadline = time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		runtime.mu.Lock()
+		methodCount := len(runtime.methods)
+		runtime.mu.Unlock()
+		if methodCount >= 3 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	runtime.mu.Lock()
+	methods = append([]string(nil), runtime.methods...)
+	runtime.mu.Unlock()
+	if len(methods) < 3 || methods[2] != "session/prompt" {
+		t.Fatalf("runtime methods after opening turn = %#v, want queued user prompt", methods)
+	}
+}
+
+func TestAssistantWorkspaceOpeningPromptFailureRetainsAcceptedMessage(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	runtime := &interactiveWorkspaceRecordingRuntime{commandErr: map[string]error{"session/prompt": errors.New("opening prompt failed")}}
+	startGate := make(chan struct{})
+	factory := &interactiveWorkspaceRuntimeFactory{runtime: runtime, spec: make(chan InteractiveRuntimeSpec, 1), startGate: startGate}
+	svc := NewInteractiveServiceWithRuntime(repo, factory)
+	svc.SetEnabled(true)
+	workspace, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", AssistantWorkspaceInput{ModeID: AssistantModeProfile}, "opening-failure")
+	if err != nil {
+		t.Fatalf("CreateAssistantWorkspace() error = %v", err)
+	}
+	t.Cleanup(func() { _ = svc.CloseAssistantWorkspace(context.Background(), "user-1", workspace.ID) })
+	select {
+	case <-factory.spec:
+	case <-time.After(time.Second):
+		t.Fatal("runtime factory did not start")
+	}
+	if err := svc.WorkspaceMessage(context.Background(), "user-1", workspace.ID, AssistantModeProfile, "恢复我的输入"); err != nil {
+		t.Fatalf("WorkspaceMessage() while runtime starts = %v", err)
+	}
+	close(startGate)
+
+	deadline := time.Now().Add(time.Second)
+	var history []InteractiveEvent
+	for time.Now().Before(deadline) {
+		svc.mu.RLock()
+		sess := svc.sessions[workspace.Sessions[AssistantModeProfile]]
+		svc.mu.RUnlock()
+		if sess != nil {
+			sess.mu.Lock()
+			history = append([]InteractiveEvent(nil), sess.events...)
+			sess.mu.Unlock()
+		}
+		for _, event := range history {
+			if event.Type == "session.error" {
+				goto historyReady
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+historyReady:
+	for _, event := range history {
+		if event.Type != "session.error" {
+			continue
+		}
+		data, ok := event.Data.(map[string]any)
+		if ok && data["retry_text"] == "恢复我的输入" {
+			return
+		}
+	}
+	t.Fatalf("session events = %#v, want retry_text for accepted message", history)
 }
 
 func TestAssistantBootstrapReturnsAllModesAndServerDefaults(t *testing.T) {
@@ -121,18 +252,20 @@ func TestAssistantBootstrapReturnsAllModesAndServerDefaults(t *testing.T) {
 		}
 	})
 
-	t.Run("unconfirmed profiles do not unlock creation", func(t *testing.T) {
+	t.Run("unconfirmed profiles unlock creation", func(t *testing.T) {
 		repo := newAssistantTestRepo(t)
 		project := &model.Project{ID: uuid.NewString(), UserID: "user-1", Platform: "wechat", Name: "待确认画像", Status: model.ProjectStatusActive, Profile: datatypes.NewJSONType(model.NewProjectProfile())}
 		if err := repo.Projects().Create(context.Background(), project); err != nil {
 			t.Fatal(err)
 		}
-		bootstrap, err := NewInteractiveServiceWithRuntime(repo, interactiveTestRuntimeFactory{}).AssistantBootstrap(context.Background(), "user-1")
+		svc := NewInteractiveServiceWithRuntime(repo, interactiveTestRuntimeFactory{})
+		svc.SetEnabled(true)
+		bootstrap, err := svc.AssistantBootstrap(context.Background(), "user-1")
 		if err != nil {
 			t.Fatalf("AssistantBootstrap() error = %v", err)
 		}
-		if bootstrap.DefaultModeID != AssistantModeProfile || bootstrap.Modes[1].Available || bootstrap.Projects[0].ProfileReady {
-			t.Fatalf("unconfirmed bootstrap = %#v; want profile default and creation locked", bootstrap)
+		if bootstrap.DefaultModeID != AssistantModeCreation || !bootstrap.Modes[1].Available || !bootstrap.Projects[0].ProfileReady {
+			t.Fatalf("unconfirmed bootstrap = %#v; want creation default and ready persona", bootstrap)
 		}
 	})
 
@@ -159,6 +292,465 @@ func TestAssistantBootstrapReturnsAllModesAndServerDefaults(t *testing.T) {
 	})
 }
 
+func TestAssistantActivePersonasAdmitCreationReviewAndWorkspaceRecovery(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		status         string
+		initialization string
+		version        int64
+		absent         bool
+	}{
+		{name: "draft ready", status: model.ProfileStatusDraft, initialization: model.ProfileInitializationReady, version: 7},
+		{name: "draft uninitialized", status: model.ProfileStatusDraft, initialization: model.ProfileInitializationNotStarted},
+		{name: "empty profile"},
+		{name: "absent profile", absent: true},
+		{name: "confirmed zero revision", status: model.ProfileStatusConfirmed, initialization: model.ProfileInitializationReady},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := newAssistantTestRepo(t)
+			project := &model.Project{ID: uuid.NewString(), UserID: "user-1", Name: tc.name, Platform: model.PlatformWechat, Status: model.ProjectStatusActive}
+			if !tc.absent {
+				profile := model.NewProjectProfile()
+				profile.Status, profile.InitializationStatus, profile.Version = tc.status, tc.initialization, tc.version
+				project.Profile = datatypes.NewJSONType(profile)
+			}
+			if err := repo.Projects().Create(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			work := &model.Task{ID: uuid.NewString(), UserID: "user-1", ProjectID: project.ID, Type: "article", Status: model.TaskStatusCompleted, Title: "Saved work"}
+			if err := repo.Tasks().Create(ctx, work); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := NewAnalyticsService(repo).Apply(ctx, AnalyticsWriteRequest{ProjectID: project.ID, Observations: []AnalyticsObservationInput{{
+				Content:     model.AnalyticsContent{ID: "task:" + work.ID, ProjectID: project.ID, Platform: model.PlatformWechat, TaskID: work.ID, Title: work.Title, ContentType: "article"},
+				Observation: model.AnalyticsObservation{ID: "observation-" + work.ID, ProjectID: project.ID, ContentID: "task:" + work.ID, StatDate: time.Now().UTC().Format("2006-01-02"), MetricBasis: "cumulative", Source: "test", EffectiveAt: time.Now().UTC(), ReceivedAt: time.Now().UTC()},
+			}}}); err != nil {
+				t.Fatal(err)
+			}
+			svc := newAssistantWorkspaceTestService(repo)
+			logger := zerolog.Nop()
+			tasks := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
+			svc.SetTaskService(tasks)
+			bootstrap, err := svc.AssistantBootstrap(ctx, "user-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(bootstrap.Projects) != 1 || bootstrap.Projects[0].ID != project.ID || !bootstrap.Projects[0].ProfileReady || bootstrap.Projects[0].ProfileRevision != tc.version || bootstrap.DefaultModeID != AssistantModeCreation || !bootstrap.Modes[1].Available || !bootstrap.Modes[2].Available {
+				t.Fatalf("active persona bootstrap = %#v", bootstrap)
+			}
+			works, err := svc.AssistantWorks(ctx, "user-1", project.ID, nil, 10)
+			if err != nil || len(works.Items) != 1 || works.Items[0].ID != work.ID {
+				t.Fatalf("completed works = %#v, %v", works, err)
+			}
+			workspace, err := svc.CreateAssistantWorkspace(ctx, "user-1", AssistantWorkspaceInput{ModeID: AssistantModeCreation, ProjectID: project.ID}, "active-persona")
+			if err != nil {
+				t.Fatalf("creation admission: %v", err)
+			}
+			t.Cleanup(func() { _ = svc.CloseAssistantWorkspace(ctx, "user-1", workspace.ID) })
+			for _, checkpoint := range []*model.AssistantCheckpoint{
+				{ID: "creation-checkpoint", UserID: "user-1", ModeID: AssistantModeCreation, ProjectID: project.ID, SourceSessionID: workspace.Sessions[AssistantModeCreation], Status: model.AssistantCheckpointDraft, SchemaVersion: "1.0", Payload: json.RawMessage(`{"plan":{"topic":"saved topic"}}`), BaseProfileRevision: tc.version, ExpiresAt: time.Now().Add(time.Hour)},
+				{ID: "review-checkpoint", UserID: "user-1", ModeID: AssistantModeReview, ProjectID: project.ID, ContentID: work.ID, SourceSessionID: "previous-review", Status: model.AssistantCheckpointDraft, SchemaVersion: "1.0", Payload: json.RawMessage(`{"review":{"findings":[]}}`), BaseProfileRevision: tc.version, BaseContentRevision: work.UpdatedAt.UTC().UnixNano(), BaseAnalyticsRevision: 1, ExpiresAt: time.Now().Add(time.Hour)},
+			} {
+				if err := repo.AssistantCheckpoints().UpsertBySourceSession(ctx, checkpoint); err != nil {
+					t.Fatal(err)
+				}
+			}
+			checkpoint, err := svc.LatestAssistantCheckpoint(ctx, "user-1", AssistantModeCreation, project.ID, "")
+			if err != nil || checkpoint == nil {
+				t.Fatalf("creation checkpoint = %#v, %v", checkpoint, err)
+			}
+			review, err := svc.SwitchAssistantWorkspaceModeWithContext(ctx, "user-1", workspace.ID, AssistantWorkspaceInput{ModeID: AssistantModeReview, ContentID: work.ID})
+			if err != nil || review.Sessions[AssistantModeReview] == "" {
+				t.Fatalf("review admission = %#v, %v", review, err)
+			}
+			if checkpoint, err = svc.LatestAssistantCheckpoint(ctx, "user-1", AssistantModeReview, project.ID, work.ID); err != nil || checkpoint == nil {
+				t.Fatalf("review checkpoint = %#v, %v", checkpoint, err)
+			}
+			if err := repo.AssistantSessions().InterruptActive(ctx, time.Now().UTC()); err != nil {
+				t.Fatal(err)
+			}
+			restarted := newAssistantWorkspaceTestService(repo)
+			restarted.SetTaskService(tasks)
+			t.Cleanup(func() { _ = restarted.CloseAssistantWorkspace(ctx, "user-1", workspace.ID) })
+			recovered, err := restarted.WorkspaceState(ctx, "user-1", workspace.ID)
+			if err != nil || recovered.Sessions[AssistantModeReview] == review.Sessions[AssistantModeReview] {
+				t.Fatalf("review recovery = %#v, %v", recovered, err)
+			}
+			if _, err := restarted.SwitchAssistantWorkspaceMode(ctx, "user-1", workspace.ID, AssistantModeCreation); err != nil {
+				t.Fatalf("creation recovery: %v", err)
+			}
+			stored, err := repo.Projects().FindByID(ctx, project.ID)
+			if err != nil || !reflect.DeepEqual(stored.Profile.Data(), project.Profile.Data()) {
+				t.Fatalf("admission mutated saved profile: %#v, %v", stored, err)
+			}
+		})
+	}
+}
+
+func TestAssistantPersonaAccessRetainsOwnershipStatusAndCompletedWorkBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name, owner, status, workOwner, workStatus string
+		excluded                                   bool
+	}{
+		{"archived", "user-1", model.ProjectStatusArchived, "user-1", model.TaskStatusCompleted, true},
+		{"wrong owner", "user-2", model.ProjectStatusActive, "user-2", model.TaskStatusCompleted, true},
+		{"unfinished work", "user-1", model.ProjectStatusActive, "user-1", model.TaskStatusRunning, false},
+		{"unowned work", "user-1", model.ProjectStatusActive, "user-2", model.TaskStatusCompleted, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := newAssistantTestRepo(t)
+			project := createAssistantProject(t, repo, tc.owner, tc.name)
+			project.Status = tc.status
+			if err := repo.Projects().Update(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			// Keep a separate eligible work so review mode availability cannot mask access checks.
+			eligible := createAssistantProject(t, repo, "user-1", "eligible")
+			for _, work := range []*model.Task{
+				{ID: "eligible-work", UserID: "user-1", ProjectID: eligible.ID, Status: model.TaskStatusCompleted},
+				{ID: "selected-work", UserID: tc.workOwner, ProjectID: project.ID, Status: tc.workStatus},
+			} {
+				if err := repo.Tasks().Create(ctx, work); err != nil {
+					t.Fatal(err)
+				}
+			}
+			svc := newAssistantWorkspaceTestService(repo)
+			bootstrap, err := svc.AssistantBootstrap(ctx, "user-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, p := range bootstrap.Projects {
+				if tc.excluded && p.ID == project.ID {
+					t.Fatalf("excluded persona returned: %#v", p)
+				}
+			}
+			works, err := svc.AssistantWorks(ctx, "user-1", project.ID, nil, 10)
+			if tc.excluded {
+				if !errors.Is(err, ErrInteractiveSessionOwner) {
+					t.Fatalf("excluded works error = %v", err)
+				}
+			} else if err != nil || len(works.Items) != 0 {
+				t.Fatalf("ineligible works = %#v, %v", works, err)
+			}
+			if _, err := svc.LatestAssistantCheckpoint(ctx, "user-1", AssistantModeReview, project.ID, "selected-work"); !errors.Is(err, ErrInteractiveSessionOwner) {
+				t.Fatalf("checkpoint access error = %v", err)
+			}
+			if _, err := svc.CreateAssistantSessionWithIdempotency(ctx, "user-1", AssistantSessionInput{ModeID: AssistantModeReview, ProjectID: project.ID, ContentID: "selected-work"}, "denied"); !errors.Is(err, ErrInteractiveSessionOwner) {
+				t.Fatalf("review access error = %v", err)
+			}
+		})
+	}
+}
+
+func TestAssistantWorkspaceKeepsModeSessionsAndRejectsBusySwitch(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	project := createAssistantProject(t, repo, "user-1", "统一助手")
+	svc := newAssistantWorkspaceTestService(repo)
+	workspace, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", AssistantWorkspaceInput{
+		ModeID: AssistantModeCreation, ProjectID: project.ID,
+	}, "workspace-create")
+	if err != nil {
+		t.Fatalf("CreateAssistantWorkspace() error = %v", err)
+	}
+	t.Cleanup(func() { _ = svc.CloseAssistantWorkspace(context.Background(), "user-1", workspace.ID) })
+	if workspace.ID == "" || workspace.Sessions[AssistantModeCreation] == "" || workspace.ModeID != AssistantModeCreation {
+		t.Fatalf("workspace = %#v", workspace)
+	}
+	profileWorkspace, err := svc.SwitchAssistantWorkspaceMode(context.Background(), "user-1", workspace.ID, AssistantModeProfile)
+	if err != nil {
+		t.Fatalf("idle mode switch error = %v", err)
+	}
+	profile := svc.sessions[profileWorkspace.Sessions[AssistantModeProfile]]
+	profile.mu.Lock()
+	profile.busy = true
+	profile.mu.Unlock()
+	defer func() {
+		profile.mu.Lock()
+		profile.busy = false
+		profile.mu.Unlock()
+	}()
+	if _, err := svc.SwitchAssistantWorkspaceMode(context.Background(), "user-1", workspace.ID, AssistantModeCreation); !errors.Is(err, ErrAssistantWorkspaceBusy) {
+		t.Fatalf("busy mode switch error = %v, want ErrAssistantWorkspaceBusy", err)
+	}
+}
+
+func TestAssistantWorkspaceRecoversInterruptedSessionAfterServiceRestart(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	svc := newAssistantWorkspaceTestService(repo)
+	workspace, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", AssistantWorkspaceInput{ModeID: AssistantModeProfile}, "restart-key")
+	if err != nil {
+		t.Fatalf("CreateAssistantWorkspace() error = %v", err)
+	}
+	t.Cleanup(func() { _ = svc.CloseAssistantWorkspace(context.Background(), "user-1", workspace.ID) })
+	if err := repo.AssistantSessions().InterruptActive(context.Background(), time.Now().UTC()); err != nil {
+		t.Fatalf("InterruptActive() error = %v", err)
+	}
+
+	restarted := newAssistantWorkspaceTestService(repo)
+	t.Cleanup(func() { _ = restarted.CloseAssistantWorkspace(context.Background(), "user-1", workspace.ID) })
+	recovered, err := restarted.WorkspaceState(context.Background(), "user-1", workspace.ID)
+	if err != nil {
+		t.Fatalf("WorkspaceState() after restart error = %v", err)
+	}
+	if recovered.SessionID == "" || recovered.SessionID == workspace.SessionID {
+		t.Fatalf("recovered session = %#v; want a new live session", recovered)
+	}
+	row, err := repo.AssistantSessions().FindByIDForUser(context.Background(), "user-1", recovered.SessionID)
+	if err != nil || row.ClosedAt != nil || row.Status == "interrupted" {
+		t.Fatalf("recovered durable session = %#v, %v; want active", row, err)
+	}
+}
+
+func TestAssistantWorkspaceSwitchReviewUsesSubmittedContext(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	project := createAssistantProject(t, repo, "user-1", "复盘画像")
+	project.Platform = model.PlatformSeednote
+	if err := repo.Projects().Update(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	work := &model.Task{ID: uuid.NewString(), UserID: "user-1", ProjectID: project.ID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted, Title: "已完成作品", CreatedAt: time.Now().Add(-time.Hour)}
+	if err := repo.Tasks().Create(context.Background(), work); err != nil {
+		t.Fatal(err)
+	}
+	store := &streamArtifactStorage{objects: map[string][]byte{"review/context.md": []byte("复盘正文")}}
+	if err := repo.TaskFiles().Create(context.Background(), &model.TaskFile{ID: uuid.NewString(), TaskID: work.ID, State: model.TaskFileStateDelivered, Role: model.FileRoleMarkdown, FilePath: "output/content.md", FileName: "content.md", MimeType: "text/markdown", FileSize: int64(len("复盘正文")), OSSKey: "review/context.md", StorageProvider: store.Name()}); err != nil {
+		t.Fatal(err)
+	}
+	views := int64(20)
+	if _, err := NewAnalyticsService(repo).Apply(context.Background(), AnalyticsWriteRequest{ProjectID: project.ID, Observations: []AnalyticsObservationInput{{Content: model.AnalyticsContent{ID: "post:" + work.ID, ProjectID: project.ID, Platform: model.PlatformSeednote, TaskID: work.ID, Title: work.Title, ContentType: "note"}, Observation: model.AnalyticsObservation{ID: "observation-" + work.ID, ProjectID: project.ID, ContentID: "post:" + work.ID, StatDate: time.Now().UTC().Format("2006-01-02"), MetricBasis: "cumulative", Source: "test", EffectiveAt: time.Now().UTC(), ReceivedAt: time.Now().UTC(), AnalyticsMetrics: model.AnalyticsMetrics{ViewCount: &views}}}}}); err != nil {
+		t.Fatal(err)
+	}
+	svc := newAssistantWorkspaceTestService(repo)
+	logger := zerolog.Nop()
+	svc.SetTaskService(NewTaskService(repo, nil, store, &logger, "", nil, nil))
+	workspace, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", AssistantWorkspaceInput{ModeID: AssistantModeProfile}, "review-context-key")
+	if err != nil {
+		t.Fatalf("CreateAssistantWorkspace() error = %v", err)
+	}
+	t.Cleanup(func() { _ = svc.CloseAssistantWorkspace(context.Background(), "user-1", workspace.ID) })
+	review, err := svc.SwitchAssistantWorkspaceModeWithContext(context.Background(), "user-1", workspace.ID, AssistantWorkspaceInput{ModeID: AssistantModeReview, ProjectID: project.ID, ContentID: work.ID})
+	if err != nil {
+		t.Fatalf("SwitchAssistantWorkspaceModeWithContext() error = %v", err)
+	}
+	if review.ContentID != work.ID || review.ProjectID != project.ID {
+		t.Fatalf("review workspace context = %#v", review)
+	}
+	row, err := repo.AssistantSessions().FindByIDForUser(context.Background(), "user-1", review.SessionID)
+	if err != nil || row.ContentID != work.ID || row.ProjectID != project.ID {
+		t.Fatalf("review durable session = %#v, %v", row, err)
+	}
+}
+
+func TestAssistantWorkspaceRecreatesClosedModeSession(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	project := createAssistantProject(t, repo, "user-1", "可恢复画像")
+	svc := newAssistantWorkspaceTestService(repo)
+	workspace, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", AssistantWorkspaceInput{ModeID: AssistantModeProfile}, "closed-mode-key")
+	if err != nil {
+		t.Fatalf("CreateAssistantWorkspace() error = %v", err)
+	}
+	t.Cleanup(func() { _ = svc.CloseAssistantWorkspace(context.Background(), "user-1", workspace.ID) })
+	if _, err := svc.SwitchAssistantWorkspaceModeWithContext(context.Background(), "user-1", workspace.ID, AssistantWorkspaceInput{ModeID: AssistantModeCreation, ProjectID: project.ID}); err != nil {
+		t.Fatalf("switch creation error = %v", err)
+	}
+	creationID := func() string {
+		state, stateErr := svc.WorkspaceState(context.Background(), "user-1", workspace.ID)
+		if stateErr != nil {
+			t.Fatalf("WorkspaceState() error = %v", stateErr)
+		}
+		return state.Sessions[AssistantModeCreation]
+	}()
+	if err := svc.Close("user-1", creationID); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	back, err := svc.SwitchAssistantWorkspaceModeWithContext(context.Background(), "user-1", workspace.ID, AssistantWorkspaceInput{ModeID: AssistantModeCreation, ProjectID: project.ID})
+	if err != nil {
+		t.Fatalf("switch back to creation error = %v", err)
+	}
+	if back.SessionID == creationID || back.Sessions[AssistantModeCreation] == creationID {
+		t.Fatalf("closed creation session was reused: %#v", back)
+	}
+}
+
+func TestAssistantWorkspaceDoesNotResumeCommittedCheckpointIntoNewSession(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	project := createAssistantProject(t, repo, "user-1", "已提交计划")
+	svc := newAssistantWorkspaceTestService(repo)
+	workspace, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", AssistantWorkspaceInput{ModeID: AssistantModeProfile}, "committed-checkpoint-key")
+	if err != nil {
+		t.Fatalf("CreateAssistantWorkspace() error = %v", err)
+	}
+	t.Cleanup(func() { _ = svc.CloseAssistantWorkspace(context.Background(), "user-1", workspace.ID) })
+	if _, err := svc.SwitchAssistantWorkspaceModeWithContext(context.Background(), "user-1", workspace.ID, AssistantWorkspaceInput{ModeID: AssistantModeCreation, ProjectID: project.ID}); err != nil {
+		t.Fatalf("switch creation error = %v", err)
+	}
+	state, err := svc.WorkspaceState(context.Background(), "user-1", workspace.ID)
+	if err != nil {
+		t.Fatalf("WorkspaceState() error = %v", err)
+	}
+	creationID := state.Sessions[AssistantModeCreation]
+	checkpoint := &model.AssistantCheckpoint{ID: uuid.NewString(), UserID: "user-1", ModeID: AssistantModeCreation, ProjectID: project.ID, SourceSessionID: creationID, SchemaVersion: "1.0", Payload: []byte(`{"plan":{"goal":"already committed"}}`), Status: model.AssistantCheckpointCommitted, ExpiresAt: time.Now().Add(time.Hour)}
+	if err := repo.AssistantCheckpoints().UpsertBySourceSession(context.Background(), checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AssistantSessions().SetCheckpoint(context.Background(), creationID, checkpoint.ID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Close("user-1", creationID); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	recreated, err := svc.SwitchAssistantWorkspaceModeWithContext(context.Background(), "user-1", workspace.ID, AssistantWorkspaceInput{ModeID: AssistantModeCreation, ProjectID: project.ID})
+	if err != nil {
+		t.Fatalf("switch back after committed checkpoint error = %v", err)
+	}
+	if recreated.SessionID == creationID {
+		t.Fatalf("closed creation session was reused: %#v", recreated)
+	}
+	row, err := repo.AssistantSessions().FindByIDForUser(context.Background(), "user-1", recreated.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.CheckpointID != "" {
+		t.Fatalf("replacement session inherited committed checkpoint %q", row.CheckpointID)
+	}
+}
+
+func TestAssistantWorkspaceConcurrentCreationReturnsCompleteIdempotentWorkspace(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	svc := newAssistantWorkspaceTestService(repo)
+	type result struct {
+		workspace *AssistantWorkspaceView
+		err       error
+	}
+	results := make(chan result, 2)
+	for range 2 {
+		go func() {
+			workspace, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", AssistantWorkspaceInput{ModeID: AssistantModeProfile}, "concurrent-key")
+			results <- result{workspace: workspace, err: err}
+		}()
+	}
+	first, second := <-results, <-results
+	if first.err != nil || second.err != nil {
+		t.Fatalf("concurrent creation errors = %v, %v", first.err, second.err)
+	}
+	t.Cleanup(func() { _ = svc.CloseAssistantWorkspace(context.Background(), "user-1", first.workspace.ID) })
+	if first.workspace.ID != second.workspace.ID || first.workspace.SessionID == "" || second.workspace.SessionID == "" {
+		t.Fatalf("concurrent creation returned incomplete/different workspaces: %#v / %#v", first.workspace, second.workspace)
+	}
+}
+
+func TestAssistantWorkspaceFirstSessionDoesNotConsumeItsOwnUserQuota(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	svc := newAssistantWorkspaceTestService(repo)
+	svc.maxPerUser = 1
+	workspace, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", AssistantWorkspaceInput{ModeID: AssistantModeProfile}, "single-quota-key")
+	if err != nil {
+		t.Fatalf("CreateAssistantWorkspace() with maxPerUser=1 error = %v", err)
+	}
+	t.Cleanup(func() { _ = svc.CloseAssistantWorkspace(context.Background(), "user-1", workspace.ID) })
+}
+
+func TestAssistantWorkspaceCreationIsIdempotentAndBindsSessionToWorkspace(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	project := createAssistantProject(t, repo, "user-1", "统一助手")
+	svc := NewInteractiveServiceWithRuntime(repo, interactiveTestRuntimeFactory{})
+	svc.SetEnabled(true)
+	input := AssistantWorkspaceInput{ModeID: AssistantModeCreation, ProjectID: project.ID}
+
+	first, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", input, "workspace-retry-key")
+	if err != nil {
+		t.Fatalf("first CreateAssistantWorkspace() error = %v", err)
+	}
+	retry, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", input, "workspace-retry-key")
+	if err != nil {
+		t.Fatalf("retry CreateAssistantWorkspace() error = %v", err)
+	}
+	if retry.ID != first.ID || retry.SessionID != first.SessionID {
+		t.Fatalf("retry workspace/session = %s/%s, want original %s/%s", retry.ID, retry.SessionID, first.ID, first.SessionID)
+	}
+	session, err := repo.AssistantSessions().FindByIDForUser(context.Background(), "user-1", retry.SessionID)
+	if err != nil {
+		t.Fatalf("FindByIDForUser() error = %v", err)
+	}
+	if session.WorkspaceID != retry.ID {
+		t.Fatalf("session workspace = %s, want %s", session.WorkspaceID, retry.ID)
+	}
+
+	if _, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", AssistantWorkspaceInput{ModeID: AssistantModeProfile}, "workspace-retry-key"); !errors.Is(err, ErrInteractiveIdempotency) {
+		t.Fatalf("same key with different request error = %v, want ErrInteractiveIdempotency", err)
+	}
+}
+
+func TestFindAssistantWorkspaceDistinguishesExpiryFromMissing(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	now := time.Now().UTC()
+	workspace := &model.AssistantWorkspace{ID: uuid.NewString(), UserID: "user-1", ModeID: AssistantModeProfile, ExpiresAt: now.Add(-time.Minute), CreatedAt: now.Add(-time.Hour), UpdatedAt: now}
+	if err := repo.AssistantWorkspaces().Create(context.Background(), workspace); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewInteractiveService(repo)
+	if _, err := svc.findAssistantWorkspace(context.Background(), "user-1", workspace.ID); !errors.Is(err, ErrAssistantWorkspaceExpired) {
+		t.Fatalf("findAssistantWorkspace() error = %v, want ErrAssistantWorkspaceExpired", err)
+	}
+	if _, err := svc.findAssistantWorkspace(context.Background(), "user-1", "missing"); !errors.Is(err, ErrAssistantWorkspaceNotFound) {
+		t.Fatalf("findAssistantWorkspace() missing error = %v, want ErrAssistantWorkspaceNotFound", err)
+	}
+}
+
+func TestAssistantWorkspaceIdempotencyRetryRecoversOrphanedWorkspace(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	svc := newAssistantWorkspaceTestService(repo)
+	input := AssistantWorkspaceInput{ModeID: AssistantModeProfile}
+	key := "orphaned-workspace-key"
+	keyHash := fmt.Sprintf("%x", sha256.Sum256([]byte("user-1\x00"+key)))
+	now := time.Now().UTC()
+	orphan := &model.AssistantWorkspace{
+		ID: uuid.NewString(), UserID: "user-1", ModeID: AssistantModeProfile,
+		RuntimeID: uuid.NewString(), RuntimeStatus: "starting", ExpiresAt: now.Add(time.Hour),
+		CreatedAt: now, UpdatedAt: now, IdempotencyKeyHash: &keyHash,
+		RequestFingerprint: assistantWorkspaceRequestFingerprint(input),
+	}
+	if err := repo.AssistantWorkspaces().Create(context.Background(), orphan); err != nil {
+		t.Fatalf("create orphan workspace: %v", err)
+	}
+
+	workspace, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", input, key)
+	if err != nil {
+		t.Fatalf("CreateAssistantWorkspace() should recover orphan: %v", err)
+	}
+	if workspace.ID != orphan.ID || workspace.SessionID == "" {
+		t.Fatalf("recovered workspace = %#v; want original id with a bound session", workspace)
+	}
+	t.Cleanup(func() { _ = svc.CloseAssistantWorkspace(context.Background(), "user-1", workspace.ID) })
+}
+
+func TestRenewSessionExtendsWorkspaceExpiry(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	svc := newAssistantWorkspaceTestService(repo)
+	svc.SetSessionTTL(3 * time.Hour)
+	svc.SetSessionIdleTimeout(time.Minute)
+	workspace, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", AssistantWorkspaceInput{ModeID: AssistantModeProfile}, "workspace-expiry-key")
+	if err != nil {
+		t.Fatalf("CreateAssistantWorkspace() error = %v", err)
+	}
+	t.Cleanup(func() { _ = svc.CloseAssistantWorkspace(context.Background(), "user-1", workspace.ID) })
+	before, err := repo.AssistantWorkspaces().FindByIDForUser(context.Background(), "user-1", workspace.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetSessionIdleTimeout(2 * time.Hour)
+	svc.renewSession(workspace.SessionID)
+	after, err := repo.AssistantWorkspaces().FindByIDForUser(context.Background(), "user-1", workspace.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ExpiresAt.After(before.ExpiresAt) {
+		t.Fatalf("workspace expiry = %v, want after %v", after.ExpiresAt, before.ExpiresAt)
+	}
+}
+
 func TestResolveRuntimeSessionRejectsAmbiguousWorkspaceToken(t *testing.T) {
 	svc := NewInteractiveServiceWithRuntime(nil, interactiveTestRuntimeFactory{})
 	first := &InteractiveSession{ID: "first", UserID: "user-1", WorkspaceID: "workspace-1", ExpiresAt: time.Now().Add(time.Hour), runtimeTokenHash: confirmationHash("runtime-token")}
@@ -183,6 +775,70 @@ func TestResolveRuntimeSessionSelectsActiveWorkspaceSession(t *testing.T) {
 	if err != nil || sessionID != active.ID || userID != active.UserID {
 		t.Fatalf("ResolveRuntimeSession() = %q/%q, %v; want active workspace session %q/%q", sessionID, userID, err, active.ID, active.UserID)
 	}
+}
+
+func TestAssistantWorkspaceReusesOneRuntimeAndClosesItAfterLastMode(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	project := createAssistantProject(t, repo, "user-1", "统一助手")
+	factory := &interactiveWorkspaceRuntimeFactory{runtime: &interactiveWorkspaceRecordingRuntime{}, spec: make(chan InteractiveRuntimeSpec, 1)}
+	svc := NewInteractiveServiceWithRuntime(repo, factory)
+	svc.SetEnabled(true)
+	workspace, err := svc.CreateAssistantWorkspace(context.Background(), "user-1", AssistantWorkspaceInput{ModeID: AssistantModeCreation, ProjectID: project.ID}, "runtime-workspace")
+	if err != nil {
+		t.Fatalf("CreateAssistantWorkspace() error = %v", err)
+	}
+	var spec InteractiveRuntimeSpec
+	select {
+	case spec = <-factory.spec:
+	case <-time.After(time.Second):
+		t.Fatal("workspace runtime did not start")
+	}
+	if spec.WorkspaceID != workspace.ID || !reflect.DeepEqual(spec.PresetIDs, []string{"project-creator", "creation-planner", "postmortem-review"}) {
+		t.Fatalf("runtime spec = %#v", spec)
+	}
+	waitForAssistantRuntimeSession(t, svc, workspace.SessionID)
+
+	profileWorkspace, err := svc.SwitchAssistantWorkspaceMode(context.Background(), "user-1", workspace.ID, AssistantModeProfile)
+	if err != nil {
+		t.Fatalf("SwitchAssistantWorkspaceMode() error = %v", err)
+	}
+	waitForAssistantRuntimeSession(t, svc, profileWorkspace.SessionID)
+	select {
+	case unexpected := <-factory.spec:
+		t.Fatalf("mode switch started another runtime: %#v", unexpected)
+	default:
+	}
+
+	if err := svc.Close("user-1", workspace.SessionID); err != nil {
+		t.Fatalf("closing creation session: %v", err)
+	}
+	factory.runtime.mu.Lock()
+	closeCount := factory.runtime.closeCount
+	factory.runtime.mu.Unlock()
+	if closeCount != 0 {
+		t.Fatalf("shared runtime closed while profile session remains: %d closes", closeCount)
+	}
+	if err := svc.Close("user-1", profileWorkspace.SessionID); err != nil {
+		t.Fatalf("closing profile session: %v", err)
+	}
+	factory.runtime.mu.Lock()
+	closeCount = factory.runtime.closeCount
+	factory.runtime.mu.Unlock()
+	if closeCount != 1 {
+		t.Fatalf("shared runtime closes = %d, want once", closeCount)
+	}
+}
+
+func waitForAssistantRuntimeSession(t *testing.T, svc *InteractiveService, sessionID string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if status, err := svc.SessionState("user-1", sessionID); err == nil && status == "running" {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("session %s did not become running", sessionID)
 }
 
 func TestAssistantWorksPagesCompletedWorksAndChecksProjectOwnership(t *testing.T) {

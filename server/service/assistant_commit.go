@@ -60,9 +60,18 @@ func (s *InteractiveService) CommitAssistant(ctx context.Context, userID, sessio
 	}
 	sess, sessionErr := s.getOwned(userID, sessionID)
 	if (sessionErr == nil && (sess.ModeID == "" || sess.ModeID == AssistantModeProfile)) || (sessionErr != nil && req.CheckpointID == "") {
+		workspaceID := ""
+		if sessionErr == nil {
+			workspaceID = sess.WorkspaceID
+		}
 		result, err := s.Commit(ctx, userID, sessionID, InteractiveCommitRequest{ConfirmationToken: req.ConfirmationToken, IdempotencyKey: key, VideoEditDefaults: req.VideoEditDefaults})
 		if err != nil {
 			return AssistantCommitResult{}, err
+		}
+		if result.Project != nil {
+			if err := s.updateAssistantWorkspaceProject(ctx, userID, workspaceID, result.Project.ID); err != nil {
+				return AssistantCommitResult{}, err
+			}
 		}
 		return AssistantCommitResult{ModeID: AssistantModeProfile, Status: "committed", Project: result.Project, Profile: &result.Profile}, nil
 	}
@@ -434,19 +443,19 @@ func decodeAssistantReview(payload []byte) (assistantReviewDraft, []byte, error)
 
 func commitAssistantCreation(ctx context.Context, userID string, checkpoint *model.AssistantCheckpoint, tasks *TaskService, repo repository.Repository) (AssistantCommitResult, error) {
 	if tasks == nil {
-		return AssistantCommitResult{}, &assistantCommitPreflightError{cause: ErrInteractivePersistence}
+		return AssistantCommitResult{}, ErrInteractivePersistence
 	}
 	plan, planJSON, err := decodeAssistantCreationPlan(checkpoint.Payload)
 	if err != nil {
-		return AssistantCommitResult{}, &assistantCommitPreflightError{cause: err}
+		return AssistantCommitResult{}, err
 	}
 	if len(plan.MissingInputs) > 0 {
-		return AssistantCommitResult{}, &assistantCommitPreflightError{cause: ErrAssistantCreationInputsMissing}
+		return AssistantCommitResult{}, ErrAssistantCreationInputsMissing
 	}
 	prompt := "请根据以下经用户确认的本次创作需求完成内容创作。项目画像和平台信息由 Server 作为独立冻结上下文提供。用户未指定的内容生产细节由你根据能力和上下文决定；不得超出明确的要求、限制或素材范围。\n\n" + string(planJSON)
 	project, err := tasks.ResolveTaskCreationProject(ctx, userID, checkpoint.ProjectID)
 	if err != nil {
-		return AssistantCommitResult{}, &assistantCommitPreflightError{cause: err}
+		return AssistantCommitResult{}, err
 	}
 	if existing, lookupErr := repo.Tasks().FindByAssistantCheckpointID(ctx, userID, checkpoint.ID); lookupErr == nil {
 		if existing.ProjectID != checkpoint.ProjectID || existing.Prompt != prompt {
@@ -454,14 +463,14 @@ func commitAssistantCreation(ctx context.Context, userID string, checkpoint *mod
 		}
 		return assistantTaskCommitResult(existing), nil
 	} else if !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
-		return AssistantCommitResult{}, &assistantCommitPreflightError{cause: errors.Join(ErrInteractivePersistence, lookupErr)}
+		return AssistantCommitResult{}, errors.Join(ErrInteractivePersistence, lookupErr)
 	}
 	selected, taskType, taskKind, err := assistantCreationIdentity(project, plan.ContentType)
 	if err != nil {
-		return AssistantCommitResult{}, &assistantCommitPreflightError{cause: err}
+		return AssistantCommitResult{}, err
 	}
 	if len(planJSON)+128 > 24<<10 || !utf8.Valid(planJSON) {
-		return AssistantCommitResult{}, &assistantCommitPreflightError{cause: ErrAssistantCheckpointInvalid}
+		return AssistantCommitResult{}, ErrAssistantCheckpointInvalid
 	}
 
 	executionProfile := strings.TrimSpace(plan.ExecutionProfile)
@@ -478,7 +487,7 @@ func commitAssistantCreation(ctx context.Context, userID string, checkpoint *mod
 	if selected.Agent.Name == model.AgentIDVideoEdit {
 		inputAttachments, assets, assetErr := assistantVideoEditCreationAssets(ctx, userID, plan.Assets, tasks, repo)
 		if assetErr != nil {
-			return AssistantCommitResult{}, &assistantCommitPreflightError{cause: assetErr}
+			return AssistantCommitResult{}, assetErr
 		}
 		params.InputAttachments = inputAttachments
 		preferences := model.VideoEditPreferences{}
@@ -492,14 +501,14 @@ func commitAssistantCreation(ctx context.Context, userID string, checkpoint *mod
 	} else if selected.Agent.Name == model.AgentIDMontage {
 		inputAttachments, assets, assetErr := assistantMontageCreationAssets(ctx, userID, plan.Assets, tasks, repo)
 		if assetErr != nil {
-			return AssistantCommitResult{}, &assistantCommitPreflightError{cause: assetErr}
+			return AssistantCommitResult{}, assetErr
 		}
 		params.InputAttachments = inputAttachments
 		params.MontageInput = &model.MontageInput{Brief: prompt, SourceAssets: assets}
 	} else {
 		inputAttachments, attachmentErr := assistantCreationAttachmentsWithTasks(ctx, userID, plan.Assets, tasks, repo)
 		if attachmentErr != nil {
-			return AssistantCommitResult{}, &assistantCommitPreflightError{cause: attachmentErr}
+			return AssistantCommitResult{}, attachmentErr
 		}
 		params.InputAttachments = inputAttachments
 	}

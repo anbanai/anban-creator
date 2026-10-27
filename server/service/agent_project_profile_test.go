@@ -264,7 +264,7 @@ func TestAgentProjectProfileReturnsPublicImageCapabilityMetadata(t *testing.T) {
 	}
 }
 
-func TestSixCreativeObjectsReadTheSameFrozenAppliedProfile(t *testing.T) {
+func TestSixCreativeObjectsReadTheSameFrozenSavedDraftProfile(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "shared-profile.db")), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -278,7 +278,7 @@ func TestSixCreativeObjectsReadTheSameFrozenAppliedProfile(t *testing.T) {
 	taskSvc := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
 	svc := NewAgentProjectProfileService(projectSvc, taskSvc, nil, config.MontageConfig{}, agentProjectProfileImageCapabilityResolver())
 	profile := model.NewProjectProfile()
-	profile.Status, profile.Version = model.ProfileStatusConfirmed, 2
+	profile.Status, profile.Version = model.ProfileStatusDraft, 2
 	profile.ApplicationSource = model.ProfileApplicationSourceSystemAnalysis
 	profile.InitializationStatus = model.ProfileInitializationRunning
 	profile.Dimensions.Identity.Content["positioning"] = "推断定位"
@@ -427,7 +427,7 @@ func TestAgentProjectProfileRejectsTaskWithoutFrozenImageCapability(t *testing.T
 	}
 }
 
-func TestAgentProjectProfileOnlyExposesConfirmedAccountProfile(t *testing.T) {
+func TestAgentProjectProfileExposesSavedAccountProfileAcrossLifecycleStates(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "profile-confirmation.db")), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -450,36 +450,45 @@ func TestAgentProjectProfileOnlyExposesConfirmedAccountProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := svc.Get(context.Background(), AgentProjectProfileRequest{UserID: userID, ProjectID: project.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := (*got)["account_profile"]; ok {
-		t.Fatal("unconfirmed profile leaked as account_profile")
-	}
-	resolved := (*got)["resolved_profile"].(map[string]any)
-	if _, ok := resolved["account_profile"]; ok {
-		t.Fatal("unconfirmed profile leaked in resolved_profile")
-	}
-	if resolved["account_profile_status"] != model.ProfileStatusDraft {
-		t.Fatalf("account_profile_status = %v, want draft", resolved["account_profile_status"])
-	}
-
-	draft.Status = model.ProfileStatusConfirmed
-	draft.Version = 1
-	project.Profile = datatypes.NewJSONType(draft)
-	if err := repo.Projects().Update(context.Background(), project); err != nil {
-		t.Fatal(err)
-	}
-	got, err = svc.Get(context.Background(), AgentProjectProfileRequest{UserID: userID, ProjectID: project.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := (*got)["account_profile"]; !ok {
-		t.Fatal("confirmed profile missing from account_profile")
-	}
-	if _, ok := (*got)["resolved_profile"].(map[string]any)["account_profile"]; !ok {
-		t.Fatal("confirmed profile missing from resolved_profile")
+	for _, tc := range []struct {
+		name, status, initialization string
+		version                      int64
+		absent                       bool
+	}{
+		{"draft ready", model.ProfileStatusDraft, model.ProfileInitializationReady, 7, false},
+		{"draft uninitialized", model.ProfileStatusDraft, model.ProfileInitializationNotStarted, 0, false},
+		{"confirmed", model.ProfileStatusConfirmed, model.ProfileInitializationReady, 1, false},
+		{"absent", model.ProfileStatusDraft, model.ProfileInitializationNotStarted, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			draft.Status, draft.InitializationStatus, draft.Version = tc.status, tc.initialization, tc.version
+			draft.Dimensions.Identity.Sources = []string{"[推断待确认]"}
+			project.Profile = datatypes.NewJSONType(draft)
+			if tc.absent {
+				project.Profile = datatypes.NewJSONType(model.ProjectProfile{})
+			}
+			if err := repo.Projects().Update(context.Background(), project); err != nil {
+				t.Fatal(err)
+			}
+			got, err := svc.Get(context.Background(), AgentProjectProfileRequest{UserID: userID, ProjectID: project.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			account, ok := (*got)["account_profile"].(model.ProjectProfile)
+			if !ok || account.SchemaVersion != 1 || account.Status != tc.status || account.InitializationStatus != tc.initialization || account.Version != tc.version {
+				t.Fatalf("account_profile = %#v", (*got)["account_profile"])
+			}
+			if !tc.absent && (account.Dimensions.Identity.Content["name"] != "inferred" || !reflect.DeepEqual(account.Dimensions.Identity.Sources, []string{"[推断待确认]"})) {
+				t.Fatalf("saved dimensions or provenance lost: %#v", account)
+			}
+			resolved := (*got)["resolved_profile"].(map[string]any)
+			if !reflect.DeepEqual(resolved["account_profile"], account) {
+				t.Fatalf("resolved account_profile = %#v", resolved)
+			}
+			if tc.status == model.ProfileStatusDraft && resolved["account_profile_status"] != model.ProfileStatusDraft {
+				t.Fatalf("account_profile_status = %v, want draft", resolved["account_profile_status"])
+			}
+		})
 	}
 }
 

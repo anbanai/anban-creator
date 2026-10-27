@@ -276,6 +276,14 @@ func interactiveError(c fiber.Ctx, err error) error {
 		return ErrorWithCode(c, 409, "assistant_mode_unavailable", err.Error())
 	case errors.Is(err, service.ErrAssistantCheckpointConflict):
 		return ErrorWithCode(c, 409, "assistant_checkpoint_conflict", err.Error())
+	case errors.Is(err, service.ErrAssistantWorkspaceBusy):
+		return ErrorWithCode(c, 409, "assistant_workspace_busy", err.Error())
+	case errors.Is(err, service.ErrAssistantWorkspaceModeMismatch):
+		return ErrorWithCode(c, 409, "assistant_workspace_mode_mismatch", err.Error())
+	case errors.Is(err, service.ErrAssistantWorkspaceExpired):
+		return ErrorWithCode(c, 410, "assistant_workspace_expired", err.Error())
+	case errors.Is(err, service.ErrAssistantWorkspaceNotFound):
+		return ErrorWithCode(c, 404, "assistant_workspace_not_found", err.Error())
 	case errors.Is(err, service.ErrAssistantRuntimeContextTooLarge):
 		return Error(c, 413, err.Error())
 	case errors.Is(err, service.ErrInteractiveSessionNotFound):
@@ -297,13 +305,13 @@ func interactiveError(c fiber.Ctx, err error) error {
 	case errors.Is(err, service.ErrProjectProfileVersionConflict), errors.Is(err, service.ErrProjectMemoryConflict):
 		return ErrorWithCode(c, 409, "project_profile_revision_conflict", err.Error())
 	case errors.Is(err, service.ErrInteractiveAgent):
-		return ErrorWithCode(c, 503, "interactive_runtime_unavailable", "助手连接暂时不可用，当前内容已保留，请稍后重试")
+		return Error(c, 503, err.Error())
 	case errors.Is(err, service.ErrInteractivePersistence):
-		return ErrorWithCode(c, 503, "interactive_persistence_unavailable", "暂时无法完成操作，当前内容已保留，请稍后重试")
+		return Error(c, 503, err.Error())
 	default:
 		if strings.Contains(err.Error(), "invalid") || errors.Is(err, service.ErrInteractiveDraftInvalid) {
 			return Error(c, 400, err.Error())
 		}
-		return ErrorWithCode(c, 500, "interactive_operation_failed", "操作暂时未完成，当前内容已保留，请稍后重试")
+		return Error(c, 500, err.Error())
 	}
 }
