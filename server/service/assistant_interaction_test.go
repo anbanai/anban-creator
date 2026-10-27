@@ -321,8 +321,8 @@ func TestInteractionMessageDoesNotReplayPendingAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = svc.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{Generation: snapshot.Generation, ClientMessageID: "message-1", Text: "需求"})
-	if err == nil || NormalizeInteractionError(err).Code != InteractionErrorReconnecting {
-		t.Fatalf("pending message retry error = %v, want reconnecting", err)
+	if err == nil || NormalizeInteractionError(err).Code != InteractionErrorCommandOutcomeUnknown {
+		t.Fatalf("pending message retry error = %v, want outcome unknown", err)
 	}
 }
 
@@ -623,8 +623,8 @@ func TestAssistantInteractionCommandFailureFencesGenerationAndReplacesRuntime(t 
 		t.Fatal(err)
 	}
 	err = svc.SendMessage(context.Background(), "user-1", snapshot.ID, InteractionMessageInput{Generation: snapshot.Generation, ClientMessageID: "message-1", Text: "继续"})
-	if err == nil || NormalizeInteractionError(err).Code != InteractionErrorReconnecting {
-		t.Fatalf("command failure = %v, want reconnecting", err)
+	if err == nil || NormalizeInteractionError(err).Code != "assistant_command_outcome_unknown" {
+		t.Fatalf("command failure = %v, want outcome unknown", err)
 	}
 	recovered, err := svc.Snapshot(context.Background(), "user-1", snapshot.ID)
 	if err != nil {
@@ -644,8 +644,8 @@ func TestAssistantInteractionCommandFailureFencesGenerationAndReplacesRuntime(t 
 		t.Fatal("late event from failed generation was accepted")
 	}
 	input := InteractionMessageInput{Generation: snapshot.Generation + 1, ClientMessageID: "message-1", Text: "继续"}
-	if err := svc.SendMessage(context.Background(), "user-1", snapshot.ID, input); err == nil || NormalizeInteractionError(err).Code != InteractionErrorReconnecting {
-		t.Fatalf("retry after ambiguous delivery = %v, want reconnecting", err)
+	if err := svc.SendMessage(context.Background(), "user-1", snapshot.ID, input); err == nil || NormalizeInteractionError(err).Code != "assistant_command_outcome_unknown" {
+		t.Fatalf("retry after ambiguous delivery = %v, want outcome unknown", err)
 	}
 	factory.mu.Lock()
 	starts := factory.starts
@@ -682,8 +682,8 @@ func TestAssistantInteractionCommandFailureKeepsAttemptPendingWhenReplacementFai
 
 	input.Generation = snapshot.Generation + 1
 	err = svc.SendMessage(context.Background(), "user-1", snapshot.ID, input)
-	if err == nil || NormalizeInteractionError(err).Code != InteractionErrorReconnecting {
-		t.Fatalf("retry with unresolved delivery = %v, want reconnecting", err)
+	if err == nil || NormalizeInteractionError(err).Code != "assistant_command_outcome_unknown" {
+		t.Fatalf("retry with unresolved delivery = %v, want outcome unknown", err)
 	}
 	factory.mu.Lock()
 	starts := factory.starts

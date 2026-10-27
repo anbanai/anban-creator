@@ -41,6 +41,7 @@ const (
 	InteractionErrorReconnecting                 = "assistant_interaction_reconnecting"
 	InteractionErrorRestartRequired              = "assistant_interaction_restart_required"
 	InteractionErrorMessageNotAccepted           = "assistant_message_not_accepted"
+	InteractionErrorCommandOutcomeUnknown        = "assistant_command_outcome_unknown"
 	InteractionErrorDraftSavedRetryable          = "assistant_draft_saved_retryable"
 	InteractionErrorDraftRevisionConflict        = "assistant_draft_revision_conflict"
 	InteractionErrorCommitAlreadyApplied         = "assistant_commit_already_applied"
