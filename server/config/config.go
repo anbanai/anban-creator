@@ -256,7 +256,7 @@ func (c DshConfig) Validate() error {
 	if c.Enabled && executor != "container" && executor != "kubernetes" && executor != "process" {
 		errs = append(errs, "dsh.executor must be container, kubernetes, or process when dsh.enabled is true")
 	}
-	if executor == "container" {
+	if c.Enabled && executor == "container" {
 		if strings.TrimSpace(c.Image) == "" {
 			errs = append(errs, "dsh.image is required for container executor")
 		}
@@ -291,7 +291,7 @@ func (c DshConfig) Validate() error {
 	if c.Enabled && c.TimeoutSec <= c.IdleTimeoutSec {
 		errs = append(errs, "dsh.timeout_sec must be greater than dsh.idle_timeout_sec")
 	}
-	if executor == "kubernetes" {
+	if c.Enabled && executor == "kubernetes" {
 		if !validDshKubernetesImageReference(c.Image) {
 			errs = append(errs, "dsh.image must be a valid immutable container image reference")
 		}
@@ -2269,10 +2269,10 @@ func (c *Config) Validate() error {
 	if err := c.Dsh.Validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
-	if strings.EqualFold(strings.TrimSpace(c.Dsh.Executor), "kubernetes") && strings.TrimSpace(c.Claude.Kubernetes.ServiceAccount) == "" {
+	if c.Dsh.Enabled && strings.EqualFold(strings.TrimSpace(c.Dsh.Executor), "kubernetes") && strings.TrimSpace(c.Claude.Kubernetes.ServiceAccount) == "" {
 		errs = append(errs, "claude.kubernetes.service_account is required when dsh.executor is kubernetes")
 	}
-	if strings.EqualFold(strings.TrimSpace(c.Dsh.Executor), "kubernetes") &&
+	if c.Dsh.Enabled && strings.EqualFold(strings.TrimSpace(c.Dsh.Executor), "kubernetes") &&
 		strings.TrimSpace(c.Dsh.KubernetesNamespace) != "" &&
 		strings.TrimSpace(c.Claude.Kubernetes.Namespace) != "" &&
 		strings.TrimSpace(c.Dsh.KubernetesNamespace) != strings.TrimSpace(c.Claude.Kubernetes.Namespace) {

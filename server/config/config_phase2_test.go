@@ -172,6 +172,8 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 		"ANBAN_BILLING_ADMIN_API_KEY":            "test-billing-admin-key",
 		"ANBAN_AGENT_EXECUTOR":                   "docker",
 		"ANBAN_AGENT_EXECUTION_TOKEN_SECRET":     "0123456789abcdef0123456789abcdef",
+		"ANBAN_DSH_EXECUTOR":                     "kubernetes",
+		"ANBAN_DSH_IMAGE":                        "registry.example.com/creator-dsh-runtime@sha256:" + strings.Repeat("a", 64),
 		"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":       "creator-agent-wechat-article:latest",
 		"ANBAN_AGENT_IMAGE_WECHAT_PICTURE":       "creator-agent-wechat-picture:latest",
 		"ANBAN_AGENT_IMAGE_SEEDNOTE":             "creator-agent-seednote:latest",
@@ -197,6 +199,7 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 		"VOLCENGINE_ARK_API_KEY":                 "test-volcengine-api-key",
 		"WANGCAI_OPENAI_BASE_URL":                "https://images.example.com/v1",
 		"WANGCAI_OPENAI_API_KEY":                 "test-openai-api-key",
+		"ANBAN_IMAGE_MODEL_PROFESSIONAL":         "gpt-image-2.5-sunburst",
 		"VIDEO_EDIT_ELEVENLABS_API_KEY":          "test-video-edit-scribe-key",
 	} {
 		t.Setenv(name, value)
@@ -218,6 +221,9 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 	if len(cfg.ModelRoutes.ImageGeneration.Capabilities) != 2 || len(cfg.Claude.ExecutionProfiles) != 3 {
 		t.Fatalf("catalog sizes: image_capabilities=%d profiles=%d", len(cfg.ModelRoutes.ImageGeneration.Capabilities), len(cfg.Claude.ExecutionProfiles))
 	}
+	if cfg.Dsh.Executor != "kubernetes" || cfg.Dsh.Image != "registry.example.com/creator-dsh-runtime@sha256:"+strings.Repeat("a", 64) {
+		t.Fatalf("DSH Kubernetes image config = %q/%q", cfg.Dsh.Executor, cfg.Dsh.Image)
+	}
 	if got := cfg.Claude.RuntimeImages["video-edit"]; got != "creator-agent-video-edit:latest" {
 		t.Fatalf("video-edit runtime image = %q, want creator-agent-video-edit:latest", got)
 	}
@@ -225,6 +231,12 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 		t.Fatalf("video-edit dispatch configuration did not load server-owned Scribe credential")
 	}
 	professional := cfg.ModelRoutes.ImageGeneration.Capabilities["professional"]
+	if cfg.ModelRoutes.ImageGeneration.DefaultCapability != "standard" || cfg.ModelRoutes.ImageGeneration.Capabilities["standard"].MinTier != "free" {
+		t.Fatalf("default image capability = %q with min_tier=%q, want capability standard with min_tier free", cfg.ModelRoutes.ImageGeneration.DefaultCapability, cfg.ModelRoutes.ImageGeneration.Capabilities["standard"].MinTier)
+	}
+	if professional.Provider+"/"+professional.Model != "wangcai_openai/gpt-image-2.5-sunburst" {
+		t.Fatalf("professional image model = %q/%q, want model present in billing costs", professional.Provider, professional.Model)
+	}
 	if professional.ResponseFormat != "b64_json" {
 		t.Fatalf("professional image response_format = %q, want b64_json", professional.ResponseFormat)
 	}
