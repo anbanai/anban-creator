@@ -117,8 +117,9 @@ func (assistantInteractionFailingFactory) Start(context.Context, string, string,
 }
 
 type assistantInteractionCommandFailureFactory struct {
-	mu     sync.Mutex
-	starts int
+	mu       sync.Mutex
+	starts   int
+	commands int
 }
 
 type assistantInteractionCommandRecoveryFailureFactory struct {
@@ -126,11 +127,18 @@ type assistantInteractionCommandRecoveryFailureFactory struct {
 	starts int
 }
 
-type assistantInteractionCommandFailureRuntime struct{}
+type assistantInteractionCommandFailureRuntime struct {
+	factory *assistantInteractionCommandFailureFactory
+}
 
-func (assistantInteractionCommandFailureRuntime) Command(_ context.Context, method string, _ any) error {
+func (r assistantInteractionCommandFailureRuntime) Command(_ context.Context, method string, _ any) error {
 	if method == "session/start" {
 		return nil
+	}
+	if r.factory != nil {
+		r.factory.mu.Lock()
+		r.factory.commands++
+		r.factory.mu.Unlock()
 	}
 	return errors.New("runtime command failed")
 }
@@ -141,7 +149,7 @@ func (f *assistantInteractionCommandFailureFactory) Start(context.Context, strin
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.starts++
-	return assistantInteractionCommandFailureRuntime{}, nil
+	return assistantInteractionCommandFailureRuntime{factory: f}, nil
 }
 
 func (f *assistantInteractionCommandRecoveryFailureFactory) Start(context.Context, string, string, string, func(string, any)) (Runtime, error) {
@@ -629,17 +637,25 @@ func TestAssistantInteractionCommandFailureFencesGenerationAndReplacesRuntime(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if attempt.Status != model.AssistantInteractionAttemptFailed {
-		t.Fatalf("attempt status after successful generation replacement = %q, want failed/retryable", attempt.Status)
+	if attempt.Status != model.AssistantInteractionAttemptPending {
+		t.Fatalf("attempt status after ambiguous delivery and successful generation replacement = %q, want pending", attempt.Status)
 	}
 	if svc.AcceptRuntimeEvent(snapshot.ID, snapshot.Generation, "assistant.message", map[string]any{"text": "late"}) {
 		t.Fatal("late event from failed generation was accepted")
 	}
+	input := InteractionMessageInput{Generation: snapshot.Generation + 1, ClientMessageID: "message-1", Text: "继续"}
+	if err := svc.SendMessage(context.Background(), "user-1", snapshot.ID, input); err == nil || NormalizeInteractionError(err).Code != InteractionErrorReconnecting {
+		t.Fatalf("retry after ambiguous delivery = %v, want reconnecting", err)
+	}
 	factory.mu.Lock()
 	starts := factory.starts
+	commands := factory.commands
 	factory.mu.Unlock()
 	if starts != 2 {
 		t.Fatalf("runtime starts = %d, want replacement runtime", starts)
+	}
+	if commands != 1 {
+		t.Fatalf("runtime command deliveries = %d, want no duplicate delivery", commands)
 	}
 }
 
