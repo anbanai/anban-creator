@@ -7,8 +7,10 @@ describe('assistant creation capabilities', () => {
     expect(assistantCreationTypes({ platform: 'wechat' }).map(type => type.value)).toEqual(['wechat-article'])
   })
 
-  it('offers only selected types accepted by the assistant primary-platform contract', () => {
-    expect(assistantCreationTypes({ platform: 'wechat', agent_ids: ['wechat-picture', 'seednote'] }).map(type => type.value)).toEqual(['wechat-picture'])
+  it('offers every enabled homepage type across platforms, preferring the primary platform', () => {
+    expect(assistantCreationTypes({ platform: 'wechat', agent_ids: ['wechat-picture', 'seednote'] }).map(type => type.value)).toEqual(['wechat-picture', 'seednote'])
+    expect(assistantCreationTypes({ platform: 'seednote', agent_ids: ['wechat-article', 'seednote'] }).map(type => type.value)).toEqual(['seednote', 'wechat-article'])
+    expect(assistantCreationTypes({ platform: 'wechat', agent_ids: ['seednote', 'montage', 'video-edit'] }).map(type => type.value)).toEqual(['seednote', 'video', 'video-edit'])
     expect(assistantCreationTypes({ platform: 'montage', agent_ids: ['montage'] }).map(type => type.value)).toEqual(['video'])
     expect(assistantCreationTypes({ platform: 'hypit', agent_ids: ['hypit'] })).toEqual([])
   })

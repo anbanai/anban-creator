@@ -13,11 +13,11 @@ const routes = [
 export function assistantCreationTypes(project?: { platform: string; agent_ids?: string[] | null }) {
   if (!project) return []
   const agents = projectAgentIDs(project as Pick<Project, 'platform' | 'agent_ids'>)
-  return routes.filter(route => route.platform === project.platform && agents.includes(route.agent))
+  return routes.filter(route => agents.includes(route.agent))
+    .sort((a, b) => Number(b.platform === project.platform) - Number(a.platform === project.platform))
 }
 
-// The assistant currently requires both the primary platform and the selected
-// Agent. Retain a compatible primary platform; initialize/repair it otherwise.
+// Retain a compatible primary platform when saving the persona's enabled types.
 export function assistantPrimaryPlatform(platform: string, agents: string[]): ProjectPlatform | undefined {
   const available = routes.filter(route => agents.includes(route.agent))
   return available.find(route => route.platform === platform)?.platform ?? available[0]?.platform

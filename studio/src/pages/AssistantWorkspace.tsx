@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Bot, Check, ChevronDown, Library, Loader2, Plus, Upload, UserRound } from 'lucide-react'
+import { ArrowLeft, Bot, Check, ChevronDown, Layers3, Library, Loader2, Plus, Upload, UserRound } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { AgentPromptDropProvider } from '@/components/agent-prompt/AgentPromptDropProvider'
@@ -37,6 +38,7 @@ import type { VideoEditDefaults, VideoEditPreferences } from '@/types/video-edit
 import type { Task, TaskFile } from '@/types'
 import type { ImageRatio } from '@/lib/schemas'
 import { platformDisplayName } from '@/lib/labels'
+import { platformBgColor, platformIcon, platformIconColor } from '@/lib/PlatformIcon'
 import { profileLabAgents, projectAgentIDs } from '@/lib/project-capabilities'
 import type { AssistantRouteState } from '@/lib/assistant-navigation'
 import { assistantCreationTypes } from '@/lib/assistant-creation-types'
@@ -447,10 +449,11 @@ export default function AssistantWorkspace() {
   const creationTypes = assistantCreationTypes(selectedProject)
   const selectedAgentIDs = selectedProject ? personaAgentIDs(selectedProject) : []
   const selectedCreationType = creationTypes.some((item) => item.value === creationType) ? creationType : creationTypes[0]?.value ?? ''
+  const creationPlatform = creationTypes.find((item) => item.value === selectedCreationType)?.platform ?? selectedProject?.platform
   const isVideoEditCreation = mode === 'creation' && selectedCreationType === 'video-edit'
   const usesImageSettings = mode === 'creation' && Boolean(selectedProject) && !isVideoEditCreation
   const imageCapabilitiesQuery = useImageCapabilities(usesImageSettings)
-  const selectedPlatformConfig = platformConfigsQuery.data?.find((config) => config.id === selectedProject?.platform)
+  const selectedPlatformConfig = platformConfigsQuery.data?.find((config) => config.id === creationPlatform)
   const supportedImageRatios = selectedPlatformConfig?.supported_image_ratios ?? []
   const effectiveImageCapabilityKey = imageCapabilityKey || imageCapabilitiesQuery.defaultCapability || ''
   const worksQuery = useInfiniteQuery({
@@ -608,7 +611,7 @@ export default function AssistantWorkspace() {
       imageRatioContextKey.current = null
       return
     }
-    const contextKey = `${selectedProject?.id ?? ''}:${selectedProject?.platform ?? ''}:${selectedProject?.image_ratio ?? ''}:${selectedPlatformConfig?.default_image_ratio ?? ''}`
+    const contextKey = `${selectedProject?.id ?? ''}:${creationPlatform ?? ''}:${selectedProject?.image_ratio ?? ''}:${selectedPlatformConfig?.default_image_ratio ?? ''}`
     const configuredRatio = selectedProject?.image_ratio || selectedPlatformConfig?.default_image_ratio || 'auto'
     const nextRatio = configuredRatio === 'auto' || supportedImageRatios.length === 0 || supportedImageRatios.includes(configuredRatio)
       ? configuredRatio as ImageRatio
@@ -619,7 +622,7 @@ export default function AssistantWorkspace() {
       return
     }
     if (imageRatio !== 'auto' && supportedImageRatios.length > 0 && !supportedImageRatios.includes(imageRatio)) setImageRatio(nextRatio)
-  }, [imageCapabilityKey, imageRatio, selectedPlatformConfig?.default_image_ratio, selectedProject?.id, selectedProject?.image_ratio, supportedImageRatios, usesImageSettings])
+  }, [creationPlatform, imageCapabilityKey, imageRatio, selectedPlatformConfig?.default_image_ratio, selectedProject?.id, selectedProject?.image_ratio, supportedImageRatios, usesImageSettings])
 
   useEffect(() => {
     if (mode !== 'creation' && attachments.length) setAttachments([])
@@ -732,7 +735,7 @@ export default function AssistantWorkspace() {
     const submittedAttachments = attachmentController.toInputAttachments()
     const contextLines = mode === 'creation' && selectedCreationType
       ? [
-          ...(selectedCreationType === 'seednote' ? [] : [`创作类型：${selectedCreationType}`]),
+          ...(selectedCreationType === 'seednote' && selectedProject?.platform === 'seednote' && creationTypes.length === 1 ? [] : [`创作类型：${selectedCreationType}`]),
           ...(isVideoEditCreation ? [
             `剪辑要求：${videoEditBrief.trim() || '按本次创作需求自动决定'}`,
             `剪辑偏好：${JSON.stringify(videoEditPreferences)}`,
@@ -1092,12 +1095,23 @@ export default function AssistantWorkspace() {
   }
 
   const creationTypeSelector = mode === 'creation' && creationTypes.length > 0 ? (
-    <label className="flex min-w-0 items-center text-xs text-muted-foreground" onClick={(event) => event.stopPropagation()}>
-      <span className="sr-only">本次创作类型</span>
-      <NativeSelect className="w-auto max-w-full shrink-0" aria-label="本次创作类型" value={selectedCreationType} disabled={switching || committing || sending || responding || draftPending} onChange={(event) => chooseCreationType(event.target.value)}>
-        {creationTypes.map((item) => <NativeSelectOption key={item.value} value={item.value}>{item.label}</NativeSelectOption>)}
-      </NativeSelect>
-    </label>
+    <Select modal={false} items={creationTypes} value={selectedCreationType} disabled={switching || committing || sending || responding || draftPending} onValueChange={(value) => { if (value) chooseCreationType(value) }}>
+      <SelectTrigger aria-label="本次创作类型" className="shrink-0 border-0 px-2 text-muted-foreground hover:bg-muted/60 dark:bg-transparent">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent side="top" align="end" sideOffset={8} alignItemWithTrigger={false} onClick={(event) => event.stopPropagation()} className="assistant-scroll w-56 max-w-[calc(100vw-2rem)] rounded-xl p-1.5 shadow-lg">
+        <SelectGroup className="p-0">
+          <SelectLabel className="px-2.5 pb-2 pt-1.5 text-[11px]">本次创作类型</SelectLabel>
+          {creationTypes.map((item) => {
+            const Icon = platformIcon[item.agent] ?? Layers3
+            return <SelectItem key={item.value} value={item.value} className="min-h-11 px-2.5 py-2 data-selected:bg-primary/5 data-selected:text-primary">
+              <span aria-hidden="true" className={`flex size-7 shrink-0 items-center justify-center rounded-lg ${platformBgColor[item.agent] ?? 'bg-muted'} ${platformIconColor[item.agent] ?? 'text-muted-foreground'}`}><Icon className="size-4" /></span>
+              <span className="self-center">{item.label}</span>
+            </SelectItem>
+          })}
+        </SelectGroup>
+      </SelectContent>
+    </Select>
   ) : null
 
   const resetCreationProject = (value: string | null) => {
@@ -1221,7 +1235,7 @@ export default function AssistantWorkspace() {
         onChange: setExecutionProfile,
         loading: executionProfilesQuery.isLoading,
         disabled: executionProfilesQuery.isError,
-        taskType: selectedProject?.platform,
+        taskType: creationPlatform,
       }}
       image={usesImageSettings ? {
         ratios: supportedImageRatios,
