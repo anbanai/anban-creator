@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { portraitProgress, portraitStatus, portraitSummary } from '@/lib/portrait-library'
-import { Archive, Brain, Lightbulb, ListChecks, RotateCcw, SquarePen, ScanFace } from 'lucide-react'
+import { Archive, Brain, Lightbulb, ListChecks, RotateCcw, Settings, SquarePen, ScanFace } from 'lucide-react'
 import type { Project, ProjectStats } from '@/types'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -20,6 +20,7 @@ interface ProjectCardProps {
   project: Project
   stats?: ProjectStats
   onEdit?: (project: Project) => void
+  onChannelConfig?: (project: Project) => void
   onUpdateProfile?: (project: Project) => void
   archiving?: boolean
   restoring?: boolean
@@ -27,7 +28,7 @@ interface ProjectCardProps {
   onRestore?: (id: string) => void
 }
 
-export function ProjectCard({ project, stats, onEdit, onUpdateProfile, archiving, restoring, onArchive, onRestore }: ProjectCardProps) {
+export function ProjectCard({ project, stats, onEdit, onChannelConfig, onUpdateProfile, archiving, restoring, onArchive, onRestore }: ProjectCardProps) {
   const [topicPoolOpen, setTopicPoolOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
   const isArchived = project.status === 'archived'
@@ -88,6 +89,14 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, archiving
                 <SquarePen />
               </TooltipTrigger>
               <TooltipContent>编辑</TooltipContent>
+            </Tooltip>
+          )}
+          {onChannelConfig && (project.platform === 'wechat' || project.agent_ids?.some((id) => id === 'wechat-article' || id === 'wechat-picture')) && (
+            <Tooltip>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onChannelConfig(project)} aria-label={`平台设置：${project.name}`} />}>
+                <Settings />
+              </TooltipTrigger>
+              <TooltipContent>平台设置</TooltipContent>
             </Tooltip>
           )}
           <Tooltip>
