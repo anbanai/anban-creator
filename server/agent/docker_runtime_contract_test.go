@@ -1083,7 +1083,9 @@ func TestTalkingHeadEditorDockerfileValidatesErduoMotionContract(t *testing.T) {
 	root := repositoryRoot(t)
 	dockerfile := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.agent-talking-head-editor"))
 	for _, want := range []string{
-		"/opt/video-use-venv/bin/pip install --no-cache-dir auto-editor==28.1.0",
+		"ARG AUTO_EDITOR_REPO=https://github.com/WyattBlue/auto-editor.git",
+		"ARG AUTO_EDITOR_REF=c6d755e590fa1fd3db0cdb3747bc92cf8af1a0bd",
+		"/opt/video-use-venv/bin/pip install --no-cache-dir \"git+${AUTO_EDITOR_REPO}@${AUTO_EDITOR_REF}\"",
 		"importlib.metadata as m; print(m.version(\"auto-editor\"))",
 		"/opt/video-use-venv/bin/auto-editor --version",
 		"for helper in transcribe.py transcribe_batch.py pack_transcripts.py timeline_view.py grade.py render.py",

@@ -11,11 +11,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 WORKDIR /opt/video-use
 ARG VIDEO_USE_REPO=https://github.com/browser-use/video-use.git
 ARG VIDEO_USE_REF=43cfc566833548093455c9d4a46bd69913b7e552
+ARG AUTO_EDITOR_REPO=https://github.com/WyattBlue/auto-editor.git
+ARG AUTO_EDITOR_REF=c6d755e590fa1fd3db0cdb3747bc92cf8af1a0bd
 RUN git init . && git remote add origin "$VIDEO_USE_REPO" && git fetch --depth 1 origin "$VIDEO_USE_REF" && git checkout --detach FETCH_HEAD && test "$(git rev-parse HEAD)" = "$VIDEO_USE_REF" && printf '%s\n' "$VIDEO_USE_REF" > .anban-source-revision && rm -rf .git
 RUN set -eux; \
     python3 -m venv /opt/video-use-venv; \
     /opt/video-use-venv/bin/pip install --no-cache-dir -e /opt/video-use; \
-    /opt/video-use-venv/bin/pip install --no-cache-dir auto-editor==28.1.0; \
+    /opt/video-use-venv/bin/pip install --no-cache-dir "git+${AUTO_EDITOR_REPO}@${AUTO_EDITOR_REF}"; \
     test "$(/opt/video-use-venv/bin/python -c 'import importlib.metadata as m; print(m.version("auto-editor"))')" = "28.1.0"; \
     /opt/video-use-venv/bin/auto-editor --version >/dev/null; \
     /opt/video-use-venv/bin/python -m compileall -q /opt/video-use/helpers; \

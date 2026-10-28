@@ -419,6 +419,7 @@ func (s *AgentProjectProfileService) talkingHeadEditorProfile(project *model.Pro
 		},
 		"upstream_revisions": map[string]string{
 			"auto-editor":                  "28.1.0",
+			"auto-editor-source":           "c6d755e590fa1fd3db0cdb3747bc92cf8af1a0bd",
 			"video-use":                    "43cfc566833548093455c9d4a46bd69913b7e552",
 			"erduo-broll-loop-engineering": "managed-release",
 		},
