@@ -850,6 +850,7 @@ describe('TaskFormDialog', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
 
     await waitFor(() => expect(toastMocks.error).toHaveBeenCalledWith(expect.stringContaining('Prompt 不能超过 5120 个字符')))
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('Prompt 不能超过 5120 个字符')
     expect(api.tasks.clone).not.toHaveBeenCalled()
   })
 
