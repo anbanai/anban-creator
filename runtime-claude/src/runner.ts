@@ -7,6 +7,7 @@ import { validateFinalArtifacts, type ArtifactValidationResult } from "./artifac
 import { CLAUDE_PROFILE_ENV_KEYS, type AgentPack, type BootstrapResponse, type ResolvedBootstrapResponse } from "./bootstrap.js";
 import { collectGeneratedImageDescriptors, materializeGeneratedImage } from "./downloads.js";
 import { BestEffortProgressReporter, ProgressEmitter, type ProgressDiagnostic } from "./progress.js";
+import { readWorkflowFailureState } from "./failure-state.js";
 import type { ExecutionResult, Reporter } from "./reporter.js";
 import { appendResumeContextToPrompt } from "./resume.js";
 import { agentMemoryPath, prepareProjectMemory, ProjectMemoryError } from "./project-memory.js";
@@ -378,6 +379,10 @@ export function buildQueryOptions(
       const pending = managedBackgroundTaskStopGuard(input);
       if (pending) return pending;
     }
+    // An honest failed Seednote outcome must reach artifact upload and the
+    // Server completion callback, without running success-only metadata hooks.
+    if (input.hook_event_name === "Stop" && data.task_type === "seednote"
+      && await readWorkflowFailureState(cwd)) return {};
     const result = await stopHook(input, toolUseID, hookOptions);
     const specific = "hookSpecificOutput" in result ? result.hookSpecificOutput as { permissionDecision?: string } : undefined;
     if (("decision" in result && result.decision === "block") || specific?.permissionDecision === "deny") return result;
