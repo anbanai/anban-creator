@@ -441,6 +441,7 @@ func NewRouter(svc *Services) *fiber.App {
 		}
 		apiV1.Delete("/tasks/:id", svc.TaskHandler.Delete)
 		apiV1.Post("/tasks/:id/cancel", svc.TaskHandler.Cancel)
+		apiV1.Post("/tasks/:id/review", svc.TaskHandler.ReviewTalkingHeadEditor)
 		apiV1.Post("/tasks/:id/clone", svc.TaskHandler.Clone)
 		apiV1.Post("/tasks/:id/resume", svc.TaskHandler.Resume)
 		apiV1.Post("/tasks/:id/retry", svc.TaskHandler.Retry)

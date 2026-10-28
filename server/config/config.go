@@ -39,6 +39,7 @@ type Config struct {
 	Hypit              HypitConfig                     `yaml:"hypit"`
 	Montage            MontageConfig                   `yaml:"montage"`
 	VideoEdit          VideoEditConfig                 `yaml:"video_edit"`
+	TalkingHeadEditor  TalkingHeadEditorConfig         `yaml:"talking_head_editor"`
 	LocalLife          LocalLifeConfig                 `yaml:"local_life"`
 	ServerInternal     ModelRuntimeConfig              `yaml:"-"`
 	ModelProviders     map[string]ModelProviderConfig  `yaml:"model_providers"`
@@ -575,6 +576,70 @@ type VideoEditConfig struct {
 	DefaultPolicy      model.VideoEditDefaults `yaml:"default_policy"`
 	ElevenLabsAPIKey   string                  `yaml:"elevenlabs_api_key" json:"-"`
 	Env                map[string]string       `yaml:"env"`
+}
+
+// TalkingHeadEditorConfig owns the independent talking-head workflow runtime.
+type TalkingHeadEditorConfig struct {
+	Enabled            bool                            `yaml:"enabled"`
+	MaxDurationSeconds int64                           `yaml:"max_duration_seconds"`
+	MaxAssets          int                             `yaml:"max_assets"`
+	TimeoutMinutes     int                             `yaml:"timeout_minutes"`
+	DefaultPolicy      model.TalkingHeadEditorDefaults `yaml:"default_policy"`
+	VideoUseAPIKey     string                          `yaml:"video_use_api_key" json:"-"`
+	Env                map[string]string               `yaml:"env"`
+}
+
+func (c *TalkingHeadEditorConfig) ApplyDefaults() {
+	if c.MaxDurationSeconds <= 0 {
+		c.MaxDurationSeconds = 1800
+	}
+	if c.MaxAssets <= 0 {
+		c.MaxAssets = 20
+	}
+	if c.TimeoutMinutes <= 0 {
+		c.TimeoutMinutes = 120
+	}
+	if c.DefaultPolicy.Preferences.QualityTier == "" {
+		c.DefaultPolicy.Preferences.QualityTier = "balanced"
+	}
+	if c.DefaultPolicy.Preferences.SubtitleMode == "" {
+		c.DefaultPolicy.Preferences.SubtitleMode = "required"
+	}
+	if c.DefaultPolicy.Preferences.AspectRatio == "" {
+		c.DefaultPolicy.Preferences.AspectRatio = "9:16"
+	}
+	if c.DefaultPolicy.Preferences.BrollMode == "" {
+		c.DefaultPolicy.Preferences.BrollMode = "auto"
+	}
+	if c.DefaultPolicy.Preferences.SoundMode == "" {
+		c.DefaultPolicy.Preferences.SoundMode = "after_review"
+	}
+	if c.DefaultPolicy.DeliveryTargets == nil {
+		c.DefaultPolicy.DeliveryTargets = []string{"final_video", "editing_evidence", "quality_evidence"}
+	}
+	if c.Env == nil {
+		c.Env = map[string]string{}
+	}
+}
+
+func (c TalkingHeadEditorConfig) Validate() error {
+	if c.MaxDurationSeconds < 0 || c.MaxAssets < 0 || c.TimeoutMinutes < 0 {
+		return fmt.Errorf("talking_head_editor limits must be positive")
+	}
+	input := model.TalkingHeadEditorInput{Brief: "server-defaults", PrimaryVideo: model.TalkingHeadEditorAsset{AssetID: "server-default"}, Preferences: c.DefaultPolicy.Preferences}
+	if err := input.Validate(c.MaxAssets, c.MaxDurationSeconds); err != nil {
+		return fmt.Errorf("talking_head_editor.default_policy: %w", err)
+	}
+	for key, value := range c.Env {
+		if key == "" || strings.ContainsAny(key, "=\x00") || strings.ContainsAny(value, "\x00\r\n") {
+			return fmt.Errorf("talking_head_editor.env contains invalid entry %q", key)
+		}
+	}
+	return nil
+}
+
+func (c TalkingHeadEditorConfig) DispatchReady() bool {
+	return c.Enabled && strings.TrimSpace(c.VideoUseAPIKey) != ""
 }
 
 func (c *VideoEditConfig) UnmarshalYAML(value *yaml.Node) error {
@@ -1148,7 +1213,7 @@ func (c ClaudeConfig) Validate() error {
 		}
 	}
 	for profile := range c.RuntimeImages {
-		if profile != "wechat-article" && profile != "wechat-picture" && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != model.PlatformVideoEdit && profile != "moments" && profile != "ecommerce" && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != model.PlatformLocalLife && profile != "profile-analysis" && profile != "feedback-analysis" && profile != "content-planning" {
+		if profile != "wechat-article" && profile != "wechat-picture" && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != model.PlatformVideoEdit && profile != model.PlatformTalkingHeadEditor && profile != "moments" && profile != "ecommerce" && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != model.PlatformLocalLife && profile != "profile-analysis" && profile != "feedback-analysis" && profile != "content-planning" {
 			errs = append(errs, fmt.Sprintf("claude.runtime_images contains unsupported profile %q", profile))
 		}
 	}
@@ -1453,6 +1518,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"mcp":                  true,
 		"montage":              true,
 		"video_edit":           true,
+		"talking_head_editor":  true,
 		"local_life":           true,
 		"hypit":                true,
 		"model_providers":      true,
@@ -1693,6 +1759,9 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.Claude.RuntimeImages[model.PlatformVideoEdit]) == "" {
 		c.Claude.RuntimeImages[model.PlatformVideoEdit] = "creator-agent-video-edit:latest"
 	}
+	if strings.TrimSpace(c.Claude.RuntimeImages[model.PlatformTalkingHeadEditor]) == "" {
+		c.Claude.RuntimeImages[model.PlatformTalkingHeadEditor] = "creator-agent-talking-head-editor:latest"
+	}
 	if c.Server.Port == 0 {
 		c.Server.Port = 8080
 	}
@@ -1758,6 +1827,7 @@ func (c *Config) applyDefaults() {
 	}
 	c.Montage.ApplyDefaults()
 	c.VideoEdit.ApplyDefaults()
+	c.TalkingHeadEditor.ApplyDefaults()
 	c.Hypit.ApplyDefaults()
 	// Asynq defaults.
 	if c.Asynq.Concurrency == 0 {
@@ -2436,6 +2506,9 @@ func (c *Config) Validate() error {
 		errs = append(errs, err.Error())
 	}
 	if err := c.VideoEdit.Validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if err := c.TalkingHeadEditor.Validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
 

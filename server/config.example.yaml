@@ -452,6 +452,23 @@ video_edit:
   elevenlabs_api_key: "${VIDEO_EDIT_ELEVENLABS_API_KEY:-}"
   env: {}
 
+# 口播精剪运行时。video-use API key 只会注入 talking-head-editor 容器。
+talking_head_editor:
+  enabled: ${ANBAN_TALKING_HEAD_EDITOR_ENABLED:-true}
+  max_duration_seconds: 1800
+  max_assets: 20
+  timeout_minutes: 120
+  default_policy:
+    preferences:
+      quality_tier: balanced
+      subtitle_mode: required
+      aspect_ratio: 9:16
+      broll_mode: auto
+      sound_mode: after_review
+    delivery_targets: [final_video, editing_evidence, quality_evidence]
+  video_use_api_key: "${VIDEO_USE_API_KEY:-}"
+  env: {}
+
 billing_runtime:
   config_dir: "./billing"
   admin_api_key: "${ANBAN_BILLING_ADMIN_API_KEY}"
@@ -551,6 +568,7 @@ claude:
     seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE:-creator-agent-seednote:latest}"
     montage: "${ANBAN_AGENT_IMAGE_MONTAGE:-creator-agent-montage:latest}"
     video-edit: "${ANBAN_AGENT_IMAGE_VIDEO_EDIT:-creator-agent-video-edit:latest}"
+    talking-head-editor: "${ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR:-creator-agent-talking-head-editor:latest}"
     moments: "${ANBAN_AGENT_IMAGE_MOMENTS:-creator-agent-moments:latest}"
     ecommerce: "${ANBAN_AGENT_IMAGE_ECOMMERCE:-creator-agent-ecommerce:latest}"
     # Optional while content autopilot is disabled; admission fails explicitly when absent.

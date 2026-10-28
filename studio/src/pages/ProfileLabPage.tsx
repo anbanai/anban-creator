@@ -20,6 +20,8 @@ import { queryKeys } from '@/lib/query-keys'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { VideoEditProjectDefaultsPanel } from '@/components/video-edit/VideoEditProjectDefaultsPanel'
 import type { VideoEditDefaults } from '@/types'
+import type { TalkingHeadEditorDefaults } from '@/types'
+import { TalkingHeadEditorProjectDefaultsPanel } from '@/components/talking-head-editor/TalkingHeadEditorProjectDefaultsPanel'
 
 const dimensions = [
   ['identity', '定位'], ['style', '风格'], ['audience', '受众'],
@@ -116,6 +118,7 @@ function ProfileLabPage() {
   const [referenceUploading, setReferenceUploading] = useState(false)
   const [selectedAgents, setSelectedAgents] = useState<string[]>([])
   const [videoEditDefaults, setVideoEditDefaults] = useState<VideoEditDefaults>({})
+  const [talkingHeadEditorDefaults, setTalkingHeadEditorDefaults] = useState<TalkingHeadEditorDefaults>({})
   const [setup, setSetup] = useState<ProjectProfileSetup>(defaultSetup)
   const [skipAnalysis, setSkipAnalysis] = useState(false)
   const [analyzeOnSave, setAnalyzeOnSave] = useState(true)
@@ -151,6 +154,7 @@ function ProfileLabPage() {
     setReferenceUploading(false)
     setSelectedAgents([])
     setVideoEditDefaults({})
+    setTalkingHeadEditorDefaults({})
     setSetup(defaultSetup)
     setSkipAnalysis(false)
     setAnalyzeOnSave(true)
@@ -203,6 +207,7 @@ function ProfileLabPage() {
     setReferenceImageDirty(false)
     setSelectedAgents(projectAgentIDs(project))
     setVideoEditDefaults(project.video_edit_defaults ?? {})
+    setTalkingHeadEditorDefaults(project.talking_head_editor_defaults ?? {})
     setSetup(setupFromProject(project))
     setHydratedProjectID(project.id)
   }, [hydratedProjectID, project])
@@ -399,6 +404,7 @@ function ProfileLabPage() {
       payload.platform = primaryPlatform(selectedAgents) as CreateProjectRequest['platform']
     }
     if (selectedAgents.includes('video-edit')) payload.video_edit_defaults = videoEditDefaults
+    if (selectedAgents.includes('talking-head-editor')) payload.talking_head_editor_defaults = talkingHeadEditorDefaults
     if (isEditing) saveProjectMutation.mutate({ id: projectId!, payload, analyze: analyzeOnSave, priorProfile: profile })
     else createMutation.mutate({ payload, viewKey: creationViewKey.current })
   }
@@ -500,6 +506,9 @@ function ProfileLabPage() {
 
           {currentStep === 0 && selectedAgents.includes('video-edit') && (
             <VideoEditProjectDefaultsPanel value={videoEditDefaults} onChange={setVideoEditDefaults} />
+          )}
+          {currentStep === 0 && selectedAgents.includes('talking-head-editor') && (
+            <TalkingHeadEditorProjectDefaultsPanel value={talkingHeadEditorDefaults} onChange={setTalkingHeadEditorDefaults} />
           )}
 
           {currentStep === 0 && <section id="project-basics" tabIndex={-1} className="scroll-mt-6 border-b border-border pb-5">

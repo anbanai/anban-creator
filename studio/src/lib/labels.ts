@@ -17,6 +17,7 @@ export const tierDescriptions: Record<string, string> = {
 export const taskStatusLabel: Record<string, string> = {
   pending: '待执行',
   running: '运行中',
+  awaiting_review: '等待样片审核',
   completed: '已完成',
   failed: '失败',
   cancelled: '已取消',
@@ -49,6 +50,7 @@ export const taskTypeLabelCN: Record<string, string> = {
   hypit: '视频复刻',
   'local-life': '素材混剪',
   'video-edit': '全自动视频剪辑',
+  'talking-head-editor': '口播精剪',
 }
 
 // --- Content Types ---
@@ -71,6 +73,7 @@ export const contentTypeLabel: Record<string, string> = {
   hypit: '视频复刻',
   'local-life': '素材混剪',
   'video-edit': '全自动视频剪辑',
+  'talking-head-editor': '口播精剪',
 }
 
 // Pipeline stage → 中文标签。stage 取值来自 server/service/task_progress_stages.go
@@ -174,6 +177,7 @@ export const contentTypeOptions = [
   { value: 'hypit', label: '视频复刻' },
   { value: 'local-life', label: '素材混剪' },
   { value: 'video-edit', label: '全自动视频剪辑' },
+  { value: 'talking-head-editor', label: '口播精剪' },
   { value: 'ecommerce', label: '电商出图' },
 ]
 
@@ -187,6 +191,7 @@ export const platformLabels: Record<string, string> = {
   hypit: '视频复刻',
   'local-life': '素材混剪',
   'video-edit': '全自动视频剪辑',
+  'talking-head-editor': '口播精剪',
 }
 
 export function platformDisplayName(platform: string | null | undefined, fallback = '通用'): string {

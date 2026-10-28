@@ -2,12 +2,13 @@ import type { HypitInput } from './hypit'
 import type { MontageInput } from './montage'
 import type { LocalLifeInput } from './local-life'
 import type { VideoEditInput } from './video-edit'
+import type { TalkingHeadEditorInput } from './talking-head-editor'
 import type { InputAttachment } from './input-attachment'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { AgentExecutionProfileID, AgentProfileSnapshot } from './agent-profile'
 import type { ProjectPlatform, OutputChannel } from './project'
 
-export type TaskType = 'seednote' | 'wechat-article' | 'wechat-picture' | 'moments' | 'viral-analysis' | 'profile-analysis' | 'content-research' | 'content-validation' | 'content-script' | 'feedback-analysis' | 'ecommerce' | 'montage' | 'whiteboard-animation' | 'hypit' | 'local-life' | 'video-edit'
+export type TaskType = 'seednote' | 'wechat-article' | 'wechat-picture' | 'moments' | 'viral-analysis' | 'profile-analysis' | 'content-research' | 'content-validation' | 'content-script' | 'feedback-analysis' | 'ecommerce' | 'montage' | 'whiteboard-animation' | 'hypit' | 'local-life' | 'video-edit' | 'talking-head-editor'
 
 // E-commerce package config carried on a task (server model.EcommerceConfig).
 // `selected_modules` maps module key → quantity. Delivery module selection
@@ -19,7 +20,7 @@ export interface EcommerceTaskConfig {
   selling_points?: string
   language?: string
 }
-export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type TaskStatus = 'pending' | 'running' | 'awaiting_review' | 'completed' | 'failed' | 'cancelled'
 
 export type TaskLifecycleStageSource = 'agent' | 'server'
 export type TaskLifecycleStageKind = 'work' | 'draft' | 'publication'
@@ -167,6 +168,7 @@ export interface Task {
   montage_input?: MontageInput
   local_life_input?: LocalLifeInput
   video_edit_input?: VideoEditInput
+  talking_head_editor_input?: TalkingHeadEditorInput
   billing_quote_id?: string
   billing_catalog_id?: string
   billing_sku_id?: string
@@ -338,6 +340,7 @@ export interface CreateTaskRequest {
   montage_input?: MontageInput
   local_life_input?: LocalLifeInput
   video_edit_input?: VideoEditInput
+  talking_head_editor_input?: TalkingHeadEditorInput
 }
 
 // Cloning creates another task through the same complete creation contract.

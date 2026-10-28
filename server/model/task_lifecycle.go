@@ -28,6 +28,9 @@ const (
 // current lifecycle snapshot. Successful creative delivery does not finalize
 // Server-owned publication stages; failed and cancelled tasks skip them.
 func NormalizeTaskLifecycleTerminal(lifecycle TaskLifecycle, taskStatus, description string, now time.Time, scope LifecycleTerminalScope) (TaskLifecycle, bool) {
+	if taskStatus == TaskStatusAwaitingReview {
+		return lifecycle, false
+	}
 	if scope == LifecycleTerminalInfrastructure {
 		return lifecycle, false
 	}

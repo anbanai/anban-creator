@@ -251,7 +251,7 @@ func (h *ProjectHandler) respondProjectUpdateError(c fiber.Ctx, projectID string
 	if errors.Is(err, service.ErrInvalidWechatPlatformConfig) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
-	if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrProjectVideoEditDefaults) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrProjectNameRequired) {
+	if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrProjectVideoEditDefaults) || errors.Is(err, service.ErrProjectTalkingHeadEditorDefaults) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrProjectNameRequired) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	h.logger.Error().Err(err).Str("project_id", projectID).Msg("update project failed")
@@ -289,6 +289,7 @@ type projectRequest struct {
 	EcommerceDefaults             *model.EcommerceProjectDefaults  `json:"ecommerce_defaults,omitempty"`
 	MontageDefaults               *model.MontageDefaults           `json:"montage_defaults,omitempty"`
 	VideoEditDefaults             *model.VideoEditDefaults         `json:"video_edit_defaults,omitempty"`
+	TalkingHeadEditorDefaults     *model.TalkingHeadEditorDefaults `json:"talking_head_editor_defaults,omitempty"`
 	HypitDefaults                 *model.HypitDefaults             `json:"hypit_defaults,omitempty"`
 	// Config fields for platform-specific credentials.
 	WechatAppID             string  `json:"wechat_app_id"`
@@ -474,6 +475,9 @@ func (req *projectRequest) toProject() *model.Project {
 	if req.VideoEditDefaults != nil {
 		p.SetVideoEditDefaults(*req.VideoEditDefaults)
 		p.VideoEditDefaultsSet = true
+	}
+	if req.TalkingHeadEditorDefaults != nil {
+		p.SetTalkingHeadEditorDefaults(*req.TalkingHeadEditorDefaults)
 	}
 	return p
 }
@@ -696,7 +700,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 
 	created, err := h.service.Create(c.Context(), userID, ch)
 	if err != nil {
-		if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrProjectVideoEditDefaults) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrProjectNameRequired) || errors.Is(err, service.ErrProjectProfileSetup) {
+		if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrProjectVideoEditDefaults) || errors.Is(err, service.ErrProjectTalkingHeadEditorDefaults) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrProjectNameRequired) || errors.Is(err, service.ErrProjectProfileSetup) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create project failed")

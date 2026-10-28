@@ -217,3 +217,4 @@ export type { InputAttachment, InputAttachmentType } from './input-attachment'
 
 export type { HypitAsset, HypitPreferences, HypitInput, HypitDefaults, HypitLimits, HypitCapabilities } from './hypit'
 export type { VideoEditAsset, VideoEditDefaults, VideoEditInput, VideoEditPreferences, VideoEditQualityTier, VideoEditSubtitleMode } from './video-edit'
+export type { TalkingHeadEditorAsset, TalkingHeadEditorDefaults, TalkingHeadEditorInput, TalkingHeadEditorPreferences, TalkingHeadEditorQualityTier, TalkingHeadEditorSubtitleMode, TalkingHeadEditorAssetRole } from './talking-head-editor'

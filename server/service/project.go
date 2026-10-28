@@ -24,6 +24,7 @@ var (
 	ErrProjectUpdateConflict             = errors.New("project update conflict")
 	ErrProjectMontageDefaults            = errors.New("视频生成项目默认设置无效")
 	ErrProjectVideoEditDefaults          = errors.New("全自动视频剪辑项目默认设置无效")
+	ErrProjectTalkingHeadEditorDefaults  = errors.New("口播精剪项目默认设置无效")
 	ErrProjectProfileVersionConflict     = errors.New("project profile version conflict")
 	ErrProjectProfileAnalysisInProgress  = errors.New("project profile analysis is already in progress")
 	ErrProjectProfileResultAlreadyStored = errors.New("project profile result already submitted")
@@ -102,6 +103,22 @@ func validateProjectVideoEditDefaults(project *model.Project) error {
 	input.Normalize(defaults)
 	if err := input.Validate(0, 1800); err != nil {
 		return fmt.Errorf("%w: %v", ErrProjectVideoEditDefaults, err)
+	}
+	return nil
+}
+
+func validateProjectTalkingHeadEditorDefaults(project *model.Project) error {
+	if project == nil || !project.TalkingHeadEditorDefaultsSet {
+		return nil
+	}
+	if !model.IsTalkingHeadEditorPlatform(project.Platform) {
+		return fmt.Errorf("%w: talking_head_editor_defaults 只能用于口播精剪项目", ErrProjectTalkingHeadEditorDefaults)
+	}
+	defaults := project.TalkingHeadEditorDefaults.Data()
+	input := model.TalkingHeadEditorInput{Brief: "project-defaults", PrimaryVideo: model.TalkingHeadEditorAsset{AssetID: "project-default"}, Preferences: defaults.Preferences}
+	input.Normalize(defaults)
+	if err := input.Validate(0, 1800); err != nil {
+		return fmt.Errorf("%w: %v", ErrProjectTalkingHeadEditorDefaults, err)
 	}
 	return nil
 }
@@ -199,6 +216,9 @@ func (s *ProjectService) prepareCreate(userID string, ch *model.Project) error {
 		return err
 	}
 	if err := validateProjectVideoEditDefaults(ch); err != nil {
+		return err
+	}
+	if err := validateProjectTalkingHeadEditorDefaults(ch); err != nil {
 		return err
 	}
 	if ch.Instructions == "" && ch.Positioning != "" {
@@ -1486,6 +1506,16 @@ func (s *ProjectService) applyProjectUpdate(existing, ch *model.Project) error {
 	}
 	if ch.VideoEditDefaultsSet {
 		existing.VideoEditDefaults = ch.VideoEditDefaults
+	}
+	if ch.TalkingHeadEditorDefaultsSet {
+		existing.TalkingHeadEditorDefaults = ch.TalkingHeadEditorDefaults
+	}
+	if model.IsTalkingHeadEditorPlatform(existing.Platform) || ch.TalkingHeadEditorDefaultsSet {
+		candidate := *existing
+		candidate.TalkingHeadEditorDefaultsSet = true
+		if err := validateProjectTalkingHeadEditorDefaults(&candidate); err != nil {
+			return err
+		}
 	}
 	if model.IsVideoEditPlatform(existing.Platform) || ch.VideoEditDefaultsSet {
 		candidate := *existing

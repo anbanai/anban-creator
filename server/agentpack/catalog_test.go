@@ -1031,8 +1031,21 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if err != nil {
 		t.Fatalf("LoadCatalog repository Packs: %v", err)
 	}
-	if len(catalog.Packs) != 17 {
-		t.Fatalf("Pack count = %d, want 17", len(catalog.Packs))
+	if len(catalog.Packs) != 18 {
+		t.Fatalf("Pack count = %d, want 18", len(catalog.Packs))
+	}
+	autoVideoEditor, ok := catalog.Pack("talking-head-editor")
+	if !ok {
+		t.Fatal("talking-head-editor Pack missing")
+	}
+	if autoVideoEditor.Kind != KindManaged || !containsString(autoVideoEditor.Surfaces, "task") {
+		t.Fatalf("talking-head-editor Pack must be managed: %#v", autoVideoEditor)
+	}
+	if autoVideoEditor.Runtime.Profile != "talking-head-editor" || autoVideoEditor.Runtime.Adapter != AdapterStandard {
+		t.Fatalf("talking-head-editor runtime = %#v", autoVideoEditor.Runtime)
+	}
+	if !containsString(autoVideoEditor.Agent.Skills, "auto-editor") || !containsString(autoVideoEditor.Agent.Skills, "video-use") || !containsString(autoVideoEditor.Agent.Skills, "erduo-broll-loop-engineering") {
+		t.Fatalf("talking-head-editor Skills = %#v", autoVideoEditor.Agent.Skills)
 	}
 	viralEditor, ok := catalog.Pack("viral-ip-video-editor")
 	if !ok {

@@ -22,7 +22,7 @@ const (
 
 var projectAgentIDs = map[string]struct{}{
 	AgentIDArticle: {}, AgentIDWechatPicture: {}, AgentIDSeednote: {},
-	AgentIDMontage: {}, AgentIDHypit: {}, AgentIDWhiteboard: {}, AgentIDLocalLife: {}, AgentIDVideoEdit: {},
+	AgentIDMontage: {}, AgentIDHypit: {}, AgentIDWhiteboard: {}, AgentIDLocalLife: {}, AgentIDVideoEdit: {}, AgentIDTalkingHeadEditor: {},
 }
 
 var profileAccountPlatforms = map[string]struct{}{
@@ -86,6 +86,8 @@ func DefaultProjectAgentIDs(platform string) []string {
 		return []string{AgentIDLocalLife}
 	case PlatformVideoEdit:
 		return []string{AgentIDVideoEdit}
+	case PlatformTalkingHeadEditor:
+		return []string{AgentIDTalkingHeadEditor}
 	default:
 		return nil
 	}

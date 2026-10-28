@@ -98,6 +98,7 @@ var previewReferenceAssetPurposes = []string{
 	service.DirectUploadPurposeTemplateThumbnail,
 	service.DirectUploadPurposeTaskReference,
 	service.DirectUploadPurposeAIEntryAttachment,
+	service.DirectUploadPurposeTalkingHeadEditorAsset,
 }
 
 func hasSingleAssetIDField(body []byte) bool {

@@ -1,10 +1,11 @@
 import type { HypitDefaults } from './hypit'
 import type { MontagePreferences } from './montage'
 import type { VideoEditDefaults } from './video-edit'
+import type { TalkingHeadEditorDefaults } from './talking-head-editor'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { ImageAnalysis } from './image-analysis'
 
-export type ProjectPlatform = 'wechat' | 'seednote' | 'moments' | 'ecommerce' | 'montage' | 'whiteboard-animation' | 'hypit' | 'local-life' | 'video-edit'
+export type ProjectPlatform = 'wechat' | 'seednote' | 'moments' | 'ecommerce' | 'montage' | 'whiteboard-animation' | 'hypit' | 'local-life' | 'video-edit' | 'talking-head-editor'
 // The open string branch keeps migrated/plugin-only rows readable while the
 // product picker exposes only the three supported channels above.
 export type OutputChannel = 'wechat-article' | 'seednote' | 'wechat-picture' | 'whiteboard-animation' | (string & {})
@@ -77,6 +78,7 @@ export interface Project {
   hypit_defaults?: HypitDefaults
   montage_defaults?: MontageProjectDefaults
   video_edit_defaults?: VideoEditDefaults
+  talking_head_editor_defaults?: TalkingHeadEditorDefaults
   max_concurrent_tasks: number
   timezone?: string
   feedback_paused?: boolean
@@ -257,6 +259,7 @@ export interface CreateProjectRequest {
   hypit_defaults?: HypitDefaults
   montage_defaults?: MontageProjectDefaults
   video_edit_defaults?: VideoEditDefaults
+  talking_head_editor_defaults?: TalkingHeadEditorDefaults
   max_concurrent_tasks?: number
   agent_ids?: string[]
   profile_setup?: ProjectProfileSetup

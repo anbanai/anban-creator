@@ -8,6 +8,7 @@ const routes = [
   { agent: 'seednote', platform: 'seednote', value: 'seednote', label: '种草笔记' },
   { agent: 'montage', platform: 'montage', value: 'video', label: '视频生成' },
   { agent: 'video-edit', platform: 'video-edit', value: 'video-edit', label: '全自动视频剪辑' },
+  { agent: 'talking-head-editor', platform: 'talking-head-editor', value: 'talking-head-editor', label: '口播精剪' },
 ] as const
 
 export function assistantCreationTypes(project?: { platform: string; agent_ids?: string[] | null }) {

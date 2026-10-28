@@ -10,6 +10,7 @@ WECHAT_PICTURE_AGENT_IMAGE ?= creator-agent-wechat-picture:latest
 SEEDNOTE_AGENT_IMAGE ?= creator-agent-seednote:latest
 MONTAGE_AGENT_IMAGE ?= creator-agent-montage:latest
 VIDEO_EDIT_AGENT_IMAGE ?= creator-agent-video-edit:latest
+TALKING_HEAD_EDITOR_AGENT_IMAGE ?= creator-agent-talking-head-editor:latest
 MOMENTS_AGENT_IMAGE ?= creator-agent-moments:latest
 ECOMMERCE_AGENT_IMAGE ?= creator-agent-ecommerce:latest
 CONTENT_PLANNING_AGENT_IMAGE ?= creator-agent-content-planning:latest
@@ -41,7 +42,7 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
         agent-install agent-test agent-build \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
-        docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-video-edit-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image docker-images \
+        docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-video-edit-agent-image docker-talking-head-editor-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image docker-images \
         agent-runtime-release-manifest
 
 .PHONY: docker-runtime-smoke docker-hypit-smoke docker-agent-build-check
@@ -196,7 +197,7 @@ docker-agent-build-check: agent-pack-check
 # start the Compose services. Runtime containers are launched on demand by the
 # Server and are not Compose services; rebuilding the Server here keeps its
 # embedded Agent Pack Catalog aligned with the images just built.
-docker-up: docker-server-image docker-dsh-runtime-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-video-edit-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image
+docker-up: docker-server-image docker-dsh-runtime-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-video-edit-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-talking-head-editor-agent-image
 	@DOCKER_GID="$(DOCKER_SOCKET_GID)" docker compose up -d
 
 # Stop infrastructure services
@@ -238,6 +239,12 @@ docker-video-edit-agent-image: docker-agent-build-check
 		--build-arg VIDEO_USE_REF="$(VIDEO_USE_SOURCE_REF)" \
 		-t $(VIDEO_EDIT_AGENT_IMAGE) . && \
 		echo "Image build complete: $(VIDEO_EDIT_AGENT_IMAGE)"
+
+docker-talking-head-editor-agent-image: docker-agent-build-check
+	@echo "Building $(TALKING_HEAD_EDITOR_AGENT_IMAGE)..." && \
+	docker build -f deploy/docker/Dockerfile.agent-talking-head-editor \
+		--build-arg VIDEO_USE_REPO="$(VIDEO_USE_SOURCE_REPO)" --build-arg VIDEO_USE_REF="$(VIDEO_USE_SOURCE_REF)" \
+		-t $(TALKING_HEAD_EDITOR_AGENT_IMAGE) . && echo "Image build complete: $(TALKING_HEAD_EDITOR_AGENT_IMAGE)"
 
 # Build the Moments Agent image.
 docker-moments-agent-image: docker-agent-build-check
@@ -312,7 +319,7 @@ docker-studio-image:
 	echo "Image build complete: $(STUDIO_IMAGE)"
 
 # Build all supported images.
-docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-video-edit-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image
+docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-video-edit-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-talking-head-editor-agent-image docker-sidecar-ilink-image docker-studio-image
 
 # Validate and record one release set for the Server and every managed Agent
 # runtime. Pass image references through the existing
@@ -325,6 +332,7 @@ agent-runtime-release-manifest:
 	AGENT_IMAGE_SEEDNOTE="$(SEEDNOTE_AGENT_IMAGE)" \
 	AGENT_IMAGE_MONTAGE="$(MONTAGE_AGENT_IMAGE)" \
 	AGENT_IMAGE_VIDEO_EDIT="$(VIDEO_EDIT_AGENT_IMAGE)" \
+	AGENT_IMAGE_TALKING_HEAD_EDITOR="$(TALKING_HEAD_EDITOR_AGENT_IMAGE)" \
 	AGENT_IMAGE_MOMENTS="$(MOMENTS_AGENT_IMAGE)" \
 	AGENT_IMAGE_ECOMMERCE="$(ECOMMERCE_AGENT_IMAGE)" \
 	AGENT_IMAGE_PROFILE_ANALYSIS="$(PROFILE_ANALYSIS_AGENT_IMAGE)" \

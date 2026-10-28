@@ -90,6 +90,9 @@ func (s *TaskService) validateExecutionDelivery(ctx context.Context, taskID stri
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrTaskDeliveryContractUnavailable, err)
 	}
+	if model.IsTalkingHeadEditorPlatform(task.Type) && talkingHeadEditorMotionSampleOnly(files) {
+		requiredArtifacts = talkingHeadEditorSampleRequiredArtifacts(requiredArtifacts)
+	}
 	matched := 0
 	for _, file := range files {
 		if file == nil || file.TaskID != taskID || file.ExecutionID != execution.ID ||
@@ -139,6 +142,22 @@ func (s *TaskService) validateExecutionDelivery(ctx context.Context, taskID stri
 		}
 	}
 	return nil
+}
+
+func talkingHeadEditorSampleRequiredArtifacts(required []agentpack.ArtifactSpec) []agentpack.ArtifactSpec {
+	allowed := map[string]struct{}{
+		"output/edit-decision-list.json": {},
+		"output/transcript.json":         {},
+		"output/edit-strategy.md":        {},
+		"output/visual-plan.json":        {},
+	}
+	filtered := make([]agentpack.ArtifactSpec, 0, len(required))
+	for _, artifact := range required {
+		if _, ok := allowed[filepath.ToSlash(strings.TrimSpace(artifact.Path))]; ok {
+			filtered = append(filtered, artifact)
+		}
+	}
+	return filtered
 }
 
 func (s *TaskService) validateStoredDeliveryObject(ctx context.Context, task *model.Task, executionID string, file *model.TaskFile, spec agentpack.DeliverySpec) error {

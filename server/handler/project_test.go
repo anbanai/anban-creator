@@ -433,7 +433,7 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 	app, repo, _ := setupProjectHandlerTest(t)
 	userID := uuid.NewString()
 	projectIDs := make(map[string]string)
-	for _, platform := range []string{model.PlatformWechat, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage, model.PlatformLocalLife, model.PlatformWhiteboardAnimation, model.PlatformHypit, model.PlatformVideoEdit} {
+	for _, platform := range []string{model.PlatformWechat, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage, model.PlatformLocalLife, model.PlatformWhiteboardAnimation, model.PlatformHypit, model.PlatformVideoEdit, model.PlatformTalkingHeadEditor} {
 		projectID := uuid.NewString()
 		if err := repo.Projects().Create(t.Context(), &model.Project{
 			ID: projectID, UserID: userID, Platform: platform,
@@ -449,8 +449,8 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 		t.Fatalf("list status = %d", resp.StatusCode)
 	}
 	items := decodeBody(t, resp)["data"].([]any)
-	if len(items) != 6 {
-		t.Fatalf("non-admin projects = %#v, want article, seednote, montage, local-life, whiteboard-animation, and video-edit", items)
+	if len(items) != 7 {
+		t.Fatalf("non-admin projects = %#v, want article, seednote, montage, local-life, whiteboard-animation, video-edit, and talking-head-editor", items)
 	}
 	for _, item := range items {
 		platformValue := item.(map[string]any)["platform"]
@@ -493,8 +493,8 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 		t.Fatalf("non-admin platform configs status = %d, want 200", resp.StatusCode)
 	}
 	configs := decodeBody(t, resp)["data"].([]any)
-	if len(configs) != 6 {
-		t.Fatalf("non-admin platform configs = %#v, want article, seednote, montage, local-life, whiteboard-animation, and video-edit", configs)
+	if len(configs) != 7 {
+		t.Fatalf("non-admin platform configs = %#v, want article, seednote, montage, local-life, whiteboard-animation, video-edit, and talking-head-editor", configs)
 	}
 	for _, item := range configs {
 		platform := item.(map[string]any)["id"].(string)
@@ -507,8 +507,8 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("admin platform configs status = %d, want 200", resp.StatusCode)
 	}
-	if configs := decodeBody(t, resp)["data"].([]any); len(configs) != 9 {
-		t.Fatalf("admin platform configs = %#v, want all nine configured platforms", configs)
+	if configs := decodeBody(t, resp)["data"].([]any); len(configs) != 10 {
+		t.Fatalf("admin platform configs = %#v, want all ten configured platforms", configs)
 	}
 }
 

@@ -40,6 +40,7 @@ import ContentLineagePanel from '@/components/tasks/ContentLineagePanel'
 import TaskFeedbackCard from '@/components/tasks/TaskFeedbackCard'
 import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
 import { AgentIconStack, agentDisplayName } from '@/components/agent-prompt/AgentIconStack'
+import { TalkingHeadEditorReviewPanel } from '@/components/talking-head-editor/TalkingHeadEditorReviewPanel'
 
 const RESUME_FILE_MAX_BYTES = 25 * 1024 * 1024
 const RESUME_ATTACHMENT_POLICY = {
@@ -292,7 +293,7 @@ export default function TaskDetailPage() {
   const { data: files, isLoading: filesLoading, isError: filesError, refetch: refetchFiles } = useQuery({
     queryKey: ['task-files', id],
     queryFn: () => api.tasks.files(id!),
-    enabled: !!id && !!task && ['completed', 'failed', 'cancelled'].includes(task.status),
+    enabled: !!id && !!task && ['awaiting_review', 'completed', 'failed', 'cancelled'].includes(task.status),
   })
 
   const deliveredFiles = files?.filter((file) => file.state === 'delivered') ?? []
@@ -751,6 +752,7 @@ export default function TaskDetailPage() {
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_18rem] xl:items-start">
         <div className="min-w-0 space-y-6">
           {task.asset_id && <ContentLineagePanel assetID={task.asset_id} runID={task.reuse_run_id} taskID={task.id} />}
+          {task.type === 'talking-head-editor' && task.status === 'awaiting_review' ? <TalkingHeadEditorReviewPanel taskId={task.id} files={files ?? []} /> : null}
           {task.status === 'pending' || task.status === 'running' ? (
             <TaskExecutionRail
               key={task.id}

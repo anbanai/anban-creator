@@ -423,6 +423,19 @@ func TestValidateExecutionDeliveryRequiresEveryFrozenArtifact(t *testing.T) {
 	}
 }
 
+func TestTalkingHeadEditorSampleRequiredArtifactsExcludeFinalDelivery(t *testing.T) {
+	required := []agentpack.ArtifactSpec{
+		{Role: "final_video", Path: "output/final.mp4", MIMEType: "video/mp4", Required: true},
+		{Role: "transcript", Path: "output/transcript.json", MIMEType: "application/json", Required: true},
+		{Role: "visual_plan", Path: "output/visual-plan.json", MIMEType: "application/json", Required: true},
+		{Role: "quality", Path: "output/quality-evidence.json", MIMEType: "application/json", Required: true},
+	}
+	got := talkingHeadEditorSampleRequiredArtifacts(required)
+	if len(got) != 2 || got[0].Path != "output/transcript.json" || got[1].Path != "output/visual-plan.json" {
+		t.Fatalf("sample required artifacts = %#v, want transcript and visual plan only", got)
+	}
+}
+
 func TestValidateExecutionDeliveryRejectsObjectFromAnotherTaskNamespace(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	store := &fakeTaskStorage{name: "oss", files: map[string][]byte{}}

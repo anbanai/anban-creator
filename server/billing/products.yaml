@@ -159,6 +159,25 @@ skus:
     price_credits: 6000
     delivery: "video_edit_artifacts_verified"
 
+  - id: "task.talking_head_editor.effective"
+    operation: "task.talking_head_editor"
+    execution_profile: "effective"
+    charge_policy: "task_admission"
+    price_credits: 1600
+    delivery: "talking_head_editor_artifacts_verified"
+  - id: "task.talking_head_editor.balanced"
+    operation: "task.talking_head_editor"
+    execution_profile: "balanced"
+    charge_policy: "task_admission"
+    price_credits: 2000
+    delivery: "talking_head_editor_artifacts_verified"
+  - id: "task.talking_head_editor.quality"
+    operation: "task.talking_head_editor"
+    execution_profile: "quality"
+    charge_policy: "task_admission"
+    price_credits: 6000
+    delivery: "talking_head_editor_artifacts_verified"
+
   - id: "task.local_life.effective"
     operation: "task.local_life"
     execution_profile: "effective"
