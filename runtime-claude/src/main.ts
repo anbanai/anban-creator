@@ -10,8 +10,8 @@ import {
   type HypitRestoreContext,
 } from "./hypit.js";
 import { pathToFileURL } from "node:url";
-import { constants } from "node:fs";
-import { open, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { readWorkflowFailureState } from "./failure-state.js";
 
 import {
   uploadWorkspaceArtifacts,
@@ -454,6 +454,8 @@ export async function runJob(
       try {
         if (data.task_type === "hypit")
           throw new Error("Hypit uses validated delivery metadata");
+        if (data.task_type === "seednote" && !result.success)
+          throw new Error("Seednote delivery did not succeed");
         const metadata = JSON.parse(
           await readFile(
             `${config.workspace}/output/completion-metadata.json`,
@@ -556,68 +558,32 @@ async function applyFailureState(
   workspace: string,
   result: ExecutionResult,
 ): Promise<ExecutionResult> {
-  const path = `${workspace}/output/failure-state.json`;
-  let file: Awaited<ReturnType<typeof open>> | undefined;
-  try {
-    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const info = await file.stat();
-    if (!info.isFile() || info.size > 64 * 1024) return result;
-    const value = JSON.parse(await file.readFile("utf8")) as Record<
-      string,
-      unknown
-    >;
-    const code =
-      typeof value.error_code === "string" &&
-      /^[a-z0-9_]{1,64}$/.test(value.error_code)
-        ? value.error_code
-        : undefined;
-    const stage =
-      typeof value.stage === "string" && /^[a-z0-9_]{1,64}$/.test(value.stage)
-        ? value.stage
-        : undefined;
-    const resumeFrom =
-      typeof value.resume_from === "string" &&
-      /^[a-z0-9_]{1,64}$/.test(value.resume_from)
-        ? value.resume_from
-        : undefined;
-    if (
-      value.version !== "1.0" ||
-      value.status !== "recoverable_failure" ||
-      !code ||
-      !stage ||
-      !resumeFrom
-    )
-      return result;
-    if (typeof value.message !== "string" || !value.message.trim())
-      return result;
-    const trustedIdentityFailure =
-      result.success === false &&
-      result.terminal_reason === "platform_error" &&
-      result.root_error_code === "execution_identity_unavailable";
-    if (trustedIdentityFailure && code !== "execution_identity_unavailable")
-      return result;
-    return {
-      ...result,
-      success: false,
-      error: trustedIdentityFailure
-        ? EXECUTION_IDENTITY_FAILURE_MESSAGE
-        : WORKFLOW_FAILURE_MESSAGE,
-      terminal_reason: trustedIdentityFailure
-        ? "platform_error"
-        : result.success
-          ? "workflow_error"
-          : (result.terminal_reason ?? "workflow_error"),
-      ...(trustedIdentityFailure
-        ? { root_error_code: "execution_identity_unavailable" }
-        : { workflow_error_code: code }),
-      failure_stage: stage,
-      resume_from: resumeFrom,
-    };
-  } catch {
+  const value = await readWorkflowFailureState(workspace);
+  if (!value) return result;
+  const { error_code: code, stage, resume_from: resumeFrom } = value;
+  const trustedIdentityFailure =
+    result.success === false &&
+    result.terminal_reason === "platform_error" &&
+    result.root_error_code === "execution_identity_unavailable";
+  if (trustedIdentityFailure && code !== "execution_identity_unavailable")
     return result;
-  } finally {
-    await file?.close().catch(() => {});
-  }
+  return {
+    ...result,
+    success: false,
+    error: trustedIdentityFailure
+      ? EXECUTION_IDENTITY_FAILURE_MESSAGE
+      : WORKFLOW_FAILURE_MESSAGE,
+    terminal_reason: trustedIdentityFailure
+      ? "platform_error"
+      : result.success
+        ? "workflow_error"
+        : (result.terminal_reason ?? "workflow_error"),
+    ...(trustedIdentityFailure
+      ? { root_error_code: "execution_identity_unavailable" }
+      : { workflow_error_code: code }),
+    failure_stage: stage,
+    resume_from: resumeFrom,
+  };
 }
 
 function startHeartbeat(

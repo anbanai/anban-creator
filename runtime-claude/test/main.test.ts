@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -636,6 +637,70 @@ describe("runJob finalization", () => {
       });
       expect(harness.completed).toEqual(result);
     } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test("Seednote stops on review failure, preserves partial delivery and reports failure even after SDK success", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "anban-seednote-failed-stop-"));
+    const harness = runJobHarness();
+    const previousPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+    try {
+      await mkdir(join(workspace, "output"));
+      await writeFile(join(workspace, "output/content.md"), "已有正文");
+      await writeFile(join(workspace, "output/completion-metadata.json"), JSON.stringify({ feedback_status: "succeeded" }));
+      let metadataSubmitted = false;
+      const createReporter = harness.dependencies.createReporter;
+      harness.dependencies.createReporter = (...args) => ({
+        ...createReporter(...args),
+        submitCompletionMetadata: async () => { metadataSubmitted = true; },
+      });
+      await writeFile(join(workspace, "output/failure-state.json"), JSON.stringify({
+        version: "1.0", status: "recoverable_failure", stage: "image_generation",
+        error_code: "image_review_unavailable", message: "图片审核不可用", resume_from: "image_generation",
+      }));
+      const pluginRoot = join(workspace, "plugin");
+      await mkdir(join(pluginRoot, "hooks"), { recursive: true });
+      const metadataScript = join(pluginRoot, "hooks/completion-metadata.sh");
+      await writeFile(metadataScript, '#!/bin/sh\nprintf success > "$CLAUDE_PROJECT_DIR/success-metadata"\n');
+      await chmod(metadataScript, 0o755);
+      process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
+      harness.dependencies.bootstrap = async () => ({
+        ...bootstrapData, task_type: "seednote", agent_flag: "anban:seednote",
+        agent_pack_id: "seednote", runtime_profile: "seednote",
+        resolved_agent_pack: {
+          ...bootstrapData.resolved_agent_pack,
+          id: "seednote", agent: { name: "seednote", max_turns: 240 },
+          bindings: { task_types: ["seednote"] },
+          runtime: { profile: "seednote", adapter: "standard" },
+          artifacts: [{ role: "image", path: "output/cover.png", required: true }],
+        },
+      });
+      let stopResult: unknown;
+      harness.dependencies.runClaude = async (_config, data, reporter, signal) => {
+        stopResult = await invokeManagedStop(data, workspace, reporter, signal);
+        return { success: true, work_dir: workspace };
+      };
+      harness.dependencies.uploadWorkspaceArtifacts = uploadWorkspaceArtifacts;
+
+      const result = await runJob(jobArgs(workspace), harness.stdout, harness.stderr, harness.dependencies);
+
+      expect(stopResult).toEqual({});
+      expect(metadataSubmitted).toBe(false);
+      await expect(readFile(join(workspace, "success-metadata"))).rejects.toMatchObject({ code: "ENOENT" });
+      expect(result).toMatchObject({
+        success: false, terminal_reason: "workflow_error", workflow_error_code: "image_review_unavailable",
+        failure_stage: "image_generation", resume_from: "image_generation",
+      });
+      expect(harness.completed).toEqual(result);
+      expect(harness.artifactManifest.map(file => file.relative_path).sort()).toEqual([
+        "output/completion-metadata.json", "output/content.md", "output/failure-state.json",
+      ]);
+      expect(harness.stageProgressEvents).toEqual([]);
+      expect(harness.finalizationOrder.indexOf("artifact-manifest")).toBeLessThan(harness.finalizationOrder.indexOf("complete"));
+    } finally {
+      if (previousPluginRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
+      else process.env.CLAUDE_PLUGIN_ROOT = previousPluginRoot;
       await rm(workspace, { recursive: true, force: true });
     }
   });

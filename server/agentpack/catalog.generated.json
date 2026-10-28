@@ -2659,7 +2659,7 @@
       "id": "seednote",
       "channel": "seednote",
       "plan_task_kind": "content_generation",
-      "version": "2.0.10",
+      "version": "2.0.11",
       "kind": "managed",
       "display_name": "种草笔记",
       "description": "支持原创、复刻和爆款分析的种草笔记图文创作流程。",
@@ -2911,7 +2911,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "59cd1b0bb096d8e71ff385158f5a1d782fbbd17c00f38185af74a7f23cd88d86"
+      "digest": "e0730ff627ac7318f8bc2cc592a07957359b7af1a006b7eb7eacc3891fca1855"
     },
     {
       "id": "video-edit",
