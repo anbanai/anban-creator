@@ -52,6 +52,32 @@ describe('PublicSharePage', () => {
     expect(calls).toBe(2)
   })
 
+  it('removes displayed content when the share expires while reading', async () => {
+    server.use(http.get('/api/v1/public/shares/test-token', () => HttpResponse.json({ data: { ...content, expires_at: new Date(Date.now() + 500).toISOString() } })))
+    open()
+    await screen.findByRole('heading', { name: content.title })
+    expect(screen.getByText('最后一段')).toBeInTheDocument()
+    await screen.findByRole('heading', { name: '分享链接已失效' }, { timeout: 2000 })
+    expect(screen.queryByText('最后一段')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重新加载' })).not.toBeInTheDocument()
+  })
+
+  it('refetches on persisted pageshow and removes a share revoked during BFCache suspension', async () => {
+    let calls = 0
+    server.use(http.get('/api/v1/public/shares/test-token', () => {
+      calls++
+      return calls === 1 ? HttpResponse.json({ data: content }) : new HttpResponse(null, { status: 410 })
+    }))
+    open()
+    await screen.findByRole('heading', { name: content.title })
+    fireEvent(window, new PageTransitionEvent('pageshow', { persisted: false }))
+    expect(calls).toBe(1)
+    fireEvent(window, new PageTransitionEvent('pageshow', { persisted: true }))
+    await screen.findByRole('heading', { name: '分享链接已失效' })
+    expect(screen.queryByText('最后一段')).not.toBeInTheDocument()
+    expect(calls).toBe(2)
+  })
+
   it('keeps Markdown gallery order, avoids body duplicates and removes raw HTML/external images', async () => {
     server.use(http.get('/api/v1/public/shares/test-token', () => HttpResponse.json({ data: { ...content,
       body: '![正文](/api/v1/public/shares/test-token/images/two)\n\n<img src="https://tracker.test/pixel">\n\n![外部](https://tracker.test/leak)',
