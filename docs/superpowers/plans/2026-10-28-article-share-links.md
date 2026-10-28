@@ -49,7 +49,8 @@ Interfaces consumed: Task 1 endpoints. Do not change their wire contract unilate
 
 - Server feature tests pass across handler, service, repository, middleware and migration packages; Server binary builds successfully.
 - Full Server test run matches the clean main baseline: 12 existing WeChat publication/reconciliation service failures, with no additional failures. The feature does not change those workflows.
-- Studio: 166 test files / 1499 tests pass and production build passes before review follow-up. Existing Vite native-config and chunk-size warnings remain.
+- Studio final verification after review follow-up: 167 test files / 1502 tests pass and production build passes. Existing Vite native-config and chunk-size warnings remain.
 - Browser smoke uses the real Studio implementation with local sample API responses: create a custom 30-day link, copy it, change to 7 days without changing the URL, revoke it, and verify anonymous invalid-link state. Both readers render complete text and images; mobile article scrolling reaches the final paragraph. Screenshots were saved outside tracked source for user confirmation.
-- Real Nginx container smoke verifies configuration syntax, SPA fallback, public API proxy, privacy headers and token-free ordinary share-path access logging. Encoded-path review follow-up is recorded in the corresponding fix commit.
+- Real Nginx container regressions pass all 11 tests: configuration syntax, SPA fallback, public API proxy, privacy headers and token-free access logging, including canonical, mixed-case, encoded-character and encoded-slash share paths. Live expiry and BFCache restoration also have passing reader regressions.
+- Final review fixes: owner sharing works with a separate API origin without expanding CORS permissions; application and Nginx logs redact equivalent encoded sharing paths. HTTP-boundary and actual-router regressions pass, and scoped re-review found no remaining issues.
 - Release order: apply `server/migrations/20261028_task_shares.sql`, then deploy Server, then Studio. No push, merge or deployment was performed; the local feature branch remains available for review.
