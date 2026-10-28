@@ -36,6 +36,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&WechatAccountCapability{},
 		&TaskExecution{},
 		&TaskFile{},
+		&TaskShare{},
 		&TaskFileObjectCleanup{},
 		&UploadSession{},
 		&Asset{},

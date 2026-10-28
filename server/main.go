@@ -617,6 +617,7 @@ func main() {
 	// 14. Create handlers.
 	var planHandler *handler.PlanHandler
 	var taskHandler *handler.TaskHandler
+	var taskShareHandler *handler.TaskShareHandler
 	var seednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 	var contentAnalyticsHandler *handler.ContentAnalyticsHandler
 	var analyticsHandler *handler.AnalyticsHandler
@@ -669,6 +670,7 @@ func main() {
 		}
 		// Pass local dataDir so ServeLocalFile can serve files from disk.
 		taskHandler = handler.NewTaskHandler(taskSvc, log, cfg.Storage.LocalDataDir)
+		taskShareHandler = handler.NewTaskShareHandler(service.NewTaskShareService(repo, store))
 		taskHandler.SetReferenceAssetService(referenceAssetSvc)
 		if store != nil {
 			taskHandler.SetStore(store)
@@ -1098,6 +1100,7 @@ func main() {
 		FeedbackDashboardHandler:            feedbackDashboardHandler,
 		PlanHandler:                         planHandler,
 		TaskHandler:                         taskHandler,
+		TaskShareHandler:                    taskShareHandler,
 		SeednoteAnalyticsHandler:            seednoteAnalyticsHandler,
 		ContentAnalyticsHandler:             contentAnalyticsHandler,
 		AnalyticsHandler:                    analyticsHandler,
