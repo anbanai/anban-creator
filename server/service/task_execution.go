@@ -111,7 +111,7 @@ func validateVideoEditCompletionArtifacts(task *model.Task, files []*model.TaskF
 	return agent.ArtifactValidation{Valid: true, MeaningfulFileCount: meaningful}
 }
 
-func validateTalkingHeadEditorCompletionArtifacts(files []*model.TaskFile) agent.ArtifactValidation {
+func validateTalkingHeadEditorCompletionArtifacts(task *model.Task, files []*model.TaskFile) agent.ArtifactValidation {
 	finalRequired := []string{"output/final.mp4", "output/edit-decision-list.json", "output/transcript.json", "output/edit-strategy.md", "output/visual-plan.json", "output/sfx-cues.json", "output/bgm-plan.json", "output/audio-source-manifest.json", "output/delivery-manifest.json", "output/quality-evidence.json", "output/content-tags.json"}
 	sampleRequired := []string{"output/rough-cut.mp4", "output/transcript.json", "output/edit-decision-list.json", "output/edit-strategy.md", "output/semantic-cut.mp4", "output/motion-sample.mp4", "output/visual-plan.json", "output/motion-review.json", "output/motion-source-manifest.json"}
 	present := map[string]bool{}
@@ -125,6 +125,12 @@ func validateTalkingHeadEditorCompletionArtifacts(files []*model.TaskFile) agent
 		}
 		if file.FileSize > 0 && (file.State == model.TaskFileStatePending || file.State == model.TaskFileStateDelivered) {
 			present[path] = true
+		}
+	}
+	if present["output/final.mp4"] && task != nil && strings.TrimSpace(task.ReviewDecision) == "" {
+		return agent.ArtifactValidation{
+			Missing: []string{"awaiting_review"},
+			Reason:  "talking-head-editor cannot deliver final.mp4 before the motion sample is approved",
 		}
 	}
 	if present["output/motion-sample.mp4"] && !present["output/final.mp4"] {

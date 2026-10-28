@@ -402,7 +402,7 @@ func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task
 		case model.IsVideoEditPlatform(task.Type):
 			validation = validateVideoEditCompletionArtifacts(task, files)
 		case model.IsTalkingHeadEditorPlatform(task.Type):
-			validation = validateTalkingHeadEditorCompletionArtifacts(files)
+			validation = validateTalkingHeadEditorCompletionArtifacts(task, files)
 		default:
 			validation = agent.ValidateTaskArtifactsFromTaskFiles(task, files)
 		}
