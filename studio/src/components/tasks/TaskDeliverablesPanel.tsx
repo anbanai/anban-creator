@@ -4,7 +4,7 @@ import { Button } from '@/components/common/button'
 import { TaskFileDownloads, TaskStageFiles } from './TaskStageFiles'
 import { CompletionSummary, TaskExecutionRail } from './TaskExecutionRail'
 import { taskFailurePresentation } from '@/lib/labels'
-import { TaskSharePanel } from './TaskSharePanel'
+import { TaskSharePopover } from './TaskSharePopover'
 
 export interface TaskDeliverablesPanelProps {
   taskId: string
@@ -64,10 +64,10 @@ export function TaskDeliverablesPanel({ taskId, taskStatus, files, taskType, tas
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {shareable ? <TaskSharePopover taskId={taskId} canCreate={hasShareBody && !filesLoading && !filesError} /> : null}
           {hasFiles ? <TaskFileDownloads taskId={taskId} files={coreFiles} /> : null}
         </div>
       </div>
-      {shareable ? <TaskSharePanel taskId={taskId} canCreate={hasShareBody && !filesLoading && !filesError} /> : null}
       {taskStatus === 'failed' || taskStatus === 'cancelled' ? (
         <div className="mt-4 space-y-3 border-t border-border/70 pt-4" role="status">
           <div className="flex items-start justify-between gap-3 rounded-lg border border-destructive/15 bg-destructive/5 px-3 py-2.5 text-sm">

@@ -2,7 +2,7 @@
 
 **Goal:** 用户可为公众号文章和种草笔记创建有期限、始终读取最新交付的匿名阅读链接。
 
-**Architecture:** Server owns share lifecycle and delivery access. Studio provides a management dialog and an isolated public reader. Reuse existing frozen delivery contracts and atomic delivery promotion.
+**Architecture:** Server owns share lifecycle and delivery access. Studio provides an anchored management popover and an isolated public reader. Reuse existing frozen delivery contracts and atomic delivery promotion.
 
 **Spec:** `docs/superpowers/specs/2026-10-28-article-share-links-design.md`
 
@@ -28,7 +28,7 @@ Interfaces produced are the five HTTP endpoints and JSON payloads in the spec. F
 Read the design spec for exact behavior and HTTP payloads, and the Task 1 report for actual integration details. Implement only Studio files for this task.
 
 - Add typed share API and types. Owner API uses current authenticated client; public reader uses anonymous fetch/client with the same configured API base and no refresh/login interceptors. Handle 404/410 as invalid link, 409 as unavailable content, 429/retry and network/500 as retryable errors.
-- Add sharing dialog in the TaskDeliverablesPanel header near download. Only supported task kinds with delivered main body get initial creation; keep management reachable if an existing delivered version remains after failure. 1/7/custom days, default 7, integer 1–365 validation, create/copy/update/close actions, clear exact expiry, busy and retry states. Build full share URL from server share_path and Studio origin. A missing share is a valid none state, never auto-create just by opening dialog.
+- Add a non-modal sharing popover in the TaskDeliverablesPanel header near download. Only supported task kinds with delivered main body get initial creation; keep management reachable if an existing delivered version remains after failure. 1/7/custom days, default 7, integer 1–365 validation, create/copy/update/close actions, clear exact expiry, busy and retry states. Build full share URL from server share_path and Studio origin. A missing share is a valid none state, never auto-create just by opening dialog.
 - Add lazy public `/share/:token` route outside ProtectedRoute, PublicRoute login redirects and AppLayout. Show title and complete content on a narrow mobile-friendly reading page. Seednote Markdown via existing react-markdown+remark-gfm without raw HTML; gallery order from response and avoid duplicating body images. Do not truncate using export helpers.
 - Render article HTML with safe element/attribute/style cleanup and sandboxed no-script iframe or equivalent isolated reader; preserve useful inline article layout. Allow only URLs supplied by the current response for images; remove active content, dangerous styles, base/meta navigation and arbitrary external image sources. Prevent raw HTML response becoming page script. Show image loading errors with a reload action instead of silently dropping content. No download buttons.
 - Add noindex/no-referrer metadata for share page and restore document metadata on navigation where relevant. Public request caching must not keep old/expired contents; evaluate expiry on load, refetch on revisit, and don't expose private workspace chrome when logged in.
@@ -57,6 +57,7 @@ Interfaces consumed: Task 1 endpoints. Do not change their wire contract unilate
 
 ## UI follow-up
 
-- Replaced the sharing dialog with an expandable card inside delivery results. The page stays interactive, with a full-width link, grouped expiry choices, sharing status, and responsive spacing. Existing create/copy/update/revoke behavior is retained.
-- Public reader and error-page branding now uses `Anban AI`.
-- Validation: 167 Studio test files / 1503 tests pass; production build passes. Browser checks cover expansion/collapse, creation, copying, custom expiry update, revocation, desktop layout and 390px mobile layout without horizontal overflow. Screenshots use local sample API data and are saved outside the repository for user confirmation.
+- Sharing opens in a compact, non-modal popover beside the delivery header's share button. The page remains visible and interactive, and clicking outside or pressing Escape dismisses the card. Expiry choices and the conditional custom-day input occupy one row.
+- Public reader and error-page branding uses `Anban AI`.
+- Browser checks cover creation, copying, custom expiry update, revocation, outside-click and Escape dismissal, focus restoration, desktop anchoring and 390px mobile layout without horizontal overflow. The card has no page overlay; custom expiry does not increase its height at the tested width. Screenshots use local sample API data and are saved outside the repository for user confirmation.
+- Final Studio verification for the popover: 167 test files / 1503 tests pass; production build passes. Existing Vite native-config and chunk-size warnings remain.

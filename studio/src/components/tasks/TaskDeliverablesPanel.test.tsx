@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server } from '@/test/mocks/server'
@@ -34,13 +34,13 @@ describe('TaskDeliverablesPanel', () => {
     expect(screen.queryByRole('button', { name: '分享作品' })).not.toBeInTheDocument()
   })
 
-  it('expands share settings inside the delivery result and keeps files visible', async () => {
+  it('opens sharing beside the trigger without hiding the delivery page', async () => {
     server.use(http.get('/api/v1/tasks/task-1/share', () => HttpResponse.json({ data: { status: 'none' } })))
     render(<TaskDeliverablesPanel taskId="task-1" taskStatus="completed" taskType="seednote" files={files} isAdmin={false} />)
     fireEvent.click(screen.getByRole('button', { name: '分享作品' }))
-    const delivery = screen.getByRole('region', { name: '交付结果' })
-    expect(await within(delivery).findByRole('region', { name: '分享设置' })).toBeVisible()
-    expect(within(delivery).getByText('final.md')).toBeVisible()
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '分享作品' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: '交付结果' })).toBeVisible()
+    expect(screen.getByText('final.md')).toBeVisible()
+    expect(screen.queryByRole('region', { name: '分享设置' })).not.toBeInTheDocument()
   })
 })
