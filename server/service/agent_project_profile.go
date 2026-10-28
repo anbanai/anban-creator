@@ -96,6 +96,7 @@ type AgentProjectProfileService struct {
 	resources         *resources.ResourceManager
 	montage           config.MontageConfig
 	videoEdit         config.VideoEditConfig
+	talkingHeadEditor config.TalkingHeadEditorConfig
 	imageCapabilities *ImageCapabilityResolver
 	repo              repository.Repository
 }
@@ -114,6 +115,14 @@ func (s *AgentProjectProfileService) SetVideoEditConfig(cfg config.VideoEditConf
 	}
 	cfg.ApplyDefaults()
 	s.videoEdit = cfg
+}
+
+func (s *AgentProjectProfileService) SetTalkingHeadEditorConfig(cfg config.TalkingHeadEditorConfig) {
+	if s == nil {
+		return
+	}
+	cfg.ApplyDefaults()
+	s.talkingHeadEditor = cfg
 }
 
 func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectProfileRequest) (*AgentProjectProfile, error) {
@@ -330,6 +339,8 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		profile["montage"] = s.montageProfile(project, task)
 	case model.PlatformVideoEdit:
 		profile["video_edit"] = s.videoEditProfile(project, task)
+	case model.PlatformTalkingHeadEditor:
+		profile["talking_head_editor"] = s.talkingHeadEditorProfile(project, task)
 	}
 
 	if s.resources != nil {
@@ -385,6 +396,50 @@ func (s *AgentProjectProfileService) videoEditProfile(project *model.Project, ta
 		},
 		"optional_artifacts": []string{"output/subtitles.srt", "output/failure-state.json", "output/failure-diagnosis.md", "output/progress-state.json"},
 		"runtime_contract":   "Use browser-use/video-use at the pinned Server-provided commit in the standard /workspace adapter. Execute autonomously, never request interactive edit approval, and never invoke OpenMontage.",
+	}
+}
+
+func (s *AgentProjectProfileService) talkingHeadEditorProfile(project *model.Project, task *model.Task) map[string]any {
+	defaults := model.TalkingHeadEditorDefaults{}
+	if project != nil {
+		defaults = project.TalkingHeadEditorDefaults.Data()
+	}
+	input := model.TalkingHeadEditorInput{}
+	if task != nil && model.IsTalkingHeadEditorPlatform(task.Type) {
+		input = task.TalkingHeadEditorInput.Data()
+	}
+	return map[string]any{
+		"defaults":       defaults,
+		"input":          input,
+		"default_policy": s.talkingHeadEditor.DefaultPolicy,
+		"limits": map[string]any{
+			"max_duration_seconds": s.talkingHeadEditor.MaxDurationSeconds,
+			"max_assets":           s.talkingHeadEditor.MaxAssets,
+			"timeout_minutes":      s.talkingHeadEditor.TimeoutMinutes,
+		},
+		"upstream_revisions": map[string]string{
+			"auto-editor":                  "28.1.0",
+			"video-use":                    "43cfc566833548093455c9d4a46bd69913b7e552",
+			"erduo-broll-loop-engineering": "managed-release",
+		},
+		"workspace_input_file": "talking-head-editor-input.json",
+		"policy_file":          "talking-head-editor-policy.json",
+		"project_root":         "/workspace",
+		"required_artifacts": []string{
+			"output/final.mp4",
+			"output/edit-decision-list.json",
+			"output/transcript.json",
+			"output/edit-strategy.md",
+			"output/visual-plan.json",
+			"output/sfx-cues.json",
+			"output/bgm-plan.json",
+			"output/audio-source-manifest.json",
+			"output/delivery-manifest.json",
+			"output/quality-evidence.json",
+			"output/content-tags.json",
+		},
+		"optional_artifacts": []string{"output/rough-cut.mp4", "output/semantic-cut.mp4", "output/motion-sample.mp4", "output/subtitles.srt", "output/failure-state.json", "output/failure-diagnosis.md", "output/progress-state.json"},
+		"runtime_contract":   "Use only the three Server-pinned talking-head-editor Skills. Execute rough cut and semantic cut continuously, stop at the motion-sample review gate, and add sound only after approval. Never load video-edit or silently downgrade to it.",
 	}
 }
 

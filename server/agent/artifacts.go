@@ -161,6 +161,33 @@ func validateTaskArtifacts(task *model.Task, files map[string]bool, meaningful i
 		result.Valid = true
 		return result
 	}
+	if task != nil && model.IsTalkingHeadEditorPlatform(task.Type) {
+		finalRequired := []string{"final.mp4", "edit-decision-list.json", "transcript.json", "edit-strategy.md", "visual-plan.json", "sfx-cues.json", "bgm-plan.json", "audio-source-manifest.json", "delivery-manifest.json", "quality-evidence.json", "content-tags.json"}
+		sampleRequired := []string{"rough-cut.mp4", "transcript.json", "edit-decision-list.json", "edit-strategy.md", "semantic-cut.mp4", "motion-sample.mp4", "visual-plan.json", "motion-review.json", "motion-source-manifest.json"}
+		sampleOnly := files["motion-sample.mp4"] && !files["final.mp4"]
+		required := finalRequired
+		if sampleOnly {
+			required = sampleRequired
+		}
+		var missing []string
+		for _, name := range required {
+			if !files[name] && !files["output/"+name] {
+				missing = append(missing, name)
+			}
+		}
+		if files["failure-state.json"] || files["output/failure-state.json"] {
+			result.Missing = []string{"successful talking-head-editor completion"}
+			result.Reason = "talking-head-editor reported a recoverable failure; inspect failure-state.json"
+			return result
+		}
+		if len(missing) > 0 {
+			result.Missing = missing
+			result.Reason = "talking-head-editor missing required deliverables: " + strings.Join(missing, ", ")
+			return result
+		}
+		result.Valid = true
+		return result
+	}
 	if task != nil && model.IsLocalLifePlatform(task.Type) {
 		if files["failure-state.json"] {
 			result.Missing = []string{"successful local-life batch"}

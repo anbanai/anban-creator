@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -24,7 +24,6 @@ import { TagInput } from '@/components/ui/TagInput'
 import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
 import { AnalyzedImageField } from '@/components/image-analysis/AnalyzedImageField'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from '@/components/ui/form'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { projectSchema, type ProjectFormValues } from '@/lib/schemas'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
@@ -33,13 +32,14 @@ import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import { createPlanHref, createTaskHref, parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
 import { referenceSelectionFromValue } from '@/lib/reference-image'
-import { ProjectChannelConfigDialog, WechatPlatformSettingsPanel } from '@/components/projects/ProjectChannelConfigDialog'
+import { ProjectChannelConfigDialog } from '@/components/projects/ProjectChannelConfigDialog'
 import { useAuth } from '@/contexts/AuthContext'
 import { CreationTypePicker } from '@/components/tasks/CreationTypePicker'
 import { profileLabAgents, projectAgentIDs, supportsProfileLab } from '@/lib/project-capabilities'
 import { getProjectCreationDefaults } from '@/lib/studio-ux'
 import { portraitSummary } from '@/lib/portrait-library'
 import { VideoEditProjectDefaultsPanel } from '@/components/video-edit/VideoEditProjectDefaultsPanel'
+import { TalkingHeadEditorProjectDefaultsPanel } from '@/components/talking-head-editor/TalkingHeadEditorProjectDefaultsPanel'
 
 const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'ecommerce', 'hypit'])
 
@@ -62,6 +62,7 @@ const PROJECT_FORM_DEFAULTS: ProjectFormValues = {
   portrait_reference_image: null,
   ecommerce_default_selected_modules: {},
   video_edit_defaults: {},
+  talking_head_editor_defaults: {},
 }
 
 function projectToForm(project: Project): ProjectFormValues {
@@ -75,10 +76,12 @@ function projectToForm(project: Project): ProjectFormValues {
     reference_image: project.reference_image ?? null,
     portrait_reference_image: project.portrait_reference_image ?? null,
     video_edit_defaults: project.video_edit_defaults ?? {},
+    talking_head_editor_defaults: project.talking_head_editor_defaults ?? {},
   }
 }
 
 function primaryProjectPlatform(agentIDs: string[]): ProjectPlatform | '' {
+  if (agentIDs.includes('talking-head-editor')) return 'talking-head-editor'
   if (agentIDs.includes('video-edit')) return 'video-edit'
   if (agentIDs.some((id) => id === 'wechat-article' || id === 'wechat-picture')) return 'wechat'
   if (agentIDs.includes('seednote')) return 'seednote'
@@ -90,10 +93,6 @@ function primaryProjectPlatform(agentIDs: string[]): ProjectPlatform | '' {
 
 function usesWechatPublishing(agentIDs: readonly string[]) {
   return agentIDs.some((id) => id === 'wechat-article' || id === 'wechat-picture')
-}
-
-function projectUsesWechatPublishing(project: Project) {
-  return project.agent_ids != null && usesWechatPublishing(project.agent_ids)
 }
 
 const selectableProjectTypeIDs: Set<string> = new Set(profileLabAgents.map((agent) => agent.id))
@@ -123,15 +122,8 @@ export default function ProjectsPage() {
   const editingAnalysisUpdatedAtRef = useRef('')
   const [referenceUploading, setReferenceUploading] = useState(false)
   const [channelProject, setChannelProject] = useState<Project | null>(null)
-  const [platformSettingsDirty, setPlatformSettingsDirty] = useState(false)
-  const [platformSettingsBusy, setPlatformSettingsBusy] = useState(false)
-  const [settingsTab, setSettingsTab] = useState('profile')
   const [onboardingProject, setOnboardingProject] = useState<Project | null>(null)
   const { submit } = useSubmitLock()
-  const handlePlatformSettingsStateChange = useCallback((dirty: boolean, busy: boolean) => {
-    setPlatformSettingsDirty(dirty)
-    setPlatformSettingsBusy(busy)
-  }, [])
 
   useEffect(() => {
     if (modalOpen || !pendingChannelProjectRef.current) return
@@ -352,9 +344,6 @@ export default function ProjectsPage() {
     setEditingAnalysis(null)
     editingAnalysisUpdatedAtRef.current = ''
     setReferenceUploading(false)
-    setPlatformSettingsDirty(false)
-    setPlatformSettingsBusy(false)
-    setSettingsTab('profile')
     setModalOpen(true)
   }
 
@@ -383,9 +372,6 @@ export default function ProjectsPage() {
     setEditingAnalysis(project.image_analysis ?? null)
     editingAnalysisUpdatedAtRef.current = project.image_analysis?.updated_at ?? ''
     setReferenceUploading(false)
-    setPlatformSettingsDirty(false)
-    setPlatformSettingsBusy(false)
-    setSettingsTab('profile')
     form.reset(projectToForm(project))
     setModalOpen(true)
   }
@@ -397,8 +383,7 @@ export default function ProjectsPage() {
   }
 
   function closeModal() {
-    if (platformSettingsBusy) return
-    if (form.formState.isDirty || platformSettingsDirty) {
+    if (form.formState.isDirty) {
       setShowDirtyDialog(true)
       return
     }
@@ -414,9 +399,6 @@ export default function ProjectsPage() {
     setEditingAnalysis(null)
     editingAnalysisUpdatedAtRef.current = ''
     setReferenceUploading(false)
-    setPlatformSettingsDirty(false)
-    setPlatformSettingsBusy(false)
-    setSettingsTab('profile')
     form.reset(PROJECT_FORM_DEFAULTS)
     if (createIntent.shouldCreate) {
       setSearchParams({}, { replace: true })
@@ -442,6 +424,7 @@ export default function ProjectsPage() {
       }
     }
     if ((values.agent_ids ?? []).includes('video-edit')) payload.video_edit_defaults = values.video_edit_defaults ?? {}
+    if ((values.agent_ids ?? []).includes('talking-head-editor')) payload.talking_head_editor_defaults = values.talking_head_editor_defaults ?? {}
     if (!editingProject || form.formState.dirtyFields.visual_style) {
       payload.visual_style = values.visual_style?.trim() ?? ''
     }
@@ -546,6 +529,7 @@ export default function ProjectsPage() {
               project={project}
               stats={projectStats[project.id]}
               onEdit={openEdit}
+              onChannelConfig={setChannelProject}
               onUpdateProfile={openProfileCreator}
               archiving={archiveMutation.isPending}
               restoring={restoreMutation.isPending}
@@ -562,19 +546,8 @@ export default function ProjectsPage() {
           <DialogHeader>
             <DialogTitle>{editingProject ? '编辑人设' : '新建人设'}</DialogTitle>
           </DialogHeader>
-          {editingProject && <Tabs value={settingsTab} onValueChange={setSettingsTab}>
-            <TabsList variant="line" aria-label="人设设置分区" className="w-full justify-start rounded-none border-b border-border p-0">
-              <TabsTrigger value="profile" className="flex-none px-3 py-2">人设资料</TabsTrigger>
-              {projectUsesWechatPublishing(editingProject) && <TabsTrigger value="platform" className="flex-none px-3 py-2">平台设置</TabsTrigger>}
-            </TabsList>
-            {projectUsesWechatPublishing(editingProject) && (
-              <TabsContent value="platform" keepMounted className="max-h-[72vh] overflow-y-auto p-1">
-                <WechatPlatformSettingsPanel project={editingProject} onStateChange={handlePlatformSettingsStateChange} />
-              </TabsContent>
-            )}
-          </Tabs>}
           <Form {...form}>
-            <form id="project-form" onSubmit={handleProjectSubmit} className={`${editingProject && settingsTab !== 'profile' ? 'hidden' : ''} max-h-[72vh] space-y-4 overflow-y-auto p-1`}>
+            <form id="project-form" onSubmit={handleProjectSubmit} className="max-h-[72vh] space-y-4 overflow-y-auto p-1">
               <FormField control={form.control} name="name" render={({ field }) => (
                 <FormItem className="flex items-center gap-3 space-y-0">
                   <FormLabel className="w-20 shrink-0 text-right">人设名称</FormLabel>
@@ -611,6 +584,9 @@ export default function ProjectsPage() {
                   value={form.watch('video_edit_defaults')}
                   onChange={(value) => form.setValue('video_edit_defaults', value, { shouldDirty: true, shouldValidate: true })}
                 />
+              )}
+              {selectedAgentIDs.includes('talking-head-editor') && (
+                <TalkingHeadEditorProjectDefaultsPanel value={form.watch('talking_head_editor_defaults')} onChange={(value) => form.setValue('talking_head_editor_defaults', value, { shouldDirty: true, shouldValidate: true })} />
               )}
 
               {hasWechatPublishing && !editingProject && (
@@ -714,11 +690,9 @@ export default function ProjectsPage() {
           </Form>
           <DialogFooter>
             <Button variant="secondary" onClick={closeModal}>取消</Button>
-            {(!editingProject || settingsTab === 'profile') && (
-              <Button type="submit" form="project-form" loading={isSubmitting} disabled={referenceUploading}>
-                {editingProject ? '更新' : '创建'}
-              </Button>
-            )}
+            <Button type="submit" form="project-form" loading={isSubmitting} disabled={referenceUploading}>
+              {editingProject ? '更新' : '创建'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

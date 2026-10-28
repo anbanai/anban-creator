@@ -85,11 +85,13 @@ type Project struct {
 	FeedbackPaused bool   `gorm:"not null;default:false" json:"feedback_paused"`
 	// EcommerceDefaults carries the reusable e-commerce defaults for platform=
 	// "ecommerce" projects. Zero value for non-ecommerce projects.
-	EcommerceDefaults    datatypes.JSONType[EcommerceProjectDefaults] `gorm:"type:json" json:"ecommerce_defaults"`
-	EcommerceDefaultsSet bool                                         `gorm:"-" json:"-"`
-	MontageDefaults      datatypes.JSONType[MontageDefaults]          `gorm:"type:json" json:"montage_defaults"`
-	VideoEditDefaults    datatypes.JSONType[VideoEditDefaults]        `gorm:"type:json" json:"video_edit_defaults"`
-	Profile              datatypes.JSONType[ProjectProfile]           `gorm:"type:json" json:"profile"`
+	EcommerceDefaults            datatypes.JSONType[EcommerceProjectDefaults]  `gorm:"type:json" json:"ecommerce_defaults"`
+	EcommerceDefaultsSet         bool                                          `gorm:"-" json:"-"`
+	MontageDefaults              datatypes.JSONType[MontageDefaults]           `gorm:"type:json" json:"montage_defaults"`
+	VideoEditDefaults            datatypes.JSONType[VideoEditDefaults]         `gorm:"type:json" json:"video_edit_defaults"`
+	TalkingHeadEditorDefaults    datatypes.JSONType[TalkingHeadEditorDefaults] `gorm:"type:json" json:"talking_head_editor_defaults"`
+	TalkingHeadEditorDefaultsSet bool                                          `gorm:"-" json:"-"`
+	Profile                      datatypes.JSONType[ProjectProfile]            `gorm:"type:json" json:"profile"`
 	// RuntimeChannelConfig is populated by Server-owned connector flows for the
 	// current request. It is never persisted or exposed in project responses.
 	RuntimeChannelConfig map[string]any                    `gorm:"-" json:"-"`
@@ -101,6 +103,13 @@ type Project struct {
 	DeletingAt           *time.Time                        `gorm:"index" json:"-"`
 	CreatedAt            time.Time                         `json:"created_at"`
 	UpdatedAt            time.Time                         `json:"updated_at"`
+}
+
+func (p *Project) SetTalkingHeadEditorDefaults(defaults TalkingHeadEditorDefaults) {
+	if p != nil {
+		p.TalkingHeadEditorDefaults = datatypes.NewJSONType(defaults)
+		p.TalkingHeadEditorDefaultsSet = true
+	}
 }
 
 func (Project) TableName() string { return "projects" }

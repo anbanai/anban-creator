@@ -1,0 +1,125 @@
+.assistant-home-stage {
+  padding-bottom: clamp(1.5rem, 4dvh, 2.5rem);
+}
+
+.assistant-home-avatar {
+  width: clamp(5rem, 16dvh, 9rem);
+  height: clamp(5rem, 16dvh, 9rem);
+}
+
+.assistant-workspace [data-slot="agent-prompt-surface"] {
+  max-height: min(24rem, 36dvh);
+}
+
+.assistant-workspace [data-slot="agent-prompt-content"] {
+  overscroll-behavior: contain;
+}
+
+.assistant-workspace [data-testid="assistant-context-bar"] {
+  padding-block: 0.5rem;
+}
+
+.assistant-workspace textarea {
+  scrollbar-width: none;
+}
+
+.assistant-workspace textarea::-webkit-scrollbar {
+  display: none;
+}
+
+.assistant-creation-tools [data-slot="native-select"] {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.assistant-creation-tools [data-slot="native-select"]:hover:not(:disabled) {
+  background: var(--muted);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .persona-card-actions {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .assistant-workspace .group:hover > .persona-card-actions,
+  .assistant-workspace .group:focus-within > .persona-card-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@container assistant (max-width: 600px) {
+  .persona-card-actions {
+    gap: 0;
+  }
+
+  .persona-card-actions > button {
+    padding-inline: 0;
+    flex-grow: 1;
+  }
+
+  .assistant-creation-tools [data-slot="popover-trigger"] > span {
+    display: none;
+  }
+
+  .assistant-home-stage h1 {
+    font-size: 1.25rem;
+  }
+}
+
+@media (max-width: 767px) {
+  .assistant-workspace .persona-card-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (max-height: 700px) {
+  .assistant-home {
+    gap: 0.5rem;
+    padding-block: 0.75rem;
+  }
+
+  .assistant-home-stage {
+    padding-bottom: 0.75rem;
+  }
+
+  .assistant-home-description {
+    -webkit-line-clamp: 1;
+  }
+
+  .assistant-home-avatar {
+    width: 5rem;
+    height: 5rem;
+  }
+
+  .assistant-home:has(.assistant-home-content > .assistant-scroll:not(:empty)) [data-slot="agent-prompt-surface"] {
+    max-height: 10rem;
+  }
+
+  .assistant-home-stage h1,
+  .assistant-home-description,
+  .assistant-home-stage .inline-flex {
+    margin-top: 0.25rem;
+  }
+}
+
+@media (pointer: coarse) {
+  .assistant-workspace .persona-card-scroll {
+    grid-auto-rows: max-content;
+    max-height: 100%;
+  }
+
+  .assistant-workspace .persona-card-scroll > * {
+    min-height: 6rem;
+  }
+
+  .assistant-creation-tools select {
+    min-height: 2.75rem;
+  }
+}
+.assistant-workspace {
+  container: assistant / inline-size;
+}

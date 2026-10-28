@@ -324,29 +324,30 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	}
 	env := deploymentEnvMap(t, deployment)
 	for name, want := range map[string]string{
-		"ANBAN_AGENT_EXECUTOR":                    "kubernetes",
-		"ANBAN_CLAUDE_AGENT_SERVER_URL":           "https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443",
-		"ANBAN_AGENT_NAMESPACE":                   "${namespace}",
-		"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":        "${wechat_article_agent_image_repo}",
-		"ANBAN_AGENT_IMAGE_WECHAT_PICTURE":        "${wechat_picture_agent_image_repo}",
-		"ANBAN_AGENT_IMAGE_SEEDNOTE":              "${seednote_agent_image_repo}",
-		"ANBAN_AGENT_IMAGE_MONTAGE":               "${montage_agent_image_repo}",
+		"ANBAN_AGENT_EXECUTOR":                  "kubernetes",
+		"ANBAN_CLAUDE_AGENT_SERVER_URL":         "https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443",
+		"ANBAN_AGENT_NAMESPACE":                 "${namespace}",
+		"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":      "${wechat_article_agent_image_repo}",
+		"ANBAN_AGENT_IMAGE_WECHAT_PICTURE":      "${wechat_picture_agent_image_repo}",
+		"ANBAN_AGENT_IMAGE_SEEDNOTE":            "${seednote_agent_image_repo}",
+		"ANBAN_AGENT_IMAGE_MONTAGE":             "${montage_agent_image_repo}",
 		"ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR": "${viral_ip_video_editor_agent_image_repo}",
-		"ANBAN_AGENT_IMAGE_VIDEO_EDIT":            "${video_edit_agent_image_repo}",
-		"ANBAN_AGENT_IMAGE_LOCAL_LIFE":            "${local_life_agent_image_repo}",
-		"ANBAN_DSH_IMAGE":                         "${dsh_image_repo}",
-		"ANBAN_AGENT_SERVICE_ACCOUNT":             "${agent_service_account}",
-		"ANBAN_AGENT_SERVER_CA_SECRET":            "anban-internal-ca",
-		"ANBAN_AGENT_IMAGE_PULL_SECRET":           "${imagePullSecret}",
-		"ANBAN_AGENT_NAS_STORAGE_CLASS":           "nas-sc-creator",
-		"ANBAN_AGENT_PROJECT_MEMORY_CLAIM":        "creator-project-memory",
-		"ANBAN_AGENT_TASK_WORKSPACE_SIZE":         "10Gi",
-		"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":       "https://api.moonshot.cn/anthropic",
-		"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":          "https://open.bigmodel.cn/api/anthropic",
-		"ANBAN_SERVER_TLS_CERT_FILE":              "/var/run/secrets/anban-server-tls/tls.crt",
-		"ANBAN_SERVER_TLS_KEY_FILE":               "/var/run/secrets/anban-server-tls/tls.key",
-		"SSL_CERT_FILE":                           "/var/run/secrets/anban-internal-ca/ca.crt",
-		"NODE_EXTRA_CA_CERTS":                     "/var/run/secrets/anban-internal-ca/ca.crt",
+		"ANBAN_AGENT_IMAGE_VIDEO_EDIT":          "${video_edit_agent_image_repo}",
+		"ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR": "${talking_head_editor_agent_image_repo}",
+		"ANBAN_AGENT_IMAGE_LOCAL_LIFE":          "${local_life_agent_image_repo}",
+		"ANBAN_DSH_IMAGE":                       "${dsh_image_repo}",
+		"ANBAN_AGENT_SERVICE_ACCOUNT":           "${agent_service_account}",
+		"ANBAN_AGENT_SERVER_CA_SECRET":          "anban-internal-ca",
+		"ANBAN_AGENT_IMAGE_PULL_SECRET":         "${imagePullSecret}",
+		"ANBAN_AGENT_NAS_STORAGE_CLASS":         "nas-sc-creator",
+		"ANBAN_AGENT_PROJECT_MEMORY_CLAIM":      "creator-project-memory",
+		"ANBAN_AGENT_TASK_WORKSPACE_SIZE":       "10Gi",
+		"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":     "https://api.moonshot.cn/anthropic",
+		"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":        "https://open.bigmodel.cn/api/anthropic",
+		"ANBAN_SERVER_TLS_CERT_FILE":            "/var/run/secrets/anban-server-tls/tls.crt",
+		"ANBAN_SERVER_TLS_KEY_FILE":             "/var/run/secrets/anban-server-tls/tls.key",
+		"SSL_CERT_FILE":                         "/var/run/secrets/anban-internal-ca/ca.crt",
+		"NODE_EXTRA_CA_CERTS":                   "/var/run/secrets/anban-internal-ca/ca.crt",
 	} {
 		if got := env[name]; got != want {
 			t.Fatalf("server env %s = %q, want %q", name, got, want)
@@ -435,7 +436,6 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 			`wechat-picture: "${ANBAN_AGENT_IMAGE_WECHAT_PICTURE:-creator-agent-wechat-picture:latest}"`,
 			`seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE:-creator-agent-seednote:latest}"`,
 			`montage: "${ANBAN_AGENT_IMAGE_MONTAGE:-creator-agent-montage:latest}"`,
-			`viral-ip-video-editor: "${ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR:-creator-agent-viral-ip-video-editor:latest}"`,
 			`video-edit: "${ANBAN_AGENT_IMAGE_VIDEO_EDIT:-creator-agent-video-edit:latest}"`,
 			`service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"`,
 			`kubernetes_namespace: "${ANBAN_AGENT_NAMESPACE:-anbanai-prod}"`,
@@ -523,9 +523,8 @@ func TestACKRenderLoadsVideoEditImageFromReleaseManifest(t *testing.T) {
 	}
 	digest := sha256.Sum256(catalog)
 	const videoEditImage = "registry.example.com/creator-video-edit-from-manifest:release"
-	const viralIPVideoEditorImage = "registry.example.com/creator-viral-ip-video-editor-from-manifest:release"
 	manifest := filepath.Join(t.TempDir(), "agent-runtime-manifest.json")
-	manifestBody := `{"schema_version":1,"catalog_digest":"` + hex.EncodeToString(digest[:]) + `","images":{"video-edit":"` + videoEditImage + `","viral-ip-video-editor":"` + viralIPVideoEditorImage + `"}}`
+	manifestBody := `{"schema_version":1,"catalog_digest":"` + hex.EncodeToString(digest[:]) + `","images":{"video-edit":"` + videoEditImage + `"}}`
 	if err := os.WriteFile(manifest, []byte(manifestBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -535,15 +534,12 @@ func TestACKRenderLoadsVideoEditImageFromReleaseManifest(t *testing.T) {
 		if strings.HasPrefix(value, "video_edit_agent_image_repo=") {
 			env[index] = "video_edit_agent_image_repo="
 		}
-		if strings.HasPrefix(value, "viral_ip_video_editor_agent_image_repo=") {
-			env[index] = "viral_ip_video_editor_agent_image_repo="
-		}
 	}
 	output := filepath.Join(t.TempDir(), "server-release.yaml")
 	cmd := exec.Command("bash", filepath.Join("..", "scripts", "render-ack-server-deployment.sh"), "--output", output)
 	cmdEnv := make([]string, 0, len(os.Environ())+len(env))
 	for _, value := range os.Environ() {
-		if !strings.HasPrefix(value, "video_edit_agent_image_repo=") && !strings.HasPrefix(value, "viral_ip_video_editor_agent_image_repo=") {
+		if !strings.HasPrefix(value, "video_edit_agent_image_repo=") {
 			cmdEnv = append(cmdEnv, value)
 		}
 	}
@@ -563,9 +559,6 @@ func TestACKRenderLoadsVideoEditImageFromReleaseManifest(t *testing.T) {
 		if deployment.Kind == "Deployment" {
 			if got := deploymentEnvMap(t, deployment)["ANBAN_AGENT_IMAGE_VIDEO_EDIT"]; got != videoEditImage {
 				t.Fatalf("rendered ANBAN_AGENT_IMAGE_VIDEO_EDIT = %q, want manifest image %q", got, videoEditImage)
-			}
-			if got := deploymentEnvMap(t, deployment)["ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR"]; got != viralIPVideoEditorImage {
-				t.Fatalf("rendered ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR = %q, want manifest image %q", got, viralIPVideoEditorImage)
 			}
 			return
 		}
@@ -618,7 +611,6 @@ func TestAgentRuntimeReleaseRejectsMalformedDshImageReference(t *testing.T) {
 		"AGENT_IMAGE_WECHAT_PICTURE=registry.example.com/picture:release",
 		"AGENT_IMAGE_SEEDNOTE=registry.example.com/seednote:release",
 		"AGENT_IMAGE_MONTAGE=registry.example.com/montage:release",
-		"AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR=registry.example.com/viral-ip-video-editor:release",
 		"AGENT_IMAGE_MOMENTS=registry.example.com/moments:release",
 		"AGENT_IMAGE_ECOMMERCE=registry.example.com/ecommerce:release",
 		"AGENT_IMAGE_PROFILE_ANALYSIS=registry.example.com/profile-analysis:release",
@@ -685,6 +677,7 @@ func ackRenderEnv(manifestPath string) []string {
 		"montage_agent_image_repo=registry.example.com/creator-montage:release",
 		"viral_ip_video_editor_agent_image_repo=registry.example.com/creator-viral-ip-video-editor:release",
 		"video_edit_agent_image_repo=registry.example.com/creator-video-edit:release",
+		"talking_head_editor_agent_image_repo=registry.example.com/creator-talking-head-editor:release",
 		"moments_agent_image_repo=registry.example.com/creator-moments:release",
 		"ecommerce_agent_image_repo=registry.example.com/creator-ecommerce:release",
 		"profile_analysis_agent_image_repo=registry.example.com/creator-profile-analysis:release",

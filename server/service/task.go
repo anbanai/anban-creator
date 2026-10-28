@@ -70,6 +70,7 @@ type TaskService struct {
 	cancelFuncs              sync.Map           // taskID → context.CancelFunc
 	montageCfg               srvconfig.MontageConfig
 	videoEditCfg             srvconfig.VideoEditConfig
+	talkingHeadEditorCfg     srvconfig.TalkingHeadEditorConfig
 	hypitCapabilities        *HypitCapabilityService
 	montageCapabilities      *MontageCapabilityService
 	localLifeCapabilities    *LocalLifeCapabilityService
@@ -141,6 +142,7 @@ func NewTaskService(
 	}
 	svc.montageCfg = defaultMontageServiceConfig()
 	svc.videoEditCfg = defaultVideoEditServiceConfig()
+	svc.talkingHeadEditorCfg.ApplyDefaults()
 
 	// Start listening for cross-replica cancel events.
 	if pubsub != nil && pubsub.Available() {
@@ -244,6 +246,14 @@ func (s *TaskService) SetVideoEditConfig(cfg srvconfig.VideoEditConfig) {
 	}
 	cfg.ApplyDefaults()
 	s.videoEditCfg = cfg
+}
+
+func (s *TaskService) SetTalkingHeadEditorConfig(cfg srvconfig.TalkingHeadEditorConfig) {
+	if s == nil {
+		return
+	}
+	cfg.ApplyDefaults()
+	s.talkingHeadEditorCfg = cfg
 }
 
 func (s *TaskService) SetMontageCapabilityService(capabilities *MontageCapabilityService) {
@@ -376,10 +386,12 @@ func (s *TaskService) StorageProviderName() string {
 }
 
 var (
-	ErrMontageInput                = errors.New("视频生成输入无效")
-	ErrVideoEditInput              = errors.New("全自动视频剪辑输入无效")
-	ErrTaskCreationProjectInactive = errors.New("task creation project is not active")
-	ErrTaskIdentityIncompatible    = errors.New("task identity is invalid or inconsistent")
+	ErrMontageInput                 = errors.New("视频生成输入无效")
+	ErrVideoEditInput               = errors.New("全自动视频剪辑输入无效")
+	ErrTalkingHeadEditorInput       = errors.New("口播精剪输入无效")
+	ErrTalkingHeadEditorUnavailable = errors.New("口播精剪运行时不可用")
+	ErrTaskCreationProjectInactive  = errors.New("task creation project is not active")
+	ErrTaskIdentityIncompatible     = errors.New("task identity is invalid or inconsistent")
 )
 
 func cloneEntryAttachments(in []model.EntryAttachment) []model.EntryAttachment {
@@ -538,10 +550,11 @@ type CreateManualParams struct {
 	Ecommerce *model.EcommerceConfig
 	// MontageInput carries the Montage-specific creation contract.
 	// It is only valid for montage projects.
-	MontageInput   *model.MontageInput
-	VideoEditInput *model.VideoEditInput
-	HypitInput     *model.HypitInput
-	LocalLifeInput *model.LocalLifeInput
+	MontageInput           *model.MontageInput
+	VideoEditInput         *model.VideoEditInput
+	TalkingHeadEditorInput *model.TalkingHeadEditorInput
+	HypitInput             *model.HypitInput
+	LocalLifeInput         *model.LocalLifeInput
 	// MontageSourceTaskID is an internal clone authorization for task-file
 	// locators that originate from the source task rather than the destination
 	// project.
@@ -756,6 +769,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 	isMontageTask := model.IsMontagePlatform(taskType)
 	isVideoEditTask := model.IsVideoEditPlatform(taskType)
+	isTalkingHeadEditorTask := model.IsTalkingHeadEditorPlatform(taskType)
 	isLocalLifeTask := model.IsLocalLifePlatform(taskType)
 	if p.LocalLifeInput != nil && !isLocalLifeTask {
 		return nil, fmt.Errorf("local_life_input 仅适用于素材混剪任务")
@@ -834,6 +848,25 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 	if p.VideoEditInput != nil && !model.IsVideoEditPlatform(taskType) {
 		return nil, fmt.Errorf("%w: video_edit_input 只能用于全自动视频剪辑任务", ErrVideoEditInput)
+	}
+	if p.TalkingHeadEditorInput != nil && !isTalkingHeadEditorTask {
+		return nil, fmt.Errorf("%w: talking_head_editor_input 只能用于口播精剪任务", ErrTalkingHeadEditorInput)
+	}
+	if isTalkingHeadEditorTask {
+		if !s.talkingHeadEditorCfg.DispatchReady() {
+			return nil, fmt.Errorf("%w: 未配置 video-use API Key，请联系管理员完成 Server 配置", ErrTalkingHeadEditorUnavailable)
+		}
+		if p.TalkingHeadEditorInput == nil {
+			return nil, fmt.Errorf("%w: talking_head_editor_input is required", ErrTalkingHeadEditorInput)
+		}
+		input := *p.TalkingHeadEditorInput
+		input.SupportingAssets = append([]model.TalkingHeadEditorAsset(nil), p.TalkingHeadEditorInput.SupportingAssets...)
+		input.Normalize(model.ResolveTalkingHeadEditorDefaults(project.TalkingHeadEditorDefaults.Data(), s.talkingHeadEditorCfg.DefaultPolicy))
+		if err := input.Validate(s.talkingHeadEditorCfg.MaxAssets, s.talkingHeadEditorCfg.MaxDurationSeconds); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrTalkingHeadEditorInput, err)
+		}
+		p.TalkingHeadEditorInput = &input
+		quantity = 1
 	}
 
 	// E-commerce: merge the PROJECT's reusable e-commerce defaults (default
@@ -1102,6 +1135,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		if isVideoEditTask && p.VideoEditInput != nil {
 			task.SetVideoEditInput(*p.VideoEditInput)
 			task.VideoEditTimeoutMinutes = s.videoEditCfg.TimeoutMinutes
+		}
+		if isTalkingHeadEditorTask && p.TalkingHeadEditorInput != nil {
+			task.SetTalkingHeadEditorInput(*p.TalkingHeadEditorInput)
 		}
 		if isLocalLifeTask && p.LocalLifeInput != nil {
 			task.SetLocalLifeInput(*p.LocalLifeInput)
@@ -1637,6 +1673,9 @@ func taskTypeForIdentity(agentID, channel, taskKind string) string {
 	if agentID == model.AgentIDVideoEdit && channel == model.ChannelVideoEdit && taskKind == model.TaskKindVideoEdit {
 		return model.PlatformVideoEdit
 	}
+	if agentID == model.AgentIDTalkingHeadEditor && channel == model.ChannelTalkingHeadEditor && taskKind == model.TaskKindTalkingHeadEditor {
+		return model.PlatformTalkingHeadEditor
+	}
 	if taskKind != model.TaskKindContentGeneration {
 		return model.TaskTypeForTaskKind(taskKind)
 	}
@@ -1964,6 +2003,71 @@ func (s *TaskService) CancelForUser(ctx context.Context, userID, id string) erro
 		return fmt.Errorf("user_id is required")
 	}
 	return s.cancel(ctx, id, userID)
+}
+
+// ReviewTalkingHeadEditor records the Server-owned sample review and resumes
+// the frozen task only after an explicit approve/revise decision.
+func (s *TaskService) ReviewTalkingHeadEditor(ctx context.Context, userID, id, decision, feedback, referenceCutAssetID string) (*model.Task, error) {
+	decision = strings.TrimSpace(decision)
+	if decision != "approve" && decision != "revise" {
+		return nil, fmt.Errorf("review decision must be approve or revise")
+	}
+	if decision == "revise" && strings.TrimSpace(feedback) == "" {
+		return nil, fmt.Errorf("revision feedback is required")
+	}
+	if strings.TrimSpace(referenceCutAssetID) != "" {
+		asset, assetErr := s.repo.Assets().FindOwnedByID(ctx, strings.TrimSpace(referenceCutAssetID), userID)
+		if assetErr != nil || asset == nil || asset.Purpose != DirectUploadPurposeTalkingHeadEditorAsset {
+			return nil, fmt.Errorf("reference cut asset is unavailable")
+		}
+	}
+	var task *model.Task
+	var previousExecutionID string
+	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		locked, err := tx.Tasks().FindByIDForUpdate(ctx, id)
+		if err != nil {
+			return err
+		}
+		if locked.UserID != userID {
+			return fmt.Errorf("task access denied")
+		}
+		if !model.IsTalkingHeadEditorPlatform(locked.Type) {
+			return fmt.Errorf("review is only supported for talking-head-editor tasks")
+		}
+		if locked.Status != model.TaskStatusAwaitingReview {
+			return fmt.Errorf("task is not awaiting review")
+		}
+		if locked.CurrentExecutionID != nil {
+			previousExecutionID = strings.TrimSpace(*locked.CurrentExecutionID)
+		}
+		now := time.Now()
+		locked.ReviewDecision, locked.ReviewFeedback, locked.ReviewReferenceCutAssetID = decision, strings.TrimSpace(feedback), strings.TrimSpace(referenceCutAssetID)
+		locked.ReviewRevision++
+		locked.ReviewUpdatedAt = &now
+		locked.Status = model.TaskStatusPending
+		attachments := append([]model.EntryAttachment(nil), locked.InputAttachments.Data()...)
+		attachments = append(attachments, model.EntryAttachment{Role: model.EntryAttachmentRoleResumeLatest, Text: "talking-head-editor review continuation"})
+		locked.SetInputAttachments(attachments)
+		if err := tx.Tasks().Update(ctx, locked); err != nil {
+			return fmt.Errorf("persist sample review: %w", err)
+		}
+		task = locked
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := s.EnqueueExecution(ctx, task, nil); err != nil {
+		latest, findErr := s.repo.Tasks().FindByID(ctx, task.ID)
+		latestExecutionID := ""
+		if latest != nil && latest.CurrentExecutionID != nil {
+			latestExecutionID = strings.TrimSpace(*latest.CurrentExecutionID)
+		}
+		if findErr == nil && latest.Status == model.TaskStatusPending && latestExecutionID == previousExecutionID {
+			_ = s.repo.Tasks().UpdateStatus(ctx, task.ID, model.TaskStatusAwaitingReview)
+		}
+		return nil, fmt.Errorf("resume reviewed talking-head-editor task: %w", err)
+	}
+	return task, nil
 }
 
 func (s *TaskService) cancel(ctx context.Context, id, userID string) error {

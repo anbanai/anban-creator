@@ -94,8 +94,21 @@ describe('ProjectCard', () => {
   })
 
   it('does not expose WeChat platform settings for non-WeChat projects', () => {
-    render(<ProjectCard project={project({ platform: 'seednote', agent_ids: ['seednote'] })} />)
+    render(<ProjectCard project={project({ platform: 'seednote', agent_ids: ['seednote'] })} onChannelConfig={vi.fn()} />)
     expect(screen.queryByRole('button', { name: /平台设置/ })).not.toBeInTheDocument()
+  })
+
+  it('opens independent WeChat settings from a gear action for legacy and typed projects', () => {
+    const onChannelConfig = vi.fn()
+    const { rerender } = render(<ProjectCard project={project({ agent_ids: null })} onChannelConfig={onChannelConfig} />)
+
+    const settings = screen.getByRole('button', { name: '平台设置：公众号人设' })
+    expect(settings.querySelector('svg')).toBeInTheDocument()
+    fireEvent.click(settings)
+    expect(onChannelConfig).toHaveBeenCalledWith(expect.objectContaining({ id: 'project-1' }))
+
+    rerender(<ProjectCard project={project({ platform: '', agent_ids: ['wechat-picture'] })} onChannelConfig={onChannelConfig} />)
+    expect(screen.getByRole('button', { name: '平台设置：公众号人设' })).toBeInTheDocument()
   })
 
   it.each(['moments', 'ecommerce'] as const)('keeps legacy %s projects in their basic settings flow', (platform) => {
@@ -195,16 +208,16 @@ describe('ProjectCard', () => {
     expect(await screen.findByRole('dialog', { name: /选题资产 - 公众号人设/ })).toBeInTheDocument()
   })
 
-  it('keeps project settings under the single edit entry and uses accessible icon targets', async () => {
+  it('keeps project actions as accessible icon targets', async () => {
     const onEdit = vi.fn()
     const onUpdateProfile = vi.fn()
-    render(<ProjectCard project={project()} onEdit={onEdit} onUpdateProfile={onUpdateProfile} onArchive={vi.fn()} />)
+    render(<ProjectCard project={project()} onEdit={onEdit} onChannelConfig={vi.fn()} onUpdateProfile={onUpdateProfile} onArchive={vi.fn()} />)
 
     expect(screen.queryByText('更多')).not.toBeInTheDocument()
     const edit = screen.getByRole('button', { name: '编辑人设：公众号人设' })
     const memory = screen.getByRole('button', { name: '人设记忆：公众号人设' })
     for (const control of [edit, memory]) expect(control).toHaveClass('size-11')
-    expect(screen.queryByRole('button', { name: '平台设置：公众号人设' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '平台设置：公众号人设' })).toHaveClass('size-11')
     expect(screen.queryByRole('button', { name: '人设画像：公众号人设' })).not.toBeInTheDocument()
 
     fireEvent.click(edit)

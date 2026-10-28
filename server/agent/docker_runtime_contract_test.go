@@ -1038,6 +1038,7 @@ func TestDockerfileInventoryIsCentralized(t *testing.T) {
 		"deploy/docker/Dockerfile.agent-montage",
 		"deploy/docker/Dockerfile.agent-profile-analysis",
 		"deploy/docker/Dockerfile.agent-seednote",
+		"deploy/docker/Dockerfile.agent-talking-head-editor",
 		"deploy/docker/Dockerfile.agent-video-edit",
 		"deploy/docker/Dockerfile.agent-viral-ip-video-editor",
 		"deploy/docker/Dockerfile.agent-wechat-article",
@@ -1050,50 +1051,6 @@ func TestDockerfileInventoryIsCentralized(t *testing.T) {
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("repository-owned Dockerfile inventory mismatch\nwant: %v\n got: %v", want, got)
-	}
-}
-
-func TestViralIPVideoEditorRuntimeProfileIsPackagedAndRegistered(t *testing.T) {
-	root := repositoryRoot(t)
-	for path, expected := range map[string][]string{
-		"deploy/docker/Dockerfile.agent-viral-ip-video-editor": {
-			"ARG AUTO_EDITOR_VERSION=29.3.1",
-			"auto-editor==${AUTO_EDITOR_VERSION}",
-			"/bin/auto-editor\" --version",
-			"ARG OPENMONTAGE_REF=c8066452325cb57c8fc1ba8c2a71b6e8842e6b65",
-			"COPY harness/ /anbanai/",
-			"ANBAN_MONTAGE_TEMPLATE_PATH=/opt/montage-template",
-		},
-		"Makefile": {
-			"VIRAL_IP_VIDEO_EDITOR_AGENT_IMAGE ?= creator-agent-viral-ip-video-editor:latest",
-			"docker-viral-ip-video-editor-agent-image:",
-			"docker build --platform linux/amd64 -f deploy/docker/Dockerfile.agent-viral-ip-video-editor",
-			"Dockerfile.agent-viral-ip-video-editor",
-			"AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR",
-		},
-		"docker-compose.yml": {
-			"ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR: \"${ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR:-creator-agent-viral-ip-video-editor:latest}\"",
-		},
-		"server/config.example.yaml": {
-			"viral-ip-video-editor: \"${ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR:-creator-agent-viral-ip-video-editor:latest}\"",
-		},
-		"server/Deployment.yaml": {
-			"name: ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR",
-		},
-		"scripts/agent-runtime-release.sh": {
-			"viral-ip-video-editor=${AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR:?AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR must be set}",
-		},
-		"scripts/render-ack-server-deployment.sh": {
-			"viral_ip_video_editor_agent_image_repo",
-			".images[\"viral-ip-video-editor\"]",
-		},
-	} {
-		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(path)))
-		for _, want := range expected {
-			if !strings.Contains(body, want) {
-				t.Errorf("%s missing viral IP runtime contract %q", path, want)
-			}
-		}
 	}
 }
 
@@ -1119,6 +1076,71 @@ func TestVideoEditDockerfilePinsTheUnmodifiedVideoUseRuntime(t *testing.T) {
 	}
 	if strings.Contains(dockerfile, "openmontage") || strings.Contains(dockerfile, "git apply") {
 		t.Fatal("video-edit Dockerfile must use the unmodified video-use source, without OpenMontage or source patches")
+	}
+}
+
+func TestTalkingHeadEditorDockerfileValidatesErduoMotionContract(t *testing.T) {
+	root := repositoryRoot(t)
+	dockerfile := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.agent-talking-head-editor"))
+	for _, want := range []string{
+		"/opt/video-use-venv/bin/pip install --no-cache-dir auto-editor==28.1.0",
+		"importlib.metadata as m; print(m.version(\"auto-editor\"))",
+		"/opt/video-use-venv/bin/auto-editor --version",
+		"for helper in transcribe.py transcribe_batch.py pack_transcripts.py timeline_view.py grade.py render.py",
+		"/opt/video-use/helpers/$helper\" --help",
+		"43cfc566833548093455c9d4a46bd69913b7e552",
+		"/anbanai/skills/erduo-broll-loop-engineering/SKILL.md",
+		"HyperFrames/Remotion",
+		"Shotcraft",
+		"parallel agents",
+		"aesthetic review",
+	} {
+		if !strings.Contains(dockerfile, want) {
+			t.Fatalf("talking-head-editor Dockerfile missing runtime contract %q", want)
+		}
+	}
+}
+
+func TestViralIPVideoEditorRuntimeProfileIsPackagedAndRegistered(t *testing.T) {
+	root := repositoryRoot(t)
+	for path, expected := range map[string][]string{
+		"deploy/docker/Dockerfile.agent-viral-ip-video-editor": {
+			"ARG AUTO_EDITOR_VERSION=29.3.1",
+			"auto-editor==${AUTO_EDITOR_VERSION}",
+			"/bin/auto-editor\" --version",
+			"ARG OPENMONTAGE_REF=c8066452325cb57c8fc1ba8c2a71b6e8842e6b65",
+			"COPY harness/ /anbanai/",
+			"ANBAN_MONTAGE_TEMPLATE_PATH=/opt/montage-template",
+		},
+		"Makefile": {
+			"VIRAL_IP_VIDEO_EDITOR_AGENT_IMAGE ?= creator-agent-viral-ip-video-editor:latest",
+			"docker-viral-ip-video-editor-agent-image:",
+			"docker build --platform linux/amd64 -f deploy/docker/Dockerfile.agent-viral-ip-video-editor",
+			"AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR",
+		},
+		"docker-compose.yml": {
+			"ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR: \"${ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR:-creator-agent-viral-ip-video-editor:latest}\"",
+		},
+		"server/config.example.yaml": {
+			"viral-ip-video-editor: \"${ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR:-creator-agent-viral-ip-video-editor:latest}\"",
+		},
+		"server/Deployment.yaml": {
+			"name: ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR",
+		},
+		"scripts/agent-runtime-release.sh": {
+			"viral-ip-video-editor=${AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR:?AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR must be set}",
+		},
+		"scripts/render-ack-server-deployment.sh": {
+			"viral_ip_video_editor_agent_image_repo",
+			".images[\"viral-ip-video-editor\"]",
+		},
+	} {
+		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(path)))
+		for _, want := range expected {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s missing viral IP runtime contract %q", path, want)
+			}
+		}
 	}
 }
 
@@ -1281,7 +1303,7 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-ilink",
 		"docker build -f deploy/docker/Dockerfile.studio -t $(STUDIO_IMAGE) .",
 		"docker-image:",
-		"docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image",
+		"docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-talking-head-editor-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image",
 		"docker-dsh-runtime-image:",
 		"docker-wechat-article-agent-image",
 		"make docker-server-image",
@@ -1335,8 +1357,8 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 		"ANBAN_AGENT_IMAGE_WECHAT_PICTURE: \"creator-agent-wechat-picture:latest\"",
 		"ANBAN_AGENT_IMAGE_SEEDNOTE: \"creator-agent-seednote:latest\"",
 		"ANBAN_AGENT_IMAGE_MONTAGE: \"creator-agent-montage:latest\"",
-		"ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR: \"${ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR:-creator-agent-viral-ip-video-editor:latest}\"",
 		"ANBAN_AGENT_IMAGE_VIDEO_EDIT: \"${ANBAN_AGENT_IMAGE_VIDEO_EDIT:-creator-agent-video-edit:latest}\"",
+		"ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR: \"${ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR:-creator-agent-talking-head-editor:latest}\"",
 		"ANBAN_AGENT_IMAGE_MOMENTS: \"creator-agent-moments:latest\"",
 		"ANBAN_AGENT_IMAGE_ECOMMERCE: \"creator-agent-ecommerce:latest\"",
 		"ANBAN_AGENT_DOCKER_NETWORK: \"creator-runtime-network\"",
@@ -1373,7 +1395,6 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 			"wechat-article: \"${ANBAN_AGENT_IMAGE_WECHAT_ARTICLE:-creator-agent-wechat-article:latest}\"",
 			"seednote: \"${ANBAN_AGENT_IMAGE_SEEDNOTE:-creator-agent-seednote:latest}\"",
 			"montage: \"${ANBAN_AGENT_IMAGE_MONTAGE:-creator-agent-montage:latest}\"",
-			"viral-ip-video-editor: \"${ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR:-creator-agent-viral-ip-video-editor:latest}\"",
 			"video-edit: \"${ANBAN_AGENT_IMAGE_VIDEO_EDIT:-creator-agent-video-edit:latest}\"",
 			"network: \"${ANBAN_AGENT_DOCKER_NETWORK:-creator-runtime-network}\"",
 			"pids_limit: 512",
@@ -1391,7 +1412,7 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 
 	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
 	for _, want := range []string{
-		"docker-up: docker-server-image docker-dsh-runtime-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-moments-agent-image docker-ecommerce-agent-image",
+		"docker-up: docker-server-image docker-dsh-runtime-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-talking-head-editor-agent-image docker-moments-agent-image docker-ecommerce-agent-image",
 		"DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null || stat -L -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)",
 		"DOCKER_GID=\"$(DOCKER_SOCKET_GID)\" docker compose up -d",
 	} {
@@ -1424,33 +1445,35 @@ func TestDockerRuntimeContract(t *testing.T) {
 			t.Fatal("docker-compose.yml has no server service")
 		}
 		for name, want := range map[string]string{
-			"ANBAN_AGENT_EXECUTOR":                    "docker",
-			"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":        "creator-agent-wechat-article:latest",
-			"ANBAN_AGENT_IMAGE_SEEDNOTE":              "creator-agent-seednote:latest",
-			"ANBAN_AGENT_IMAGE_MONTAGE":               "creator-agent-montage:latest",
+			"ANBAN_AGENT_EXECUTOR":                   "docker",
+			"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":       "creator-agent-wechat-article:latest",
+			"ANBAN_AGENT_IMAGE_SEEDNOTE":             "creator-agent-seednote:latest",
+			"ANBAN_AGENT_IMAGE_MONTAGE":              "creator-agent-montage:latest",
 			"ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR": "${ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR:-creator-agent-viral-ip-video-editor:latest}",
-			"ANBAN_AGENT_IMAGE_VIDEO_EDIT":            "${ANBAN_AGENT_IMAGE_VIDEO_EDIT:-creator-agent-video-edit:latest}",
-			"VIDEO_EDIT_ELEVENLABS_API_KEY":           "${VIDEO_EDIT_ELEVENLABS_API_KEY:-}",
-			"ANBAN_AGENT_IMAGE_MOMENTS":               "creator-agent-moments:latest",
-			"ANBAN_AGENT_IMAGE_ECOMMERCE":             "creator-agent-ecommerce:latest",
-			"ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS":      "${ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS:-creator-agent-profile-analysis:latest}",
-			"ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS":     "${ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS:-creator-agent-feedback-analysis:latest}",
-			"ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION":  "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}",
-			"ANBAN_AGENT_IMAGE_HYPIT":                 "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}",
-			"ANBAN_AGENT_DOCKER_NETWORK":              "creator-runtime-network",
-			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET":      "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET:?ANBAN_AGENT_EXECUTION_TOKEN_SECRET is required}",
-			"ANBAN_BILLING_ADMIN_API_KEY":             "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}",
-			"ANBAN_JWT_SECRET_KEY":                    "${ANBAN_JWT_SECRET_KEY:?ANBAN_JWT_SECRET_KEY is required}",
-			"ANBAN_OSS_ENDPOINT":                      "${ANBAN_OSS_ENDPOINT:?ANBAN_OSS_ENDPOINT is required}",
-			"ANBAN_OSS_ACCESS_KEY_ID":                 "${ANBAN_OSS_ACCESS_KEY_ID:?ANBAN_OSS_ACCESS_KEY_ID is required}",
-			"ANBAN_OSS_ACCESS_KEY_SECRET":             "${ANBAN_OSS_ACCESS_KEY_SECRET:?ANBAN_OSS_ACCESS_KEY_SECRET is required}",
-			"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL":       "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-}",
-			"ANBAN_DEEPSEEK_API_KEY":                  "${ANBAN_DEEPSEEK_API_KEY:?ANBAN_DEEPSEEK_API_KEY is required}",
-			"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":       "${ANBAN_MOONSHOT_ANTHROPIC_BASE_URL:-https://api.moonshot.cn/anthropic}",
-			"ANBAN_MOONSHOT_API_KEY":                  "${ANBAN_MOONSHOT_API_KEY:?ANBAN_MOONSHOT_API_KEY is required}",
-			"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":          "${ANBAN_ZHIPU_ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}",
-			"ANBAN_ZHIPU_API_KEY":                     "${ANBAN_ZHIPU_API_KEY:?ANBAN_ZHIPU_API_KEY is required}",
-			"MOONSHOT_API_KEY":                        "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}",
+			"ANBAN_AGENT_IMAGE_VIDEO_EDIT":           "${ANBAN_AGENT_IMAGE_VIDEO_EDIT:-creator-agent-video-edit:latest}",
+			"ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR":  "${ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR:-creator-agent-talking-head-editor:latest}",
+			"VIDEO_EDIT_ELEVENLABS_API_KEY":          "${VIDEO_EDIT_ELEVENLABS_API_KEY:-}",
+			"VIDEO_USE_API_KEY":                      "${VIDEO_USE_API_KEY:-}",
+			"ANBAN_AGENT_IMAGE_MOMENTS":              "creator-agent-moments:latest",
+			"ANBAN_AGENT_IMAGE_ECOMMERCE":            "creator-agent-ecommerce:latest",
+			"ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS":     "${ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS:-creator-agent-profile-analysis:latest}",
+			"ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS":    "${ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS:-creator-agent-feedback-analysis:latest}",
+			"ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION": "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}",
+			"ANBAN_AGENT_IMAGE_HYPIT":                "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}",
+			"ANBAN_AGENT_DOCKER_NETWORK":             "creator-runtime-network",
+			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET":     "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET:?ANBAN_AGENT_EXECUTION_TOKEN_SECRET is required}",
+			"ANBAN_BILLING_ADMIN_API_KEY":            "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}",
+			"ANBAN_JWT_SECRET_KEY":                   "${ANBAN_JWT_SECRET_KEY:?ANBAN_JWT_SECRET_KEY is required}",
+			"ANBAN_OSS_ENDPOINT":                     "${ANBAN_OSS_ENDPOINT:?ANBAN_OSS_ENDPOINT is required}",
+			"ANBAN_OSS_ACCESS_KEY_ID":                "${ANBAN_OSS_ACCESS_KEY_ID:?ANBAN_OSS_ACCESS_KEY_ID is required}",
+			"ANBAN_OSS_ACCESS_KEY_SECRET":            "${ANBAN_OSS_ACCESS_KEY_SECRET:?ANBAN_OSS_ACCESS_KEY_SECRET is required}",
+			"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL":      "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-}",
+			"ANBAN_DEEPSEEK_API_KEY":                 "${ANBAN_DEEPSEEK_API_KEY:?ANBAN_DEEPSEEK_API_KEY is required}",
+			"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":      "${ANBAN_MOONSHOT_ANTHROPIC_BASE_URL:-https://api.moonshot.cn/anthropic}",
+			"ANBAN_MOONSHOT_API_KEY":                 "${ANBAN_MOONSHOT_API_KEY:?ANBAN_MOONSHOT_API_KEY is required}",
+			"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":         "${ANBAN_ZHIPU_ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}",
+			"ANBAN_ZHIPU_API_KEY":                    "${ANBAN_ZHIPU_API_KEY:?ANBAN_ZHIPU_API_KEY is required}",
+			"MOONSHOT_API_KEY":                       "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}",
 		} {
 			if got := server.Environment[name]; got != want {
 				t.Errorf("server environment %s = %q, want %q", name, got, want)
@@ -1493,6 +1516,7 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_AGENT_IMAGE_MONTAGE",
 			"ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR",
 			"ANBAN_AGENT_IMAGE_VIDEO_EDIT",
+			"ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR",
 			"VIDEO_EDIT_ELEVENLABS_API_KEY",
 			"ANBAN_AGENT_IMAGE_MOMENTS",
 			"ANBAN_AGENT_IMAGE_ECOMMERCE",
@@ -1540,34 +1564,33 @@ func TestDockerRuntimeContract(t *testing.T) {
 			t.Setenv(match[1], "")
 		}
 		for name, value := range map[string]string{
-			"ANBAN_DATABASE_DSN":                      "root:dev@tcp(mysql:3306)/anban_creator?charset=utf8mb4&parseTime=True&loc=Local",
-			"ANBAN_REDIS_ADDR":                        "redis:6379",
-			"ANBAN_BILLING_ADMIN_API_KEY":             "test-billing-admin-key",
-			"ANBAN_AGENT_EXECUTOR":                    "docker",
-			"ANBAN_CLAUDE_AGENT_SERVER_URL":           "http://server:8080",
-			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET":      "0123456789abcdef0123456789abcdef",
-			"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":        "creator-agent-wechat-article:latest",
-			"ANBAN_AGENT_IMAGE_SEEDNOTE":              "creator-agent-seednote:latest",
-			"ANBAN_AGENT_IMAGE_MONTAGE":               "creator-agent-montage:latest",
-			"ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR": "creator-agent-viral-ip-video-editor:latest",
-			"ANBAN_AGENT_IMAGE_VIDEO_EDIT":            "creator-agent-video-edit:latest",
-			"VIDEO_EDIT_ELEVENLABS_API_KEY":           "test-video-edit-scribe-key",
-			"ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS":      "creator-agent-profile-analysis:latest",
-			"ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS":     "creator-agent-feedback-analysis:latest",
-			"ANBAN_JWT_SECRET_KEY":                    "0123456789abcdef0123456789abcdef",
-			"ANBAN_OSS_ENDPOINT":                      "oss-cn-test.aliyuncs.com",
-			"ANBAN_OSS_ACCESS_KEY_ID":                 "test-access-key-id",
-			"ANBAN_OSS_ACCESS_KEY_SECRET":             "test-access-key-secret",
-			"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL":       "https://deepseek.example.com/anthropic",
-			"ANBAN_DEEPSEEK_API_KEY":                  "test-deepseek-api-key",
-			"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":       "https://api.moonshot.cn/anthropic",
-			"ANBAN_MOONSHOT_API_KEY":                  "test-moonshot-agent-api-key",
-			"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":          "https://open.bigmodel.cn/api/anthropic",
-			"ANBAN_ZHIPU_API_KEY":                     "test-zhipu-api-key",
-			"MOONSHOT_API_KEY":                        "test-moonshot-api-key",
-			"VOLCENGINE_ARK_API_KEY":                  "test-volcengine-api-key",
-			"WANGCAI_OPENAI_BASE_URL":                 "https://images.example.com/v1",
-			"WANGCAI_OPENAI_API_KEY":                  "test-openai-api-key",
+			"ANBAN_DATABASE_DSN":                  "root:dev@tcp(mysql:3306)/anban_creator?charset=utf8mb4&parseTime=True&loc=Local",
+			"ANBAN_REDIS_ADDR":                    "redis:6379",
+			"ANBAN_BILLING_ADMIN_API_KEY":         "test-billing-admin-key",
+			"ANBAN_AGENT_EXECUTOR":                "docker",
+			"ANBAN_CLAUDE_AGENT_SERVER_URL":       "http://server:8080",
+			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET":  "0123456789abcdef0123456789abcdef",
+			"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":    "creator-agent-wechat-article:latest",
+			"ANBAN_AGENT_IMAGE_SEEDNOTE":          "creator-agent-seednote:latest",
+			"ANBAN_AGENT_IMAGE_MONTAGE":           "creator-agent-montage:latest",
+			"ANBAN_AGENT_IMAGE_VIDEO_EDIT":        "creator-agent-video-edit:latest",
+			"VIDEO_EDIT_ELEVENLABS_API_KEY":       "test-video-edit-scribe-key",
+			"ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS":  "creator-agent-profile-analysis:latest",
+			"ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS": "creator-agent-feedback-analysis:latest",
+			"ANBAN_JWT_SECRET_KEY":                "0123456789abcdef0123456789abcdef",
+			"ANBAN_OSS_ENDPOINT":                  "oss-cn-test.aliyuncs.com",
+			"ANBAN_OSS_ACCESS_KEY_ID":             "test-access-key-id",
+			"ANBAN_OSS_ACCESS_KEY_SECRET":         "test-access-key-secret",
+			"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL":   "https://deepseek.example.com/anthropic",
+			"ANBAN_DEEPSEEK_API_KEY":              "test-deepseek-api-key",
+			"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":   "https://api.moonshot.cn/anthropic",
+			"ANBAN_MOONSHOT_API_KEY":              "test-moonshot-agent-api-key",
+			"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":      "https://open.bigmodel.cn/api/anthropic",
+			"ANBAN_ZHIPU_API_KEY":                 "test-zhipu-api-key",
+			"MOONSHOT_API_KEY":                    "test-moonshot-api-key",
+			"VOLCENGINE_ARK_API_KEY":              "test-volcengine-api-key",
+			"WANGCAI_OPENAI_BASE_URL":             "https://images.example.com/v1",
+			"WANGCAI_OPENAI_API_KEY":              "test-openai-api-key",
 		} {
 			t.Setenv(name, value)
 		}

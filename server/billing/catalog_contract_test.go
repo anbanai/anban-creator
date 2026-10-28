@@ -107,7 +107,7 @@ func TestProviderCostCatalogV4(t *testing.T) {
 		"volcengine_ark/doubao-seedream-5-0-pro-260628": {pricingType: "output_pixel_tier", currency: "CNY"},
 		"wangcai_openai/gpt-image-2-t":                  {pricingType: "openai_image_usage", currency: "USD"},
 		"wangcai_openai/gpt-image-2.5-sunburst":         {pricingType: "openai_image_usage", currency: "USD"},
-		"wangcai_openai/gpt-image-2.5-flare":           {pricingType: "openai_image_usage", currency: "USD"},
+		"wangcai_openai/gpt-image-2.5-flare":            {pricingType: "openai_image_usage", currency: "USD"},
 	}
 	for _, provider := range []string{"tokenplayer_anthropic", "tokenplayer_openai"} {
 		for _, model := range []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"} {
@@ -381,7 +381,7 @@ func initialCatalogMetadataContractError(bundle *Bundle) error {
 		"volcengine_ark/doubao-seedream-5-0-pro-260628": "pricing-snapshot:volcengine-ark:seedream-output-pixel-prices:2026-07-13",
 		"wangcai_openai/gpt-image-2-t":                  "pricing-snapshot:wangcai-openai:gpt-image-2-t-usage-prices:2026-07-13",
 		"wangcai_openai/gpt-image-2.5-sunburst":         "operator-confirmed:wangcai-openai:gpt-image-2.5-sunburst=inherits-gpt-image-2-t-prices:2026-07-13",
-		"wangcai_openai/gpt-image-2.5-flare":           "operator-confirmed:wangcai-openai:gpt-image-2.5-flare=inherits-gpt-image-2-t-prices:2026-07-13",
+		"wangcai_openai/gpt-image-2.5-flare":            "operator-confirmed:wangcai-openai:gpt-image-2.5-flare=inherits-gpt-image-2-t-prices:2026-07-13",
 	}
 	for _, provider := range []string{"tokenplayer_anthropic", "tokenplayer_openai"} {
 		for _, model := range []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"} {
@@ -443,6 +443,7 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		{"ecommerce", "task.ecommerce", "ecommerce_artifacts_verified", 3000},
 		{"montage", "task.montage", "montage_artifacts_verified", 2000},
 		{"video_edit", "task.video_edit", "video_edit_artifacts_verified", 2000},
+		{"talking_head_editor", "task.talking_head_editor", "talking_head_editor_artifacts_verified", 2000},
 		{"local_life", "task.local_life", "local_life_artifacts_verified", 2400},
 		{"whiteboard-animation", "task.whiteboard-animation", "whiteboard_animation_artifacts_verified", 4000},
 		{"hypit", "task.hypit", "hypit_artifacts_verified", 2000},

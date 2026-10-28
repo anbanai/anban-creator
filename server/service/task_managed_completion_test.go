@@ -409,6 +409,25 @@ func TestValidateVideoEditCompletionArtifactsRejectsFailureState(t *testing.T) {
 	}
 }
 
+func TestValidateTalkingHeadEditorCompletionArtifactsRejectsFinalBeforeReview(t *testing.T) {
+	task := &model.Task{Type: model.PlatformTalkingHeadEditor}
+	files := []*model.TaskFile{{
+		FilePath: "output/final.mp4",
+		FileSize: 1,
+		State:    model.TaskFileStatePending,
+	}}
+	validation := validateTalkingHeadEditorCompletionArtifacts(task, files)
+	if validation.Valid || len(validation.Missing) != 1 || validation.Missing[0] != "awaiting_review" {
+		t.Fatalf("validation = %#v, want final delivery blocked before review", validation)
+	}
+
+	task.ReviewDecision = "approve"
+	validation = validateTalkingHeadEditorCompletionArtifacts(task, files)
+	if validation.Valid || len(validation.Missing) == 0 {
+		t.Fatalf("approved task validation = %#v, want remaining final evidence requirements", validation)
+	}
+}
+
 func videoEditCompletionTestFiles() []*model.TaskFile {
 	return []*model.TaskFile{
 		{State: model.TaskFileStatePending, FilePath: "output/final.mp4", FileSize: 1},

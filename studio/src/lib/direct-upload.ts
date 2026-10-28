@@ -10,6 +10,7 @@ export type DirectUploadPurpose =
   | 'ai_entry_attachment'
   | 'montage_asset'
   | 'video_edit_asset'
+  | 'talking_head_editor_asset'
   | 'hypit_asset'
   | 'seednote_analytics_import'
   | 'wechat_analytics_import'

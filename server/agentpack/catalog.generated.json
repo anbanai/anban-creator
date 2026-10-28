@@ -2914,6 +2914,267 @@
       "digest": "e0730ff627ac7318f8bc2cc592a07957359b7af1a006b7eb7eacc3891fca1855"
     },
     {
+      "id": "talking-head-editor",
+      "channel": "talking-head-editor",
+      "version": "2.0.2",
+      "kind": "managed",
+      "display_name": "口播精剪",
+      "description": "按固定口播工作流自动完成静音粗剪、语义精剪、动效素材包装和音效 BGM 收尾，并保留可复核的剪辑证据。",
+      "agent": {
+        "name": "talking-head-editor",
+        "skills": [
+          "auto-editor",
+          "video-use",
+          "erduo-broll-loop-engineering"
+        ],
+        "max_turns": 220
+      },
+      "interaction": {},
+      "bindings": {
+        "task_kinds": [
+          "talking_head_editor"
+        ]
+      },
+      "runtime": {
+        "profile": "talking-head-editor",
+        "adapter": "standard"
+      },
+      "surfaces": [
+        "plugin",
+        "task"
+      ],
+      "features": [
+        "automatic-video-editing",
+        "talking-head",
+        "broll-packaging",
+        "sound-design",
+        "review-gate"
+      ],
+      "billing_operations": {
+        "talking_head_editor": "task.talking_head_editor"
+      },
+      "artifacts": [
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "edit_decision_list",
+          "path": "output/edit-decision-list.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "transcript",
+          "path": "output/transcript.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "edit_strategy",
+          "path": "output/edit-strategy.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "visual_plan",
+          "path": "output/visual-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "sfx_cues",
+          "path": "output/sfx-cues.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "bgm_plan",
+          "path": "output/bgm-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "audio_source_manifest",
+          "path": "output/audio-source-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "motion_sample",
+          "path": "output/motion-sample.mp4",
+          "mime_type": "video/mp4",
+          "required": false
+        },
+        {
+          "role": "motion_review",
+          "path": "output/motion-review.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "motion_source_manifest",
+          "path": "output/motion-source-manifest.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "rough_cut",
+          "path": "output/rough-cut.mp4",
+          "mime_type": "video/mp4",
+          "required": false
+        },
+        {
+          "role": "semantic_cut",
+          "path": "output/semantic-cut.mp4",
+          "mime_type": "video/mp4",
+          "required": false
+        },
+        {
+          "role": "subtitles",
+          "path": "output/subtitles.srt",
+          "mime_type": "application/x-subrip",
+          "required": false
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "quality_evidence",
+          "path": "output/quality-evidence.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "failure_diagnosis",
+          "path": "output/failure-diagnosis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json",
+          "required": false
+        }
+      ],
+      "delivery": [
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "rough_cut",
+          "path": "output/rough-cut.mp4",
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "semantic_cut",
+          "path": "output/semantic-cut.mp4",
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "motion_sample",
+          "path": "output/motion-sample.mp4",
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "motion_review",
+          "path": "output/motion-review.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "motion_source_manifest",
+          "path": "output/motion-source-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "edit_decision_list",
+          "path": "output/edit-decision-list.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "transcript",
+          "path": "output/transcript.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "edit_strategy",
+          "path": "output/edit-strategy.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "visual_plan",
+          "path": "output/visual-plan.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "sfx_cues",
+          "path": "output/sfx-cues.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "bgm_plan",
+          "path": "output/bgm-plan.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "audio_source_manifest",
+          "path": "output/audio-source-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "quality_evidence",
+          "path": "output/quality-evidence.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "subtitles",
+          "path": "output/subtitles.srt",
+          "mime_type": "application/x-subrip"
+        }
+      ],
+      "ui": {
+        "renderer": "custom:talking-head-editor"
+      },
+      "tagging": {
+        "enabled": true,
+        "profile": "generic-content",
+        "required_artifact": "output/content-tags.json",
+        "subject_roles": [
+          "final_video"
+        ],
+        "extensions": [
+          "presentation_device",
+          "funnel_stage"
+        ]
+      },
+      "digest": "0c50bbcbdf802e829f7d48b6a0fea70484573f83d528254917647580d9649556"
+    },
+    {
       "id": "video-edit",
       "channel": "video-edit",
       "version": "1.0.1",
@@ -3081,7 +3342,8 @@
           "portrait-cover-design",
           "short-video-cover",
           "viral-ip-editing",
-          "wechat-video-account-review"
+          "wechat-video-account-review",
+          "auto-editor"
         ],
         "max_turns": 250
       },
@@ -3350,7 +3612,7 @@
         }
       ],
       "ui": {},
-      "digest": "88121c3999cb63f2d81cd278e35b30ab9497bde5fb40c0bbee63eab67e0df6a7"
+      "digest": "d19651b7708cd35e2badee010c723180631beb4e01ff5e8df9f6c07c47ee8f1b"
     },
     {
       "id": "wechat-article",

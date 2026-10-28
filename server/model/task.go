@@ -157,25 +157,26 @@ type ProjectSnapshot struct {
 	// AgentID and Channel are the immutable execution identity for new tasks.
 	// Platform is retained only so historical snapshots can still be rendered
 	// while the one-time migration drains old rows.
-	AgentID                       string                   `json:"agent_id,omitempty"`
-	Channel                       string                   `json:"channel,omitempty"`
-	Platform                      string                   `json:"platform,omitempty"`
-	Instructions                  string                   `json:"instructions,omitempty"`
-	Keywords                      string                   `json:"keywords,omitempty"`
-	VisualStyle                   string                   `json:"visual_style,omitempty"`
-	ReferenceImageAssetID         string                   `json:"reference_image_asset_id,omitempty"`
-	PortraitReferenceImageAssetID string                   `json:"portrait_reference_image_asset_id,omitempty"`
-	ImageRatio                    string                   `json:"image_ratio,omitempty"`
-	Writer                        string                   `json:"writer,omitempty"`
-	Theme                         string                   `json:"theme,omitempty"`
-	Author                        string                   `json:"author,omitempty"`
-	EcommerceDefaults             EcommerceProjectDefaults `json:"ecommerce_defaults,omitempty"`
-	HypitDefaults                 HypitDefaults            `json:"hypit_defaults,omitempty"`
-	MontageDefaults               MontageDefaults          `json:"montage_defaults,omitempty"`
-	VideoEditDefaults             VideoEditDefaults        `json:"video_edit_defaults,omitempty"`
-	ChannelConfig                 map[string]any           `json:"channel_config,omitempty"`
-	WechatDelivery                WechatDeliveryDecision   `json:"wechat_delivery,omitempty"`
-	Profile                       ProjectProfile           `json:"profile,omitempty"`
+	AgentID                       string                    `json:"agent_id,omitempty"`
+	Channel                       string                    `json:"channel,omitempty"`
+	Platform                      string                    `json:"platform,omitempty"`
+	Instructions                  string                    `json:"instructions,omitempty"`
+	Keywords                      string                    `json:"keywords,omitempty"`
+	VisualStyle                   string                    `json:"visual_style,omitempty"`
+	ReferenceImageAssetID         string                    `json:"reference_image_asset_id,omitempty"`
+	PortraitReferenceImageAssetID string                    `json:"portrait_reference_image_asset_id,omitempty"`
+	ImageRatio                    string                    `json:"image_ratio,omitempty"`
+	Writer                        string                    `json:"writer,omitempty"`
+	Theme                         string                    `json:"theme,omitempty"`
+	Author                        string                    `json:"author,omitempty"`
+	EcommerceDefaults             EcommerceProjectDefaults  `json:"ecommerce_defaults,omitempty"`
+	HypitDefaults                 HypitDefaults             `json:"hypit_defaults,omitempty"`
+	MontageDefaults               MontageDefaults           `json:"montage_defaults,omitempty"`
+	VideoEditDefaults             VideoEditDefaults         `json:"video_edit_defaults,omitempty"`
+	TalkingHeadEditorDefaults     TalkingHeadEditorDefaults `json:"talking_head_editor_defaults,omitempty"`
+	ChannelConfig                 map[string]any            `json:"channel_config,omitempty"`
+	WechatDelivery                WechatDeliveryDecision    `json:"wechat_delivery,omitempty"`
+	Profile                       ProjectProfile            `json:"profile,omitempty"`
 }
 
 // Task represents a content generation task.
@@ -246,29 +247,30 @@ type Task struct {
 	// tasks (selected deliverable modules, product photos, target platform, selling
 	// points, and language). Zero value for non-ecommerce
 	// tasks. Read by the agent via get_project_profile(task_id, scope="ecommerce").
-	Ecommerce               datatypes.JSONType[EcommerceConfig]   `gorm:"type:json" json:"ecommerce"`
-	InputAttachments        datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
-	HypitRuntimeSnapshot    datatypes.JSON                        `gorm:"type:json" json:"-"`
-	HypitInput              datatypes.JSONType[HypitInput]        `gorm:"type:json" json:"hypit_input"`
-	MontageInput            datatypes.JSONType[MontageInput]      `gorm:"type:json" json:"montage_input"`
-	VideoEditInput          datatypes.JSONType[VideoEditInput]    `gorm:"type:json" json:"video_edit_input"`
-	VideoEditTimeoutMinutes int                                   `gorm:"not null;default:0" json:"-"`
-	LocalLifeInput          datatypes.JSONType[LocalLifeInput]    `gorm:"type:json" json:"local_life_input"`
-	AgentInput              datatypes.JSONType[map[string]any]    `gorm:"type:json" json:"agent_input"`
-	ProgressLog             string                                `gorm:"type:longtext" json:"progress_log,omitempty"`
-	Lifecycle               datatypes.JSONType[TaskLifecycle]     `gorm:"type:json" json:"lifecycle"`
-	Result                  *string                               `gorm:"type:json" json:"-"`
-	Outcome                 *TaskOutcome                          `gorm:"type:json;serializer:json" json:"outcome,omitempty"`
-	TerminalModelUsage      datatypes.JSONType[[]ModelTokenUsage] `gorm:"type:json" json:"-"`
-	CostStatus              string                                `gorm:"type:varchar(20);default:'';index" json:"-"`
-	BillingQuoteID          string                                `gorm:"type:char(36);index" json:"billing_quote_id,omitempty"`
-	BillingCatalogID        string                                `gorm:"type:varchar(128);index" json:"billing_catalog_id,omitempty"`
-	BillingSKUID            string                                `gorm:"type:varchar(128);index" json:"billing_sku_id,omitempty"`
-	BillingPricingTier      string                                `gorm:"type:varchar(20);index" json:"billing_pricing_tier,omitempty"`
-	BillingChargeID         *string                               `gorm:"type:char(36);uniqueIndex" json:"billing_charge_id,omitempty"`
-	BillingPriceCredits     int64                                 `gorm:"not null;default:0" json:"billing_price_credits"`
-	ExecutionProfile        string                                `gorm:"type:varchar(40);not null;index:idx_tasks_execution_profile" json:"execution_profile"`
-	AgentProfileSnapshot    AgentProfileSnapshot                  `gorm:"type:json;serializer:json;not null" json:"agent_profile_snapshot"`
+	Ecommerce               datatypes.JSONType[EcommerceConfig]        `gorm:"type:json" json:"ecommerce"`
+	InputAttachments        datatypes.JSONType[[]EntryAttachment]      `gorm:"type:json" json:"input_attachments"`
+	HypitRuntimeSnapshot    datatypes.JSON                             `gorm:"type:json" json:"-"`
+	HypitInput              datatypes.JSONType[HypitInput]             `gorm:"type:json" json:"hypit_input"`
+	MontageInput            datatypes.JSONType[MontageInput]           `gorm:"type:json" json:"montage_input"`
+	VideoEditInput          datatypes.JSONType[VideoEditInput]         `gorm:"type:json" json:"video_edit_input"`
+	TalkingHeadEditorInput  datatypes.JSONType[TalkingHeadEditorInput] `gorm:"type:json" json:"talking_head_editor_input"`
+	VideoEditTimeoutMinutes int                                        `gorm:"not null;default:0" json:"-"`
+	LocalLifeInput          datatypes.JSONType[LocalLifeInput]         `gorm:"type:json" json:"local_life_input"`
+	AgentInput              datatypes.JSONType[map[string]any]         `gorm:"type:json" json:"agent_input"`
+	ProgressLog             string                                     `gorm:"type:longtext" json:"progress_log,omitempty"`
+	Lifecycle               datatypes.JSONType[TaskLifecycle]          `gorm:"type:json" json:"lifecycle"`
+	Result                  *string                                    `gorm:"type:json" json:"-"`
+	Outcome                 *TaskOutcome                               `gorm:"type:json;serializer:json" json:"outcome,omitempty"`
+	TerminalModelUsage      datatypes.JSONType[[]ModelTokenUsage]      `gorm:"type:json" json:"-"`
+	CostStatus              string                                     `gorm:"type:varchar(20);default:'';index" json:"-"`
+	BillingQuoteID          string                                     `gorm:"type:char(36);index" json:"billing_quote_id,omitempty"`
+	BillingCatalogID        string                                     `gorm:"type:varchar(128);index" json:"billing_catalog_id,omitempty"`
+	BillingSKUID            string                                     `gorm:"type:varchar(128);index" json:"billing_sku_id,omitempty"`
+	BillingPricingTier      string                                     `gorm:"type:varchar(20);index" json:"billing_pricing_tier,omitempty"`
+	BillingChargeID         *string                                    `gorm:"type:char(36);uniqueIndex" json:"billing_charge_id,omitempty"`
+	BillingPriceCredits     int64                                      `gorm:"not null;default:0" json:"billing_price_credits"`
+	ExecutionProfile        string                                     `gorm:"type:varchar(40);not null;index:idx_tasks_execution_profile" json:"execution_profile"`
+	AgentProfileSnapshot    AgentProfileSnapshot                       `gorm:"type:json;serializer:json;not null" json:"agent_profile_snapshot"`
 
 	AgentProfileFingerprint string `gorm:"type:char(64);not null;index" json:"agent_profile_fingerprint"`
 
@@ -285,7 +287,12 @@ type Task struct {
 	MaxRetries            int        `gorm:"default:3" json:"max_retries"`
 	RateLimitRetryCount   int        `gorm:"default:0" json:"rate_limit_retry_count"`
 
-	WorkflowStatus *string `gorm:"type:json" json:"workflow_status,omitempty"`
+	WorkflowStatus            *string    `gorm:"type:json" json:"workflow_status,omitempty"`
+	ReviewDecision            string     `gorm:"type:varchar(20);default:''" json:"review_decision,omitempty"`
+	ReviewFeedback            string     `gorm:"type:text" json:"review_feedback,omitempty"`
+	ReviewReferenceCutAssetID string     `gorm:"type:char(36);default:''" json:"review_reference_cut_asset_id,omitempty"`
+	ReviewRevision            int        `gorm:"not null;default:0" json:"review_revision,omitempty"`
+	ReviewUpdatedAt           *time.Time `gorm:"index" json:"review_updated_at,omitempty"`
 
 	CurrentExecutionID *string    `gorm:"type:char(36);index" json:"current_execution_id,omitempty"`
 	DeletingAt         *time.Time `gorm:"index" json:"-"`
@@ -347,7 +354,7 @@ func (s ProjectSnapshot) HasData() bool {
 		strings.TrimSpace(s.Writer) != "" ||
 		strings.TrimSpace(s.Theme) != "" ||
 		strings.TrimSpace(s.Author) != "" ||
-		s.Profile.SchemaVersion != 0 || len(s.ChannelConfig) > 0 || s.WechatDelivery.Mode != ""
+		s.Profile.SchemaVersion != 0 || len(s.ChannelConfig) > 0 || s.WechatDelivery.Mode != "" || s.TalkingHeadEditorDefaults.Preferences.QualityTier != ""
 }
 
 func (t *Task) SetImageCapabilitySnapshot(snapshot ImageCapabilitySnapshot) {
@@ -381,6 +388,7 @@ func SnapshotProject(p *Project) ProjectSnapshot {
 		EcommerceDefaults:             p.EcommerceDefaults.Data(),
 		MontageDefaults:               p.MontageDefaults.Data(),
 		VideoEditDefaults:             p.VideoEditDefaults.Data(),
+		TalkingHeadEditorDefaults:     p.TalkingHeadEditorDefaults.Data(),
 		HypitDefaults:                 p.HypitDefaults.Data(),
 		Profile:                       profile,
 	}
@@ -410,6 +418,7 @@ func ProjectFromSnapshot(base *Project, snap ProjectSnapshot) *Project {
 	p.SetEcommerceDefaults(snap.EcommerceDefaults)
 	p.SetMontageDefaults(snap.MontageDefaults)
 	p.SetVideoEditDefaults(snap.VideoEditDefaults)
+	p.SetTalkingHeadEditorDefaults(snap.TalkingHeadEditorDefaults)
 	p.SetHypitDefaults(snap.HypitDefaults)
 	p.Profile = datatypes.NewJSONType(snap.Profile)
 	return &p

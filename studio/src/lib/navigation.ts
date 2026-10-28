@@ -3,7 +3,7 @@ import {
   Sparkles,
   CalendarRange,
   CalendarDays,
-  ListChecks,
+  GalleryHorizontalEnd,
   Settings,
   Coins,
   LayoutGrid,
@@ -25,7 +25,7 @@ export interface NavItem {
 export const mvpNavItems: NavItem[] = [
   { to: '/', label: '首页', icon: Sparkles, end: true },
   { to: '/projects', label: '人设', icon: UserRound },
-  { to: '/tasks', label: '作品', icon: ListChecks },
+  { to: '/tasks', label: '作品', icon: GalleryHorizontalEnd },
   { to: '/plans', label: '排期', icon: CalendarRange },
   { to: '/billing', label: '钱包', icon: Coins },
   { to: '/plugins', label: '插件', icon: PlugZap },

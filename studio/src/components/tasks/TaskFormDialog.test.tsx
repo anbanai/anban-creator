@@ -838,6 +838,22 @@ describe('TaskFormDialog', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
+  it('explains why a clone with an overlong inherited prompt was not submitted', async () => {
+    renderDialog({
+      mode: 'clone',
+      sourceTask: { ...fixtures.sourceTask, prompt: '超长要求'.repeat(1281) },
+      initialProjectId: undefined,
+    })
+
+    const dialog = await screen.findByRole('dialog', { name: '克隆作品' })
+    await waitFor(() => expect(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('超长要求'.repeat(1281)))
+    fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
+
+    await waitFor(() => expect(toastMocks.error).toHaveBeenCalledWith(expect.stringContaining('Prompt 不能超过 5120 个字符')))
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('Prompt 不能超过 5120 个字符')
+    expect(api.tasks.clone).not.toHaveBeenCalled()
+  })
+
   it('reports the cloned quantity in its success toast', async () => {
     renderDialog({ mode: 'clone', sourceTask: fixtures.sourceTask, initialProjectId: undefined })
     const dialog = await screen.findByRole('dialog', { name: '克隆作品' })

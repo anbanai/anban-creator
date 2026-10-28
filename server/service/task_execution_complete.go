@@ -401,6 +401,8 @@ func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task
 			validation = validateMontageCompletionArtifacts(files)
 		case model.IsVideoEditPlatform(task.Type):
 			validation = validateVideoEditCompletionArtifacts(task, files)
+		case model.IsTalkingHeadEditorPlatform(task.Type):
+			validation = validateTalkingHeadEditorCompletionArtifacts(task, files)
 		default:
 			validation = agent.ValidateTaskArtifactsFromTaskFiles(task, files)
 		}
@@ -632,7 +634,7 @@ func (s *TaskService) ensureTerminalExecutionAuthority(ctx context.Context, task
 			return fmt.Errorf("verify terminal task authority: %w", err)
 		}
 		if execution.TaskID != taskID || task.CurrentExecutionID == nil || *task.CurrentExecutionID != executionID ||
-			(task.Status != model.TaskStatusCompleted && task.Status != model.TaskStatusFailed && task.Status != model.TaskStatusCancelled) {
+			(task.Status != model.TaskStatusCompleted && task.Status != model.TaskStatusFailed && task.Status != model.TaskStatusCancelled && task.Status != model.TaskStatusAwaitingReview) {
 			return ErrStaleTaskExecution
 		}
 		return nil
@@ -708,6 +710,9 @@ func (s *TaskService) cloudFinalizationStep(task *model.Task, execution *model.T
 		}, nil
 	case model.TaskExecutionFinalizationDispatch:
 		return model.TaskExecutionFinalizationNotification, func(ctx context.Context) error {
+			if task.Status == model.TaskStatusAwaitingReview {
+				return s.notifyTerminalDurable(ctx, task, model.TaskStatusAwaitingReview, "")
+			}
 			status, errMsg := taskTerminalFromExecution(execution, result)
 			return s.notifyTerminalDurable(ctx, task, status, errMsg)
 		}, nil
@@ -727,6 +732,15 @@ func (s *TaskService) finalizeCloudExecutionCore(ctx context.Context, task *mode
 		return err
 	}
 	target, errMsg := taskTerminalFromExecution(execution, result)
+	if execution.Status == model.TaskExecutionSucceeded && task != nil && model.IsTalkingHeadEditorPlatform(task.Type) {
+		files, filesErr := s.repo.TaskFiles().FindByExecutionID(ctx, execution.ID)
+		if filesErr != nil {
+			return fmt.Errorf("inspect talking-head-editor review artifacts: %w", filesErr)
+		}
+		if talkingHeadEditorMotionSampleOnly(files) {
+			target, errMsg = model.TaskStatusAwaitingReview, ""
+		}
+	}
 	reason := terminalBillingReason(execution, result)
 	durableDelivery, err := s.taskHasDurableDelivery(ctx, task.ID)
 	if err != nil {
@@ -760,6 +774,22 @@ func (s *TaskService) finalizeCloudExecutionCore(ctx context.Context, task *mode
 	task.CostStatus = result.CostStatus
 	task.BillingTerminalReason = reason
 	return nil
+}
+
+func talkingHeadEditorMotionSampleOnly(files []*model.TaskFile) bool {
+	hasSample, hasFinal := false, false
+	for _, file := range files {
+		if file == nil || (file.State != model.TaskFileStatePending && file.State != model.TaskFileStateDelivered) {
+			continue
+		}
+		switch filepath.ToSlash(strings.TrimSpace(file.FilePath)) {
+		case "output/motion-sample.mp4":
+			hasSample = true
+		case "output/final.mp4":
+			hasFinal = true
+		}
+	}
+	return hasSample && !hasFinal
 }
 
 func (s *TaskService) syncCloudSlot(ctx context.Context, task *model.Task) error {
