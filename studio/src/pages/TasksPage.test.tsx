@@ -102,6 +102,8 @@ vi.mock('@/lib/api', async () => {
         listBefore: vi.fn().mockResolvedValue({ items: [fixtures.failedTask], total: 1 }),
         create: vi.fn(),
         clone: vi.fn(),
+        resume: vi.fn(),
+        retry: vi.fn(),
         bulkCancel: vi.fn(),
         bulkClone: vi.fn(),
         bulkDelete: vi.fn(),
@@ -501,15 +503,28 @@ describe('TasksPage URL-driven recovery filters', () => {
     }
   })
 
-  it('opens the existing clone form when retrying a failed task from the row', async () => {
+  it('retries a failed task in place instead of opening the clone form', async () => {
     vi.mocked(api.tasks.list).mockResolvedValue({ items: [fixtures.failedTask as Task], total: 1 })
+    vi.mocked(api.tasks.retry).mockResolvedValue({ ...fixtures.failedTask, status: 'pending' } as Task)
 
     renderTasksPage()
 
     fireEvent.click(await screen.findByRole('button', { name: '重试作品：失败文章' }))
 
-    expect(await screen.findByRole('dialog', { name: '克隆作品' })).toBeInTheDocument()
-    expect(screen.getByText('失败文章')).toBeInTheDocument()
+    await waitFor(() => expect(api.tasks.retry).toHaveBeenCalledWith('failed-task'))
+    expect(api.tasks.resume).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: '克隆作品' })).not.toBeInTheDocument()
+  })
+
+  it('offers in-place retry for a cancelled task', async () => {
+    vi.mocked(api.tasks.list).mockResolvedValue({ items: [{ ...fixtures.failedTask, status: 'cancelled' } as Task], total: 1 })
+    vi.mocked(api.tasks.retry).mockResolvedValue({ ...fixtures.failedTask, status: 'pending' } as Task)
+
+    renderTasksPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '重试作品：失败文章' }))
+
+    await waitFor(() => expect(api.tasks.retry).toHaveBeenCalledWith('failed-task'))
   })
 
   it('downloads the completed task package from the row action rail', async () => {
@@ -585,7 +600,7 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect(actionRails[1].nextElementSibling).toBe(statusMarks[1])
   })
 
-  it.each(['pending', 'running', 'cancelled'] as const)('keeps %s status accessible without an orphan separator', async (status) => {
+  it.each(['pending', 'running'] as const)('keeps %s status accessible without an orphan separator', async (status) => {
     vi.mocked(api.tasks.list).mockResolvedValue({
       items: [{ ...fixtures.failedTask, status } as Task],
       total: 1,

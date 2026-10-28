@@ -797,27 +797,31 @@ func (r *taskRepository) CancelPendingTask(ctx context.Context, taskID, errorMsg
 	return result.RowsAffected > 0, nil
 }
 
-// ResetRetryableTaskForResume atomically persists supplemental inputs, moves a
-// failed or cancelled task back to pending, and routes it to the cloud executor.
-func (r *taskRepository) ResetRetryableTaskForResume(ctx context.Context, taskID string, attachments []model.EntryAttachment) (bool, error) {
+// ResetRetryableTask atomically moves a failed or cancelled task back to pending.
+func (r *taskRepository) ResetRetryableTask(ctx context.Context, taskID string, attachments []model.EntryAttachment, clearLifecycle bool) (bool, error) {
+	updates := map[string]interface{}{
+		"status":                  model.TaskStatusPending,
+		"started_at":              nil,
+		"completed_at":            nil,
+		"last_heartbeat_at":       nil,
+		"error_message":           "",
+		"result":                  nil,
+		"outcome":                 nil,
+		"terminal_model_usage":    datatypes.NewJSONType([]model.ModelTokenUsage{}),
+		"cost_status":             "",
+		"billing_terminal_reason": "",
+		"workflow_status":         nil,
+		"input_attachments":       datatypes.NewJSONType(attachments),
+	}
+	if clearLifecycle {
+		updates["lifecycle"] = datatypes.NewJSONType(model.TaskLifecycle{})
+	}
 	result := r.db.WithContext(ctx).
 		Model(&model.Task{}).
 		Where("id = ? AND status IN ?", taskID, []string{model.TaskStatusFailed, model.TaskStatusCancelled}).
 		Where("deleting_at IS NULL").
 		Where("current_execution_id IS NULL OR EXISTS (SELECT 1 FROM task_executions WHERE task_executions.id = tasks.current_execution_id AND task_executions.finalization_status = ?)", model.TaskExecutionFinalizationDone).
-		Updates(map[string]interface{}{
-			"status":               model.TaskStatusPending,
-			"started_at":           nil,
-			"completed_at":         nil,
-			"last_heartbeat_at":    nil,
-			"error_message":        "",
-			"result":               nil,
-			"outcome":              nil,
-			"terminal_model_usage": datatypes.NewJSONType([]model.ModelTokenUsage{}),
-			"cost_status":          "",
-			"workflow_status":      nil,
-			"input_attachments":    datatypes.NewJSONType(attachments),
-		})
+		Updates(updates)
 	if result.Error != nil {
 		return false, result.Error
 	}

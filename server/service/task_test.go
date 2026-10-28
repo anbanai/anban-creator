@@ -2297,6 +2297,87 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 	}
 }
 
+func TestTaskService_RetryRequeuesOriginalTaskWithoutNewChargeOrResumeInputs(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	chargeID := uuid.NewString()
+	completedAt := time.Now().Add(-time.Minute)
+	result := `{"success":false}`
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+		Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle,
+		Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
+		Status: model.TaskStatusFailed, Prompt: "原始创作要求",
+		BillingChargeID: &chargeID, BillingPriceCredits: 6000,
+		CompletedAt: &completedAt, Result: &result, ErrorMessage: "provider timeout",
+		Lifecycle: datatypes.NewJSONType(model.TaskLifecycle{Version: model.TaskLifecycleVersion, Stages: []model.TaskLifecycleStage{{ID: "writing", Title: "撰写", State: model.TaskLifecycleStateFailed}}}),
+	}
+	freezeTestTaskProfile(t, task)
+	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
+	task.SetInputAttachments([]model.EntryAttachment{
+		{Role: "brief", Text: "原始附件"},
+		{Role: model.EntryAttachmentRoleResumeLatest, Text: "旧的续跑补充指令"},
+		{Role: model.EntryAttachmentRoleResumeFile, Key: "resume/old.txt", FileName: "old.txt"},
+	})
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	retried, err := svc.Retry(ctx, userID, task.ID)
+	if err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+	if retried.ID != task.ID || retried.Status != model.TaskStatusPending {
+		t.Fatalf("retried task id=%q status=%q, want original id and pending", retried.ID, retried.Status)
+	}
+	if retried.BillingChargeID == nil || *retried.BillingChargeID != chargeID || retried.BillingPriceCredits != 6000 {
+		t.Fatalf("retry changed billing identity: charge=%v price=%d", retried.BillingChargeID, retried.BillingPriceCredits)
+	}
+	if retried.CompletedAt != nil || retried.Result != nil || retried.ErrorMessage != "" {
+		t.Fatalf("retry retained terminal state: %#v", retried)
+	}
+	if lifecycle := retried.Lifecycle.Data(); lifecycle.Version != 0 || len(lifecycle.Stages) != 0 {
+		t.Fatalf("retry retained prior lifecycle: %#v", lifecycle)
+	}
+	if len(svc.enqueuer.(*mockEnqueuer).enqueued) != 1 {
+		t.Fatalf("enqueued retry count = %d, want 1", len(svc.enqueuer.(*mockEnqueuer).enqueued))
+	}
+
+	found, err := repo.Tasks().FindByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachments := found.InputAttachments.Data()
+	if len(attachments) != 1 || attachments[0].Role != "brief" || attachments[0].Text != "原始附件" {
+		t.Fatalf("retry attachments = %#v, want original inputs without resume additions", attachments)
+	}
+	if lifecycle := found.Lifecycle.Data(); lifecycle.Version != 0 || len(lifecycle.Stages) != 0 {
+		t.Fatalf("persisted retry lifecycle = %#v, want cleared", lifecycle)
+	}
+}
+
+func TestTaskService_RetryRejectsCompletedTask(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+		Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle,
+		Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
+		Status: model.TaskStatusCompleted,
+	}
+	freezeTestTaskProfile(t, task)
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if retried, err := svc.Retry(ctx, userID, task.ID); retried != nil || !errors.Is(err, ErrTaskRetryCompleted) {
+		t.Fatalf("Retry completed task = %#v, %v; want nil/ErrTaskRetryCompleted", retried, err)
+	}
+}
+
 func TestTaskServiceResumeRejectsCompletedTaskWithoutMutation(t *testing.T) {
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)
@@ -2960,7 +3041,7 @@ func TestTaskService_ResumeRejectsNoInputAndNonTerminal(t *testing.T) {
 	}
 }
 
-func TestTaskRepository_ResetRetryableTaskForResumeOnlyOneStatusSwap(t *testing.T) {
+func TestTaskRepository_ResetRetryableTaskOnlyOneStatusSwap(t *testing.T) {
 	_, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
@@ -2979,14 +3060,14 @@ func TestTaskRepository_ResetRetryableTaskForResumeOnlyOneStatusSwap(t *testing.
 		t.Fatalf("create task: %v", err)
 	}
 
-	first, err := repo.Tasks().ResetRetryableTaskForResume(ctx, task.ID, nil)
+	first, err := repo.Tasks().ResetRetryableTask(ctx, task.ID, nil, false)
 	if err != nil {
 		t.Fatalf("first ResetRetryableTaskForResume: %v", err)
 	}
 	if !first {
 		t.Fatal("first ResetRetryableTaskForResume = false, want true")
 	}
-	second, err := repo.Tasks().ResetRetryableTaskForResume(ctx, task.ID, nil)
+	second, err := repo.Tasks().ResetRetryableTask(ctx, task.ID, nil, false)
 	if err != nil {
 		t.Fatalf("second ResetRetryableTaskForResume: %v", err)
 	}
