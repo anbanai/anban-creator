@@ -1350,6 +1350,43 @@ func (h *TaskHandler) Resume(c fiber.Ctx) error {
 	return Success(c, taskAPIResponse(task, h.store))
 }
 
+// Retry handles POST /api/v1/tasks/:id/retry and requeues the original task.
+func (h *TaskHandler) Retry(c fiber.Ctx) error {
+	id, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
+	}
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	task, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return Error(c, fiber.StatusNotFound, "task not found")
+	}
+	if task.UserID != userID {
+		return Forbidden(c, "you do not have access to this task")
+	}
+	task, err = h.service.Retry(c.Context(), userID, id)
+	if err != nil {
+		if handled, response := respondAgentProfileError(c, err); handled {
+			return response
+		}
+		switch {
+		case errors.Is(err, service.ErrTaskRetryCompleted):
+			return Error(c, fiber.StatusConflict, "已完成任务不可重试，请克隆任务创建新版本")
+		case errors.Is(err, service.ErrTaskRetryNotTerminal), errors.Is(err, service.ErrTaskRetryConflict):
+			return Error(c, fiber.StatusConflict, "只有失败或已取消的任务可以重试，请刷新后重试")
+		case errors.Is(err, service.ErrTaskResumeImageCapabilityMissing):
+			return Error(c, fiber.StatusConflict, "任务缺少冻结的图像能力，请克隆任务创建新版本")
+		default:
+			h.logger.Error().Err(err).Str("task_id", id).Msg("retry task failed")
+			return Error(c, fiber.StatusInternalServerError, "重试任务失败")
+		}
+	}
+	return Success(c, taskAPIResponse(task, h.store))
+}
+
 // Delete handles DELETE /api/v1/tasks/:id.
 func (h *TaskHandler) Delete(c fiber.Ctx) error {
 	id, err := validateUUIDParam(c, "id")

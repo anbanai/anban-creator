@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"mime"
+	"net/http"
 	"strings"
 	"time"
 
@@ -115,11 +118,9 @@ func (c *openaiLLMClient) CompleteWithImage(ctx context.Context, systemPrompt, u
 
 func (c *openaiLLMClient) CompleteWithImageResult(ctx context.Context, systemPrompt, userPrompt, imageURL string) (*LLMResult, error) {
 	if c.timeout > 0 {
-		if _, ok := ctx.Deadline(); !ok {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, c.timeout)
-			defer cancel()
-		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
 	}
 	messages := []openai.ChatCompletionMessageParamUnion{}
 	if systemPrompt != "" {
@@ -139,14 +140,60 @@ func (c *openaiLLMClient) CompleteWithImageResult(ctx context.Context, systemPro
 			},
 		},
 	})
-	resp, err := c.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{Messages: messages, Model: shared.ChatModel(c.model)})
+	var httpResponse *http.Response
+	resp, err := c.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{Messages: messages, Model: shared.ChatModel(c.model)}, option.WithResponseInto(&httpResponse))
 	if err != nil {
-		return nil, fmt.Errorf("llm vision completion: %w", err)
+		return nil, newImageUnderstandingProviderError(err, httpResponse)
 	}
 	if len(resp.Choices) == 0 {
-		return nil, fmt.Errorf("llm returned no choices (model=%s, resp_id=%s, resp_model=%s)", c.model, resp.ID, resp.Model)
+		return nil, newImageUnderstandingProviderError(errors.New("llm returned no choices"), httpResponse)
 	}
 	return &LLMResult{Text: resp.Choices[0].Message.Content, Model: responseModel(resp.Model, c.model), Usage: chatCompletionUsage(resp.Usage)}, nil
+}
+
+// Keep response bodies, request credentials and internal endpoints out of errors returned to agents.
+// Unwrap preserves SDK API status and context cancellation for server callers.
+type imageUnderstandingProviderError struct {
+	Code        string
+	StatusCode  int
+	ContentType string
+	Endpoint    string
+	RequestID   string
+	cause       error
+}
+
+func (e *imageUnderstandingProviderError) Error() string {
+	return fmt.Sprintf("llm vision completion: %s (status=%d, content_type=%q, request_id=%q)", e.Code, e.StatusCode, e.ContentType, e.RequestID)
+}
+
+func (e *imageUnderstandingProviderError) Unwrap() error { return e.cause }
+
+func newImageUnderstandingProviderError(err error, response *http.Response) *imageUnderstandingProviderError {
+	result := &imageUnderstandingProviderError{Code: "provider_request_error", cause: err}
+	if response != nil {
+		result.StatusCode = response.StatusCode
+		result.ContentType, _, _ = mime.ParseMediaType(response.Header.Get("Content-Type"))
+		if response.Request != nil && response.Request.URL != nil {
+			result.Endpoint = response.Request.URL.Host + response.Request.URL.EscapedPath()
+		}
+		result.RequestID = strings.TrimSpace(response.Header.Get("X-Request-ID"))
+		if len(result.RequestID) > 256 || strings.ContainsAny(result.RequestID, "\r\n") {
+			result.RequestID = ""
+		}
+		var apiError *openai.Error
+		isJSON := result.ContentType == "application/json" || strings.HasSuffix(result.ContentType, "+json")
+		if isJSON && errors.As(err, &apiError) {
+			result.Code = "provider_api_error"
+		} else {
+			result.Code = "provider_protocol_error"
+		}
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		result.Code = "provider_timeout"
+	} else if errors.Is(err, context.Canceled) {
+		result.Code = "provider_canceled"
+	}
+	return result
 }
 
 func (c *openaiLLMClient) CompleteWithVideoURL(ctx context.Context, systemPrompt, userPrompt, videoURL string) (string, error) {

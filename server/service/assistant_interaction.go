@@ -472,10 +472,23 @@ func (s *AssistantInteractionService) ensureRuntimeLocked(ctx context.Context, _
 	if tokenErr != nil {
 		return RuntimeBindingView{}, tokenErr
 	}
+	tokenHash := confirmationHash(runtimeToken)
+	s.runtimeMu.Lock()
+	if s.capabilities == nil {
+		s.capabilities = map[string]interactionRuntimeCapability{}
+	}
+	s.capabilities[tokenHash] = interactionRuntimeCapability{UserID: interaction.UserID, InteractionID: interaction.ID, ModeID: interaction.ModeID, ProjectID: interaction.ProjectID, Generation: generation, ExpiresAt: interaction.ExpiresAt}
+	s.runtimeMu.Unlock()
+	removeCapability := func() {
+		s.runtimeMu.Lock()
+		delete(s.capabilities, tokenHash)
+		s.runtimeMu.Unlock()
+	}
 	runtime, startErr := s.startRuntime(ctx, interaction, logicalSessionID, runtimeToken, func(eventType string, data any) {
 		s.AcceptRuntimeEvent(interaction.ID, generation, eventType, data)
 	})
 	if startErr != nil {
+		removeCapability()
 		s.metrics.observeRecovery("runtime_start_failed", "restart_required")
 		_ = s.repo.AssistantInteractions().UpdateLifecycle(ctx, interaction.ID, model.AssistantInteractionReconnecting, s.clock())
 		return RuntimeBindingView{}, &InteractionError{Code: InteractionErrorRestartRequired, Status: 410, Message: "当前连接已结束，已保留可恢复内容", AvailableActions: []string{"restore_draft", "restart"}, cause: startErr}
@@ -496,6 +509,7 @@ func (s *AssistantInteractionService) ensureRuntimeLocked(ctx context.Context, _
 		"interaction_id": interaction.ID,
 		"generation":     interaction.Generation,
 	}); err != nil {
+		removeCapability()
 		s.metrics.observeRecovery("runtime_handshake_failed", "restart_required")
 		s.clearModeSessions(interaction.ID, interaction.Generation)
 		_ = runtime.Close()
@@ -505,6 +519,7 @@ func (s *AssistantInteractionService) ensureRuntimeLocked(ctx context.Context, _
 	now := s.clock()
 	binding := &model.AssistantInteractionRuntime{ID: uuid.NewString(), InteractionID: interaction.ID, Generation: interaction.Generation, ServerInstance: "server", RuntimeID: uuid.NewString(), LogicalSession: logicalSessionID, TokenHash: confirmationHash(runtimeToken), Status: InteractionRuntimeRunning, StartedAt: now, CreatedAt: now, UpdatedAt: now}
 	if err := s.repo.AssistantInteractions().CreateRuntimeBinding(ctx, binding); err != nil {
+		removeCapability()
 		_ = runtime.Close()
 		return RuntimeBindingView{}, err
 	}

@@ -295,6 +295,47 @@ func TestTaskFixedBillingResumeKeepsOriginalCharge(t *testing.T) {
 	}
 }
 
+func TestTaskFixedBillingRetryAfterReversalReusesOriginalCharge(t *testing.T) {
+	ctx := context.Background()
+	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)
+	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformWechat)
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+		AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
+		ExecutionProfile: "effective", UserID: billingWalletUserID, ProjectID: projectID, Prompt: "retry after reversal", Quantity: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := tasks[0]
+	if err := svc.failPendingAdmittedTask(ctx, task, model.TaskBillingTerminalProviderError, "provider unavailable"); err != nil {
+		t.Fatalf("fail and reverse initial attempt: %v", err)
+	}
+	if processed, err := f.wallet.ProcessSettlementOutbox(ctx, 10); err != nil || processed != 1 {
+		t.Fatalf("process reversal=%d, %v", processed, err)
+	}
+	if account := f.account(t, billingWalletUserID); account.PaidCredits != 1_000 {
+		t.Fatalf("refunded account=%#v, want original balance", account)
+	}
+
+	retried, err := svc.Retry(ctx, billingWalletUserID, task.ID)
+	if err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+	if retried.ID != task.ID || retried.BillingChargeID == nil || *retried.BillingChargeID != *task.BillingChargeID {
+		t.Fatalf("retry billing identity = %#v, want original task and charge", retried)
+	}
+	if retried.BillingTerminalReason != "" {
+		t.Fatalf("retry retained old terminal billing reason %q", retried.BillingTerminalReason)
+	}
+	if account := f.account(t, billingWalletUserID); account.PaidCredits != 1_000 {
+		t.Fatalf("retry charged again: account=%#v", account)
+	}
+	charge, err := f.repo.Billing().FindChargeByTask(ctx, task.ID)
+	if err != nil || charge.ID != *task.BillingChargeID {
+		t.Fatalf("original charge = %#v, %v", charge, err)
+	}
+}
+
 func TestShouldReverseTaskChargeUsesExplicitReasonAndDurableDelivery(t *testing.T) {
 	tests := []struct {
 		reason  string

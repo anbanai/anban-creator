@@ -33,6 +33,20 @@ func TestDshSecretEnvDefaultsToServerMCPRoute(t *testing.T) {
 	t.Fatal("missing ANBAN_DSH_BRIDGE_MCP_URL")
 }
 
+func TestDshSecretEnvHasUniqueNames(t *testing.T) {
+	envs, err := dshRuntimeEnv("session-secret", InteractiveRuntimeSpec{SessionID: "session-1", AgentPackID: "creation-planner", InteractionID: "interaction-1", Generation: 3}, "https://creator/mcp", "https://creator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[string]bool, len(envs))
+	for _, env := range envs {
+		if seen[env.Name] {
+			t.Fatalf("duplicate DSH environment variable %q", env.Name)
+		}
+		seen[env.Name] = true
+	}
+}
+
 func TestKubernetesRuntimeFactoryPodIsolatedAndReadOnly(t *testing.T) {
 	factory := KubernetesRuntimeFactory{Config: srvconfig.DshConfig{
 		Image: "registry.example/dsh@sha256:" + repeatHex(64), KubernetesNamespace: "anban",

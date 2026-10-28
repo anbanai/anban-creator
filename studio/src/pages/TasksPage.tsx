@@ -6,6 +6,7 @@ import { Plus, ClipboardList, Download, Square, CheckSquare, Ban, RotateCcw, Tra
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
+import { getApiErrorMessage } from '@/lib/http-client'
 import type { AgentExecutionProfileID, Task, TaskStatus, Project, TaskType } from '@/types'
 import { ProjectSelector } from '@/components/ProjectSelector'
 import { AgentIconStack, agentDisplayName } from '@/components/agent-prompt/AgentIconStack'
@@ -152,7 +153,6 @@ export default function TasksPage() {
   const [searchFilter, setSearchFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [createDialogIntent, setCreateDialogIntent] = useState<{ projectId?: string; type?: TaskType }>({})
-  const [retrySourceTask, setRetrySourceTask] = useState<Task | null>(null)
   const [downloadingTaskIds, setDownloadingTaskIds] = useState<Set<string>>(() => new Set())
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
   const [bulkAction, setBulkAction] = useState<'cancel' | 'clone' | 'delete' | null>(null)
@@ -359,6 +359,15 @@ export default function TasksPage() {
         return next
       })
     },
+  })
+
+  const retryTaskMutation = useMutation({
+    mutationFn: (task: Task) => api.tasks.retry(task.id),
+    onSuccess: () => {
+      toast.success('已提交重试，作品将继续执行')
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error, '重试作品失败，请稍后重试')),
   })
 
   // Bulk cancel / clone / delete — best-effort; the server returns a per-task
@@ -756,14 +765,16 @@ export default function TasksPage() {
                       <TaskActionToolbar
                         status={task.status}
                         actions={[
-                          ...(task.status === 'failed' ? [{
+                          ...(task.status === 'failed' || task.status === 'cancelled' ? [{
                             id: 'retry',
                             label: '重试',
                             ariaLabel: `重试作品：${task.title || '未命名作品'}`,
                             priority: 100,
                             icon: <RotateCcw className="size-4" />,
                             className: 'font-semibold text-primary hover:text-primary',
-                            onSelect: () => setRetrySourceTask(task),
+                            onSelect: () => retryTaskMutation.mutate(task),
+                            loading: retryTaskMutation.isPending && retryTaskMutation.variables?.id === task.id,
+                            disabled: retryTaskMutation.isPending,
                           }] : []),
                           ...(task.status === 'completed' && (task.type === 'wechat-article' || task.type === 'seednote') ? [{
                             id: 'analytics',
@@ -831,18 +842,6 @@ export default function TasksPage() {
         onOpenChange={setModalOpen}
         onCreated={(task) => navigate(`/tasks/${task.id}`)}
       />
-
-      {retrySourceTask ? (
-        <TaskFormDialog
-          open
-          mode="clone"
-          sourceTask={retrySourceTask}
-          onOpenChange={(open) => {
-            if (!open) setRetrySourceTask(null)
-          }}
-          onCreated={(task) => navigate(`/tasks/${task.id}`)}
-        />
-      ) : null}
 
       {/* 批量操作二次确认：文案/按钮随 bulkAction 变化。取消与删除不可逆 → destructive。 */}
       <AlertDialog

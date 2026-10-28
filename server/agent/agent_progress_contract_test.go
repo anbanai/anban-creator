@@ -46,7 +46,7 @@ func TestManagedAgentsOwnDynamicLifecycleReporting(t *testing.T) {
 				wantVersion = "0.3.4"
 			}
 			if pack.ID == "seednote" {
-				wantVersion = "2.0.10"
+				wantVersion = "2.0.11"
 			}
 			if pack.ID == "feedback-analysis" {
 				wantVersion = "1.0.2"

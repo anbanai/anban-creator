@@ -2659,7 +2659,7 @@
       "id": "seednote",
       "channel": "seednote",
       "plan_task_kind": "content_generation",
-      "version": "2.0.10",
+      "version": "2.0.11",
       "kind": "managed",
       "display_name": "种草笔记",
       "description": "支持原创、复刻和爆款分析的种草笔记图文创作流程。",
@@ -2911,7 +2911,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "59cd1b0bb096d8e71ff385158f5a1d782fbbd17c00f38185af74a7f23cd88d86"
+      "digest": "e0730ff627ac7318f8bc2cc592a07957359b7af1a006b7eb7eacc3891fca1855"
     },
     {
       "id": "video-edit",
@@ -3068,7 +3068,7 @@
     },
     {
       "id": "viral-ip-video-editor",
-      "version": "1.0.8",
+      "version": "1.0.11",
       "kind": "plugin",
       "display_name": "爆款 IP 视频剪辑",
       "description": "基于 Montage 运行时处理真人 IP 口播素材，完成留存导向的剪辑规划、制作指导和成片质量复核。",
@@ -3128,6 +3128,18 @@
         {
           "role": "plan_review",
           "path": "output/plan_review.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "editing_reference_profile",
+          "path": "output/editing_reference_profile.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "lookdev_review",
+          "path": "output/lookdev_review.md",
           "mime_type": "text/markdown",
           "required": false
         },
@@ -3343,7 +3355,7 @@
         }
       ],
       "ui": {},
-      "digest": "be0cbfacdba7fb8596de594284def5620a2b0d0b381648520ae988a0667c8c7b"
+      "digest": "ed77e697739b7fdd50421025ae5dc772ab3fc3896ca2f4a5ca1e3d2e334a60c5"
     },
     {
       "id": "wechat-article",
