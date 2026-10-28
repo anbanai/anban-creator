@@ -56,7 +56,7 @@ export default function PublicSharePage() {
   const [revision, setRevision] = useState(0)
   const [imageError, setImageError] = useState(false)
   const [decodedImages, setDecodedImages] = useState<Set<string>>(new Set())
-  useReaderMetadata(state.status === 'ready' ? state.share.title : '分享作品 · 安伴')
+  useReaderMetadata(state.status === 'ready' ? state.share.title : '分享作品 · Anban AI')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -114,7 +114,7 @@ export default function PublicSharePage() {
   const imagesPending = isolated && state.status === 'ready' && decodedImages.size < state.images.size
   return <main className={`${isolated ? 'flex h-dvh flex-col overflow-hidden' : 'min-h-dvh'} bg-white text-zinc-800`}>
     <header className="shrink-0 border-b border-zinc-100 px-5 py-4">
-      <div className="mx-auto flex max-w-[720px] items-center justify-between gap-3 sm:px-3"><span className="text-sm font-semibold text-zinc-700">安伴<span className="ml-3 border-l border-zinc-200 pl-3 text-xs font-normal text-zinc-400">作品分享</span></span>{state.status === 'ready' ? <span className="text-xs text-zinc-400">{state.share.type === 'seednote' ? '种草笔记' : '公众号文章'}</span> : null}</div>
+      <div className="mx-auto flex max-w-[720px] items-center justify-between gap-3 sm:px-3"><span className="text-sm font-semibold text-zinc-700">Anban AI<span className="ml-3 border-l border-zinc-200 pl-3 text-xs font-normal text-zinc-400">作品分享</span></span>{state.status === 'ready' ? <span className="text-xs text-zinc-400">{state.share.type === 'seednote' ? '种草笔记' : '公众号文章'}</span> : null}</div>
     </header>
     {state.status === 'loading' || imagesPending ? <div role="status" className="flex items-center justify-center gap-2 py-24 text-sm text-zinc-500"><LoaderCircle className="size-4 animate-spin" />正在加载作品…</div> : state.status === 'error' || imageError ? <div className="mx-auto max-w-sm px-6 py-24 text-center">
       <AlertCircle className="mx-auto mb-5 size-8 text-zinc-400" aria-hidden="true" />

@@ -23,6 +23,7 @@ describe('PublicSharePage', () => {
     document.title = '工作台'
     const view = open()
     await screen.findByRole('heading', { name: '周末的公园' })
+    expect(screen.getByText('Anban AI')).toBeInTheDocument()
     expect(screen.getByText('最后一段')).toBeInTheDocument()
     expect(screen.getByText(/完整内容/).textContent?.length).toBe(3000)
     expect(auth).toBeNull()
@@ -37,6 +38,8 @@ describe('PublicSharePage', () => {
     server.use(http.get('/api/v1/public/shares/test-token', () => new HttpResponse(null, { status })))
     open()
     expect(await screen.findByRole('heading', { name: status === 404 || status === 410 ? '分享链接已失效' : status === 409 ? '内容暂不可用' : '暂时无法加载' })).toBeInTheDocument()
+    expect(screen.getByText('Anban AI')).toBeInTheDocument()
+    expect(document.title).toBe('分享作品 · Anban AI')
     if (status !== 404 && status !== 410) expect(screen.getByRole('button', { name: '重新加载' })).toBeInTheDocument()
   })
 
