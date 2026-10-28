@@ -40,6 +40,7 @@ const UserMediaLibraryPage = lazyWithRecovery(() => import('@/pages/UserMediaLib
 const ContentAutopilotSettingsPage = lazyWithRecovery(() => import('@/pages/ContentAutopilotSettingsPage'))
 const ContentAnalyticsPage = lazyWithRecovery(() => import('@/pages/ContentAnalyticsPage'))
 const TrendsPage = lazyWithRecovery(() => import('@/pages/TrendsPage'))
+const PublicSharePage = lazyWithRecovery(() => import('@/pages/PublicSharePage'))
 
 function ChatRedirect() {
   const [params] = useSearchParams()
@@ -130,6 +131,7 @@ function AppRoutes() {
   return (
     <ErrorBoundary>
       <Routes>
+        <Route path="/share/:token" element={<LazyPage component={PublicSharePage} />} />
         <Route
           path="/login"
           element={

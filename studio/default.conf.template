@@ -5,8 +5,24 @@
 # /api/v1/tasks/<id>/stream. So proxying /api/ covers everything. /ws is proxied
 # for parity with the vite dev server (studio has no WS client today).
 
+# Suppress token-bearing requests even after the SPA internal redirect.
+map $request_uri $share_access_log {
+    default 1;
+    ~*^/share/ 0;
+    ~*^/api/v1/public/shares/ 0;
+}
+map $share_access_log $share_robots_tag {
+    default "";
+    0 "noindex, nofollow";
+}
+map $share_access_log $share_referrer_policy {
+    default "";
+    0 "no-referrer";
+}
+
 server {
     listen 80;
+    access_log /var/log/nginx/access.log combined if=$share_access_log;
     # Image upload (cover art, reference images) exceeds nginx's 1m default.
     client_max_body_size 25m;
 
@@ -32,6 +48,8 @@ server {
     location = /index.html {
         root /usr/share/nginx/html;
         add_header Cache-Control "no-store, must-revalidate" always;
+        add_header X-Robots-Tag $share_robots_tag always;
+        add_header Referrer-Policy $share_referrer_policy always;
     }
 
     # Static frontend with SPA routing fallback.
