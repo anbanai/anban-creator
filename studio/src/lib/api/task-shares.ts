@@ -2,7 +2,7 @@ import { http, unwrap } from '@/lib/http-client'
 import type { PublicShare, TaskShareStatus } from '@/types/task-share'
 
 export const taskSharesApi = {
-  get: (taskId: string) => unwrap<TaskShareStatus>(http.get(`/tasks/${encodeURIComponent(taskId)}/share`, { headers: { 'Cache-Control': 'no-cache' } })),
+  get: (taskId: string) => unwrap<TaskShareStatus>(http.get(`/tasks/${encodeURIComponent(taskId)}/share`)),
   save: (taskId: string, days: number) => unwrap<TaskShareStatus>(http.put(`/tasks/${encodeURIComponent(taskId)}/share`, { expires_in_days: days })),
   revoke: async (taskId: string) => { await http.delete(`/tasks/${encodeURIComponent(taskId)}/share`) },
 }

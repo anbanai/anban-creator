@@ -13,10 +13,17 @@ import (
 func TestRequestLoggerRedactsShareTokensOnly(t *testing.T) {
 	for _, route := range []struct{ path, want string }{
 		{"/api/v1/public/shares/secret-token", "/api/v1/public/shares/[redacted]"},
-		{"/api/v1/public/shares/secret-token/images/image-id", "/api/v1/public/shares/[redacted]/images/image-id"},
+		{"/api/v1/public/shares/secret-token/images/image-id", "/api/v1/public/shares/[redacted]"},
 		{"/API/v1/Public/Shares/secret-token", "/API/v1/Public/Shares/[redacted]"},
 		{"/share/secret-token", "/share/[redacted]"},
+		{"/api/v1/public/%73hares/secret-token", "/api/v1/public/shares/[redacted]"},
+		{"/api/v1/public/shares%2fsecret-token", "/api/v1/public/shares/[redacted]"},
+		{"/api/v1/public%2f%73hares%2fsecret-token/images/image-id", "/api/v1/public/shares/[redacted]"},
+		{"/%73hare%2fsecret-token", "/share/[redacted]"},
+		{"/share//secret-token", "/share/[redacted]"},
+		{"/api/v1/public/shares/secret-token/images/secret-token", "/api/v1/public/shares/[redacted]"},
 		{"/api/v1/tasks/task-id/share", "/api/v1/tasks/task-id/share"},
+		{"/api/v1/tasks/task%2Did/share", "/api/v1/tasks/task%2Did/share"},
 	} {
 		var logs bytes.Buffer
 		logger := zerolog.New(&logs)
@@ -30,6 +37,14 @@ func TestRequestLoggerRedactsShareTokensOnly(t *testing.T) {
 		resp.Body.Close()
 		if strings.Contains(logs.String(), "secret-token") || !strings.Contains(logs.String(), route.want) {
 			t.Fatalf("%s: %s", route.path, logs.String())
+		}
+	}
+}
+
+func TestRequestLoggerRedactsMalformedEncodedPaths(t *testing.T) {
+	for _, path := range []string{"/api/v1/public/%73hares/secret-token%zz", "/%73hare/secret-token%"} {
+		if got := redactedRequestPath(path); got != "[redacted]" {
+			t.Fatalf("malformed encoded path retained sensitive data: %s", got)
 		}
 	}
 }

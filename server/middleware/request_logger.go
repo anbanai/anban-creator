@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"errors"
+	"net/url"
 	"strings"
 	"time"
 
@@ -69,14 +70,13 @@ func RequestLogger(logger *zerolog.Logger) fiber.Handler {
 }
 
 func redactedRequestPath(path string) string {
+	normalized, err := url.PathUnescape(path)
+	if err != nil {
+		return "[redacted]"
+	}
 	for _, prefix := range []string{"/api/v1/public/shares/", "/share/"} {
-		if strings.HasPrefix(strings.ToLower(path), prefix) {
-			tail := path[len(prefix):]
-			prefix = path[:len(prefix)]
-			if slash := strings.IndexByte(tail, '/'); slash >= 0 {
-				return prefix + "[redacted]" + tail[slash:]
-			}
-			return prefix + "[redacted]"
+		if strings.HasPrefix(strings.ToLower(normalized), prefix) {
+			return normalized[:len(prefix)] + "[redacted]"
 		}
 	}
 	return path
