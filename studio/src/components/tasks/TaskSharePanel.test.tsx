@@ -2,11 +2,11 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server } from '@/test/mocks/server'
-import { TaskShareDialog } from './TaskShareDialog'
+import { TaskSharePanel } from './TaskSharePanel'
 
 const active = { status: 'active', share_path: '/share/current', expires_at: '2030-11-04T12:00:00Z' }
 
-describe('TaskShareDialog', () => {
+describe('TaskSharePanel', () => {
   beforeEach(() => {
     server.use(http.get('/api/v1/tasks/task-1/share', () => HttpResponse.json({ data: { status: 'none' } })))
   })
@@ -25,9 +25,13 @@ describe('TaskShareDialog', () => {
     )
     const clipboard = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: clipboard } })
-    render(<TaskShareDialog taskId="task-1" canCreate />)
+    render(<TaskSharePanel taskId="task-1" canCreate />)
+    expect(screen.getByRole('button', { name: '分享作品' })).toHaveAttribute('aria-expanded', 'false')
     fireEvent.click(screen.getByRole('button', { name: '分享作品' }))
     await screen.findByRole('button', { name: '创建链接' })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '分享设置' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '收起分享设置' })).toHaveAttribute('aria-expanded', 'true')
     expect(days).toEqual([])
     fireEvent.click(screen.getByRole('button', { name: '创建链接' }))
     await screen.findByDisplayValue('http://localhost:3000/share/current')
@@ -40,7 +44,8 @@ describe('TaskShareDialog', () => {
     await waitFor(() => expect(days).toEqual([7, 1]))
     fireEvent.click(screen.getByRole('button', { name: '关闭分享' }))
     await screen.findByText('分享已关闭')
-    fireEvent.click(screen.getByRole('button', { name: '关闭对话框' }))
+    fireEvent.click(screen.getByRole('button', { name: '收起分享设置' }))
+    expect(screen.queryByRole('region', { name: '分享设置' })).not.toBeInTheDocument()
     current = active
     fireEvent.click(screen.getByRole('button', { name: '分享作品' }))
     await screen.findByRole('button', { name: '复制链接' })
@@ -52,7 +57,7 @@ describe('TaskShareDialog', () => {
       requests++
       return requests === 1 ? new HttpResponse(null, { status: 500 }) : HttpResponse.json({ data: active })
     }))
-    render(<TaskShareDialog taskId="task-1" canCreate />)
+    render(<TaskSharePanel taskId="task-1" canCreate />)
     fireEvent.click(screen.getByRole('button', { name: '分享作品' }))
     await screen.findByRole('button', { name: '创建链接' })
     fireEvent.click(screen.getByLabelText('自定义'))
@@ -72,7 +77,7 @@ describe('TaskShareDialog', () => {
 
   it('copies an existing active share without needing another delivered body', async () => {
     server.use(http.get('/api/v1/tasks/task-1/share', () => HttpResponse.json({ data: active })))
-    render(<TaskShareDialog taskId="task-1" canCreate={false} />)
+    render(<TaskSharePanel taskId="task-1" canCreate={false} />)
     fireEvent.click(screen.getByRole('button', { name: '分享作品' }))
     expect(await screen.findByRole('button', { name: '复制链接' })).toBeEnabled()
     expect(screen.getByRole('button', { name: '更新期限' })).toBeDisabled()

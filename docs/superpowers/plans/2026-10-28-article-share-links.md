@@ -54,3 +54,9 @@ Interfaces consumed: Task 1 endpoints. Do not change their wire contract unilate
 - Real Nginx container regressions pass all 11 tests: configuration syntax, SPA fallback, public API proxy, privacy headers and token-free access logging, including canonical, mixed-case, encoded-character and encoded-slash share paths. Live expiry and BFCache restoration also have passing reader regressions.
 - Final review fixes: owner sharing works with a separate API origin without expanding CORS permissions; application and Nginx logs redact equivalent encoded sharing paths. HTTP-boundary and actual-router regressions pass, and scoped re-review found no remaining issues.
 - Release order: apply `server/migrations/20261028_task_shares.sql`, then deploy Server, then Studio. No push, merge or deployment was performed; the local feature branch remains available for review.
+
+## UI follow-up
+
+- Replaced the sharing dialog with an expandable card inside delivery results. The page stays interactive, with a full-width link, grouped expiry choices, sharing status, and responsive spacing. Existing create/copy/update/revoke behavior is retained.
+- Public reader and error-page branding now uses `Anban AI`.
+- Validation: 167 Studio test files / 1503 tests pass; production build passes. Browser checks cover expansion/collapse, creation, copying, custom expiry update, revocation, desktop layout and 390px mobile layout without horizontal overflow. Screenshots use local sample API data and are saved outside the repository for user confirmation.
