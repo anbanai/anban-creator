@@ -21,7 +21,7 @@ Read the design spec for the exact behavior and HTTP contract. Implement only Se
 - TDD: first add tests and run red, then implement. Tests cover expiry integer/range/edge, owner access, stable token on update, rotate on reenable, revoke, latest complete manifest, failed/pending/internal exclusion, deleted task, relative/platform image rewrite, foreign/retained image refusal, byte streaming and safe response contract, HTTP anonymous/owner routes and log redaction. Use real SQLite repositories and storage fakes/httptest where appropriate.
 - Verify focused Go tests during development, then `go test ./...` and `go build -o /tmp/anban-share-server .` in server. Record pre-existing baseline failures separately; do not change unrelated code. Commit only Task 1 files and write report with RED/GREEN evidence and actual API shapes.
 
-Interfaces produced are the six HTTP endpoints and JSON payloads in the spec. Frontend Task 2 consumes them. Test fixtures must include real frozen execution delivery contracts and use current repository identities.
+Interfaces produced are the five HTTP endpoints and JSON payloads in the spec. Frontend Task 2 consumes them. Test fixtures must include real frozen execution delivery contracts and use current repository identities.
 
 ### Task 2: Studio management and public reader
 
@@ -44,3 +44,12 @@ Interfaces consumed: Task 1 endpoints. Do not change their wire contract unilate
 - Exercise public UI in a real browser without credentials, with a local fixture server for API responses if production credentials are unavailable. Cover valid article and seednote rendering, invalid link, phone viewport, and management flow. Fixtures and screenshots stay outside tracked source.
 - Run final fresh Go/Studio tests and builds after relevant changes. Inspect diff/status, preserve unrelated main checkout files, and leave the implementation on the feature branch for review. Do not merge, push or deploy without user request.
 - Report completed behavior, verified checks, actual limitations and migration requirement.
+
+## Validation record
+
+- Server feature tests pass across handler, service, repository, middleware and migration packages; Server binary builds successfully.
+- Full Server test run matches the clean main baseline: 12 existing WeChat publication/reconciliation service failures, with no additional failures. The feature does not change those workflows.
+- Studio: 166 test files / 1499 tests pass and production build passes before review follow-up. Existing Vite native-config and chunk-size warnings remain.
+- Browser smoke uses the real Studio implementation with local sample API responses: create a custom 30-day link, copy it, change to 7 days without changing the URL, revoke it, and verify anonymous invalid-link state. Both readers render complete text and images; mobile article scrolling reaches the final paragraph. Screenshots were saved outside tracked source for user confirmation.
+- Real Nginx container smoke verifies configuration syntax, SPA fallback, public API proxy, privacy headers and token-free ordinary share-path access logging. Encoded-path review follow-up is recorded in the corresponding fix commit.
+- Release order: apply `server/migrations/20261028_task_shares.sql`, then deploy Server, then Studio. No push, merge or deployment was performed; the local feature branch remains available for review.
