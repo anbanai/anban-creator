@@ -381,7 +381,6 @@ export default function DashboardPage() {
                     onChange: setExecutionProfile,
                     loading: profilesQuery.isLoading || billingCatalogQuery.isLoading,
                     disabled: profilesQuery.isError || billingCatalogQuery.isError,
-                    catalog: billingCatalogQuery.data,
                     taskType: selectedProject?.platform,
                   }}
                   image={usesImageSettings ? {

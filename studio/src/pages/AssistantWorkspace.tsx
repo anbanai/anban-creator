@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Bot, Check, ChevronDown, Layers3, Library, Loader2, Plus, Upload, UserRound } from 'lucide-react'
+import { ArrowLeft, Bot, Check, ChevronDown, Layers3, Library, Loader2, Plus, Sparkles, Upload, UserRound } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
@@ -1252,7 +1252,12 @@ export default function AssistantWorkspace() {
     />
   )
   const creationComposerParameters = mode === 'creation' ? composerParameters : null
-  const composerContextBar = (
+  const ModeIcon = mode === 'profile' ? UserRound : mode === 'creation' ? Sparkles : Check
+  const composerMode = <span role="status" aria-label="当前模式" className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
+    <ModeIcon aria-hidden="true" className="size-3.5" />{modeLabel(mode)}模式
+    {creationTypeSelector && <span aria-hidden="true" className="ml-1 h-3 border-r border-border" />}
+  </span>
+  const composerContextBar = workspace ? (
     <AssistantContextBar
       phase="locked"
       mode={mode}
@@ -1267,7 +1272,8 @@ export default function AssistantWorkspace() {
       loadingWorks={worksQuery.isLoading}
       status={missingContextInstruction ? <span role="status" className="text-xs text-muted-foreground">{missingContextInstruction}</span> : undefined}
     />
-  )
+  ) : missingContextInstruction ? <div data-testid="assistant-context-bar"><span role="status" className="text-xs text-muted-foreground">{missingContextInstruction}</span></div> : undefined
+  const currentPersona = completeProjects.find((project) => project.id === selectedProject?.id)
   const activeReviewSelectors = workspace && pendingMode === 'review' ? <WorkspaceSelectors mode="review" projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={contentId} works={works} disabled={switching} onProject={selectPersona} onContent={selectReviewContent} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} /> : null
 
   const personaRail = bootstrap ? (
@@ -1312,7 +1318,13 @@ export default function AssistantWorkspace() {
       {!workspace ? (
         <section className="assistant-home mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col justify-center gap-3 overflow-hidden px-4 py-4 md:px-8 md:py-8">
           <div data-testid="assistant-conversation" className="assistant-home-content flex min-h-0 flex-col">
-            <HomeStage project={selectedProject} hasPersona={completeProjects.length > 0} />
+            <HomeStage project={selectedProject} mode={mode} hasPersona={completeProjects.length > 0} actions={currentPersona && <>
+              <PersonaCreationSettings project={currentPersona} disabled={switching || committing || sending || responding} />
+              <Button type="button" variant="ghost" size="sm" aria-label={`查看作品：${currentPersona.name}`} onClick={() => viewPersonaWorks(currentPersona.id)} className="h-7 px-1.5 text-[11px]">查看作品</Button>
+              {mode === 'profile'
+                ? <Button type="button" variant="ghost" size="sm" disabled={switching || committing || sending || responding} onClick={() => selectCreationPersona(currentPersona.id)} className="h-7 px-1.5 text-[11px]">开始创作</Button>
+                : <Button type="button" variant="ghost" size="sm" disabled={switching || committing || sending || responding} aria-label={`调整人设：${currentPersona.name}`} onClick={() => editPersona(currentPersona.id)} className="h-7 px-1.5 text-[11px]">调整人设</Button>}
+            </>} />
             {personaRail}
             <div className="assistant-scroll min-h-0 max-h-[45%] overflow-y-auto overscroll-contain">
             {routeHasContext && mode === 'review' && <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} onProject={resetCreationProject} onContent={setContentId} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />}
@@ -1326,7 +1338,7 @@ export default function AssistantWorkspace() {
             {videoEditInputs}
             </div>
           </div>
-          <Composer fadeAbove={false} value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || composerBlocked} /> : undefined} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <Composer fadeAbove={false} value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || composerBlocked} /> : undefined} trailingTools={<>{composerMode}{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       ) : (
         <section className="mx-auto flex min-h-0 w-full max-w-6xl min-w-0 flex-1 flex-col px-4 pb-3 md:px-8">
@@ -1339,7 +1351,7 @@ export default function AssistantWorkspace() {
             {activeDraft && confirmationDraft && <DraftConfirmationCard mode={mode} draft={confirmationDraft} committing={committing} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => { setDraftByMode((current) => ({ ...current, [mode]: null })); setError(null) }} />}
             {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
           </div>
-          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} /> : undefined} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} /> : undefined} trailingTools={<>{composerMode}{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       )}
       </main>
@@ -1373,7 +1385,7 @@ function platformIntroduction(platform: string) {
   return profileLabAgents.find((agent) => agent.id === agentID)?.detail ?? `${platformDisplayName(platform, '创作')}内容创作`
 }
 
-function HomeStage({ project, hasPersona }: { project?: AssistantProject; hasPersona: boolean }) {
+function HomeStage({ project, hasPersona, mode, actions }: { project?: AssistantProject; hasPersona: boolean; mode: AssistantModeID; actions?: ReactNode }) {
   const imageURL = personaImageURL(project)
   const agents = project ? personaAgentIDs(project) : []
   return <section aria-label="当前人设" className="assistant-home-stage mx-auto flex w-full max-w-xl shrink-0 flex-col px-2 text-left">
@@ -1384,8 +1396,8 @@ function HomeStage({ project, hasPersona }: { project?: AssistantProject; hasPer
     <div className="min-w-0">
       <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{project ? '当前人设' : '准备开始'}</p>
       <h1 className="mt-2 truncate text-xl font-semibold tracking-tight sm:text-3xl" title={project?.name}>{project?.name ?? '神秘人'}</h1>
-      <p className="assistant-home-description mt-2 line-clamp-2 max-w-xl text-sm leading-6 text-muted-foreground">{project?.description || (hasPersona ? '选择一个人设，开始你的下一次创作。' : '为了创建更好的作品，需要先创建您的人设')}</p>
-      {project && <span className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><AgentIconStack agentIds={agents} maxVisible={3} compact emptyLabel="还未选择创作类型" /></span>}
+      <p className="assistant-home-description mt-2 line-clamp-2 max-w-xl text-sm leading-6 text-muted-foreground">{project && mode === 'profile' ? '调整这个人设的定位、风格与创作方向。' : project?.description || (project ? '使用当前人设，开始你的下一次创作。' : hasPersona ? '选择一个人设，开始你的下一次创作。' : '为了创建更好的作品，需要先创建您的人设')}</p>
+      {project && <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground"><AgentIconStack agentIds={agents} maxVisible={3} compact emptyLabel="还未选择创作类型" /><div className="persona-current-actions flex flex-wrap items-center">{actions}</div></div>}
     </div>
     </div>
   </section>
@@ -1403,6 +1415,22 @@ function PersonaRail({ projects, selectedProjectId, disabled, onSelect, onCreate
   const scrollRef = useRef<HTMLDivElement>(null)
   const [hasContentAbove, setHasContentAbove] = useState(false)
   const [hasContentBelow, setHasContentBelow] = useState(false)
+  const [ordering, setOrdering] = useState({ selectedId: selectedProjectId, ids: [] as string[] })
+  const orderedProjects = [
+    ...ordering.ids.flatMap((id) => projects.find((project) => project.id === id) ?? []),
+    ...projects.filter((project) => !ordering.ids.includes(project.id)),
+  ]
+  if (ordering.selectedId !== selectedProjectId) {
+    const previousIndex = orderedProjects.findIndex((project) => project.id === ordering.selectedId)
+    const nextIndex = orderedProjects.findIndex((project) => project.id === selectedProjectId)
+    // Put the previous persona in the chosen card's slot without shifting other cards.
+    if (previousIndex >= 0 && nextIndex >= 0) {
+      [orderedProjects[previousIndex], orderedProjects[nextIndex]] = [orderedProjects[nextIndex], orderedProjects[previousIndex]]
+    }
+    setOrdering({ selectedId: selectedProjectId, ids: orderedProjects.map((project) => project.id) })
+  }
+  const otherProjects = orderedProjects.filter((project) => project.id !== selectedProjectId)
+  const hasSelectedProject = projects.some((project) => project.id === selectedProjectId)
 
   useEffect(() => {
     const element = scrollRef.current
@@ -1422,12 +1450,12 @@ function PersonaRail({ projects, selectedProjectId, disabled, onSelect, onCreate
       element.removeEventListener('scroll', updateOverflow)
       window.removeEventListener('resize', updateOverflow)
     }
-  }, [projects.length])
+  }, [otherProjects.length])
 
   return <section aria-label="首页人设选择" className="mx-auto flex min-h-32 w-full max-w-5xl flex-col pb-1">
     <div data-testid="persona-rail-header" className="mb-3 flex shrink-0 items-center gap-2 px-1">
-      <p className="text-sm font-medium">选择人设</p>
-      <span className="text-xs text-muted-foreground">{projects.length ? `${projects.length} 个可用人设` : '还没有可用人设'}</span>
+      <p className="text-sm font-medium">{hasSelectedProject ? '切换人设' : '选择人设'}</p>
+      <span className="text-xs text-muted-foreground">{hasSelectedProject ? `其他 ${otherProjects.length} 个人设` : projects.length ? `${projects.length} 个可用人设` : '还没有可用人设'}</span>
     </div>
     <div className="relative h-[14.125rem] min-h-0">
       <div ref={scrollRef} className="assistant-scroll persona-card-scroll grid h-full min-h-0 grid-cols-2 min-[700px]:grid-cols-3 min-[1600px]:grid-cols-4 min-[1900px]:grid-cols-5 min-[2200px]:grid-cols-6 auto-rows-max content-start gap-2 overflow-y-auto overscroll-contain p-1" data-testid="persona-card-scroll" tabIndex={0}>
@@ -1435,12 +1463,11 @@ function PersonaRail({ projects, selectedProjectId, disabled, onSelect, onCreate
           <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Plus className="size-4" /></span>
           <span className="min-w-0"><span className="block truncate text-sm font-semibold">创建新人设</span><span className="mt-0.5 block truncate text-xs leading-4 text-muted-foreground">聊一聊你的定位与风格</span></span>
         </button>
-        {projects.map((project) => {
+        {otherProjects.map((project) => {
           const agents = personaAgentIDs(project)
           const imageURL = personaImageURL(project)
-          const selected = selectedProjectId === project.id
-          return <article key={project.id} className={`group relative flex min-h-[5.25rem] min-w-0 flex-col rounded-xl border bg-card p-2 transition-shadow ${selected ? 'border-primary shadow-sm ring-1 ring-primary/25' : 'border-border hover:shadow-sm'}`}>
-            <button type="button" aria-label={`选择人设：${project.name}`} aria-pressed={selected} disabled={disabled} onClick={() => onSelect(project.id)} className="flex min-h-10 w-full min-w-0 grow shrink-0 items-start gap-2 text-left">
+          return <article key={project.id} className="group relative flex min-h-[5.25rem] min-w-0 flex-col rounded-xl border border-border bg-card p-2 transition-shadow hover:shadow-sm">
+            <button type="button" aria-label={`选择人设：${project.name}`} disabled={disabled} onClick={() => onSelect(project.id)} className="flex min-h-10 w-full min-w-0 grow shrink-0 items-start gap-2 text-left">
               <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
                 {imageURL ? <SignedImage src={imageURL} alt="" className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-5 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-5 text-muted-foreground" />}
               </div>
