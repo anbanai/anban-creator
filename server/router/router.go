@@ -43,6 +43,7 @@ type Services struct {
 	TaskService                         *service.TaskService
 	PlanHandler                         *handler.PlanHandler
 	TaskHandler                         *handler.TaskHandler
+	TaskShareHandler                    *handler.TaskShareHandler
 	SeednoteAnalyticsHandler            *handler.SeednoteAnalyticsHandler
 	SeednoteImportHandler               *handler.SeednoteImportHandler
 	WechatAnalyticsHandler              *handler.WechatAnalyticsHandler
@@ -245,9 +246,19 @@ func NewRouter(svc *Services) *fiber.App {
 	// Protected API group — /api/v1 (requires authentication)
 	// ---------------------------------------------------------------------------
 
+	if svc.TaskShareHandler != nil {
+		app.Get("/api/v1/public/shares/:token", svc.TaskShareHandler.Public)
+		app.Get("/api/v1/public/shares/:token/images/:fileId", svc.TaskShareHandler.Image)
+		app.Use("/api/v1/tasks/:id/share", handler.TaskShareHeaders)
+	}
 	authMiddleware := appmiddleware.AuthMiddleware(svc.JWTService, svc.Repo, svc.Logger)
 	rateLimiter := appmiddleware.RateLimit(svc.Redis, "api", svc.Config.RateLimit.API.Requests, svc.Config.RateLimit.API.Window)
 	apiV1 := app.Group("/api/v1", authMiddleware, rateLimiter)
+	if svc.TaskShareHandler != nil {
+		apiV1.Get("/tasks/:id/share", svc.TaskShareHandler.Get)
+		apiV1.Put("/tasks/:id/share", svc.TaskShareHandler.Put)
+		apiV1.Delete("/tasks/:id/share", svc.TaskShareHandler.Revoke)
+	}
 	if svc.InteractiveHandler != nil {
 		interactive := apiV1.Group("/interactive")
 		interactive.Get("/agents", svc.InteractiveHandler.Agents)
