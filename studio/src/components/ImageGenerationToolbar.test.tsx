@@ -33,7 +33,7 @@ describe('ImageGenerationSettings', () => {
     expect(screen.getByText('4:3')).toBeInTheDocument()
     expect(screen.queryByText('16:9')).not.toBeInTheDocument()
     expect(screen.getByText('适合复杂构图')).toBeInTheDocument()
-    expect(screen.getByText('每张 800 积分')).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: '图像能力' })).not.toHaveTextContent(/积分|价格/)
     expect(screen.getByText('图片比例').closest('section')).toHaveClass(
       'grid-cols-[4.5rem_minmax(0,1fr)]',
     )
