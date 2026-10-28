@@ -42,10 +42,11 @@ type assistantInteractionTestFactory struct {
 }
 
 type assistantInteractionModeFactory struct {
-	mu       sync.Mutex
-	starts   int
-	specs    []InteractiveRuntimeSpec
-	commands []struct {
+	mu              sync.Mutex
+	starts          int
+	specs           []InteractiveRuntimeSpec
+	capabilityCheck func(string) error
+	commands        []struct {
 		method string
 		params map[string]any
 	}
@@ -56,6 +57,14 @@ type assistantInteractionModeRuntime struct {
 }
 
 func (r assistantInteractionModeRuntime) Command(_ context.Context, method string, params any) error {
+	if method == "session/start" && r.factory.capabilityCheck != nil {
+		r.factory.mu.Lock()
+		token := r.factory.specs[len(r.factory.specs)-1].RuntimeToken
+		r.factory.mu.Unlock()
+		if err := r.factory.capabilityCheck(token); err != nil {
+			return err
+		}
+	}
 	r.factory.mu.Lock()
 	defer r.factory.mu.Unlock()
 	encoded, _ := json.Marshal(params)
@@ -288,6 +297,19 @@ func TestAssistantInteractionStartsLogicalSessionBeforeCommands(t *testing.T) {
 	factory.mu.Unlock()
 	if len(commands) != 2 || commands[1] != "session/prompt" {
 		t.Fatalf("runtime commands after message = %#v, want session/start then session/prompt", commands)
+	}
+}
+
+func TestAssistantInteractionRuntimeCapabilityIsAvailableDuringHandshake(t *testing.T) {
+	svc, _ := newAssistantInteractionServiceTest(t)
+	factory := &assistantInteractionModeFactory{}
+	factory.capabilityCheck = func(token string) error {
+		_, _, _, _, _, _, err := svc.ResolveRuntimeCapability(token)
+		return err
+	}
+	svc.factory = factory
+	if _, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "handshake-capability"); err != nil {
+		t.Fatalf("create interaction while authenticating MCP during runtime handshake: %v", err)
 	}
 }
 

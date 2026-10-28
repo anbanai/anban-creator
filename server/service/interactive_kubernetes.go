@@ -105,19 +105,12 @@ func (f KubernetesRuntimeFactory) StartSession(ctx context.Context, spec Interac
 		_ = f.deleteSecret(context.Background(), namespace, secretName)
 		return nil, err
 	}
-	envs, err := dshSecretEnv(secretName, spec.SessionID, f.MCPURL, f.Config.ServerURL, spec.AgentPackID, spec.InteractionID, spec.Generation)
+	envs, err := dshRuntimeEnv(secretName, spec, f.MCPURL, f.Config.ServerURL)
 	if err != nil {
 		abort()
 		_ = f.deleteSecret(context.Background(), namespace, secretName)
 		return nil, err
 	}
-	envs = append(envs,
-		corev1.EnvVar{Name: "ANBAN_DSH_BRIDGE_WORKSPACE_ID", Value: spec.WorkspaceID},
-		corev1.EnvVar{Name: "ANBAN_DSH_BRIDGE_INTERACTION_ID", Value: spec.InteractionID},
-		corev1.EnvVar{Name: "ANBAN_DSH_BRIDGE_GENERATION", Value: strconv.FormatInt(spec.Generation, 10)},
-		corev1.EnvVar{Name: "ANBAN_DSH_BRIDGE_PRESETS", Value: strings.Join(spec.PresetIDs, ",")},
-		corev1.EnvVar{Name: "ANBAN_DSH_BRIDGE_PATCHES", Value: strings.Join(patchesForSpec(spec), ",")},
-	)
 	job.Spec.Template.Spec.Containers[0].Env = envs
 	created, err := f.Kube.BatchV1().Jobs(namespace).Create(ctx, job, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
@@ -332,6 +325,18 @@ func dshSecretEnv(secretName, sessionID, mcpURL, serverURL, presetID string, cap
 		return &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: secretName}, Key: key}}
 	}
 	return []corev1.EnvVar{{Name: "HOME", Value: "/tmp/dsh-home"}, {Name: "DSH_HOME", Value: "/tmp/dsh-home"}, {Name: "ANBAN_DSH_BRIDGE_HOME", Value: "/tmp/dsh-home"}, {Name: "ANBAN_DSH_BRIDGE_SESSION_ID", Value: sessionID}, {Name: "ANBAN_DSH_BRIDGE_INTERACTION_ID", Value: interactionID}, {Name: "ANBAN_DSH_BRIDGE_GENERATION", Value: strconv.FormatInt(generation, 10)}, {Name: "ANBAN_DSH_BRIDGE_PRESET_ID", Value: presetID}, {Name: "ANBAN_DSH_BRIDGE_RUNTIME_TOKEN", ValueFrom: ref("runtime-token")}, {Name: "ANBAN_DSH_BRIDGE_MCP_URL", Value: strings.TrimRight(dshFirstNonEmpty(mcpURL, serverURL+"/mcp"), "/")}, {Name: "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY", ValueFrom: ref("provider-api-key")}, {Name: "ANBAN_DSH_BRIDGE_INITIAL_CONTEXT_FILE", Value: "/var/run/anban-dsh-context/initial-context"}, {Name: "ANBAN_DSH_BRIDGE_PATCH", Value: patchPath}}, nil
+}
+
+func dshRuntimeEnv(secretName string, spec InteractiveRuntimeSpec, mcpURL, serverURL string) ([]corev1.EnvVar, error) {
+	envs, err := dshSecretEnv(secretName, spec.SessionID, mcpURL, serverURL, spec.AgentPackID, spec.InteractionID, spec.Generation)
+	if err != nil {
+		return nil, err
+	}
+	return append(envs,
+		corev1.EnvVar{Name: "ANBAN_DSH_BRIDGE_WORKSPACE_ID", Value: spec.WorkspaceID},
+		corev1.EnvVar{Name: "ANBAN_DSH_BRIDGE_PRESETS", Value: strings.Join(spec.PresetIDs, ",")},
+		corev1.EnvVar{Name: "ANBAN_DSH_BRIDGE_PATCHES", Value: strings.Join(patchesForSpec(spec), ",")},
+	), nil
 }
 
 func (f KubernetesRuntimeFactory) CleanupOrphans(ctx context.Context) error {

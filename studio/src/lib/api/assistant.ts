@@ -231,7 +231,10 @@ export const assistantApi = {
   closeWorkspace: (workspaceId: string) => http.delete(`/assistant/interactions/${encodeURIComponent(workspaceId)}`),
 
   createInteraction: (request: { mode_id: AssistantModeID; project_id?: string; content_id?: string; resume_interaction_id?: string }, idempotencyKey?: string) =>
-    unwrap<AssistantInteractionSnapshot>(http.post('/assistant/interactions', request, idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined)),
+    unwrap<AssistantInteractionSnapshot>(http.post('/assistant/interactions', request, {
+      timeout: ASSISTANT_COMMAND_TIMEOUT_MS,
+      ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),
+    })),
   getInteractionSnapshot: (interactionId: string) =>
     unwrap<AssistantInteractionSnapshot>(http.get(`/assistant/interactions/${encodeURIComponent(interactionId)}`)),
   sendInteractionMessage: (interactionId: string, payload: { generation: number; client_message_id: string; text: string }) =>

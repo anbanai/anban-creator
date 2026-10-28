@@ -70,7 +70,7 @@ it('creates and commits from a durable interaction draft receipt', async () => {
   const interaction = await assistantApi.createInteraction({ mode_id: 'creation' }, 'interaction-key')
   const result = await assistantApi.commitInteraction(interaction.interaction_id, { draft_id: 'draft-1', revision: 2, idempotency_key: 'commit-1' })
 
-  expect(http.post).toHaveBeenNthCalledWith(1, '/assistant/interactions', { mode_id: 'creation' }, { headers: { 'Idempotency-Key': 'interaction-key' } })
+  expect(http.post).toHaveBeenNthCalledWith(1, '/assistant/interactions', { mode_id: 'creation' }, { headers: { 'Idempotency-Key': 'interaction-key' }, timeout: 15 * 60 * 1000 })
   expect(http.post).toHaveBeenNthCalledWith(2, '/assistant/interactions/interaction-1/commit', { draft_id: 'draft-1', revision: 2, idempotency_key: 'commit-1' }, { timeout: 15 * 60 * 1000 })
   expect(result.status).toBe('already_created')
 })
