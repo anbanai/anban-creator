@@ -27,16 +27,6 @@
   display: none;
 }
 
-.assistant-creation-tools [data-slot="native-select"] {
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-}
-
-.assistant-creation-tools [data-slot="native-select"]:hover:not(:disabled) {
-  background: var(--muted);
-}
-
 @media (hover: hover) and (pointer: fine) {
   .persona-card-actions {
     opacity: 0;
@@ -116,7 +106,7 @@
     min-height: 6rem;
   }
 
-  .assistant-creation-tools select {
+  .assistant-creation-tools [data-slot="select-trigger"] {
     min-height: 2.75rem;
   }
 }

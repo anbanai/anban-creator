@@ -1337,6 +1337,69 @@ func TestAssistantCreationIdentityRoutesByProjectPlatformAndContentType(t *testi
 	}
 }
 
+func TestAssistantCreationIdentityUsesEnabledAgentsAcrossPlatforms(t *testing.T) {
+	for _, tc := range []struct {
+		contentType string
+		agentID     string
+		taskType    string
+	}{
+		{"wechat-article", model.AgentIDArticle, model.TaskTypeWechatArticle},
+		{"wechat-picture", model.AgentIDWechatPicture, model.TaskTypeWechatPicture},
+		{"seednote", model.AgentIDSeednote, model.PlatformSeednote},
+		{"video", model.AgentIDMontage, model.PlatformMontage},
+		{"video-edit", model.AgentIDVideoEdit, model.PlatformVideoEdit},
+	} {
+		t.Run(tc.contentType, func(t *testing.T) {
+			project := &model.Project{Platform: model.PlatformWechat, AgentIDs: []string{tc.agentID}}
+			pack, taskType, _, err := assistantCreationIdentity(project, tc.contentType)
+			if err != nil || pack.Agent.Name != tc.agentID || taskType != tc.taskType {
+				t.Fatalf("enabled type identity = %q/%q, %v", pack.Agent.Name, taskType, err)
+			}
+			project.AgentIDs = []string{}
+			if _, _, _, err := assistantCreationIdentity(project, tc.contentType); !errors.Is(err, ErrAssistantModeUnavailable) {
+				t.Fatalf("disabled type error = %v, want unavailable", err)
+			}
+		})
+	}
+}
+
+func TestAssistantCreationCommitCreatesSeednoteForMultiTypePersona(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	ctx := context.Background()
+	userID := "user-1"
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "multi-type@example.com", Password: "test", InviteCode: "MULTITYPE01", Tier: model.TierFree}); err != nil {
+		t.Fatal(err)
+	}
+	project := createAssistantProject(t, repo, userID, "多类型人设")
+	project.AgentIDs = []string{model.AgentIDArticle, model.AgentIDSeednote}
+	project.AgentIDsSet = true
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard).With().Logger()
+	tasks := newTestTaskService(repo, &mockEnqueuer{}, &fakeTaskStorage{}, &logger, "", nil, nil)
+	checkpoint := &model.AssistantCheckpoint{
+		ID: uuid.NewString(), UserID: userID, ModeID: AssistantModeCreation, ProjectID: project.ID,
+		BaseProfileRevision: projectProfileFor(project).Version, Status: model.AssistantCheckpointReady, ExpiresAt: time.Now().Add(time.Hour),
+		Payload: json.RawMessage(`{"plan":{"goal":"介绍新茶","content_type":"seednote","topic":"春茶","angle":"冲泡体验","expression_form":"图文笔记","profile_context":[],"temporary_overrides":[]}}`),
+	}
+	result, err := commitAssistantCreation(ctx, userID, checkpoint, tasks, repo)
+	if err != nil {
+		t.Fatalf("commit seednote for WeChat persona: %v", err)
+	}
+	created, err := repo.Tasks().FindByID(ctx, result.Task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Type != model.PlatformSeednote || created.AgentID != model.AgentIDSeednote || created.Channel != model.ChannelSeednote || created.ProjectSnapshot.Data().Platform != model.PlatformWechat {
+		t.Fatalf("incorrect output identity or persona context: %#v", created)
+	}
+	updated, err := repo.Projects().FindByID(ctx, project.ID)
+	if err != nil || updated.Platform != model.PlatformWechat || !reflect.DeepEqual(updated.AgentIDs, project.AgentIDs) {
+		t.Fatalf("creation changed persona settings: %#v, %v", updated, err)
+	}
+}
+
 func TestAssistantCreationCommitCreatesVideoEditTaskFromOwnedUpload(t *testing.T) {
 	repo := newAssistantTestRepo(t)
 	userID := "user-1"

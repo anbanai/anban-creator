@@ -351,7 +351,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.change(composer, { target: { value: '正在编辑的人设内容' } })
     const card = screen.getByRole('button', { name: '选择人设：另一个人设' }).closest('article')!
     fireEvent.click(within(card).getByRole('button', { name: '创作类型：另一个人设' }))
-    expect(within(screen.getByRole('dialog')).getByText(/为「另一个人设」/)).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toHaveAccessibleDescription('另一个人设')
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBe(composer)
     expect(screen.getByRole('dialog')).not.toHaveAttribute('aria-modal', 'true')
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '取消' }))
@@ -572,15 +572,15 @@ describe('AssistantWorkspace', () => {
     view.queryClient.setQueryData(['project', persona.id], persona)
     fireEvent.click(await screen.findByRole('button', { name: '创作类型：待设置人设' }))
     const dialog = screen.getByRole('dialog')
-    expect(within(dialog).getByRole('button', { name: '保存并继续创作' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: '保存设置' })).toBeDisabled()
     fireEvent.click(within(dialog).getByRole('button', { name: '公众号贴图' }))
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存并继续创作' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存设置' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(mocks.projectUpdate).toHaveBeenCalledWith(persona.id, { agent_ids: ['wechat-picture'], platform: 'wechat' })
     expect(view.queryClient.getQueryState(['project', persona.id])?.isInvalidated).toBe(true)
     expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('做一组茶知识图片')
     expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
-    expect(screen.getByRole('combobox', { name: '本次创作类型' })).toHaveValue('wechat-picture')
+    expect(screen.getByRole('combobox', { name: '本次创作类型' })).toHaveTextContent('公众号贴图')
     expect(mocks.createWorkspace).not.toHaveBeenCalled()
     expect(mocks.workspaceMessage).not.toHaveBeenCalled()
     view.unmount()
@@ -600,9 +600,9 @@ describe('AssistantWorkspace', () => {
     expect(mocks.projectUpdate).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: '创作类型：待设置人设' }))
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '视频生成' }))
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '保存并继续创作' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '保存设置' }))
     expect(await within(screen.getByRole('dialog')).findByRole('alert')).toBeInTheDocument()
-    expect(within(screen.getByRole('dialog')).getByRole('button', { name: '保存并继续创作' })).toBeEnabled()
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: '保存设置' })).toBeEnabled()
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '取消' }))
     expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('保留这段需求')
     expect(mocks.createWorkspace).not.toHaveBeenCalled()
@@ -612,9 +612,59 @@ describe('AssistantWorkspace', () => {
     const persona = setupUnconfiguredPersona()
     mocks.projectsList.mockResolvedValue([{ ...persona, platform: 'wechat', agent_ids: ['wechat-article', 'wechat-picture'] }])
     renderPage({ modeId: 'creation', projectId: persona.id, initialMessage: '图片创作' })
-    fireEvent.change(await screen.findByRole('combobox', { name: '本次创作类型' }), { target: { value: 'wechat-picture' } })
+    fireEvent.click(await screen.findByRole('combobox', { name: '本次创作类型' }))
+    fireEvent.pointerDown(await screen.findByRole('option', { name: '公众号贴图' }))
+    fireEvent.click(await screen.findByRole('option', { name: '公众号贴图' }))
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '图片创作\n\n创作类型：wechat-picture'))
+  })
+
+  it('offers seednote on a WeChat persona and submits the selected type and its image defaults', async () => {
+    const persona = setupUnconfiguredPersona()
+    mocks.projectsList.mockResolvedValue([{ ...persona, platform: 'wechat', agent_ids: ['wechat-article', 'wechat-picture', 'seednote'] }])
+    mocks.platformConfigs.mockResolvedValue([
+      { id: 'wechat', default_image_ratio: '16:9', supported_image_ratios: ['16:9', '1:1'] },
+      { id: 'seednote', default_image_ratio: '3:4', supported_image_ratios: ['3:4', '1:1'] },
+    ])
+    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: persona.id, runtime_status: 'starting', expires_at: '' })
+    mocks.streamEvents = [{ event: 'draft.ready', id: 'seednote-draft', data: JSON.stringify({ mode_id: 'creation', session_id: 'session-1', draft: { ready: true, payload: { plan: { goal: '介绍新茶', content_type: 'seednote', topic: '春茶', angle: '冲泡体验', expression_form: '图文笔记' } } } }) }]
+    renderPage({ modeId: 'creation', projectId: persona.id, initialMessage: '介绍新茶' })
+
+    const selector = await screen.findByRole('combobox', { name: '本次创作类型' })
+    fireEvent.click(selector)
+    const list = await screen.findByRole('listbox')
+    expect(within(list).getAllByRole('option').map(option => option.textContent)).toEqual(['公众号文章', '公众号贴图', '种草笔记'])
+    expect(within(list).getByRole('option', { name: '公众号文章' })).toHaveAttribute('aria-selected', 'true')
+    fireEvent.pointerDown(within(list).getByRole('option', { name: '种草笔记' }))
+    fireEvent.click(within(list).getByRole('option', { name: '种草笔记' }))
+    await waitFor(() => expect(selector).toHaveFocus())
+    expect(await screen.findByRole('button', { name: /选择参数：.*3:4/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '介绍新茶\n\n创作类型：seednote'))
+    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '创作作品' }))
+    await waitFor(() => expect(mocks.workspaceCheckpoint).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
+      payload: { plan: expect.objectContaining({ content_type: 'seednote', image_ratio: '3:4' }) },
+    })))
+    expect(mocks.projectUpdate).not.toHaveBeenCalled()
+  })
+
+  it('refreshes available creation types when selecting a different persona', async () => {
+    const persona = setupUnconfiguredPersona()
+    mocks.projectsList.mockResolvedValue([
+      { ...persona, platform: 'wechat', agent_ids: ['wechat-article', 'seednote'] },
+      activePersona('article-only', '仅公众号人设', { agent_ids: ['wechat-article'] }),
+    ])
+    renderPage({ modeId: 'creation', projectId: persona.id, initialMessage: '保留创作想法' })
+    fireEvent.click(await screen.findByRole('combobox', { name: '本次创作类型' }))
+    fireEvent.pointerDown(await screen.findByRole('option', { name: '种草笔记' }))
+    fireEvent.click(await screen.findByRole('option', { name: '种草笔记' }))
+    expect(screen.getByRole('combobox', { name: '本次创作类型' })).toHaveTextContent('种草笔记')
+    fireEvent.click(screen.getByRole('button', { name: '选择人设：仅公众号人设' }))
+    const selector = screen.getByRole('combobox', { name: '本次创作类型' })
+    expect(selector).toHaveTextContent('公众号文章')
+    fireEvent.click(selector)
+    expect(within(await screen.findByRole('listbox')).getAllByRole('option').map(option => option.textContent)).toEqual(['公众号文章'])
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('保留创作想法')
   })
 
   it('only exposes creation parameters in creation mode', async () => {
@@ -822,10 +872,12 @@ describe('AssistantWorkspace', () => {
     const composer = await screen.findByRole('textbox', { name: '发送消息' })
     const surface = composer.closest('[data-slot="agent-prompt-surface"]') as HTMLElement
     const selector = await within(surface).findByRole('combobox', { name: '本次创作类型' })
-    expect(selector).toHaveValue('wechat-article')
+    expect(selector).toHaveTextContent('公众号文章')
     selector.focus()
-    fireEvent.click(selector)
-    expect(selector).toHaveFocus()
+    fireEvent.keyDown(selector, { key: 'ArrowDown' })
+    const option = await screen.findByRole('option', { name: '公众号文章' })
+    fireEvent.keyDown(option, { key: 'Escape' })
+    await waitFor(() => expect(selector).toHaveFocus())
     expect(within(surface).getByRole('button', { name: /^选择参数：/ })).toBeInTheDocument()
   })
 
@@ -881,7 +933,7 @@ describe('AssistantWorkspace', () => {
 
     await screen.findByRole('textbox', { name: '发送消息' })
     expect(screen.queryByRole('combobox', { name: '创作类型' })).not.toBeInTheDocument()
-    expect(await screen.findByRole('combobox', { name: '本次创作类型' })).toHaveValue('wechat-article')
+    expect(await screen.findByRole('combobox', { name: '本次创作类型' })).toHaveTextContent('公众号文章')
   })
 
   it('keeps the empty and active states on the root route', async () => {
@@ -1278,7 +1330,7 @@ describe('AssistantWorkspace', () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:assistant-video')
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
     renderPage({ modeId: 'creation', projectId: 'video-project' })
-    fireEvent.change(await screen.findByRole('combobox', { name: '本次创作类型' }), { target: { value: 'video-edit' } })
+    expect(await screen.findByRole('combobox', { name: '本次创作类型' })).toHaveTextContent('全自动视频剪辑')
     fireEvent.change(screen.getByRole('textbox', { name: '剪辑要求' }), { target: { value: '剪成 30 秒访谈短片' } })
     fireEvent.change(screen.getByRole('combobox', { name: '质量档位' }), { target: { value: 'quality' } })
     fireEvent.change(screen.getByRole('combobox', { name: '字幕' }), { target: { value: 'required' } })
