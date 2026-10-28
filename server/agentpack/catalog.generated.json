@@ -159,7 +159,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "96586301e03d36e716dbf4828b169b2fc6d4fd3f975547b9e983b2eea3c8f5c3"
+      "digest": "fdf9f245858f58297e6b3a1671b7f35277af71e3ff30105961e8ec4ae2629325"
     },
     {
       "id": "content-planning",
@@ -1297,7 +1297,7 @@
       "ui": {
         "renderer": "custom:content-planning"
       },
-      "digest": "08273867b660921faba7df34e2120f07e1cb19d616b234441af62da005deef83"
+      "digest": "8de2d1687cf7cea726d0f530816d9babcd39ce3b905b8cece33a63f103448911"
     },
     {
       "id": "creation-planner",
@@ -1625,7 +1625,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "e08fd30e87add93d737d2da682dd1a82d2ce0a283daed8070d354aa55733a7fe"
+      "digest": "4e2cef89afbe9c47aed84a95c980ca09f4a78ba38a624768a86f6d2dce06211c"
     },
     {
       "id": "local-life",
@@ -1773,7 +1773,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "db0a943e04e7c3de4339931a0a87c7e0856e7dc036e219e2e7f4ae124ef4b7cc"
+      "digest": "3cc5f4738b8d6cc5c76809e65db856b31614a406305251047a83a3d01597e1a0"
     },
     {
       "id": "moments",
@@ -1881,7 +1881,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "cbcbc476abed3bb39219ebc92d767a985ca485c499cce448fda79fb6b4da5b26"
+      "digest": "62933c66d9b000190d5274d3a63f0bb8e18589090d18c8b256c24696eeb9a44f"
     },
     {
       "id": "montage",
@@ -2038,7 +2038,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "b3820eea1978c3eeff639632197da75f337dca45800632e53aefacc937f6366d"
+      "digest": "03a99a4959e2ab969c7e847e59523fca67c09fc5821b79538394443b3c16d75f"
     },
     {
       "id": "postmortem-review",
@@ -2381,7 +2381,7 @@
       "ui": {
         "renderer": "custom:profile-analysis"
       },
-      "digest": "3b9887d5a9f763d6dc567bca4a1fd4031b36bccc213840405909f51c8f500850"
+      "digest": "3b87ba12cdb4c16d8c1e2b96afe19b5307e1afd7d406a7e565371c3ce5aef82d"
     },
     {
       "id": "project-creator",
@@ -2911,7 +2911,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "e0730ff627ac7318f8bc2cc592a07957359b7af1a006b7eb7eacc3891fca1855"
+      "digest": "47611b95b9b86d52be625a22ed3351afe470c32738a943bf5d0521c3d47c8906"
     },
     {
       "id": "talking-head-editor",
@@ -3325,11 +3325,11 @@
           "funnel_stage"
         ]
       },
-      "digest": "045de82ff436b51543414a1f9af2a3454315f282e22c04bb696cd7006332a07b"
+      "digest": "a1f8face31ebef9fa6240db7f0da087947a8bfd46d67347e3165233f477444fc"
     },
     {
       "id": "viral-ip-video-editor",
-      "version": "1.0.9",
+      "version": "1.0.11",
       "kind": "plugin",
       "display_name": "爆款 IP 视频剪辑",
       "description": "基于 Montage 运行时处理真人 IP 口播素材，完成留存导向的剪辑规划、制作指导和成片质量复核。",
@@ -3612,7 +3612,7 @@
         }
       ],
       "ui": {},
-      "digest": "d19651b7708cd35e2badee010c723180631beb4e01ff5e8df9f6c07c47ee8f1b"
+      "digest": "92da8fbdb275219d450faad239f9569a6b1e4c852992ab7988ce119cda33cbe5"
     },
     {
       "id": "wechat-article",
@@ -3876,7 +3876,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "66fa7948a0354aaa4fcde1ee1d270467ad460c503fa795c8b68df34115dcb20c"
+      "digest": "b07c0df2117a04be89e2e651f889c86975fda11c0197f86be4f750137f2de09a"
     },
     {
       "id": "wechat-picture",
@@ -4054,7 +4054,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "1bdf5e79e224f3939dcdfb4b1e34f0ebd8dbf91f4f53a4de89af572a70711338"
+      "digest": "5fc329a3d686007d964327ab3a17f82a915aec50df5b9e7e68f1f7a1e2c60184"
     },
     {
       "id": "whiteboard-animation",
@@ -4232,7 +4232,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "22a779c07c666f9d397b1a6ecbf2f19ec268004a8a94adbe365f6297c2fc145d"
+      "digest": "9a6c0486d04c0f69c45c4ba6f2868a2b1a4bb3d555e82747c96f79a71da134c9"
     }
   ]
 }
