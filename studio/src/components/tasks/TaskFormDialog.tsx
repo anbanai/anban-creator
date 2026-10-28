@@ -67,6 +67,20 @@ const WHITEBOARD_ATTACHMENT_POLICY = {
 } as const
 const BATCH_TASK_TYPES = new Set<TaskType>(['wechat-article', 'wechat-picture', 'seednote', 'moments'])
 
+function firstFormErrorMessage(errors: unknown, seen = new Set<object>()): string | undefined {
+  if (!errors || typeof errors !== 'object') return undefined
+  if (seen.has(errors)) return undefined
+  seen.add(errors)
+  const record = errors as Record<string, unknown>
+  const message = record.message
+  if (typeof message === 'string' && message.trim()) return message
+  for (const value of Object.values(record)) {
+    const nestedMessage = firstFormErrorMessage(value, seen)
+    if (nestedMessage) return nestedMessage
+  }
+  return undefined
+}
+
 function maxTaskQuantity(type: TaskType) {
   return BATCH_TASK_TYPES.has(type) ? 5 : 1
 }
@@ -147,6 +161,7 @@ export function TaskFormDialog({
   const [portraitUploading, setPortraitUploading] = useState(false)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [outputSettingsOpen, setOutputSettingsOpen] = useState(false)
+  const [validationMessage, setValidationMessage] = useState<string>()
 
   const { data: projects = [], isLoading: projectsLoading } = useQuery({
     queryKey: ['projects', 'active'],
@@ -436,6 +451,7 @@ export function TaskFormDialog({
   }
 
   async function onSubmit(values: TaskFormDefaults) {
+    setValidationMessage(undefined)
     const submittedValues: TaskFormDefaults = {
       ...values,
       quantity: Math.min(values.quantity, maxTaskQuantity(values.type)),
@@ -451,7 +467,12 @@ export function TaskFormDialog({
       event?.preventDefault()
       return
     }
-    return form.handleSubmit(onSubmit)(event)
+    setValidationMessage(undefined)
+    return form.handleSubmit(onSubmit, (errors) => {
+      const message = firstFormErrorMessage(errors) ?? '请检查表单填写内容。'
+      setValidationMessage(message)
+      toast.error(message)
+    })(event)
   }
 
   const costPreview = taskCreationCostPreview({
@@ -1021,6 +1042,7 @@ export function TaskFormDialog({
                   {creationBlocker && !hasIncompatibleSeednoteAttachments ? (
                     <p className="text-sm font-medium text-red-500">{creationBlocker.href ? <Link to={creationBlocker.href}>{creationBlocker.message}</Link> : creationBlocker.message}</p>
                   ) : null}
+                  {validationMessage ? <p role="alert" className="text-sm font-medium text-red-500">{validationMessage}</p> : null}
                 </div>
               </div> : null}
             </form>
