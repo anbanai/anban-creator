@@ -104,6 +104,18 @@ func TestNewProviderAcceptsBillingCatalogProviderIdentities(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:     "TokenPlayer Seedream",
+			provider: "tokenplayer",
+			model:    "doubao-seedream-5-0-pro-260628",
+			assert: func(t *testing.T, provider Provider) {
+				t.Helper()
+				tokenplayer, ok := provider.(*VolcengineProvider)
+				if !ok || tokenplayer.model != "doubao-seedream-5-0-pro-260628" || tokenplayer.Name() != "TokenPlayer" {
+					t.Fatalf("provider = %#v, want TokenPlayer Seedream implementation with configured model", provider)
+				}
+			},
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			provider, err := NewProvider(&config.ImageAPI{

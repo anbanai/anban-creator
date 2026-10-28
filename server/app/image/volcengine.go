@@ -21,6 +21,7 @@ type VolcengineProvider struct {
 	log        *zerolog.Logger
 	sizePixel  string // 像素格式 "WIDTHxHEIGHT"，如 "1728x2304"
 	volcConfig *config.VolcengineConfig
+	name       string
 }
 
 // volcenginePixelMap 将 aspect_ratio:sizeTier 映射到像素格式
@@ -48,6 +49,16 @@ func volcenginePixelSize(aspectRatio, sizeTier string) string {
 
 // NewVolcengineProvider 创建火山方舟 Seedream Provider
 func NewVolcengineProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (*VolcengineProvider, error) {
+	return newSeedreamProvider(apiCfg, log, "Volcengine")
+}
+
+// NewTokenplayerProvider creates a TokenPlayer provider using the same
+// Seedream-compatible Ark request protocol as Volcengine.
+func NewTokenplayerProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (*VolcengineProvider, error) {
+	return newSeedreamProvider(apiCfg, log, "TokenPlayer")
+}
+
+func newSeedreamProvider(apiCfg *config.ImageAPI, log *zerolog.Logger, name string) (*VolcengineProvider, error) {
 	mdl := apiCfg.Model
 	if mdl == "" {
 		mdl = DefaultVolcengineModel
@@ -74,11 +85,15 @@ func NewVolcengineProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (*Volce
 		model:      mdl,
 		sizePixel:  sizePixel,
 		volcConfig: apiCfg.Volcengine,
+		name:       name,
 	}, nil
 }
 
 // Name 返回提供者名称
 func (p *VolcengineProvider) Name() string {
+	if p.name != "" {
+		return p.name
+	}
 	return "Volcengine"
 }
 
