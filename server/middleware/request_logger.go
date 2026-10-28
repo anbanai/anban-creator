@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -47,7 +48,7 @@ func RequestLogger(logger *zerolog.Logger) fiber.Handler {
 
 		event.
 			Str("method", c.Method()).
-			Str("path", c.Path()).
+			Str("path", redactedRequestPath(c.Path())).
 			Int("status", status).
 			Dur("duration", duration).
 			Str("ip", c.IP())
@@ -65,4 +66,18 @@ func RequestLogger(logger *zerolog.Logger) fiber.Handler {
 
 		return err
 	}
+}
+
+func redactedRequestPath(path string) string {
+	for _, prefix := range []string{"/api/v1/public/shares/", "/share/"} {
+		if strings.HasPrefix(strings.ToLower(path), prefix) {
+			tail := path[len(prefix):]
+			prefix = path[:len(prefix)]
+			if slash := strings.IndexByte(tail, '/'); slash >= 0 {
+				return prefix + "[redacted]" + tail[slash:]
+			}
+			return prefix + "[redacted]"
+		}
+	}
+	return path
 }
