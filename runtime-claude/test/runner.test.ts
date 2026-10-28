@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -765,6 +765,45 @@ describe("managed progress hooks", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test.each(["malformed", "missing field", "oversized", "symlink", "output symlink", "internal output symlink"])(
+    "Seednote cannot use a %s failure artifact to bypass delivery validation",
+    async (kind) => {
+      const root = await progressWorkspace();
+      const outside = await mkdtemp(join(tmpdir(), "anban-failure-outside-"));
+      const valid = {
+        version: "1.0", status: "recoverable_failure", stage: "image_generation",
+        error_code: "image_review_unavailable", message: "审核不可用", resume_from: "image_generation",
+      };
+      try {
+        const failurePath = join(root, "output/failure-state.json");
+        if (kind === "output symlink" || kind === "internal output symlink") {
+          await rm(join(root, "output"), { recursive: true });
+          const target = kind === "output symlink" ? outside : join(root, "linked-output");
+          if (kind === "internal output symlink") await mkdir(target);
+          await symlink(target, join(root, "output"));
+        }
+        if (kind === "symlink") {
+          const target = join(outside, "failure-state.json");
+          await writeFile(target, JSON.stringify(valid));
+          await symlink(target, failurePath);
+        } else {
+          const value = kind === "malformed" ? "{"
+            : kind === "missing field" ? JSON.stringify({ ...valid, resume_from: undefined })
+            : JSON.stringify({ ...valid, message: kind === "oversized" ? "x".repeat(64 * 1024) : valid.message });
+          await writeFile(failurePath, value);
+        }
+        const stop = optionHooks(runner.buildQueryOptions({
+          ...validBootstrap(), task_type: "seednote", agent_flag: "anban:seednote",
+          agent_pack_id: "seednote", runtime_profile: "seednote", resolved_agent_pack: viralAnalysisPack,
+        }, root)).Stop![0]!.hooks[0]!;
+        expect(await stop(stopHookInput(), undefined, hookOptions)).toMatchObject({ decision: "block" });
+      } finally {
+        await rm(root, { recursive: true, force: true });
+        await rm(outside, { recursive: true, force: true });
+      }
+    },
+  );
 
   test("creates isolated lifecycle event state for each query options instance", async () => {
     const root = await progressWorkspace(true);

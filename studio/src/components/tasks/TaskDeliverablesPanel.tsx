@@ -4,12 +4,14 @@ import { Button } from '@/components/common/button'
 import { TaskFileDownloads, TaskStageFiles } from './TaskStageFiles'
 import { CompletionSummary, TaskExecutionRail } from './TaskExecutionRail'
 import { taskFailurePresentation } from '@/lib/labels'
+import { TaskShareDialog } from './TaskShareDialog'
 
 export interface TaskDeliverablesPanelProps {
   taskId: string
   taskStatus: TaskStatus
   files: TaskFile[]
   taskType?: string
+  taskKind?: string
   filesLoading?: boolean
   filesError?: boolean
   onRetryFiles?: () => void
@@ -32,11 +34,13 @@ function emptyMessage(status: TaskStatus) {
   return '当前作品没有可交付文件。'
 }
 
-export function TaskDeliverablesPanel({ taskId, taskStatus, files, taskType, filesLoading = false, filesError = false, onRetryFiles, workflow, outcome, errorMessage, onResume, isAdmin, lifecycle, onOpenLogs, deliveryMode, canFormallyPublish, isNewspic }: TaskDeliverablesPanelProps) {
+export function TaskDeliverablesPanel({ taskId, taskStatus, files, taskType, taskKind, filesLoading = false, filesError = false, onRetryFiles, workflow, outcome, errorMessage, onResume, isAdmin, lifecycle, onOpenLogs, deliveryMode, canFormallyPublish, isNewspic }: TaskDeliverablesPanelProps) {
   const settledFiles = files.filter((file) => file.state === 'delivered' || file.state === 'retained')
   const coreFiles = settledFiles.filter((file) => file.is_deliverable === true)
   const internalFiles = isAdmin ? settledFiles.filter((file) => file.is_deliverable !== true) : []
   const hasFiles = coreFiles.length > 0
+  const shareable = (taskType === 'wechat-article' || taskType === 'seednote') && (!taskKind || taskKind === 'content_generation')
+  const hasShareBody = coreFiles.some((file) => file.state === 'delivered' && (taskType === 'wechat-article' ? file.delivery_role === 'html' && file.mime_type === 'text/html' : file.delivery_role === 'final_markdown' && file.mime_type === 'text/markdown'))
   const Icon = hasFiles ? CheckCircle2 : CircleDashed
   const failure = taskFailurePresentation({ error_message: errorMessage, outcome })
   const internalGroups = new Map<string, TaskFile[]>()
@@ -59,7 +63,10 @@ export function TaskDeliverablesPanel({ taskId, taskStatus, files, taskType, fil
             </p>
           </div>
         </div>
-        {hasFiles ? <TaskFileDownloads taskId={taskId} files={coreFiles} /> : null}
+        <div className="flex items-center gap-2">
+          {shareable ? <TaskShareDialog taskId={taskId} canCreate={hasShareBody && !filesLoading && !filesError} /> : null}
+          {hasFiles ? <TaskFileDownloads taskId={taskId} files={coreFiles} /> : null}
+        </div>
       </div>
       {taskStatus === 'failed' || taskStatus === 'cancelled' ? (
         <div className="mt-4 space-y-3 border-t border-border/70 pt-4" role="status">

@@ -782,6 +782,7 @@ export default function TaskDetailPage() {
               isNewspic={task.type === 'wechat-picture'}
               files={files ?? []}
               taskType={task.type}
+              taskKind={task.task_kind}
               filesLoading={filesLoading}
               filesError={filesError}
               onRetryFiles={() => void refetchFiles()}

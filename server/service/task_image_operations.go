@@ -600,8 +600,21 @@ func (s *TaskImageOperationsService) Analyze(ctx context.Context, req AnalyzeTas
 		return nil, err
 	}
 	providerRequestID := "internal:understanding:" + model.OperationImageUnderstanding + ":" + uuid.NewString()
+	started := time.Now()
 	result, err := s.understanding.CompleteWithImageResult(ctx, "Analyze the authorized image accurately and answer only the user's request.", req.Prompt, imageSource)
 	if err != nil {
+		if s.logger != nil {
+			event := s.logger.Error().Str("task_id", req.TaskID).Str("execution_id", req.ExecutionID).
+				Str("provider", s.config.UnderstandingProvider).Str("model", s.config.UnderstandingModel).
+				Int64("duration_ms", time.Since(started).Milliseconds())
+			var providerErr *imageUnderstandingProviderError
+			if errors.As(err, &providerErr) {
+				event.Str("error_code", providerErr.Code).Int("http_status", providerErr.StatusCode).
+					Str("content_type", providerErr.ContentType).Str("endpoint", providerErr.Endpoint).
+					Str("provider_request_id", providerErr.RequestID)
+			}
+			event.Msg("image understanding provider call failed")
+		}
 		s.recordAnalysisCost(ctx, req.TaskID, providerRequestID, nil)
 		return nil, fmt.Errorf("analyze image: %w", err)
 	}

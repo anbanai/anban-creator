@@ -24,4 +24,11 @@ describe('TaskDeliverablesPanel', () => {
     expect(screen.getByText('review.json')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'review' })).toBeInTheDocument()
   })
+
+  it('keeps sharing reachable after failed continuation but hides unsupported task kinds', () => {
+    const { rerender } = render(<TaskDeliverablesPanel taskId="task-1" taskStatus="failed" taskType="seednote" taskKind="content_generation" files={files} isAdmin={false} />)
+    expect(screen.getByRole('button', { name: '分享作品' })).toBeEnabled()
+    rerender(<TaskDeliverablesPanel taskId="task-1" taskStatus="completed" taskType="seednote" taskKind="analysis" files={files} isAdmin={false} />)
+    expect(screen.queryByRole('button', { name: '分享作品' })).not.toBeInTheDocument()
+  })
 })

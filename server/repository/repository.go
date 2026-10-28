@@ -19,6 +19,7 @@ type Repository interface {
 	Tasks() TaskRepository
 	TaskExecutions() TaskExecutionRepository
 	TaskFiles() TaskFileRepository
+	TaskShares() TaskShareRepository
 	UploadSessions() UploadSessionRepository
 	Assets() AssetRepository
 	UserMediaAssets() UserMediaAssetRepository
@@ -650,6 +651,7 @@ type repository struct {
 	tasks                     TaskRepository
 	taskExecutions            TaskExecutionRepository
 	files                     TaskFileRepository
+	taskShares                TaskShareRepository
 	uploadSessions            UploadSessionRepository
 	assets                    AssetRepository
 	userMediaAssets           UserMediaAssetRepository
@@ -751,6 +753,7 @@ func New(db *gorm.DB) Repository {
 		tasks:                     tasks,
 		taskExecutions:            taskExecutions,
 		files:                     files,
+		taskShares:                newTaskShareRepository(db),
 		uploadSessions:            uploadSessions,
 		assets:                    assets,
 		userMediaAssets:           userMediaAssets,
@@ -805,6 +808,7 @@ func (r *repository) PlanEntries() PlanEntryRepository          { return r.planE
 func (r *repository) Tasks() TaskRepository                     { return r.tasks }
 func (r *repository) TaskExecutions() TaskExecutionRepository   { return r.taskExecutions }
 func (r *repository) TaskFiles() TaskFileRepository             { return r.files }
+func (r *repository) TaskShares() TaskShareRepository           { return r.taskShares }
 func (r *repository) UploadSessions() UploadSessionRepository   { return r.uploadSessions }
 func (r *repository) Assets() AssetRepository                   { return r.assets }
 func (r *repository) UserMediaAssets() UserMediaAssetRepository { return r.userMediaAssets }
@@ -912,6 +916,7 @@ type txRepository struct {
 	tasks                   TaskRepository
 	taskExecutions          TaskExecutionRepository
 	files                   TaskFileRepository
+	taskShares              TaskShareRepository
 	uploadSessions          UploadSessionRepository
 	assets                  AssetRepository
 	userMediaAssets         UserMediaAssetRepository
@@ -967,6 +972,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		tasks:                   newTaskRepository(tx),
 		taskExecutions:          newTaskExecutionRepository(tx),
 		files:                   newTaskFileRepository(tx),
+		taskShares:              newTaskShareRepository(tx),
 		uploadSessions:          newUploadSessionRepository(tx),
 		assets:                  newAssetRepository(tx),
 		userMediaAssets:         newUserMediaAssetRepository(tx),
@@ -1020,6 +1026,7 @@ func (r *txRepository) PlanEntries() PlanEntryRepository          { return r.pla
 func (r *txRepository) Tasks() TaskRepository                     { return r.tasks }
 func (r *txRepository) TaskExecutions() TaskExecutionRepository   { return r.taskExecutions }
 func (r *txRepository) TaskFiles() TaskFileRepository             { return r.files }
+func (r *txRepository) TaskShares() TaskShareRepository           { return r.taskShares }
 func (r *txRepository) UploadSessions() UploadSessionRepository   { return r.uploadSessions }
 func (r *txRepository) Assets() AssetRepository                   { return r.assets }
 func (r *txRepository) UserMediaAssets() UserMediaAssetRepository { return r.userMediaAssets }

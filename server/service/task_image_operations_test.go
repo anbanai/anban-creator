@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"image"
 	"image/color"
@@ -11,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -1076,6 +1078,54 @@ func TestTaskImageOperationsRejectForeignTaskBeforeDelegation(t *testing.T) {
 	if understanding.calls != 0 {
 		t.Fatalf("understanding calls = %d, want 0", understanding.calls)
 	}
+}
+
+func TestTaskImageAnalysisLogsSafeProviderDiagnostics(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("X-Request-ID", "request-image-diagnostics")
+		_, _ = w.Write([]byte("<html>fixture-response-secret</html>"))
+	}))
+	defer server.Close()
+	var logs bytes.Buffer
+	logger := zerolog.New(&logs)
+	client := NewOpenAILLMClient(server.URL+"/v1?token=fixture-query-secret", "fixture-api-key", "vision-route", time.Second).(ImageUnderstandingClient)
+	cost := &fakeTaskImageOperationsCost{}
+	svc := NewTaskImageOperationsService(f.tasks, nil, client, cost, TaskImageOperationsConfig{
+		UnderstandingProvider: "vision-provider", UnderstandingModel: "vision-route",
+	}, &logger)
+	_, err := svc.Analyze(context.Background(), AnalyzeTaskImageRequest{
+		UserID: f.userID, ProjectID: f.task.ProjectID, TaskID: f.task.ID, ExecutionID: f.executionID,
+		FilePath: "output/source-a.png", Prompt: "fixture-prompt-secret",
+	})
+	if err == nil || !strings.Contains(err.Error(), "provider_protocol_error") {
+		t.Fatalf("Analyze error = %v; want protocol error", err)
+	}
+	if cost.unreconciled == nil {
+		t.Fatal("failed provider response must retain unreconciled cost evidence")
+	}
+	var event map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &event); err != nil {
+		t.Fatalf("provider diagnostics = %q: %v", logs.String(), err)
+	}
+	endpoint, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]any{
+		"task_id": f.task.ID, "execution_id": f.executionID, "provider": "vision-provider", "model": "vision-route",
+		"error_code": "provider_protocol_error", "http_status": float64(200), "content_type": "text/html",
+		"endpoint": endpoint.Host + "/v1/chat/completions", "provider_request_id": "request-image-diagnostics",
+	} {
+		if event[key] != want {
+			t.Errorf("diagnostic %s = %#v, want %#v", key, event[key], want)
+		}
+	}
+	if duration, ok := event["duration_ms"].(float64); !ok || duration < 0 {
+		t.Errorf("diagnostic duration_ms = %#v, want non-negative duration", event["duration_ms"])
+	}
+	assertImageUnderstandingErrorRedacted(t, errors.New(logs.String()))
 }
 
 func TestTaskImageOperationsRejectsForeignProjectWithoutTaskBeforeDelegation(t *testing.T) {
