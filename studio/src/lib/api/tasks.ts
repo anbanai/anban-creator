@@ -54,6 +54,9 @@ export const tasksApi = {
       input_attachments: data.input_attachments,
     })),
 
+  retry: (id: string) =>
+    unwrap<Task>(http.post(`/tasks/${id}/retry`)),
+
   delete: (id: string) =>
     unwrap<void>(http.delete(`/tasks/${id}`)),
 

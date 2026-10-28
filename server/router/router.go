@@ -432,6 +432,7 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Post("/tasks/:id/cancel", svc.TaskHandler.Cancel)
 		apiV1.Post("/tasks/:id/clone", svc.TaskHandler.Clone)
 		apiV1.Post("/tasks/:id/resume", svc.TaskHandler.Resume)
+		apiV1.Post("/tasks/:id/retry", svc.TaskHandler.Retry)
 		apiV1.Get("/tasks/:id/files", svc.TaskHandler.GetFiles)
 		apiV1.Get("/tasks/:id/stream", svc.TaskHandler.Stream)
 		apiV1.Get("/tasks/:id/preview", svc.TaskHandler.PreviewHTML)

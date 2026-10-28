@@ -183,7 +183,7 @@ type TaskRepository interface {
 	SetCurrentExecution(ctx context.Context, taskID, executionID string) (bool, error)
 	FailStaleRunningTask(ctx context.Context, taskID string, staleBefore time.Time, errorMsg string) (bool, error)
 	FailPendingTask(ctx context.Context, taskID, errorMsg string) (bool, error)
-	ResetRetryableTaskForResume(ctx context.Context, taskID string, attachments []model.EntryAttachment) (bool, error)
+	ResetRetryableTask(ctx context.Context, taskID string, attachments []model.EntryAttachment, clearLifecycle bool) (bool, error)
 	FindTitlesByProjectID(ctx context.Context, projectID string) ([]string, error)
 	FindTitleTasksByProjectID(ctx context.Context, projectID string) ([]*model.Task, error)
 	FindRecentTitleTasksByProjectID(ctx context.Context, projectID string, since time.Time) ([]*model.Task, error)

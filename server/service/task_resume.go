@@ -110,7 +110,7 @@ func (s *TaskService) Resume(ctx context.Context, userID, taskID string, params 
 	}
 	merged := replaceResumeInputAttachments(task.InputAttachments.Data(), resumeAttachments)
 
-	swapped, err := s.repo.Tasks().ResetRetryableTaskForResume(ctx, task.ID, merged)
+	swapped, err := s.repo.Tasks().ResetRetryableTask(ctx, task.ID, merged, false)
 	if err != nil {
 		s.deleteRemoteResumeAttachments(ctx, resumeAttachments)
 		return nil, fmt.Errorf("reset task for resume: %w", err)
@@ -158,6 +158,7 @@ func applyResumedTaskState(task *model.Task, attachments []model.EntryAttachment
 	task.Outcome = nil
 	task.TerminalModelUsage = datatypes.NewJSONType([]model.ModelTokenUsage{})
 	task.CostStatus = ""
+	task.BillingTerminalReason = ""
 	task.WorkflowStatus = nil
 	task.SetInputAttachments(attachments)
 }
