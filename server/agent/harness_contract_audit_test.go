@@ -102,6 +102,29 @@ func TestViralIPVideoEditorCoverRoutingUsesMontageContract(t *testing.T) {
 	}
 }
 
+func TestViralIPVideoEditorUsesAutoEditorForReviewedDeadAirCuts(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	body := readArticleContractFile(t, filepath.Join(root, "harness/agents/viral-ip-video-editor.md"))
+	for _, term := range []string{
+		"auto-editor",
+		`auto-editor "$SOURCE_VIDEO"`,
+		"--export premiere",
+		"--output output/auto-editor-silence-cuts.xml",
+		"audio:threshold=",
+		"source_start_frame",
+		"source_end_frame",
+		"composition_start_frame",
+		"composition_end_frame",
+		"output/edit_decision_list.json",
+		"自然呼吸",
+		"recoverable_failure",
+	} {
+		if !strings.Contains(body, term) {
+			t.Errorf("Auto-Editor dead-air contract missing %q", term)
+		}
+	}
+}
+
 func TestProjectCreatorProfileRefreshPreservesScopeAndDirectionSemantics(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	creator := readArticleContractFile(t, filepath.Join(root, "harness/skills/project-creator-client-discovery/SKILL.md"))

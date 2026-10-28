@@ -1,0 +1,94 @@
+FROM node:24.22.0-bookworm-slim AS builder
+
+WORKDIR /app/runtime-claude
+COPY runtime-claude/package.json runtime-claude/package-lock.json ./
+RUN npm ci
+COPY runtime-claude/ ./
+RUN npm run build && \
+    grep -Fq 'X-Anban-Agent-Pack-Catalog-Digest' dist/bootstrap.js && \
+    npm prune --omit=dev && test -d node_modules/@anthropic-ai/claude-agent-sdk
+
+FROM node:24.22.0-trixie-slim
+
+ARG OPENMONTAGE_REPO=https://github.com/calesthio/OpenMontage.git
+ARG OPENMONTAGE_REF=c8066452325cb57c8fc1ba8c2a71b6e8842e6b65
+ARG AUTO_EDITOR_VERSION=29.3.1
+
+USER root
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      ca-certificates curl git jq ffmpeg fontconfig fonts-noto-cjk fonts-noto-color-emoji \
+      libnss3 libdbus-1-3 libatk1.0-0 libgbm-dev libasound2 \
+      libxrandr2 libxkbcommon-dev libxfixes3 libxcomposite1 libxdamage1 \
+      libatk-bridge2.0-0 libpango-1.0-0 libcairo2 libcups2 \
+      python3 python3-venv tini; \
+    test "$(uname -m)" = "x86_64"; \
+    getent passwd 1000 >/dev/null || { echo >&2 "Node base must provide UID 1000"; exit 1; }; \
+    getent group 1000 >/dev/null || { echo >&2 "Node base must provide GID 1000"; exit 1; }; \
+    install -d -m 0755 -o 1000 -g 1000 /home/node; \
+    install -d -m 0770 -o 1000 -g 1000 /workspace; \
+    install -d -m 0750 -o 1000 -g 1000 /workspace/.claude; \
+    install -d -m 0700 -o 1000 -g 1000 /run/secrets/anban; \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/montage-template
+RUN git init . \
+    && git remote add origin "$OPENMONTAGE_REPO" \
+    && git fetch --depth 1 origin "$OPENMONTAGE_REF" \
+    && git checkout --detach FETCH_HEAD \
+    && test "$(git rev-parse HEAD)" = "$OPENMONTAGE_REF" \
+    && printf '%s\n' "$OPENMONTAGE_REF" > /opt/montage-template/.anban-source-revision
+
+COPY deploy/docker/openmontage-remotion-deps.patch /tmp/openmontage-remotion-deps.patch
+RUN set -eux; \
+    cd /opt/montage-template; \
+    git apply /tmp/openmontage-remotion-deps.patch; \
+    rm -rf .git /tmp/openmontage-remotion-deps.patch
+
+ENV OPENMONTAGE_VENV=/opt/openmontage-venv
+RUN set -eux; \
+    python3 -m venv "$OPENMONTAGE_VENV"; \
+    "$OPENMONTAGE_VENV/bin/pip" install --no-cache-dir -r /opt/montage-template/requirements.txt; \
+    "$OPENMONTAGE_VENV/bin/pip" install --no-cache-dir "auto-editor==${AUTO_EDITOR_VERSION}"; \
+    auto_editor_version=$("$OPENMONTAGE_VENV/bin/auto-editor" --version); \
+    case "$auto_editor_version" in *"$AUTO_EDITOR_VERSION"*) ;; *) echo >&2 "Auto-Editor version mismatch: $auto_editor_version"; exit 1 ;; esac; \
+    test -x "$OPENMONTAGE_VENV/bin/auto-editor"; \
+    test -f /opt/montage-template/remotion-composer/package-lock.json; \
+    cd /opt/montage-template/remotion-composer; \
+    npm ci; \
+    npm audit --omit=dev --audit-level=moderate || true; \
+    ./node_modules/.bin/remotion browser ensure; \
+    cd /opt/montage-template; \
+    "$OPENMONTAGE_VENV/bin/python" -c "from tools.tool_registry import registry; registry.discover(); summary = registry.provider_menu_summary(); assert isinstance(summary, dict)"; \
+    "$OPENMONTAGE_VENV/bin/python" -c "from lib.pipeline_loader import load_pipeline; manifest = load_pipeline('cinematic'); assert manifest.get('name') or manifest.get('display_name')"; \
+    npm cache clean --force; \
+    rm -rf /root/.npm; \
+    chown -R root:root /opt/montage-template "$OPENMONTAGE_VENV"; \
+    chmod -R a=rX /opt/montage-template "$OPENMONTAGE_VENV"
+
+RUN set -eux; \
+    cp -a /opt/montage-template /workspace/openmontage; \
+    chown -R 1000:1000 /workspace/openmontage; \
+    chmod -R u+rwX /workspace/openmontage; \
+    install -d -m 0750 -o 1000 -g 1000 /workspace/openmontage/.claude
+
+COPY --from=builder /app/runtime-claude/node_modules /app/runtime-claude/node_modules
+COPY --from=builder /app/runtime-claude/dist /app/runtime-claude/dist
+COPY harness/ /anbanai/
+COPY deploy/docker/anban-agent-launcher /usr/local/bin/anban
+RUN set -eux; \
+    if [ -n "$(find /anbanai -type l -print -quit)" ]; then echo >&2 "/anbanai must not contain symlinks"; exit 1; fi; \
+    chown -R root:root /anbanai /app/runtime-claude; \
+    chmod -R a=rX /anbanai /app/runtime-claude; \
+    chmod 0755 /usr/local/bin/anban
+
+ENV CLAUDE_PLUGIN_ROOT=/anbanai
+ENV ANBAN_MONTAGE_TEMPLATE_PATH=/opt/montage-template
+ENV HOME=/home/node
+ENV PATH="${OPENMONTAGE_VENV}/bin:${PATH}"
+
+USER 1000:1000
+WORKDIR /workspace
+ENTRYPOINT ["tini", "--", "anban"]
+CMD ["job"]

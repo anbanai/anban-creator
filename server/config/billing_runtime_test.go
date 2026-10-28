@@ -31,6 +31,7 @@ claude:
     wechat-picture: creator-agent-wechat-picture:latest
     seednote: creator-agent-seednote:latest
     montage: creator-agent-montage:latest
+    viral-ip-video-editor: creator-agent-viral-ip-video-editor:latest
     video-edit: creator-agent-video-edit:latest
     whiteboard-animation: creator-agent-whiteboard-animation:latest
     moments: creator-agent-moments:latest
@@ -84,6 +85,7 @@ claude:
     wechat-picture: creator-agent-wechat-picture:latest
     seednote: creator-agent-seednote:latest
     montage: creator-agent-montage:latest
+    viral-ip-video-editor: creator-agent-viral-ip-video-editor:latest
     video-edit: creator-agent-video-edit:latest
     whiteboard-animation: creator-agent-whiteboard-animation:latest
     moments: creator-agent-moments:latest

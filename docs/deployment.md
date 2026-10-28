@@ -139,6 +139,13 @@ The release manifest must include the separate DSH runtime image under
 the Server Deployment. This is the runtime image setting consumed by
 `claude.runtime_images.video-edit`.
 
+The viral IP video editor has its own `viral-ip-video-editor` runtime profile and
+amd64 image. Build it with `make docker-viral-ip-video-editor-agent-image`; the
+image pins Auto-Editor 29.3.1 and the same OpenMontage revision as the generic
+Montage image. Set `VIRAL_IP_VIDEO_EDITOR_AGENT_IMAGE` for release-manifest
+generation; the ACK renderer maps `images["viral-ip-video-editor"]` to
+`ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR`.
+
 Local/Compose deployments provide `ANBAN_AGENT_IMAGE_VIDEO_EDIT` and
 `VIDEO_EDIT_ELEVENLABS_API_KEY` through `.env`. Kubernetes reads the Scribe key
 from the optional `video-edit-elevenlabs` Secret's `api-key` entry; create that

@@ -9,6 +9,8 @@ WECHAT_ARTICLE_AGENT_IMAGE ?= creator-agent-wechat-article:latest
 WECHAT_PICTURE_AGENT_IMAGE ?= creator-agent-wechat-picture:latest
 SEEDNOTE_AGENT_IMAGE ?= creator-agent-seednote:latest
 MONTAGE_AGENT_IMAGE ?= creator-agent-montage:latest
+VIRAL_IP_VIDEO_EDITOR_AGENT_IMAGE ?= creator-agent-viral-ip-video-editor:latest
+AUTO_EDITOR_VERSION ?= 29.3.1
 VIDEO_EDIT_AGENT_IMAGE ?= creator-agent-video-edit:latest
 MOMENTS_AGENT_IMAGE ?= creator-agent-moments:latest
 ECOMMERCE_AGENT_IMAGE ?= creator-agent-ecommerce:latest
@@ -41,7 +43,7 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
         agent-install agent-test agent-build \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
-        docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-video-edit-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image docker-images \
+        docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image docker-images \
         agent-runtime-release-manifest
 
 .PHONY: docker-runtime-smoke docker-hypit-smoke docker-agent-build-check
@@ -196,7 +198,7 @@ docker-agent-build-check: agent-pack-check
 # start the Compose services. Runtime containers are launched on demand by the
 # Server and are not Compose services; rebuilding the Server here keeps its
 # embedded Agent Pack Catalog aligned with the images just built.
-docker-up: docker-server-image docker-dsh-runtime-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-video-edit-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image
+docker-up: docker-server-image docker-dsh-runtime-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image
 	@DOCKER_GID="$(DOCKER_SOCKET_GID)" docker compose up -d
 
 # Stop infrastructure services
@@ -229,6 +231,16 @@ docker-montage-agent-image: docker-agent-build-check
 		--build-arg OPENMONTAGE_REF="$(OPENMONTAGE_SOURCE_REF)" \
 		-t $(MONTAGE_AGENT_IMAGE) . && \
 		echo "Image build complete: $(MONTAGE_AGENT_IMAGE)"
+
+# Build the IP video editor with its pinned OpenMontage and Auto-Editor tools.
+docker-viral-ip-video-editor-agent-image: docker-agent-build-check
+	@echo "Building $(VIRAL_IP_VIDEO_EDITOR_AGENT_IMAGE)..." && \
+	docker build --platform linux/amd64 -f deploy/docker/Dockerfile.agent-viral-ip-video-editor \
+		--build-arg OPENMONTAGE_REPO="$(OPENMONTAGE_SOURCE_REPO)" \
+		--build-arg OPENMONTAGE_REF="$(OPENMONTAGE_SOURCE_REF)" \
+		--build-arg AUTO_EDITOR_VERSION="$(AUTO_EDITOR_VERSION)" \
+		-t $(VIRAL_IP_VIDEO_EDITOR_AGENT_IMAGE) . && \
+		echo "Image build complete: $(VIRAL_IP_VIDEO_EDITOR_AGENT_IMAGE)"
 
 # Build the dedicated video editor with the pinned browser-use/video-use runtime.
 docker-video-edit-agent-image: docker-agent-build-check
@@ -312,7 +324,7 @@ docker-studio-image:
 	echo "Image build complete: $(STUDIO_IMAGE)"
 
 # Build all supported images.
-docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-video-edit-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image
+docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image
 
 # Validate and record one release set for the Server and every managed Agent
 # runtime. Pass image references through the existing
@@ -324,6 +336,7 @@ agent-runtime-release-manifest:
 	AGENT_IMAGE_WECHAT_PICTURE="$(WECHAT_PICTURE_AGENT_IMAGE)" \
 	AGENT_IMAGE_SEEDNOTE="$(SEEDNOTE_AGENT_IMAGE)" \
 	AGENT_IMAGE_MONTAGE="$(MONTAGE_AGENT_IMAGE)" \
+	AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR="$(VIRAL_IP_VIDEO_EDITOR_AGENT_IMAGE)" \
 	AGENT_IMAGE_VIDEO_EDIT="$(VIDEO_EDIT_AGENT_IMAGE)" \
 	AGENT_IMAGE_MOMENTS="$(MOMENTS_AGENT_IMAGE)" \
 	AGENT_IMAGE_ECOMMERCE="$(ECOMMERCE_AGENT_IMAGE)" \
@@ -381,6 +394,7 @@ help:
 	@echo "  make docker-agent-image - Build agent image (Claude Code + plugin)"
 	@echo "  make docker-seednote-agent-image - Build independent Seednote workflow image"
 	@echo "  make docker-montage-agent-image - Build Montage agent image with OpenMontage"
+	@echo "  make docker-viral-ip-video-editor-agent-image - Build IP video editor with Auto-Editor and OpenMontage"
 	@echo "  make docker-video-edit-agent-image - Build video-edit Agent with pinned browser-use/video-use"
 	@echo "  make docker-feedback-analysis-agent-image - Build Feedback analysis agent image"
 	@echo "  make docker-whiteboard-animation-agent-image - Build whiteboard-animation runtime image"

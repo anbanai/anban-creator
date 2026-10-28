@@ -550,6 +550,7 @@ claude:
     wechat-picture: "${ANBAN_AGENT_IMAGE_WECHAT_PICTURE:-creator-agent-wechat-picture:latest}"
     seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE:-creator-agent-seednote:latest}"
     montage: "${ANBAN_AGENT_IMAGE_MONTAGE:-creator-agent-montage:latest}"
+    viral-ip-video-editor: "${ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR:-creator-agent-viral-ip-video-editor:latest}"
     video-edit: "${ANBAN_AGENT_IMAGE_VIDEO_EDIT:-creator-agent-video-edit:latest}"
     moments: "${ANBAN_AGENT_IMAGE_MOMENTS:-creator-agent-moments:latest}"
     ecommerce: "${ANBAN_AGENT_IMAGE_ECOMMERCE:-creator-agent-ecommerce:latest}"

@@ -24,6 +24,7 @@ func baseKubernetesConfigForTest() Config {
 		"wechat-picture":                  "registry.example.com/creator-agent-wechat-picture@sha256:" + strings.Repeat("e", 64),
 		model.PlatformSeednote:            "registry.example.com/creator-agent-seednote@sha256:" + strings.Repeat("b", 64),
 		model.PlatformMontage:             "registry.example.com/creator-agent-montage@sha256:" + strings.Repeat("c", 64),
+		"viral-ip-video-editor":           "registry.example.com/creator-agent-viral-ip-video-editor@sha256:" + strings.Repeat("a", 64),
 		model.PlatformVideoEdit:           "registry.example.com/creator-agent-video-edit@sha256:" + strings.Repeat("g", 64),
 		"moments":                         "registry.example.com/creator-agent-moments@sha256:" + strings.Repeat("d", 64),
 		"ecommerce":                       "registry.example.com/creator-agent-ecommerce@sha256:" + strings.Repeat("f", 64),
@@ -74,6 +75,7 @@ func TestRuntimeImageForTaskUsesCanonicalProfileMap(t *testing.T) {
 		"ecommerce":                       "creator-agent-ecommerce:latest",
 		model.PlatformSeednote:            "creator-agent-seednote:latest",
 		model.PlatformMontage:             "creator-agent-montage:latest",
+		"viral-ip-video-editor":           "creator-agent-viral-ip-video-editor:latest",
 		model.PlatformVideoEdit:           "creator-agent-video-edit:latest",
 		model.PlatformWhiteboardAnimation: "creator-agent-whiteboard-animation:latest",
 		"profile-analysis":                "creator-agent-profile-analysis:latest",
@@ -356,6 +358,7 @@ claude:
     wechat-article: "registry.example.com/creator-agent-wechat-article@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     seednote: "registry.example.com/creator-agent-seednote@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     montage: "registry.example.com/creator-agent-montage@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    viral-ip-video-editor: "registry.example.com/creator-agent-viral-ip-video-editor@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     whiteboard-animation: "registry.example.com/creator-agent-whiteboard-animation@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
   execution_token_secret: "0123456789abcdef0123456789abcdef"
   agent_server_url: "https://creator-api-svc:8443"

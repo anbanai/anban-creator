@@ -297,17 +297,13 @@ type publishBetweenDraftRecoveryAndReloadRepository struct {
 	now   time.Time
 }
 
-func (r *publishBetweenDraftRecoveryAndReloadRepository) FindByTaskID(ctx context.Context, taskID string) (*model.WechatPublication, error) {
-	publication, err := r.WechatPublicationRepository.FindByTaskID(ctx, taskID)
-	if err != nil {
-		return nil, err
-	}
+func (r *publishBetweenDraftRecoveryAndReloadRepository) FindByID(ctx context.Context, publicationID string) (*model.WechatPublication, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls++
-	if r.calls == 2 && publication.Status == model.WechatPublicationStatusDrafted {
+	if r.calls == 1 {
 		attemptedAt := r.now
-		if err := r.db.WithContext(ctx).Model(&model.WechatPublication{}).Where("id = ?", publication.ID).Updates(map[string]any{
+		if err := r.db.WithContext(ctx).Model(&model.WechatPublication{}).Where("id = ?", publicationID).Updates(map[string]any{
 			"status":              model.WechatPublicationStatusPublishing,
 			"publish_id":          "concurrent-publish",
 			"submit_attempted_at": &attemptedAt,
@@ -316,7 +312,7 @@ func (r *publishBetweenDraftRecoveryAndReloadRepository) FindByTaskID(ctx contex
 			return nil, err
 		}
 	}
-	return publication, nil
+	return r.WechatPublicationRepository.FindByID(ctx, publicationID)
 }
 
 func (r *pausingFindPendingWechatPublicationRepository) FindPendingByProject(ctx context.Context, projectID string) ([]*model.WechatPublication, error) {
@@ -1115,7 +1111,7 @@ func TestCreateDraftRecoveryDoesNotOverwriteConcurrentAutomaticPublish(t *testin
 		DraftTitle: article.Title, DraftAuthor: article.Author, DraftDigest: article.Digest,
 		DraftThumbMediaID: article.ThumbMediaID, DraftContentFingerprint: WechatContentFingerprint(article.Content),
 		DraftRequestFingerprint: wechatDraftRequestFingerprint(article), Source: model.WechatPublicationSourceAnbanAPI,
-		Status: model.WechatPublicationStatusDrafting, DraftCreatedAt: &created,
+		Status: model.WechatPublicationStatusDrafting, DeliveryMode: model.WechatDeliveryModeDirectPublish, DraftCreatedAt: &created,
 	}
 	if err := f.repo.WechatPublications().Create(context.Background(), publication); err != nil {
 		t.Fatal(err)
@@ -2704,7 +2700,11 @@ func TestPublicationResponseLossPathsPropagatePersistenceFailures(t *testing.T) 
 
 	t.Run("unsupported reconcile", func(t *testing.T) {
 		f := newPublicationFixture(t)
-		f.seedDrafted(t)
+		publication := f.seedDrafted(t)
+		publication.DeliveryMode = model.WechatDeliveryModeDirectPublish
+		if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
+			t.Fatal(err)
+		}
 		f.api.publishedListError = &appwechat.WechatAPIError{ErrCode: 48001, UserMsg: "unsupported"}
 		f.overridePublications(failingWechatPublicationRepository{WechatPublicationRepository: f.repo.WechatPublications(), updateErr: persistErr})
 		if err := f.svc.Reconcile(context.Background(), f.userID, f.taskID); !errors.Is(err, persistErr) {
@@ -2715,6 +2715,10 @@ func TestPublicationResponseLossPathsPropagatePersistenceFailures(t *testing.T) 
 	t.Run("binding lookup", func(t *testing.T) {
 		f := newPublicationFixture(t)
 		p := f.seedDrafted(t)
+		p.SubmitAttemptedAt = &f.now
+		if err := f.repo.WechatPublications().Update(context.Background(), p); err != nil {
+			t.Fatal(err)
+		}
 		f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
 			ArticleID: "candidate", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{Title: p.DraftTitle, Content: `<section class="body"><p>Hello <strong>world</strong></p></section>`, URL: "https://mp.weixin.qq.com/s/candidate"}}},
 		}}}
@@ -3000,7 +3004,7 @@ func TestWechatPublicationRecoverDueDispatchesDatabaseBackedWork(t *testing.T) {
 	manual := &model.WechatPublication{
 		ID: uuid.NewString(), TaskID: manualTaskID, UserID: f.userID, ProjectID: f.projectID,
 		DraftMediaID: "draft-2", Source: model.WechatPublicationSourceAnbanAPI,
-		Status: model.WechatPublicationStatusDrafted, DraftCreatedAt: &due, NextCheckAt: &due,
+		Status: model.WechatPublicationStatusDrafted, DraftCreatedAt: &due, SubmitAttemptedAt: &due, NextCheckAt: &due,
 	}
 	if err := f.repo.WechatPublications().Create(context.Background(), manual); err != nil {
 		t.Fatal(err)
@@ -3034,7 +3038,7 @@ func TestWechatPublicationRecoverDueReleasesDispatchLeaseAfterEnqueueFailure(t *
 
 	publication := f.seedDrafted(t)
 	due := f.now.Add(-time.Minute)
-	publication.NextCheckAt = &due
+	publication.NextCheckAt, publication.SubmitAttemptedAt = &due, &due
 	if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
 		t.Fatal(err)
 	}
@@ -3420,6 +3424,10 @@ func TestExpiredPublishPreflightBecomesTerminalImmediately(t *testing.T) {
 func TestManualReconcileBatchesProjectAndUsesOnlyHighConfidenceMatches(t *testing.T) {
 	f := newPublicationFixture(t)
 	first := f.seedDrafted(t)
+	first.SubmitAttemptedAt = &f.now
+	if err := f.repo.WechatPublications().Update(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
 	secondTaskID := uuid.NewString()
 	secondTask := &model.Task{ID: secondTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusCompleted}
 	secondTask.SetProjectSnapshot(model.ProjectSnapshot{WechatDelivery: model.WechatDeliveryDecision{
@@ -3429,7 +3437,7 @@ func TestManualReconcileBatchesProjectAndUsesOnlyHighConfidenceMatches(t *testin
 		t.Fatal(err)
 	}
 	created := f.now.Add(-time.Hour)
-	second := &model.WechatPublication{ID: uuid.NewString(), TaskID: secondTaskID, UserID: f.userID, ProjectID: f.projectID, DraftMediaID: "draft-2", DraftTitle: "Weak title", DraftDigest: "other", DraftThumbMediaID: "other-thumb", DraftContentFingerprint: WechatContentFingerprint("<p>different body</p>"), Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafted, DraftCreatedAt: &created}
+	second := &model.WechatPublication{ID: uuid.NewString(), TaskID: secondTaskID, UserID: f.userID, ProjectID: f.projectID, DraftMediaID: "draft-2", DraftTitle: "Weak title", DraftDigest: "other", DraftThumbMediaID: "other-thumb", DraftContentFingerprint: WechatContentFingerprint("<p>different body</p>"), Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafted, DraftCreatedAt: &created, SubmitAttemptedAt: &created}
 	if err := f.repo.WechatPublications().Create(context.Background(), second); err != nil {
 		t.Fatal(err)
 	}
@@ -3445,7 +3453,7 @@ func TestManualReconcileBatchesProjectAndUsesOnlyHighConfidenceMatches(t *testin
 		t.Fatalf("batch calls=%d, want 1", f.api.publishedListCalls)
 	}
 	bound, _ := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID)
-	if bound.Status != model.WechatPublicationStatusPublished || bound.ArticleID != "exact" || bound.Source != model.WechatPublicationSourceWechatConsole {
+	if bound.Status != model.WechatPublicationStatusPublished || bound.ArticleID != "exact" || bound.Source != model.WechatPublicationSourceAnbanAPI {
 		t.Fatalf("exact = %#v", bound)
 	}
 	weak, _ := f.repo.WechatPublications().FindByTaskID(context.Background(), secondTaskID)
@@ -3457,6 +3465,10 @@ func TestManualReconcileBatchesProjectAndUsesOnlyHighConfidenceMatches(t *testin
 func TestManualReconcileEvaluatesExactUniquenessAcrossAllPages(t *testing.T) {
 	f := newPublicationFixture(t)
 	p := f.seedDrafted(t)
+	p.SubmitAttemptedAt = &f.now
+	if err := f.repo.WechatPublications().Update(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
 	item := func(id string) appwechat.FreePublishBatchItem {
 		return appwechat.FreePublishBatchItem{ArticleID: id, UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{Title: p.DraftTitle, Content: `<section class="body"><p>Hello <strong>world</strong></p></section>`, URL: "https://mp.weixin.qq.com/s/" + id}}}}
 	}
@@ -3576,7 +3588,11 @@ func TestPollRecoversStalePublishSubmittingWithoutResubmit(t *testing.T) {
 
 func TestReconcileUsesDeniedCapabilityWithoutSubmittingAgain(t *testing.T) {
 	f := newPublicationFixture(t)
-	f.seedDrafted(t)
+	publication := f.seedDrafted(t)
+	publication.DeliveryMode = model.WechatDeliveryModeDirectPublish
+	if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
+		t.Fatal(err)
+	}
 	f.svc.recordCapability(context.Background(), f.projectID, model.WechatCapabilityFreePublishSubmit, model.WechatCapabilityDenied, 48001)
 	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{}
 	if err := f.svc.Reconcile(context.Background(), f.userID, f.taskID); err != nil {
@@ -3775,6 +3791,10 @@ func TestReconciliationOutcomesRequireLoadedPublicationVersion(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newPublicationFixture(t)
 			publication := f.seedDrafted(t)
+			publication.DeliveryMode = model.WechatDeliveryModeDirectPublish
+			if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
+				t.Fatal(err)
+			}
 			f.api.publishedListResponse = tt.response(f, publication)
 			f.api.publishedListError = tt.listError
 			var claimErr error
@@ -3820,6 +3840,10 @@ func TestReconciliationOutcomesRequireLoadedPublicationVersion(t *testing.T) {
 func TestManualReconcileRequiresOneUniqueArticleAcrossAllExactSignals(t *testing.T) {
 	f := newPublicationFixture(t)
 	p := f.seedDrafted(t)
+	p.SubmitAttemptedAt = &f.now
+	if err := f.repo.WechatPublications().Update(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
 	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{Items: []appwechat.FreePublishBatchItem{
 		{ArticleID: "body-match", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{Title: "Different", Digest: "Different", ThumbMediaID: "different", Content: `<section class="body"><p>Hello <strong>world</strong></p></section>`, URL: "https://mp.weixin.qq.com/s/body-match"}}}},
 		{ArticleID: "metadata-match", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{Title: p.DraftTitle, Digest: p.DraftDigest, ThumbMediaID: p.DraftThumbMediaID, Content: `<p>different</p>`, URL: "https://mp.weixin.qq.com/s/metadata-match"}}}},

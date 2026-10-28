@@ -140,6 +140,8 @@ spec:
               value: "${seednote_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_MONTAGE
               value: "${montage_agent_image_repo}"
+            - name: ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR
+              value: "${viral_ip_video_editor_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_VIDEO_EDIT
               value: "${video_edit_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_MOMENTS

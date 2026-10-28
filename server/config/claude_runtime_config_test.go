@@ -44,6 +44,7 @@ claude:
     wechat-picture: creator-agent-wechat-picture:latest
     seednote: creator-agent-seednote:latest
     montage: creator-agent-montage:latest
+    viral-ip-video-editor: creator-agent-viral-ip-video-editor:latest
     video-edit: creator-agent-video-edit:latest
     moments: creator-agent-moments:latest
     ecommerce: creator-agent-ecommerce:latest
@@ -70,7 +71,7 @@ func validClaudeConfigForTest() ClaudeConfig {
 		},
 		Executor: "docker", ExecutionTokenSecret: "0123456789abcdef0123456789abcdef",
 		RuntimeImages: RuntimeImages{
-			"wechat-article": "creator-agent-wechat-article:latest", "wechat-picture": "creator-agent-wechat-picture:latest", model.PlatformSeednote: "creator-agent-seednote:latest", model.PlatformMontage: "creator-agent-montage:latest", model.PlatformVideoEdit: "creator-agent-video-edit:latest", model.PlatformWhiteboardAnimation: "creator-agent-whiteboard-animation:latest", "moments": "creator-agent-moments:latest", "ecommerce": "creator-agent-ecommerce:latest", model.PlatformHypit: "creator-agent-hypit:latest", "profile-analysis": "creator-agent-profile-analysis:latest", "feedback-analysis": "creator-agent-feedback-analysis:latest",
+			"wechat-article": "creator-agent-wechat-article:latest", "wechat-picture": "creator-agent-wechat-picture:latest", model.PlatformSeednote: "creator-agent-seednote:latest", model.PlatformMontage: "creator-agent-montage:latest", model.PlatformVideoEdit: "creator-agent-video-edit:latest", model.PlatformWhiteboardAnimation: "creator-agent-whiteboard-animation:latest", "moments": "creator-agent-moments:latest", "ecommerce": "creator-agent-ecommerce:latest", model.PlatformHypit: "creator-agent-hypit:latest", "profile-analysis": "creator-agent-profile-analysis:latest", "feedback-analysis": "creator-agent-feedback-analysis:latest", "viral-ip-video-editor": "creator-agent-viral-ip-video-editor:latest",
 		},
 	}
 }
@@ -92,6 +93,15 @@ func TestClaudeConfigAcceptsOnlyProfileEnvs(t *testing.T) {
 	profile := cfg.Claude.ExecutionProfiles["quality"]
 	if profile.Envs[model.ClaudeEnvModel] != "kimi-k3[1m]" || profile.Envs["MAX_THINKING_TOKENS"] != "0" || profile.Envs["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] != "1" || profile.Envs["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] != "0" || profile.Envs["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] != "262144" || profile.Envs["ENABLE_TOOL_SEARCH"] != "false" {
 		t.Fatalf("profile envs = %#v", profile.Envs)
+	}
+}
+
+func TestClaudeConfigRequiresViralIPVideoEditorRuntimeImage(t *testing.T) {
+	cfg := validClaudeConfigForTest()
+	delete(cfg.RuntimeImages, "viral-ip-video-editor")
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "claude.runtime_images.viral-ip-video-editor is required") {
+		t.Fatalf("Validate() error = %v, want viral-ip-video-editor runtime image requirement", err)
 	}
 }
 

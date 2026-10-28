@@ -1013,6 +1013,15 @@ func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, task
 		now := s.now()
 		decision := wechatDeliveryDecision(task)
 		deliveryMode := model.NormalizeWechatDeliveryMode(decision.Mode, &decision.AutomaticEnabled)
+		if strings.TrimSpace(task.ReuseRunID) != "" {
+			policy, policyErr := contentReusePublicationPolicy(ctx, s.repo, task)
+			if policyErr != nil {
+				return nil, policyErr
+			}
+			if policy.PublishEnabled {
+				deliveryMode = model.WechatDeliveryModeDirectPublish
+			}
+		}
 		imageMediaIDs := draftImageMediaIDs(article)
 		var cropPercentList datatypes.JSON
 		if article.CoverInfo != nil && len(article.CoverInfo.CropPercentList) > 0 {
@@ -2432,7 +2441,7 @@ func (s *WechatPublicationService) Reconcile(ctx context.Context, userID, taskID
 	if !isWechatPublicationReconcilePending(publication.Status) {
 		return ErrWechatPublicationConflict
 	}
-	if publication.Status == model.WechatPublicationStatusDrafted && !hasWechatSubmissionEvidence(publication) {
+	if publication.Status == model.WechatPublicationStatusDrafted && publication.DeliveryMode != model.WechatDeliveryModeDirectPublish && !hasWechatSubmissionEvidence(publication) {
 		return nil
 	}
 	claimed, err := s.repo.WechatPublications().ClaimProjectReconcile(ctx, project.ID, wechatReconcileRateLimit)
@@ -2474,14 +2483,40 @@ func isWechatPublicationReconcilePending(status string) bool {
 	}
 }
 
+func appendUniqueWechatPublications(publications []*model.WechatPublication, additions ...*model.WechatPublication) []*model.WechatPublication {
+	seen := make(map[string]struct{}, len(publications)+len(additions))
+	for _, publication := range publications {
+		if publication != nil {
+			seen[publication.ID] = struct{}{}
+		}
+	}
+	for _, publication := range additions {
+		if publication == nil {
+			continue
+		}
+		if _, exists := seen[publication.ID]; exists {
+			continue
+		}
+		seen[publication.ID] = struct{}{}
+		publications = append(publications, publication)
+	}
+	return publications
+}
+
 func hasWechatSubmissionEvidence(publication *model.WechatPublication) bool {
 	return publication != nil && (publication.SubmitAttemptedAt != nil || publication.PublishID != "" || publication.MsgDataID != "" || publication.MsgID != "")
 }
 
 func (s *WechatPublicationService) reconcileProject(ctx context.Context, project *model.Project) (resultErr error) {
+	var recoveredDrafts []*model.WechatPublication
 	pending, err := s.repo.WechatPublications().FindPendingByProject(ctx, project.ID)
 	if err != nil || len(pending) == 0 {
-		return err
+		if err != nil {
+			return err
+		}
+	}
+	if len(pending) == 0 {
+		return nil
 	}
 	eligible := pending[:0]
 	for _, publication := range pending {
@@ -2495,7 +2530,7 @@ func (s *WechatPublicationService) reconcileProject(ctx context.Context, project
 		if wechatDeliveryDecision(task).IsUserAssisted() {
 			continue
 		}
-		if publication.Status == model.WechatPublicationStatusDrafted && !hasWechatSubmissionEvidence(publication) {
+		if publication.Status == model.WechatPublicationStatusDrafted && publication.DeliveryMode != model.WechatDeliveryModeDirectPublish && !hasWechatSubmissionEvidence(publication) {
 			if strings.TrimSpace(task.ReuseRunID) == "" {
 				continue
 			}
@@ -2517,6 +2552,7 @@ func (s *WechatPublicationService) reconcileProject(ctx context.Context, project
 	if err != nil || len(pending) == 0 {
 		return err
 	}
+	pending = appendUniqueWechatPublications(pending, recoveredDrafts...)
 	defer func() {
 		if syncErr := s.syncReconciledDraftDeliveries(context.WithoutCancel(ctx), pending); syncErr != nil {
 			resultErr = errors.Join(resultErr, syncErr)
@@ -2571,10 +2607,19 @@ func (s *WechatPublicationService) reconcileProject(ctx context.Context, project
 				if updateErr != nil {
 					return updateErr
 				}
-				if !won {
-					if _, outcomeErr := s.reloadWechatPublicationAfterCASLoss(ctx, publication.ID); outcomeErr != nil &&
-						!errors.Is(outcomeErr, ErrWechatPublicationPending) && !errors.Is(outcomeErr, ErrWechatPublicationConflict) {
+				if won {
+					recovered, reloadErr := s.repo.WechatPublications().FindByID(ctx, publication.ID)
+					if reloadErr != nil {
+						return reloadErr
+					}
+					recoveredDrafts = appendUniqueWechatPublications(recoveredDrafts, recovered)
+				} else {
+					latest, outcomeErr := s.reloadWechatPublicationAfterCASLoss(ctx, publication.ID)
+					if outcomeErr != nil && !errors.Is(outcomeErr, ErrWechatPublicationPending) && !errors.Is(outcomeErr, ErrWechatPublicationConflict) {
 						return outcomeErr
+					}
+					if latest != nil && outcomeErr == nil {
+						recoveredDrafts = appendUniqueWechatPublications(recoveredDrafts, latest)
 					}
 				}
 				continue
@@ -2597,12 +2642,20 @@ func (s *WechatPublicationService) reconcileProject(ctx context.Context, project
 			}
 		}
 		pending, err = s.repo.WechatPublications().FindPendingByProject(ctx, project.ID)
-		if err != nil || len(pending) == 0 {
+		if err != nil {
 			return err
 		}
+		pending = appendUniqueWechatPublications(pending, recoveredDrafts...)
+		if len(pending) == 0 {
+			return nil
+		}
 		pending, err = s.fallbackDraftsForCachedDeniedFormalPublish(ctx, project.ID, pending)
-		if err != nil || len(pending) == 0 {
+		if err != nil {
 			return err
+		}
+		pending = appendUniqueWechatPublications(pending, recoveredDrafts...)
+		if len(pending) == 0 {
+			return nil
 		}
 	}
 	articles, err := listAllWechatPublishes(ctx, api)
