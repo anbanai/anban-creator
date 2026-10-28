@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Check } from 'lucide-react'
+import { Check, Clapperboard, Layers3, Scissors } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { assistantPrimaryPlatform } from '@/lib/assistant-creation-types'
 import { profileLabAgents, projectAgentIDs } from '@/lib/project-capabilities'
+import { platformIcon, platformIconColor } from '@/lib/PlatformIcon'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverDescription, PopoverTitle, PopoverTrigger } from '@/components/ui/popover'
 import type { Project } from '@/types'
@@ -52,23 +53,34 @@ export function PersonaCreationSettings({ project, disabled }: { project: Pick<P
     setOpen(next)
   }}>
     <PopoverTrigger render={<Button type="button" variant="ghost" size="sm" disabled={disabled} aria-label={`创作类型：${project.name}`} className="h-7 px-1.5 text-[11px]" />}>创作类型</PopoverTrigger>
-    <PopoverContent align="end" side="bottom" className="assistant-scroll max-h-[var(--available-height)] w-[min(22rem,calc(100vw-2rem))] gap-3 overflow-y-auto overscroll-contain p-3">
-      <div className="min-w-0 space-y-1">
-        <PopoverTitle>创作类型</PopoverTitle>
-        <PopoverDescription className="text-xs">为「{project.name}」选择内容类型，可多选。</PopoverDescription>
+    <PopoverContent align="end" side="bottom" sideOffset={8} className="max-h-[min(28rem,var(--available-height))] w-[min(17rem,calc(100vw-2rem))] gap-0 overflow-hidden rounded-xl p-0 shadow-lg">
+      <div className="min-w-0 shrink-0 space-y-0.5 px-3.5 pb-2 pt-3">
+        <div className="flex items-center justify-between gap-2">
+          <PopoverTitle className="text-[13px] font-semibold">创作类型</PopoverTitle>
+          <span className="text-[11px] text-muted-foreground">可多选</span>
+        </div>
+        <PopoverDescription className="truncate text-xs leading-5">{project.name}</PopoverDescription>
       </div>
-      <div role="group" aria-label="创作类型" className="grid grid-cols-2 gap-1.5">
+      <div role="group" aria-label="创作类型" className="assistant-scroll min-h-0 space-y-0.5 overflow-y-auto overscroll-contain px-1.5 pb-1.5">
         {profileLabAgents.filter(agent => user?.is_admin || agent.id !== 'hypit').map(agent => {
           const selected = agents.includes(agent.id)
-          return <Button key={agent.id} type="button" variant="outline" size="sm" aria-label={agent.label} aria-pressed={selected} disabled={saving} onClick={() => setAgents(current => selected ? current.filter(id => id !== agent.id) : [...current, agent.id])} className={`h-10 min-w-0 justify-between px-2 text-xs ${selected ? 'border-primary/50 bg-primary/5' : ''}`}>
-            <span className="truncate">{agent.label}</span><Check className={`size-3.5 shrink-0 ${selected ? 'text-primary' : 'invisible'}`} />
-          </Button>
+          const Icon = platformIcon[agent.id] ?? (agent.id === 'video-edit' ? Scissors : agent.id === 'local-life' ? Clapperboard : Layers3)
+          return <button key={agent.id} type="button" aria-label={agent.label} aria-pressed={selected} disabled={saving} onClick={() => setAgents(current => selected ? current.filter(id => id !== agent.id) : [...current, agent.id])} className={`flex min-h-9 w-full min-w-0 items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-50 pointer-coarse:min-h-11 ${selected ? 'bg-muted/60 hover:bg-muted' : 'hover:bg-muted/60'}`}>
+            <span aria-hidden="true" className={platformIconColor[agent.id] ?? 'text-muted-foreground'}><Icon className="size-4 shrink-0" /></span>
+            <span className="min-w-0 flex-1 text-[13px] leading-5">{agent.label}</span>
+            <Check aria-hidden="true" className={`size-3.5 shrink-0 ${selected ? 'text-foreground' : 'invisible'}`} />
+          </button>
         })}
       </div>
-      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="ghost" size="sm" disabled={saving} onClick={() => setOpen(false)}>取消</Button>
-        <Button type="button" size="sm" disabled={saving || !agents.length} onClick={() => void save()}>{saving ? '保存中…' : '保存并继续创作'}</Button>
+      <div className="shrink-0 space-y-2 border-t border-border/60 px-2.5 py-2">
+        {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] text-muted-foreground">已选 {agents.length} 项</span>
+          <div className="flex gap-1">
+            <Button type="button" variant="ghost" size="sm" className="h-7 rounded-md px-2 text-xs" disabled={saving} onClick={() => setOpen(false)}>取消</Button>
+            <Button type="button" size="sm" className="h-7 rounded-md px-2.5 text-xs" disabled={saving || !agents.length} onClick={() => void save()}>{saving ? '保存中…' : '保存设置'}</Button>
+          </div>
+        </div>
       </div>
     </PopoverContent>
   </Popover>

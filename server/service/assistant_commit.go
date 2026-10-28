@@ -738,7 +738,10 @@ func assistantCreationIdentity(project *model.Project, contentType string) (agen
 			break
 		}
 	}
-	if route == nil || project == nil || project.Platform != route.projectPlatform || !model.ProjectAllowsAgent(project, route.agentID) {
+	if route == nil || project == nil || !model.ProjectAllowsAgent(project, route.agentID) {
+		return agentpack.Manifest{}, "", "", ErrAssistantModeUnavailable
+	}
+	if project.AgentIDs == nil && project.Platform != route.projectPlatform {
 		return agentpack.Manifest{}, "", "", ErrAssistantModeUnavailable
 	}
 	pack, ok := agentpack.Default().ForAgent(route.agentID)
