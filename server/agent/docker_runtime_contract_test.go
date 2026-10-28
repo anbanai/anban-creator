@@ -1038,6 +1038,7 @@ func TestDockerfileInventoryIsCentralized(t *testing.T) {
 		"deploy/docker/Dockerfile.agent-montage",
 		"deploy/docker/Dockerfile.agent-profile-analysis",
 		"deploy/docker/Dockerfile.agent-seednote",
+		"deploy/docker/Dockerfile.agent-talking-head-editor",
 		"deploy/docker/Dockerfile.agent-video-edit",
 		"deploy/docker/Dockerfile.agent-wechat-article",
 		"deploy/docker/Dockerfile.agent-wechat-picture",
@@ -1074,6 +1075,24 @@ func TestVideoEditDockerfilePinsTheUnmodifiedVideoUseRuntime(t *testing.T) {
 	}
 	if strings.Contains(dockerfile, "openmontage") || strings.Contains(dockerfile, "git apply") {
 		t.Fatal("video-edit Dockerfile must use the unmodified video-use source, without OpenMontage or source patches")
+	}
+}
+
+func TestTalkingHeadEditorDockerfileValidatesErduoMotionContract(t *testing.T) {
+	root := repositoryRoot(t)
+	dockerfile := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.agent-talking-head-editor"))
+	for _, want := range []string{
+		"/opt/video-use-venv/bin/pip install --no-cache-dir auto-editor==28.1.0",
+		"43cfc566833548093455c9d4a46bd69913b7e552",
+		"/anbanai/skills/erduo-broll-loop-engineering/SKILL.md",
+		"HyperFrames/Remotion",
+		"Shotcraft",
+		"parallel agents",
+		"aesthetic review",
+	} {
+		if !strings.Contains(dockerfile, want) {
+			t.Fatalf("talking-head-editor Dockerfile missing runtime contract %q", want)
+		}
 	}
 }
 

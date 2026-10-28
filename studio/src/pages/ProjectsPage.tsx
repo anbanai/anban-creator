@@ -39,6 +39,7 @@ import { profileLabAgents, projectAgentIDs, supportsProfileLab } from '@/lib/pro
 import { getProjectCreationDefaults } from '@/lib/studio-ux'
 import { portraitSummary } from '@/lib/portrait-library'
 import { VideoEditProjectDefaultsPanel } from '@/components/video-edit/VideoEditProjectDefaultsPanel'
+import { TalkingHeadEditorProjectDefaultsPanel } from '@/components/talking-head-editor/TalkingHeadEditorProjectDefaultsPanel'
 
 const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'ecommerce', 'hypit'])
 
@@ -61,6 +62,7 @@ const PROJECT_FORM_DEFAULTS: ProjectFormValues = {
   portrait_reference_image: null,
   ecommerce_default_selected_modules: {},
   video_edit_defaults: {},
+  talking_head_editor_defaults: {},
 }
 
 function projectToForm(project: Project): ProjectFormValues {
@@ -74,10 +76,12 @@ function projectToForm(project: Project): ProjectFormValues {
     reference_image: project.reference_image ?? null,
     portrait_reference_image: project.portrait_reference_image ?? null,
     video_edit_defaults: project.video_edit_defaults ?? {},
+    talking_head_editor_defaults: project.talking_head_editor_defaults ?? {},
   }
 }
 
 function primaryProjectPlatform(agentIDs: string[]): ProjectPlatform | '' {
+  if (agentIDs.includes('talking-head-editor')) return 'talking-head-editor'
   if (agentIDs.includes('video-edit')) return 'video-edit'
   if (agentIDs.some((id) => id === 'wechat-article' || id === 'wechat-picture')) return 'wechat'
   if (agentIDs.includes('seednote')) return 'seednote'
@@ -420,6 +424,7 @@ export default function ProjectsPage() {
       }
     }
     if ((values.agent_ids ?? []).includes('video-edit')) payload.video_edit_defaults = values.video_edit_defaults ?? {}
+    if ((values.agent_ids ?? []).includes('talking-head-editor')) payload.talking_head_editor_defaults = values.talking_head_editor_defaults ?? {}
     if (!editingProject || form.formState.dirtyFields.visual_style) {
       payload.visual_style = values.visual_style?.trim() ?? ''
     }
@@ -579,6 +584,9 @@ export default function ProjectsPage() {
                   value={form.watch('video_edit_defaults')}
                   onChange={(value) => form.setValue('video_edit_defaults', value, { shouldDirty: true, shouldValidate: true })}
                 />
+              )}
+              {selectedAgentIDs.includes('talking-head-editor') && (
+                <TalkingHeadEditorProjectDefaultsPanel value={form.watch('talking_head_editor_defaults')} onChange={(value) => form.setValue('talking_head_editor_defaults', value, { shouldDirty: true, shouldValidate: true })} />
               )}
 
               {hasWechatPublishing && !editingProject && (

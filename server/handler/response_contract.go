@@ -88,6 +88,63 @@ func freezeVideoEditSourceAssets(input *model.VideoEditInput, finalized map[stri
 	return nil
 }
 
+func talkingHeadEditorSourceAssetURLs(input *model.TalkingHeadEditorInput) []string {
+	if input == nil {
+		return nil
+	}
+	urls := make([]string, 0, len(input.SupportingAssets)+1)
+	if strings.TrimSpace(input.PrimaryVideo.URL) != "" {
+		urls = append(urls, input.PrimaryVideo.URL)
+	}
+	for _, asset := range input.SupportingAssets {
+		if strings.TrimSpace(asset.URL) != "" {
+			urls = append(urls, asset.URL)
+		}
+	}
+	if input.ReferenceCut != nil && strings.TrimSpace(input.ReferenceCut.URL) != "" {
+		urls = append(urls, input.ReferenceCut.URL)
+	}
+	return urls
+}
+
+func validateTalkingHeadEditorSourceAssetURLs(input *model.TalkingHeadEditorInput, store storage.Provider) error {
+	for _, rawURL := range talkingHeadEditorSourceAssetURLs(input) {
+		if store == nil || !store.IsOwnedURL(rawURL) {
+			return fmt.Errorf("talking_head_editor_input assets must use Anban-owned upload URLs")
+		}
+	}
+	return nil
+}
+
+func freezeTalkingHeadEditorSourceAssets(input *model.TalkingHeadEditorInput, finalized map[string]*model.Asset) error {
+	if input == nil {
+		return nil
+	}
+	freeze := func(asset *model.TalkingHeadEditorAsset, label string) error {
+		if asset == nil || strings.TrimSpace(asset.URL) == "" {
+			return nil
+		}
+		stored := finalized[asset.URL]
+		if stored == nil || strings.TrimSpace(stored.ID) == "" {
+			return fmt.Errorf("%s was not finalized as an owned upload", label)
+		}
+		asset.AssetID, asset.URL, asset.FileName, asset.MimeType, asset.FileSize = stored.ID, "", stored.FileName, stored.ContentType, stored.Size
+		return nil
+	}
+	if err := freeze(&input.PrimaryVideo, "talking_head_editor_input.primary_video"); err != nil {
+		return err
+	}
+	for i := range input.SupportingAssets {
+		if err := freeze(&input.SupportingAssets[i], fmt.Sprintf("talking_head_editor_input.supporting_assets[%d]", i)); err != nil {
+			return err
+		}
+	}
+	if err := freeze(input.ReferenceCut, "talking_head_editor_input.reference_cut"); err != nil {
+		return err
+	}
+	return nil
+}
+
 func localLifeSourceAssetURLs(input *model.LocalLifeInput) []string {
 	if input == nil {
 		return nil

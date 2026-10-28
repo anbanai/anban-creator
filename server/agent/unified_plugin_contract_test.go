@@ -125,7 +125,7 @@ func TestUnifiedPluginLayout(t *testing.T) {
 
 	markdownAgents := pluginAgentNames(t, filepath.Join(pluginRoot, "agents"), ".md")
 	tomlAgents := pluginAgentNames(t, filepath.Join(pluginRoot, "agents"), ".toml")
-	if len(markdownAgents) != 17 || strings.Join(markdownAgents, "\n") != strings.Join(tomlAgents, "\n") {
+	if len(markdownAgents) != 18 || len(tomlAgents) != 18 || strings.Join(markdownAgents, "\n") != strings.Join(tomlAgents, "\n") {
 		t.Fatalf("native Agent sets differ or count drifted: Claude=%v Codex=%v", markdownAgents, tomlAgents)
 	}
 	for _, name := range tomlAgents {

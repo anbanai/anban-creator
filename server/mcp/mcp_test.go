@@ -596,6 +596,7 @@ func TestProjectToolSchemasIncludeMoments(t *testing.T) {
 	assertToolEnumContains("list_projects", "platform", "montage")
 	assertToolEnumContains("get_project_profile", "scope", "montage")
 	assertToolEnumContains("get_project_profile", "scope", "video-edit")
+	assertToolEnumContains("get_project_profile", "scope", "talking-head-editor")
 }
 
 func TestGetProjectProfileKeepsTaskOptionalAndSupportsCreativeScopes(t *testing.T) {
@@ -635,6 +636,15 @@ func TestGetProjectProfileKeepsTaskOptionalAndSupportsCreativeScopes(t *testing.
 		}
 		if !found {
 			t.Fatalf("get_project_profile.scope enum = %v, missing video-edit", values)
+		}
+		found = false
+		for _, value := range values {
+			if value == "talking-head-editor" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("get_project_profile.scope enum = %v, missing talking-head-editor", values)
 		}
 		required := schema["required"].([]any)
 		found = false

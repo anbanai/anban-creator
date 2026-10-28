@@ -200,15 +200,16 @@ type createTaskRequest struct {
 	// fee, and selected modules only guide later image/vision MCP usage.
 	// ProductPhotos are browser-upload URLs finalized into immutable task input
 	// attachments before creation.
-	ProductPhotos   []string              `json:"product_photos,omitempty"`
-	SelectedModules map[string]int        `json:"selected_modules,omitempty"`
-	TargetPlatform  string                `json:"target_platform,omitempty"`
-	SellingPoints   string                `json:"selling_points,omitempty"`
-	Language        string                `json:"language,omitempty"`
-	MontageInput    *model.MontageInput   `json:"montage_input,omitempty"`
-	VideoEditInput  *model.VideoEditInput `json:"video_edit_input,omitempty"`
-	HypitInput      *model.HypitInput     `json:"hypit_input,omitempty"`
-	LocalLifeInput  *model.LocalLifeInput `json:"local_life_input,omitempty"`
+	ProductPhotos          []string                      `json:"product_photos,omitempty"`
+	SelectedModules        map[string]int                `json:"selected_modules,omitempty"`
+	TargetPlatform         string                        `json:"target_platform,omitempty"`
+	SellingPoints          string                        `json:"selling_points,omitempty"`
+	Language               string                        `json:"language,omitempty"`
+	MontageInput           *model.MontageInput           `json:"montage_input,omitempty"`
+	VideoEditInput         *model.VideoEditInput         `json:"video_edit_input,omitempty"`
+	TalkingHeadEditorInput *model.TalkingHeadEditorInput `json:"talking_head_editor_input,omitempty"`
+	HypitInput             *model.HypitInput             `json:"hypit_input,omitempty"`
+	LocalLifeInput         *model.LocalLifeInput         `json:"local_life_input,omitempty"`
 }
 
 type cloneTaskRequest struct {
@@ -237,8 +238,16 @@ type cloneTaskRequest struct {
 	Language                  string                           `json:"language,omitempty"`
 	MontageInput              *model.MontageInput              `json:"montage_input,omitempty"`
 	VideoEditInput            *model.VideoEditInput            `json:"video_edit_input,omitempty"`
+	TalkingHeadEditorInput    *model.TalkingHeadEditorInput    `json:"talking_head_editor_input,omitempty"`
 	HypitInput                *model.HypitInput                `json:"hypit_input,omitempty"`
 	LocalLifeInput            *model.LocalLifeInput            `json:"local_life_input,omitempty"`
+}
+
+type talkingHeadEditorReviewRequest struct {
+	Decision            string `json:"decision"`
+	Feedback            string `json:"feedback,omitempty"`
+	ReferenceCutAssetID string `json:"reference_cut_asset_id,omitempty"`
+	ReferenceCutURL     string `json:"reference_cut_url,omitempty"`
 }
 
 type resumeTaskRequest struct {
@@ -606,6 +615,9 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 	if err := validateVideoEditSourceAssetURLs(req.VideoEditInput, h.service.Storage()); err != nil {
 		return nil, Error(c, fiber.StatusBadRequest, err.Error())
 	}
+	if err := validateTalkingHeadEditorSourceAssetURLs(req.TalkingHeadEditorInput, h.service.Storage()); err != nil {
+		return nil, Error(c, fiber.StatusBadRequest, err.Error())
+	}
 	if err := validateLocalLifeSourceAssetURLs(req.LocalLifeInput); err != nil {
 		return nil, Error(c, fiber.StatusBadRequest, err.Error())
 	}
@@ -678,6 +690,16 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 				return nil, Error(c, fiber.StatusBadRequest, err.Error())
 			}
 		}
+		if requestedChannel == model.ChannelTalkingHeadEditor {
+			var finalizedAssets map[string]*model.Asset
+			_, finalizedAssets, err = service.FinalizeUploadSessionURLAssets(c.Context(), finalStore, h.repo, userID, service.DirectUploadPurposeTalkingHeadEditorAsset, talkingHeadEditorSourceAssetURLs(req.TalkingHeadEditorInput), time.Now(), ownedURLChecks...)
+			if err != nil {
+				return nil, respondUploadSessionFinalizeError(c, h.logger, err)
+			}
+			if err := freezeTalkingHeadEditorSourceAssets(req.TalkingHeadEditorInput, finalizedAssets); err != nil {
+				return nil, Error(c, fiber.StatusBadRequest, err.Error())
+			}
+		}
 		if requestedChannel == model.ChannelLocalLife {
 			rewrites, err = finalizeUploadSessionURLs(c.Context(), finalizationStore, h.repo, userID, service.DirectUploadPurposeMontageAsset, localLifeSourceAssetURLs(req.LocalLifeInput))
 			if err != nil {
@@ -731,6 +753,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 			Ecommerce:                     ecommerceCfg,
 			MontageInput:                  req.MontageInput,
 			VideoEditInput:                req.VideoEditInput,
+			TalkingHeadEditorInput:        req.TalkingHeadEditorInput,
 			HypitInput:                    req.HypitInput,
 			LocalLifeInput:                req.LocalLifeInput,
 		},
@@ -759,11 +782,17 @@ func (h *TaskHandler) respondTaskCreationServiceError(c fiber.Ctx, userID string
 	if errors.Is(err, service.ErrLocalLifeDisabled) {
 		return Error(c, fiber.StatusServiceUnavailable, err.Error())
 	}
+	if errors.Is(err, service.ErrTalkingHeadEditorUnavailable) {
+		return Error(c, fiber.StatusServiceUnavailable, err.Error())
+	}
+	if errors.Is(err, service.ErrTalkingHeadEditorInput) {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
 	if isReferenceAssetError(err) {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	h.logger.Error().Err(err).Str("user_id", userID).Msg(logMessage)
-	if errors.Is(err, service.ErrMontageInput) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrVideoEditInput) {
+	if errors.Is(err, service.ErrMontageInput) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrVideoEditInput) || errors.Is(err, service.ErrTalkingHeadEditorInput) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
@@ -1068,6 +1097,47 @@ func (h *TaskHandler) Cancel(c fiber.Ctx) error {
 	return Success(c, fiber.Map{"message": "task cancelled"})
 }
 
+// ReviewTalkingHeadEditor handles the explicit motion-sample review gate.
+func (h *TaskHandler) ReviewTalkingHeadEditor(c fiber.Ctx) error {
+	id, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
+	}
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	var req talkingHeadEditorReviewRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid review request")
+	}
+	if strings.TrimSpace(req.ReferenceCutAssetID) == "" && strings.TrimSpace(req.ReferenceCutURL) != "" {
+		finalStore, _ := h.service.Storage().(service.DirectUploadFinalizationStorage)
+		var ownedURLChecks []func(string) bool
+		if h.service.Storage() != nil {
+			ownedURLChecks = append(ownedURLChecks, h.service.Storage().IsOwnedURL)
+		}
+		_, assets, finalizeErr := service.FinalizeUploadSessionURLAssets(c.Context(), finalStore, h.repo, userID, service.DirectUploadPurposeTalkingHeadEditorAsset, []string{strings.TrimSpace(req.ReferenceCutURL)}, time.Now(), ownedURLChecks...)
+		if finalizeErr != nil {
+			return respondUploadSessionFinalizeError(c, h.logger, finalizeErr)
+		}
+		if asset := assets[strings.TrimSpace(req.ReferenceCutURL)]; asset != nil {
+			req.ReferenceCutAssetID = asset.ID
+		}
+	}
+	task, err := h.service.ReviewTalkingHeadEditor(c.Context(), userID, id, req.Decision, req.Feedback, req.ReferenceCutAssetID)
+	if err != nil {
+		if strings.Contains(err.Error(), "access denied") {
+			return Forbidden(c, "you do not have access to this task")
+		}
+		if strings.Contains(err.Error(), "unavailable") || strings.Contains(err.Error(), "not awaiting") {
+			return Error(c, fiber.StatusConflict, err.Error())
+		}
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+	return Success(c, taskAPIResponse(task, h.store))
+}
+
 // Clone handles POST /api/v1/tasks/:id/clone.
 // It creates a fresh task from a terminal task's configuration and enqueues it.
 // The original task is preserved and the new task is billed as a new run.
@@ -1148,6 +1218,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			Language:                  req.Language,
 			MontageInput:              req.MontageInput,
 			VideoEditInput:            req.VideoEditInput,
+			TalkingHeadEditorInput:    req.TalkingHeadEditorInput,
 			HypitInput:                req.HypitInput,
 			LocalLifeInput:            req.LocalLifeInput,
 		}
@@ -1180,6 +1251,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			Ecommerce:                     prepared.params.Ecommerce,
 			MontageInput:                  prepared.params.MontageInput,
 			VideoEditInput:                prepared.params.VideoEditInput,
+			TalkingHeadEditorInput:        prepared.params.TalkingHeadEditorInput,
 			HypitInput:                    prepared.params.HypitInput,
 			LocalLifeInput:                prepared.params.LocalLifeInput,
 		}})

@@ -1,4 +1,4 @@
-import type { AgentExecutionProfileID, CreateTaskRequest, HypitDefaults, Project, ReferenceImageSelection, Task, TaskType, VideoEditInput } from '@/types'
+import type { AgentExecutionProfileID, CreateTaskRequest, HypitDefaults, Project, ReferenceImageSelection, Task, TaskType, VideoEditInput, TalkingHeadEditorInput } from '@/types'
 import type { CreateTaskFormValues } from '@/lib/schemas'
 import { buildHypitInputForSubmit, initialHypitInput } from '@/lib/hypit-form'
 import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
@@ -42,6 +42,8 @@ function taskIdentity(type: TaskType): { agent_id: string; channel: NonNullable<
       return { agent_id: 'local-life', channel: 'local-life', task_kind: 'content_generation' }
     case 'video-edit':
       return { agent_id: 'video-edit', channel: 'video-edit', task_kind: 'video_edit' }
+    case 'talking-head-editor':
+      return { agent_id: 'talking-head-editor', channel: 'talking-head-editor', task_kind: 'talking_head_editor' }
     default:
       return { agent_id: type, channel: type, task_kind: type }
   }
@@ -79,6 +81,17 @@ function projectVideoEditInput(project?: Project | null, brief = ''): VideoEditI
   }
 }
 
+function projectTalkingHeadEditorInput(project?: Project | null, brief = ''): TalkingHeadEditorInput | undefined {
+  if (project?.platform !== 'talking-head-editor') return undefined
+  return {
+    brief,
+    primary_video: { role: 'reference' },
+    supporting_assets: [],
+    preferences: cloneValue(project.talking_head_editor_defaults?.preferences ?? {}),
+    delivery_targets: cloneValue(project.talking_head_editor_defaults?.delivery_targets ?? []),
+  }
+}
+
 export function createTaskFormDefaults(project?: Project | null): TaskFormDefaults {
   const defaults = getProjectCreationDefaults(project)
 
@@ -111,6 +124,7 @@ export function createTaskFormDefaults(project?: Project | null): TaskFormDefaul
     montage_input: projectMontageInput(project),
     local_life_input: projectLocalLifeInput(project),
     video_edit_input: projectVideoEditInput(project),
+    talking_head_editor_input: projectTalkingHeadEditorInput(project),
   }
 }
 
@@ -160,6 +174,19 @@ export function switchTaskFormDefaults(
         }
       }
     }
+    if (current.type === 'talking-head-editor') {
+      const editorDefaults = projectTalkingHeadEditorInput(project, current.prompt)
+      if (editorDefaults) {
+        switched.talking_head_editor_input = {
+          ...editorDefaults,
+          ...cloneValue(current.talking_head_editor_input ?? {}),
+          brief: current.talking_head_editor_input?.brief ?? current.prompt ?? '',
+          supporting_assets: cloneValue(current.talking_head_editor_input?.supporting_assets ?? []),
+          preferences: { ...editorDefaults.preferences, ...cloneValue(current.talking_head_editor_input?.preferences ?? {}) },
+          delivery_targets: cloneValue(current.talking_head_editor_input?.delivery_targets ?? editorDefaults.delivery_targets),
+        }
+      }
+    }
 
     return switched
   }
@@ -180,6 +207,7 @@ export function switchTaskFormDefaults(
     montage_input: projectMontageInput(project, current.prompt),
     local_life_input: projectLocalLifeInput(project, current.prompt),
     video_edit_input: projectVideoEditInput(project, current.prompt),
+    talking_head_editor_input: projectTalkingHeadEditorInput(project, current.prompt),
   }
 }
 
@@ -249,6 +277,9 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
       : undefined,
     video_edit_input: task.video_edit_input
       ? cloneValue({ ...task.video_edit_input, brief: task.video_edit_input.brief || task.prompt })
+      : undefined,
+    talking_head_editor_input: task.talking_head_editor_input
+      ? cloneValue({ ...task.talking_head_editor_input, brief: task.talking_head_editor_input.brief || task.prompt })
       : undefined,
   }
 }
@@ -323,6 +354,13 @@ export function taskFormValuesToRequest(values: TaskFormDefaults, hypitDefaults?
           ...(values.video_edit_input ?? { source_assets: [] }),
           brief: values.video_edit_input?.brief?.trim() || prompt || '',
           source_assets: cloneValue(values.video_edit_input?.source_assets ?? []),
+        }) }
+      : {}),
+    ...(values.type === 'talking-head-editor'
+      ? { talking_head_editor_input: cloneValue({
+          ...(values.talking_head_editor_input ?? { primary_video: { role: 'reference' }, supporting_assets: [] }),
+          brief: values.talking_head_editor_input?.brief?.trim() || prompt || '',
+          supporting_assets: cloneValue(values.talking_head_editor_input?.supporting_assets ?? []),
         }) }
       : {}),
   }

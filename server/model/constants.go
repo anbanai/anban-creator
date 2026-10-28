@@ -4,11 +4,12 @@ import "slices"
 
 // Task status constants.
 const (
-	TaskStatusPending   = "pending"
-	TaskStatusRunning   = "running"
-	TaskStatusCompleted = "completed"
-	TaskStatusFailed    = "failed"
-	TaskStatusCancelled = "cancelled"
+	TaskStatusPending        = "pending"
+	TaskStatusRunning        = "running"
+	TaskStatusAwaitingReview = "awaiting_review"
+	TaskStatusCompleted      = "completed"
+	TaskStatusFailed         = "failed"
+	TaskStatusCancelled      = "cancelled"
 )
 
 // TerminalTaskStatuses is the set of task statuses that signal the end of
@@ -41,46 +42,49 @@ const (
 
 // Config scope constants.
 const (
-	ScopeWechat    = "wechat"
-	ScopeSeednote  = "seednote"
-	ScopeMoments   = "moments"
-	ScopeEcommerce = "ecommerce"
-	ScopeMontage   = "montage"
-	ScopeVideoEdit = "video-edit"
+	ScopeWechat            = "wechat"
+	ScopeSeednote          = "seednote"
+	ScopeMoments           = "moments"
+	ScopeEcommerce         = "ecommerce"
+	ScopeMontage           = "montage"
+	ScopeVideoEdit         = "video-edit"
+	ScopeTalkingHeadEditor = "talking-head-editor"
 )
 
 // Agent IDs are stable execution identities. An Agent owns exactly one output
 // channel; task kind selects the workflow exposed by that Agent.
 const (
-	AgentIDArticle          = "wechat-article"
-	AgentIDSeednote         = "seednote"
-	AgentIDWechatPicture    = "wechat-picture"
-	AgentIDMontage          = "montage"
-	AgentIDHypit            = "hypit"
-	AgentIDFeedbackAnalysis = "feedback-analysis"
-	AgentIDProfileAnalysis  = "profile-analysis"
-	AgentIDContentPlanning  = "content-planning"
-	AgentIDWhiteboard       = "whiteboard-animation"
-	AgentIDLocalLife        = "local-life"
-	AgentIDVideoEdit        = "video-edit"
+	AgentIDArticle           = "wechat-article"
+	AgentIDSeednote          = "seednote"
+	AgentIDWechatPicture     = "wechat-picture"
+	AgentIDMontage           = "montage"
+	AgentIDHypit             = "hypit"
+	AgentIDFeedbackAnalysis  = "feedback-analysis"
+	AgentIDProfileAnalysis   = "profile-analysis"
+	AgentIDContentPlanning   = "content-planning"
+	AgentIDWhiteboard        = "whiteboard-animation"
+	AgentIDLocalLife         = "local-life"
+	AgentIDVideoEdit         = "video-edit"
+	AgentIDTalkingHeadEditor = "talking-head-editor"
 )
 
 // Channel constants. Keep these values provider-neutral; labels belong to the
 // Studio and connector implementations.
 const (
-	ChannelArticle          = "wechat-article"
-	ChannelSeednote         = "seednote"
-	ChannelWechatPicture    = "wechat-picture"
-	ChannelHypit            = "hypit"
-	ChannelMoments          = "moments"
-	ChannelEcommerce        = "ecommerce"
-	ChannelProfileAnalysis  = "profile-analysis"
-	ChannelContentPlanning  = "content-planning"
-	ChannelMontage          = "montage"
-	ChannelFeedbackAnalysis = "feedback-analysis"
-	ChannelWhiteboard       = "whiteboard-animation"
-	ChannelLocalLife        = "local-life"
-	ChannelVideoEdit        = "video-edit"
+	ChannelArticle           = "wechat-article"
+	ChannelSeednote          = "seednote"
+	ChannelWechatPicture     = "wechat-picture"
+	ChannelHypit             = "hypit"
+	ChannelMoments           = "moments"
+	ChannelEcommerce         = "ecommerce"
+	ChannelProfileAnalysis   = "profile-analysis"
+	ChannelContentPlanning   = "content-planning"
+	ChannelMontage           = "montage"
+	ChannelFeedbackAnalysis  = "feedback-analysis"
+	ChannelWhiteboard        = "whiteboard-animation"
+	ChannelLocalLife         = "local-life"
+	ChannelVideoEdit         = "video-edit"
+	ChannelTalkingHeadEditor = "talking-head-editor"
 )
 
 // Task kinds are workflow identities within one Agent/channel.
@@ -93,6 +97,7 @@ const (
 	TaskKindContentScript     = "content_script"
 	TaskKindFeedbackAnalysis  = "feedback_analysis"
 	TaskKindVideoEdit         = "video_edit"
+	TaskKindTalkingHeadEditor = "talking_head_editor"
 )
 
 // Task types are public, persisted execution identities and use kebab-case.
@@ -144,6 +149,8 @@ func TaskTypeForTaskKind(taskKind string) string {
 		return TaskTypeContentScript
 	case TaskKindVideoEdit:
 		return PlatformVideoEdit
+	case TaskKindTalkingHeadEditor:
+		return PlatformTalkingHeadEditor
 	default:
 		return taskKind
 	}
@@ -151,7 +158,7 @@ func TaskTypeForTaskKind(taskKind string) string {
 
 func IsChannel(value string) bool {
 	switch value {
-	case ChannelContentPlanning, ChannelArticle, ChannelSeednote, ChannelWechatPicture, ChannelHypit, ChannelMoments, ChannelEcommerce, ChannelMontage, ChannelFeedbackAnalysis, ChannelProfileAnalysis, ChannelWhiteboard, ChannelLocalLife, ChannelVideoEdit:
+	case ChannelContentPlanning, ChannelArticle, ChannelSeednote, ChannelWechatPicture, ChannelHypit, ChannelMoments, ChannelEcommerce, ChannelMontage, ChannelFeedbackAnalysis, ChannelProfileAnalysis, ChannelWhiteboard, ChannelLocalLife, ChannelVideoEdit, ChannelTalkingHeadEditor:
 		return true
 	default:
 		return false
@@ -160,7 +167,7 @@ func IsChannel(value string) bool {
 
 func IsAgentID(value string) bool {
 	switch value {
-	case AgentIDContentPlanning, AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDMontage, AgentIDHypit, AgentIDFeedbackAnalysis, AgentIDProfileAnalysis, AgentIDWhiteboard, AgentIDLocalLife, AgentIDVideoEdit:
+	case AgentIDContentPlanning, AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDMontage, AgentIDHypit, AgentIDFeedbackAnalysis, AgentIDProfileAnalysis, AgentIDWhiteboard, AgentIDLocalLife, AgentIDVideoEdit, AgentIDTalkingHeadEditor:
 		return true
 	default:
 		return false
@@ -189,6 +196,8 @@ func AgentChannel(agentID string) (string, bool) {
 		return ChannelLocalLife, true
 	case AgentIDVideoEdit:
 		return ChannelVideoEdit, true
+	case AgentIDTalkingHeadEditor:
+		return ChannelTalkingHeadEditor, true
 	default:
 		return "", false
 	}
@@ -209,6 +218,8 @@ func PlatformForChannel(channel string) string {
 		return PlatformLocalLife
 	case ChannelVideoEdit:
 		return PlatformVideoEdit
+	case ChannelTalkingHeadEditor:
+		return PlatformTalkingHeadEditor
 	default:
 		return ""
 	}
@@ -250,7 +261,7 @@ func DefaultImageRatioForChannel(channel string) string {
 func IsTaskKind(value string) bool {
 	switch value {
 	case TaskKindContentResearch, TaskKindContentValidation, TaskKindContentScript, TaskKindContentGeneration, TaskKindViralAnalysis, TaskKindProfileAnalysis,
-		TaskKindFeedbackAnalysis, TaskKindVideoEdit, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit, PlatformLocalLife,
+		TaskKindFeedbackAnalysis, TaskKindVideoEdit, TaskKindTalkingHeadEditor, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit, PlatformLocalLife,
 		TaskTypeWechatArticle, TaskTypeWechatPicture:
 		return true
 	default:
@@ -295,6 +306,7 @@ const (
 	PlatformHypit               = "hypit"
 	PlatformLocalLife           = "local-life"
 	PlatformVideoEdit           = "video-edit"
+	PlatformTalkingHeadEditor   = "talking-head-editor"
 )
 
 // IsProjectPlatform reports whether value is an explicitly implemented
@@ -302,7 +314,7 @@ const (
 // identities, but must not create new business identities by themselves.
 func IsProjectPlatform(value string) bool {
 	switch value {
-	case PlatformWechat, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit, PlatformLocalLife, PlatformVideoEdit:
+	case PlatformWechat, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit, PlatformLocalLife, PlatformVideoEdit, PlatformTalkingHeadEditor:
 		return true
 	default:
 		return false
@@ -334,6 +346,10 @@ func IsLocalLifePlatform(platform string) bool {
 
 func IsVideoEditPlatform(platform string) bool {
 	return platform == PlatformVideoEdit
+}
+
+func IsTalkingHeadEditorPlatform(platform string) bool {
+	return platform == PlatformTalkingHeadEditor
 }
 
 // SupportsPortraitCover identifies workflows with an independently selected project portrait cover.

@@ -148,6 +148,34 @@ export const videoEditInputSchema = z.object({
   delivery_targets: z.array(z.string().min(1).max(100)).max(20).optional(),
 }).optional()
 
+const talkingHeadEditorAssetSchema = z.object({
+  role: z.enum(['broll', 'sfx', 'bgm', 'reference']),
+  asset_id: z.string().optional(),
+  url: z.string().optional(),
+  file_name: z.string().optional(),
+  mime_type: z.string().optional(),
+  file_size: z.number().nonnegative().optional(),
+}).refine((asset) => Boolean(asset.asset_id?.trim() || asset.url?.trim()), '素材缺少上传标识')
+
+const talkingHeadEditorPreferencesSchema = z.object({
+  quality_tier: z.enum(['effective', 'balanced', 'quality']).optional(),
+  subtitle_mode: z.enum(['off', 'required']).optional(),
+  target_duration_seconds: z.number().int().min(0).max(1800).optional(),
+  aspect_ratio: z.enum(['9:16', '16:9', '1:1', '4:3']).optional(),
+  broll_mode: z.enum(['auto', 'provided_only']).optional(),
+  sound_mode: z.enum(['after_review', 'provided_only', 'auto']).optional(),
+  style: z.string().max(2000).optional(),
+}).optional()
+
+export const talkingHeadEditorInputSchema = z.object({
+  brief: promptSchema,
+  primary_video: z.object({ role: z.literal('reference'), asset_id: z.string().optional(), url: z.string().optional(), file_name: z.string().optional(), mime_type: z.string().optional(), file_size: z.number().nonnegative().optional() }).refine((asset) => Boolean(asset.asset_id?.trim() || asset.url?.trim()), '请上传主口播视频'),
+  supporting_assets: z.array(talkingHeadEditorAssetSchema).max(20).optional(),
+  reference_cut: talkingHeadEditorAssetSchema.optional(),
+  preferences: talkingHeadEditorPreferencesSchema,
+  delivery_targets: z.array(z.string().min(1).max(100)).max(20).optional(),
+}).optional()
+
 export const loginSchema = z.object({
   email: z.string().min(1, "邮箱不能为空").email("请输入有效的邮箱地址"),
   password: z.string().min(1, "密码不能为空"),
@@ -166,7 +194,7 @@ export type RegisterFormValues = z.infer<typeof registerSchema>
 export const createTaskSchema = z.object({
   project_id: z.string().optional().default(""),
   execution_profile: executionProfileSchema,
-  type: z.enum(["seednote", "wechat-article", "wechat-picture", "moments", "viral-analysis", "profile-analysis", "content-research", "content-validation", "content-script", "feedback-analysis", "ecommerce", "montage", "whiteboard-animation", "hypit", "local-life", "video-edit"]),
+  type: z.enum(["seednote", "wechat-article", "wechat-picture", "moments", "viral-analysis", "profile-analysis", "content-research", "content-validation", "content-script", "feedback-analysis", "ecommerce", "montage", "whiteboard-animation", "hypit", "local-life", "video-edit", "talking-head-editor"]),
   topic: promptSchema.optional(),
   prompt: promptSchema.optional(),
   quantity: z.number().int().min(1).max(5).default(1),
@@ -204,6 +232,7 @@ export const createTaskSchema = z.object({
   montage_input: montageInputSchema,
   local_life_input: localLifeInputSchema,
   video_edit_input: videoEditInputSchema,
+  talking_head_editor_input: talkingHeadEditorInputSchema,
 }).superRefine((data, ctx) => {
   if (!data.project_id?.trim()) {
     ctx.addIssue({
@@ -265,6 +294,13 @@ export const createTaskSchema = z.object({
     if (!data.video_edit_input?.source_assets?.length) ctx.addIssue({ code: 'custom', message: '请至少上传一个视频、音频或图片素材', path: ['video_edit_input', 'source_assets'] })
   }
 
+  if (data.type === 'talking-head-editor') {
+    if (!data.talking_head_editor_input?.brief?.trim()) ctx.addIssue({ code: 'custom', message: '请填写剪辑要求', path: ['talking_head_editor_input', 'brief'] })
+    if (!data.talking_head_editor_input?.primary_video?.asset_id?.trim() && !data.talking_head_editor_input?.primary_video?.url?.trim()) {
+      ctx.addIssue({ code: 'custom', message: '请上传主口播视频', path: ['talking_head_editor_input', 'primary_video'] })
+    }
+  }
+
   if (data.type === "whiteboard-animation") {
     const subtitles = (data.input_attachments ?? []).filter((attachment) => /\.srt$/i.test(attachment.file_name ?? ""))
     if (subtitles.length !== 1 || (subtitles[0]?.type !== 'text' && subtitles[0]?.type !== 'document')) {
@@ -301,7 +337,7 @@ export const planSchema = z.object({
 export type PlanFormValues = z.infer<typeof planSchema>
 
 export const projectSchema = z.object({
-  platform: z.enum(["seednote", "wechat", "moments", "ecommerce", "montage", "whiteboard-animation", "hypit", "local-life", "video-edit"]).or(z.literal('')).optional(),
+  platform: z.enum(["seednote", "wechat", "moments", "ecommerce", "montage", "whiteboard-animation", "hypit", "local-life", "video-edit", "talking-head-editor"]).or(z.literal('')).optional(),
   agent_ids: z.array(z.string()).min(1, "至少选择一种人设类型").max(8, "最多选择 8 种人设类型").default(['wechat-article']),
   name: z.string().trim().min(1, "请输入人设名称").max(100, "名称不能超过 100 个字符"),
   profile_url: z.string().optional(),
@@ -332,6 +368,10 @@ export const projectSchema = z.object({
       style: z.string().max(2000).optional(),
       max_duration_seconds: z.number().int().min(0).max(1800).optional(),
     }).optional(),
+    delivery_targets: z.array(z.string().min(1).max(100)).max(20).optional(),
+  }).optional(),
+  talking_head_editor_defaults: z.object({
+    preferences: talkingHeadEditorPreferencesSchema,
     delivery_targets: z.array(z.string().min(1).max(100)).max(20).optional(),
   }).optional(),
   reference_image: referenceImageSelectionSchema.nullable().optional(),

@@ -145,6 +145,15 @@ var PlatformConfigs = map[string]*PlatformConfig{
 			{Key: "video_edit_defaults", Label: "剪辑默认值", Placeholder: "质量档位、字幕和交付偏好", Type: "textarea", Group: "advanced"},
 		},
 	},
+	PlatformTalkingHeadEditor: {
+		ID: PlatformTalkingHeadEditor, Label: "口播精剪", BadgeVariant: "secondary", SupportsPublishing: false, SupportsAutoFetch: false,
+		DefaultImageRatio: "9:16", SupportedImageRatios: []string{"9:16", "16:9", "1:1", "4:3"},
+		Fields: []PlatformFieldConfig{
+			{Key: "name", Label: "项目名称", Placeholder: "例如 个人口播精剪", Required: true, Type: "text", Group: "basic"},
+			{Key: "instructions", Label: "剪辑定位", Placeholder: "例如 保留自然表达，突出观点，动效服务于话术", Type: "textarea", Group: "basic"},
+			{Key: "talking_head_editor_defaults", Label: "口播精剪默认值", Placeholder: "字幕、动效密度、声音偏好和目标时长", Type: "textarea", Group: "advanced"},
+		},
+	},
 	PlatformWhiteboardAnimation: {
 		ID:                   PlatformWhiteboardAnimation,
 		Label:                "白板动画",
@@ -171,7 +180,7 @@ func GetPlatformConfig(platform string) *PlatformConfig {
 
 // GetAllPlatformConfigs returns a slice of all platform configs in deterministic order.
 func GetAllPlatformConfigs() []*PlatformConfig {
-	order := []string{PlatformSeednote, PlatformMoments, PlatformWechat, PlatformEcommerce, PlatformMontage, PlatformVideoEdit, PlatformLocalLife, PlatformWhiteboardAnimation, PlatformHypit}
+	order := []string{PlatformSeednote, PlatformMoments, PlatformWechat, PlatformEcommerce, PlatformMontage, PlatformVideoEdit, PlatformTalkingHeadEditor, PlatformLocalLife, PlatformWhiteboardAnimation, PlatformHypit}
 	configs := make([]*PlatformConfig, 0, len(order))
 	for _, key := range order {
 		if pc, ok := PlatformConfigs[key]; ok {

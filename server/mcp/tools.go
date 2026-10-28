@@ -162,7 +162,7 @@ func registerProjectTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID"},
-				"scope":      map[string]any{"type": "string", "enum": []any{"wechat", "wechat-picture", "seednote", "moments", "ecommerce", "montage", "video-edit", "hypit", "whiteboard-animation"}, "description": "Optional output-shape hint."},
+				"scope":      map[string]any{"type": "string", "enum": []any{"wechat", "wechat-picture", "seednote", "moments", "ecommerce", "montage", "video-edit", "talking-head-editor", "hypit", "whiteboard-animation"}, "description": "Optional output-shape hint."},
 				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID for resolving its frozen project_snapshot; it must belong to the same project and user."},
 			},
 			"required": []any{"project_id"},
@@ -177,7 +177,7 @@ func registerTaskTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"status":     map[string]any{"type": "string", "enum": []any{"pending", "running", "completed", "failed", "cancelled"}, "description": "Filter by status"},
+				"status":     map[string]any{"type": "string", "enum": []any{"pending", "running", "awaiting_review", "completed", "failed", "cancelled"}, "description": "Filter by status"},
 				"project_id": map[string]any{"type": "string", "description": "Filter by project ID"},
 				"plan_id":    map[string]any{"type": "string", "description": "Filter by plan ID"},
 				"limit":      map[string]any{"type": "integer", "description": "Max results (default 20, max 100)", "default": 20},

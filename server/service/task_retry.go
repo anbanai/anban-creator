@@ -43,6 +43,7 @@ type CloneTaskOverrides struct {
 	Ecommerce                     *model.EcommerceConfig
 	MontageInput                  *model.MontageInput
 	VideoEditInput                *model.VideoEditInput
+	TalkingHeadEditorInput        *model.TalkingHeadEditorInput
 	HypitInput                    *model.HypitInput
 	LocalLifeInput                *model.LocalLifeInput
 }
@@ -140,6 +141,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 			Ecommerce:                     override.Ecommerce,
 			MontageInput:                  override.MontageInput,
 			VideoEditInput:                override.VideoEditInput,
+			TalkingHeadEditorInput:        override.TalkingHeadEditorInput,
 			HypitInput:                    override.HypitInput,
 			LocalLifeInput:                override.LocalLifeInput,
 			MontageSourceTaskID:           src.ID,
@@ -249,6 +251,13 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 			input.Brief = prompt
 		}
 		params.VideoEditInput = &input
+	}
+	if model.IsTalkingHeadEditorPlatform(src.Type) {
+		input := src.TalkingHeadEditorInput.Data()
+		if cloneParams.Prompt != nil {
+			input.Brief = prompt
+		}
+		params.TalkingHeadEditorInput = &input
 	}
 	if model.IsLocalLifePlatform(src.Type) {
 		input := src.LocalLifeInput.Data()

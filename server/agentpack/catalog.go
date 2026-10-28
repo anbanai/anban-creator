@@ -33,6 +33,7 @@ var supportedChannels = map[string]struct{}{
 	"hypit":                {},
 	"montage":              {},
 	"video-edit":           {},
+	"talking-head-editor":  {},
 	"local-life":           {},
 }
 

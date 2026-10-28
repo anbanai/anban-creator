@@ -30,6 +30,7 @@ const (
 	DirectUploadPurposeEcommercePhoto           = "ecommerce_product_photo"
 	DirectUploadPurposeMontageAsset             = "montage_asset"
 	DirectUploadPurposeVideoEditAsset           = "video_edit_asset"
+	DirectUploadPurposeTalkingHeadEditorAsset   = "talking_head_editor_asset"
 	DirectUploadPurposeHypitAsset               = "hypit_asset"
 	DirectUploadPurposeAIEntryAttachment        = "ai_entry_attachment"
 	DirectUploadPurposeMediaLibrary             = "media_library"
@@ -166,6 +167,7 @@ var directUploadPolicies = map[string]directUploadPurposePolicy{
 	DirectUploadPurposeHypitAsset:               {maxSize: 256 << 20, validate: isDirectUploadMontageAsset},
 	DirectUploadPurposeMontageAsset:             {maxSize: 50 * 1024 * 1024, validate: isDirectUploadMontageAsset},
 	DirectUploadPurposeVideoEditAsset:           {maxSize: 256 * 1024 * 1024, validate: isDirectUploadMontageAsset},
+	DirectUploadPurposeTalkingHeadEditorAsset:   {maxSize: 1024 * 1024 * 1024, validate: isDirectUploadMontageAsset},
 	DirectUploadPurposeAIEntryAttachment:        {maxSize: 50 * 1024 * 1024, maxSizeFor: aiEntryAttachmentMaxSize, validate: isDirectUploadAIEntryAttachment},
 	DirectUploadPurposeMediaLibrary:             {maxSize: 50 * 1024 * 1024, validate: isDirectUploadMediaLibrary},
 	DirectUploadPurposeSeednoteImport:           {maxSize: 20 * 1024 * 1024, validate: isDirectUploadSeednoteImport},

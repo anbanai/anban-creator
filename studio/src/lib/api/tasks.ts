@@ -6,6 +6,13 @@ export interface ResumeTaskRequest {
   input_attachments: InputAttachment[]
 }
 
+export interface TalkingHeadEditorReviewRequest {
+  decision: 'approve' | 'revise'
+  feedback?: string
+  reference_cut_asset_id?: string
+  reference_cut_url?: string
+}
+
 export interface ReconcileWechatResponse {
   reconciled: boolean
 }
@@ -53,6 +60,9 @@ export const tasksApi = {
       prompt: data.prompt?.trim() ?? '',
       input_attachments: data.input_attachments,
     })),
+
+  reviewTalkingHeadEditor: (id: string, data: TalkingHeadEditorReviewRequest) =>
+    unwrap<Task>(http.post(`/tasks/${id}/review`, data)),
 
   retry: (id: string) =>
     unwrap<Task>(http.post(`/tasks/${id}/retry`)),

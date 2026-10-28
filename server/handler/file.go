@@ -124,6 +124,7 @@ func (h *FileHandler) validatePendingFileAccess(c fiber.Ctx, userID, cleanKey st
 		service.DirectUploadPurposeEcommercePhoto,
 		service.DirectUploadPurposeMontageAsset,
 		service.DirectUploadPurposeVideoEditAsset,
+		service.DirectUploadPurposeTalkingHeadEditorAsset,
 		service.DirectUploadPurposeHypitAsset,
 		service.DirectUploadPurposeAIEntryAttachment,
 	}, cleanKey, time.Now())

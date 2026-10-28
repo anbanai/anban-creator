@@ -374,7 +374,8 @@ func (r *taskRepository) FinalizeCloudTaskWithArtifactsInTx(ctx context.Context,
 		return false, fmt.Errorf("lock cloud task execution for finalization: %w", err)
 	}
 	expectedStatus, terminal := cloudTaskStatusForExecution(execution.Status)
-	if strings.TrimSpace(execution.Target) == "" || !terminal || execution.CompletedAt == nil || status != expectedStatus {
+	statusMatches := status == expectedStatus || (status == model.TaskStatusAwaitingReview && execution.Status == model.TaskExecutionSucceeded)
+	if strings.TrimSpace(execution.Target) == "" || !terminal || execution.CompletedAt == nil || !statusMatches {
 		return false, ErrCloudTaskExecutionCASLost
 	}
 
@@ -387,7 +388,7 @@ func (r *taskRepository) FinalizeCloudTaskWithArtifactsInTx(ctx context.Context,
 
 	switch artifactAction {
 	case CloudTaskArtifactsDeliver:
-		if status != model.TaskStatusCompleted || execution.Status != model.TaskExecutionSucceeded {
+		if (status != model.TaskStatusCompleted && status != model.TaskStatusAwaitingReview) || execution.Status != model.TaskExecutionSucceeded {
 			return false, fmt.Errorf("publishing cloud artifacts requires succeeded execution and completed task status")
 		}
 		if err := deliverLockedExecutionManifest(ctx, r.db, task, execution); err != nil {
@@ -410,8 +411,13 @@ func (r *taskRepository) FinalizeCloudTaskWithArtifactsInTx(ctx context.Context,
 	now := time.Now()
 	lifecycle, lifecycleChanged := model.NormalizeTaskLifecycleTerminal(task.Lifecycle.Data(), status, errorMsg, now, scope)
 	updates := map[string]any{
-		"status": status, "error_message": errorMsg, "completed_at": now, "result": result,
+		"status": status, "error_message": errorMsg, "result": result,
 		"terminal_model_usage": datatypes.NewJSONType(usage), "cost_status": costStatus,
+	}
+	if status == model.TaskStatusCompleted || status == model.TaskStatusFailed || status == model.TaskStatusCancelled {
+		updates["completed_at"] = now
+	} else if status == model.TaskStatusAwaitingReview {
+		updates["completed_at"] = nil
 	}
 	if lifecycleChanged {
 		updates["lifecycle"] = datatypes.NewJSONType(lifecycle)
@@ -443,7 +449,7 @@ func cloudTaskStatusForExecution(executionStatus string) (string, bool) {
 
 func cloudTaskTerminalStateMatches(task *model.Task, execution *model.TaskExecution, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string, artifactAction CloudTaskArtifactAction) bool {
 	if task == nil || execution == nil || task.Status != status || task.ErrorMessage != errorMsg ||
-		task.CompletedAt == nil || task.Result == nil || !jsonValuesEqual(*task.Result, result) ||
+		(status != model.TaskStatusAwaitingReview && task.CompletedAt == nil) || task.Result == nil || !jsonValuesEqual(*task.Result, result) ||
 		!reflect.DeepEqual(task.TerminalModelUsage.Data(), usage) || task.CostStatus != costStatus {
 		return false
 	}

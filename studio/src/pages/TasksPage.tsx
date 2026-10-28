@@ -32,6 +32,7 @@ const statusTabs: { label: string; value: string }[] = [
   { label: '全部', value: 'all' },
   { label: '待执行', value: 'pending' },
   { label: '运行中', value: 'running' },
+  { label: '待审核', value: 'awaiting_review' },
   { label: '已完成', value: 'completed' },
   { label: '失败', value: 'failed' },
   { label: '已取消', value: 'cancelled' },

@@ -94,6 +94,7 @@ type AgentBootstrapConfig struct {
 	Hypit                   srvconfig.HypitConfig
 	MontageEnv              map[string]string
 	VideoEdit               srvconfig.VideoEditConfig
+	TalkingHeadEditor       srvconfig.TalkingHeadEditorConfig
 	Registry                *AgentProfileRegistry
 	ProjectMemory           ProjectMemoryReader
 }
@@ -329,6 +330,15 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 			tokenTTL = required
 		}
 	}
+	if task != nil && model.IsTalkingHeadEditorPlatform(task.Type) {
+		required := time.Duration(s.cfg.TalkingHeadEditor.TimeoutMinutes) * time.Minute
+		if execution != nil && execution.ActiveDeadlineSeconds > 0 {
+			required = time.Duration(execution.ActiveDeadlineSeconds) * time.Second
+		}
+		if tokenTTL < required {
+			tokenTTL = required
+		}
+	}
 	credentialDeadline := issuedAt.Add(tokenTTL)
 	if workloadDeadline.Before(credentialDeadline) {
 		credentialDeadline = workloadDeadline
@@ -523,6 +533,11 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, err
 	}
 	files = append(files, videoEditFiles...)
+	talkingHeadFiles, err := s.buildTalkingHeadEditorFiles(ctx, execution, task, credentialDeadline)
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, talkingHeadFiles...)
 	recoveryFiles, err := s.buildPublicationRecoveryFiles(ctx, execution, task, credentialDeadline)
 	if err != nil {
 		return nil, err
@@ -837,6 +852,18 @@ func (s *AgentBootstrapService) runtimeEnv(task *model.Task) map[string]string {
 		}
 		return env
 	}
+	if task != nil && model.IsTalkingHeadEditorPlatform(task.Type) {
+		env := make(map[string]string, len(s.cfg.TalkingHeadEditor.Env)+1)
+		for key, value := range s.cfg.TalkingHeadEditor.Env {
+			if strings.TrimSpace(value) != "" {
+				env[key] = value
+			}
+		}
+		if key := strings.TrimSpace(s.cfg.TalkingHeadEditor.VideoUseAPIKey); key != "" {
+			env["VIDEO_USE_API_KEY"] = key
+		}
+		return env
+	}
 	return s.montageEnv(task)
 }
 
@@ -942,6 +969,137 @@ func (s *AgentBootstrapService) buildVideoEditFiles(ctx context.Context, task *m
 	}
 	files = append(files, BootstrapFile{Path: "video-edit-policy.json", Text: string(policyRaw), Mode: 0644})
 	return files, nil
+}
+
+func (s *AgentBootstrapService) buildTalkingHeadEditorFiles(ctx context.Context, execution *model.TaskExecution, task *model.Task, credentialDeadline time.Time) ([]BootstrapFile, error) {
+	if task == nil || !model.IsTalkingHeadEditorPlatform(task.Type) {
+		return nil, nil
+	}
+	input := task.TalkingHeadEditorInput.Data()
+	if reviewAssetID := strings.TrimSpace(task.ReviewReferenceCutAssetID); reviewAssetID != "" {
+		input.ReferenceCut = &model.TalkingHeadEditorAsset{Role: "reference", AssetID: reviewAssetID}
+	}
+	if err := input.Validate(s.cfg.TalkingHeadEditor.MaxAssets, s.cfg.TalkingHeadEditor.MaxDurationSeconds); err != nil {
+		return nil, fmt.Errorf("%w: validate frozen talking-head-editor input: %v", ErrAgentBootstrapConflict, err)
+	}
+	if s.repo == nil || s.cfg.Store == nil {
+		return nil, fmt.Errorf("%w: talking-head-editor source material storage is unavailable", ErrAgentBootstrapUnavailable)
+	}
+	files := make([]BootstrapFile, 0, len(input.SupportingAssets)+4)
+	materialize := func(stored *model.Asset, rel string) (BootstrapFile, error) {
+		if stored == nil {
+			return BootstrapFile{}, fmt.Errorf("%w: talking-head-editor asset storage is invalid", ErrAgentBootstrapConflict)
+		}
+		signed, err := s.signedBootstrapObjectKey(ctx, stored.StorageKey, credentialDeadline)
+		if err != nil {
+			return BootstrapFile{}, err
+		}
+		return BootstrapFile{Path: rel, DownloadURL: signed, Mode: 0644, ExpectedSize: stored.Size, MaxBytes: 1 << 30}, nil
+	}
+	material := func(asset *model.TalkingHeadEditorAsset, rel string) error {
+		if asset == nil || strings.TrimSpace(asset.AssetID) == "" {
+			return fmt.Errorf("%w: talking-head-editor asset is missing", ErrAgentBootstrapConflict)
+		}
+		stored, err := s.repo.Assets().FindOwnedByID(ctx, asset.AssetID, task.UserID)
+		if err != nil || stored == nil {
+			return fmt.Errorf("%w: talking-head-editor asset %q is unavailable", ErrAgentBootstrapConflict, asset.AssetID)
+		}
+		file, err := materialize(stored, rel)
+		if err != nil {
+			return err
+		}
+		files = append(files, file)
+		asset.AssetID, asset.URL, asset.FileName, asset.MimeType, asset.FileSize = "", "", stored.FileName, stored.ContentType, stored.Size
+		return nil
+	}
+	if err := material(&input.PrimaryVideo, path.Join(".anban-creator/talking-head-editor-assets", "primary-"+safeAssetFilename(input.PrimaryVideo.FileName))); err != nil {
+		return nil, err
+	}
+	for i := range input.SupportingAssets {
+		if err := material(&input.SupportingAssets[i], path.Join(".anban-creator/talking-head-editor-assets", fmt.Sprintf("supporting-%02d-%s", i+1, safeAssetFilename(input.SupportingAssets[i].FileName)))); err != nil {
+			return nil, err
+		}
+	}
+	if input.ReferenceCut != nil {
+		if err := material(input.ReferenceCut, path.Join(".anban-creator/talking-head-editor-assets", "reference-"+safeAssetFilename(input.ReferenceCut.FileName))); err != nil {
+			return nil, err
+		}
+	}
+	if strings.TrimSpace(task.ReviewDecision) != "" && execution != nil && strings.TrimSpace(execution.ParentExecutionID) != "" {
+		parentID := strings.TrimSpace(execution.ParentExecutionID)
+		parentFiles, err := s.repo.TaskFiles().FindByExecutionID(ctx, parentID)
+		if err != nil {
+			return nil, fmt.Errorf("list talking-head-editor review artifacts: %w", err)
+		}
+		allowed := map[string]bool{
+			"output/rough-cut.mp4":               true,
+			"output/transcript.json":             true,
+			"output/edit-decision-list.json":     true,
+			"output/edit-strategy.md":            true,
+			"output/semantic-cut.mp4":            true,
+			"output/motion-sample.mp4":           true,
+			"output/visual-plan.json":            true,
+			"output/motion-review.json":          true,
+			"output/motion-source-manifest.json": true,
+		}
+		prefix := buildTaskMCPArtifactStoragePrefix(task, parentID)
+		for _, file := range parentFiles {
+			if file == nil || file.TaskID != task.ID || file.ExecutionID != parentID || file.State != model.TaskFileStateDelivered || !allowed[filepath.ToSlash(file.FilePath)] {
+				continue
+			}
+			if s.cfg.Store == nil || file.StorageProvider != s.cfg.Store.Name() || file.OSSKey != prefix+file.FilePath || file.FileSize <= 0 || file.FileSize > 1<<30 {
+				return nil, fmt.Errorf("%w: invalid talking-head-editor review artifact %q", ErrAgentBootstrapConflict, file.FilePath)
+			}
+			signed, err := s.signedBootstrapObjectKey(ctx, file.OSSKey, credentialDeadline)
+			if err != nil {
+				return nil, fmt.Errorf("sign talking-head-editor review artifact %q: %w", file.FilePath, err)
+			}
+			files = append(files, BootstrapFile{Path: filepath.ToSlash(file.FilePath), DownloadURL: signed, ContentSHA256: file.ContentHash, Mode: 0644, ExpectedSize: file.FileSize, MaxBytes: 1 << 30, ReplaceExisting: true})
+		}
+	}
+	raw, err := json.MarshalIndent(input, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal talking-head-editor input: %w", err)
+	}
+	files = append(files, BootstrapFile{Path: "talking-head-editor-input.json", Text: string(raw), Mode: 0644})
+	policy := map[string]any{
+		"skills":            []string{"auto-editor", "video-use", "erduo-broll-loop-engineering"},
+		"video_use_api_key": "server-injected",
+		"review_gate":       "motion-sample",
+		"review_decision":   task.ReviewDecision,
+		"review_feedback":   task.ReviewFeedback,
+		"review_revision":   task.ReviewRevision,
+		"resume_from":       talkingHeadEditorResumeStage(task.ReviewDecision),
+		"output_dir":        "output",
+	}
+	policyRaw, err := json.MarshalIndent(policy, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, BootstrapFile{Path: "talking-head-editor-policy.json", Text: string(policyRaw), Mode: 0644})
+	return files, nil
+}
+
+func talkingHeadEditorResumeStage(decision string) string {
+	if strings.TrimSpace(decision) == "approve" {
+		return "sound_and_review"
+	}
+	if strings.TrimSpace(decision) == "revise" {
+		return "motion_packaging"
+	}
+	return "input_and_rough_cut"
+}
+
+func safeAssetFilename(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "asset.bin"
+	}
+	name = regexp.MustCompile(`[^a-zA-Z0-9._-]+`).ReplaceAllString(name, "-")
+	if name == "" {
+		return "asset.bin"
+	}
+	return name
 }
 
 func validateVideoEditSourceAssetMaterializable(asset *model.Asset, userID, expectedStorageProvider string, input *model.VideoEditAsset, maxBytes int64) error {

@@ -372,6 +372,7 @@ func main() {
 		MontagePipelineDefaults: cfg.Montage.PipelineDefaults,
 		MontageEnv:              cfg.Montage.Env,
 		VideoEdit:               cfg.VideoEdit,
+		TalkingHeadEditor:       cfg.TalkingHeadEditor,
 		Hypit:                   cfg.Hypit,
 		Registry:                agentProfiles,
 		ProjectMemory:           projectMemoryStore,
@@ -485,6 +486,7 @@ func main() {
 		taskSvc.SetHypitConfig(cfg.Hypit)
 		taskSvc.SetMontageConfig(cfg.Montage)
 		taskSvc.SetVideoEditConfig(cfg.VideoEdit)
+		taskSvc.SetTalkingHeadEditorConfig(cfg.TalkingHeadEditor)
 		taskSvc.SetMontageCapabilityService(montageCapabilitySvc)
 		taskSvc.SetLocalLifeCapabilityService(localLifeCapabilitySvc)
 		taskSvc.SetExecutionTimeouts(cfg.Asynq.ContentGenerateTimeout, cfg.Asynq.PersistTimeout)
@@ -950,6 +952,7 @@ func main() {
 		}
 		agentProjectProfileSvc := service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), cfg.Montage, imageCapabilityResolver, repo)
 		agentProjectProfileSvc.SetVideoEditConfig(cfg.VideoEdit)
+		agentProjectProfileSvc.SetTalkingHeadEditorConfig(cfg.TalkingHeadEditor)
 		mcp.SetServices(&mcp.Services{
 			ProjectSvc:             projectSvc,
 			TaskSvc:                taskSvc,

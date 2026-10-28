@@ -9,6 +9,7 @@ const customRendererKeys = new Set([
   'hypit',
   'local-life',
   'video-edit',
+  'talking-head-editor',
 ])
 
 export function registeredAgentPackForm(renderer?: string): string | null {

@@ -72,6 +72,7 @@ image_entries=(
   "seednote=${AGENT_IMAGE_SEEDNOTE:?AGENT_IMAGE_SEEDNOTE must be set}"
   "montage=${AGENT_IMAGE_MONTAGE:?AGENT_IMAGE_MONTAGE must be set}"
   "video-edit=${AGENT_IMAGE_VIDEO_EDIT:?AGENT_IMAGE_VIDEO_EDIT must be set}"
+  "talking-head-editor=${AGENT_IMAGE_TALKING_HEAD_EDITOR:?AGENT_IMAGE_TALKING_HEAD_EDITOR must be set}"
   "moments=${AGENT_IMAGE_MOMENTS:?AGENT_IMAGE_MOMENTS must be set}"
   "ecommerce=${AGENT_IMAGE_ECOMMERCE:?AGENT_IMAGE_ECOMMERCE must be set}"
   "profile-analysis=${AGENT_IMAGE_PROFILE_ANALYSIS:?AGENT_IMAGE_PROFILE_ANALYSIS must be set}"

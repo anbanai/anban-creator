@@ -142,6 +142,8 @@ spec:
               value: "${montage_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_VIDEO_EDIT
               value: "${video_edit_agent_image_repo}"
+            - name: ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR
+              value: "${talking_head_editor_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_MOMENTS
               value: "${moments_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_ECOMMERCE
@@ -162,6 +164,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: video-edit-elevenlabs
+                  key: api-key
+                  optional: true
+            - name: VIDEO_USE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: talking-head-editor-video-use
                   key: api-key
                   optional: true
             - name: ANBAN_DSH_IMAGE
