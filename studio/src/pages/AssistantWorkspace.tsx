@@ -1415,21 +1415,6 @@ function PersonaRail({ projects, selectedProjectId, disabled, onSelect, onCreate
   const scrollRef = useRef<HTMLDivElement>(null)
   const [hasContentAbove, setHasContentAbove] = useState(false)
   const [hasContentBelow, setHasContentBelow] = useState(false)
-  const [ordering, setOrdering] = useState({ selectedId: selectedProjectId, ids: [] as string[] })
-  const orderedProjects = [
-    ...ordering.ids.flatMap((id) => projects.find((project) => project.id === id) ?? []),
-    ...projects.filter((project) => !ordering.ids.includes(project.id)),
-  ]
-  if (ordering.selectedId !== selectedProjectId) {
-    const previousIndex = orderedProjects.findIndex((project) => project.id === ordering.selectedId)
-    const nextIndex = orderedProjects.findIndex((project) => project.id === selectedProjectId)
-    // Put the previous persona in the chosen card's slot without shifting other cards.
-    if (previousIndex >= 0 && nextIndex >= 0) {
-      [orderedProjects[previousIndex], orderedProjects[nextIndex]] = [orderedProjects[nextIndex], orderedProjects[previousIndex]]
-    }
-    setOrdering({ selectedId: selectedProjectId, ids: orderedProjects.map((project) => project.id) })
-  }
-  const otherProjects = orderedProjects.filter((project) => project.id !== selectedProjectId)
   const hasSelectedProject = projects.some((project) => project.id === selectedProjectId)
 
   useEffect(() => {
@@ -1450,12 +1435,12 @@ function PersonaRail({ projects, selectedProjectId, disabled, onSelect, onCreate
       element.removeEventListener('scroll', updateOverflow)
       window.removeEventListener('resize', updateOverflow)
     }
-  }, [otherProjects.length])
+  }, [projects.length])
 
   return <section aria-label="首页人设选择" className="mx-auto flex min-h-32 w-full max-w-5xl flex-col pb-1">
     <div data-testid="persona-rail-header" className="mb-3 flex shrink-0 items-center gap-2 px-1">
       <p className="text-sm font-medium">{hasSelectedProject ? '切换人设' : '选择人设'}</p>
-      <span className="text-xs text-muted-foreground">{hasSelectedProject ? `其他 ${otherProjects.length} 个人设` : projects.length ? `${projects.length} 个可用人设` : '还没有可用人设'}</span>
+      <span className="text-xs text-muted-foreground">{projects.length ? `${projects.length} 个人设` : '还没有可用人设'}</span>
     </div>
     <div className="relative h-[14.125rem] min-h-0">
       <div ref={scrollRef} className="assistant-scroll persona-card-scroll grid h-full min-h-0 grid-cols-2 min-[700px]:grid-cols-3 min-[1600px]:grid-cols-4 min-[1900px]:grid-cols-5 min-[2200px]:grid-cols-6 auto-rows-max content-start gap-2 overflow-y-auto overscroll-contain p-1" data-testid="persona-card-scroll" tabIndex={0}>
@@ -1463,15 +1448,17 @@ function PersonaRail({ projects, selectedProjectId, disabled, onSelect, onCreate
           <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Plus className="size-4" /></span>
           <span className="min-w-0"><span className="block truncate text-sm font-semibold">创建新人设</span><span className="mt-0.5 block truncate text-xs leading-4 text-muted-foreground">聊一聊你的定位与风格</span></span>
         </button>
-        {otherProjects.map((project) => {
+        {projects.map((project) => {
+          const selected = project.id === selectedProjectId
           const agents = personaAgentIDs(project)
           const imageURL = personaImageURL(project)
-          return <article key={project.id} className="group relative flex min-h-[5.25rem] min-w-0 flex-col rounded-xl border border-border bg-card p-2 transition-shadow hover:shadow-sm">
-            <button type="button" aria-label={`选择人设：${project.name}`} disabled={disabled} onClick={() => onSelect(project.id)} className="flex min-h-10 w-full min-w-0 grow shrink-0 items-start gap-2 text-left">
+          return <article key={project.id} className={`group relative flex min-h-[5.25rem] min-w-0 flex-col rounded-xl border p-2 transition-colors hover:shadow-sm ${selected ? 'border-primary/50 bg-primary/[0.05]' : 'border-border bg-card'}`}>
+            <button type="button" aria-label={`选择人设：${project.name}`} aria-pressed={selected} disabled={disabled} onClick={() => onSelect(project.id)} className="flex min-h-10 w-full min-w-0 grow shrink-0 items-start gap-2 text-left">
               <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
                 {imageURL ? <SignedImage src={imageURL} alt="" className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-5 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-5 text-muted-foreground" />}
               </div>
               <span className="min-w-0 flex-1"><span className="flex items-center gap-1 text-sm font-semibold"><span className="truncate">{project.name}</span><AgentIconStack agentIds={agents} maxVisible={1} compact emptyLabel="还未选择创作类型" /></span><span className="block truncate text-xs leading-4 text-muted-foreground">{project.description || (agents.length ? platformIntroduction(project.platform) : '选择创作类型后即可开始')}</span></span>
+              {selected && <Check aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-primary" />}
             </button>
             <div className="persona-card-actions mt-auto flex shrink-0 flex-wrap items-center justify-end gap-1 transition-opacity">
               <PersonaCreationSettings project={project} disabled={disabled} />
