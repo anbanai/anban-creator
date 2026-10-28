@@ -17,6 +17,12 @@ This file provides guidance to AI coding assistants when working in this reposit
 - Before large work, detect whether the current checkout is already a linked worktree. Otherwise create or enter a task worktree (prefer the host's native tool; otherwise use the ignored `.worktrees/` directory). Do not start large work in the shared checkout.
 - Preserve unrelated changes from other sessions; never reset, clean, overwrite, or copy them. One-file, low-conflict documentation or formatting edits may stay in the current checkout after checking status, but work that grows beyond that scope must move to a worktree.
 
+## Main Synchronization Before Push
+
+- Before EVERY push to a remote branch, fetch the latest `main` from `origin` with `git fetch origin main`. A fetch from an earlier push or the local `main` branch does not satisfy this requirement.
+- Merge or rebase the latest `origin/main` into the branch being pushed, preserving unrelated work. Resolve any conflicts and run the relevant verification for changes introduced by synchronization before pushing.
+- Confirm `git merge-base --is-ancestor origin/main HEAD` succeeds before the push. If fetching, synchronization, conflict resolution, or required verification fails, do not push.
+
 ## Project Overview
 
 **Anban 自媒体智能创作助手** is a Studio-first content creation platform for WeChat articles, Seednote-style notes, live slicing, AI image work, and agent-assisted publishing workflows.
