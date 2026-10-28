@@ -68,7 +68,10 @@
     .create-title { font-size:14px; font-weight:600; line-height:20px; }
     .create-description { font-size:12px; color:var(--muted); line-height:18px; }
     .composer-area { margin-top:12px; }
-    .mode-tag { display:inline-flex; align-items:center; height:26px; padding:0 8px; border:1px solid #e6dfd3; border-radius:6px; background:#f7f3ec; color:#8c775e; font-size:12px; white-space:nowrap; }
+    .mode-indicator { display:inline-flex; align-items:center; gap:5px; color:#85887b; font-size:12px; white-space:nowrap; }
+    .mode-indicator svg { width:14px; height:14px; }
+    .mode-indicator::after { content:""; width:1px; height:12px; margin-left:6px; background:var(--border); }
+    .mode-indicator[data-mode="profile"]::after { display:none; }
     .composer { border:1px solid #d8d6cc; border-radius:12px; background:white; padding:10px 12px 10px; }
     .composer:focus-within { border-color:#b28c62; }
     textarea { width:100%; height:96px; display:block; background:transparent; border:0; outline:none; resize:none; font-size:14px; line-height:22px; padding:0; }
@@ -137,7 +140,7 @@
       </div>
     </section>
     <section class="composer-area" aria-label="创作输入区">
-      <div class="composer"><textarea aria-label="发送消息" placeholder="描述你想创作的内容，或告诉我你的目标..."></textarea><div class="tools"><div class="tools-left"><button aria-label="添加附件"><svg><use href="#attach"/></svg></button><button aria-label="从素材库选择"><svg style="width:12px;height:12px"><use href="#plus"/></svg></button></div><div class="tools-right"><span class="mode-tag">创作模式</span><button class="type-select"><span id="creation-type">公众号文章</span><svg><use href="#down"/></svg></button><button class="parameters"><svg><use href="#sliders"/></svg><span>性价比 / 16:9 / 标准图像</span><svg><use href="#down"/></svg></button><button class="send" aria-label="发送消息"><svg><use href="#arrow"/></svg></button></div></div></div>
+      <div class="composer"><textarea aria-label="发送消息" placeholder="描述你想创作的内容，或告诉我你的目标..."></textarea><div class="tools"><div class="tools-left"><button aria-label="添加附件"><svg><use href="#attach"/></svg></button><button aria-label="从素材库选择"><svg style="width:12px;height:12px"><use href="#plus"/></svg></button></div><div class="tools-right"><span class="mode-indicator" data-mode="creation" role="status"><svg aria-hidden="true"><use id="mode-icon" href="#spark"/></svg><span id="mode-label">创作模式</span></span><button class="type-select"><span id="creation-type">公众号文章</span><svg><use href="#down"/></svg></button><button class="parameters"><svg><use href="#sliders"/></svg><span>性价比 / 16:9 / 标准图像</span><svg><use href="#down"/></svg></button><button class="send" aria-label="发送消息"><svg><use href="#arrow"/></svg></button></div></div></div>
     </section>
   </div></main>
   <script>
@@ -151,21 +154,34 @@
       { name:'词元玩家 TokenPlayer 公众号', description:'深度文章与图文内容', type:'公众号文章', count:1 },
     ];
     const grid = document.getElementById('persona-grid');
+    function setMode(mode) {
+      const isProfile = mode === 'profile';
+      document.querySelector('.mode-indicator').dataset.mode = mode;
+      document.getElementById('mode-label').textContent = isProfile ? '人设模式' : '创作模式';
+      document.getElementById('mode-icon').setAttribute('href', isProfile ? '#user' : '#spark');
+      document.querySelector('.type-select').hidden = isProfile;
+      document.querySelector('.parameters').hidden = isProfile;
+      document.querySelector('textarea').placeholder = isProfile ? '告诉我你希望调整的人设定位、风格或创作方向...' : '描述你想创作的内容，或告诉我你的目标...';
+      document.querySelector('.hero-description').textContent = isProfile ? '调整这个人设的定位、风格与创作方向。' : '使用当前人设，开始你的下一次创作。';
+    }
     function agentIcon(persona) {
       const note = persona.type === '种草笔记';
       return `<span class="agent-icon ${note ? 'note' : ''}" title="${persona.type}"><svg><use href="#${note ? 'works' : 'edit'}"/></svg></span>${persona.count > 1 ? `<span class="agent-extra">+${persona.count - 1}</span>` : ''}`;
     }
     function renderCard(card, index) {
       const persona = alternatives[index];
-      card.innerHTML = `<button class="select-persona" aria-label="切换到${persona.name}"><span class="card-avatar"><svg><use href="#user"/></svg></span><span class="card-copy"><span class="card-name-row"><span class="card-name">${persona.name}</span>${agentIcon(persona)}</span><span class="card-description">${persona.description}</span></span></button><div class="card-actions"><button>创作类型</button><button>查看作品</button><button>调整人设</button></div>`;
-      card.querySelector('.select-persona').addEventListener('click', () => {
+      card.innerHTML = `<button class="select-persona" aria-label="切换到${persona.name}"><span class="card-avatar"><svg><use href="#user"/></svg></span><span class="card-copy"><span class="card-name-row"><span class="card-name">${persona.name}</span>${agentIcon(persona)}</span><span class="card-description">${persona.description}</span></span></button><div class="card-actions"><button>创作类型</button><button>查看作品</button><button class="edit-persona" aria-label="调整人设：${persona.name}">调整人设</button></div>`;
+      const choosePersona = (mode) => {
         // The previous persona takes this slot so other cards do not move.
         [current, alternatives[index]] = [alternatives[index], current];
         document.getElementById('current-name').textContent = current.name;
         document.getElementById('current-types').innerHTML = agentIcon(current);
         document.getElementById('creation-type').textContent = current.type;
+        setMode(mode);
         renderCard(card, index);
-      });
+      };
+      card.querySelector('.select-persona').addEventListener('click', () => choosePersona('creation'));
+      card.querySelector('.edit-persona').addEventListener('click', () => choosePersona('profile'));
     }
     alternatives.forEach((_, index) => {
       const card = document.createElement('article');
