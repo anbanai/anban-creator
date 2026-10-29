@@ -33,11 +33,16 @@ func TestAssistantInteractionRepositoryCASAndRuntime(t *testing.T) {
 	if err := repo.AssistantInteractions().Create(context.Background(), interaction); err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := repo.AssistantInteractions().CompareAndSwapGeneration(context.Background(), interaction.ID, 1, 2, now); err != nil || !ok {
+	expiresAt := now.Add(24 * time.Hour)
+	if ok, err := repo.AssistantInteractions().CompareAndSwapGeneration(context.Background(), interaction.ID, 1, 2, now, expiresAt); err != nil || !ok {
 		t.Fatalf("CAS = %v, %v", ok, err)
 	}
-	if ok, err := repo.AssistantInteractions().CompareAndSwapGeneration(context.Background(), interaction.ID, 1, 3, now); err != nil || ok {
+	if ok, err := repo.AssistantInteractions().CompareAndSwapGeneration(context.Background(), interaction.ID, 1, 3, now, expiresAt.Add(time.Hour)); err != nil || ok {
 		t.Fatalf("stale CAS = %v, %v", ok, err)
+	}
+	renewed, err := repo.AssistantInteractions().FindByID(context.Background(), interaction.ID)
+	if err != nil || renewed.Generation != 2 || !renewed.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("generation and expiry must renew atomically: %#v, %v", renewed, err)
 	}
 	runtime := &model.AssistantInteractionRuntime{ID: "runtime-1", InteractionID: interaction.ID, Generation: 2, ServerInstance: "server-1", RuntimeID: "runtime-1", LogicalSession: "logical-1", TokenHash: "hash", Status: model.AssistantInteractionRuntimeRunning, StartedAt: now, CreatedAt: now, UpdatedAt: now}
 	if err := repo.AssistantInteractions().CreateRuntimeBinding(context.Background(), runtime); err != nil {
@@ -100,7 +105,7 @@ func TestAssistantInteractionRepositoryAppendEventFencesGenerationAndAllocatesSe
 			t.Fatalf("append event %d = accepted=%v, err=%v", sequence, accepted, err)
 		}
 	}
-	if ok, err := repo.AssistantInteractions().CompareAndSwapGeneration(context.Background(), interaction.ID, 1, 2, now); err != nil || !ok {
+	if ok, err := repo.AssistantInteractions().CompareAndSwapGeneration(context.Background(), interaction.ID, 1, 2, now, now.Add(time.Hour)); err != nil || !ok {
 		t.Fatalf("generation CAS = %v, %v", ok, err)
 	}
 	accepted, err := repo.AssistantInteractions().AppendEvent(context.Background(), interaction.ID, 1, &model.AssistantInteractionEvent{ID: uuid.NewString(), Type: "late", Data: json.RawMessage(`{}`), CreatedAt: now})

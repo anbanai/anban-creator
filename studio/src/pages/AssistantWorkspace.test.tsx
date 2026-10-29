@@ -1140,6 +1140,42 @@ describe('AssistantWorkspace', () => {
     expect(mocks.workspaceMessage).toHaveBeenLastCalledWith('workspace-1', 'profile', '继续完善画像')
   })
 
+  it('starts a conversation when the initial snapshot omits empty drafts', async () => {
+    mocks.createWorkspace.mockResolvedValueOnce({
+      id: 'workspace-1', mode_id: 'profile', session_id: 'session-1', sessions: { profile: 'session-1' }, runtime_status: 'running', expires_at: '',
+      interaction_snapshot: {
+        interaction_id: 'workspace-1', mode_id: 'profile', lifecycle: 'active', generation: 1,
+        runtime_status: 'running', expires_at: '', last_activity_at: '', available_actions: ['send_message'],
+      },
+    })
+    renderPage()
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '建立新的人设' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(await screen.findByText('收到，我开始处理。')).toBeInTheDocument()
+    expect(screen.getByText('建立新的人设')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('')
+  })
+
+  it('preserves input and allows retry when a 410 recovery snapshot omits empty drafts', async () => {
+    const snapshot = {
+      interaction_id: 'workspace-1', mode_id: 'profile', lifecycle: 'active', generation: 1,
+      runtime_status: 'expired', expires_at: '', last_activity_at: '', available_actions: ['send_message', 'restart'],
+    }
+    mocks.createWorkspace.mockRejectedValueOnce(Object.assign(new Error('expired'), {
+      response: { status: 410, data: { error_code: 'assistant_workspace_expired', data: snapshot } },
+    }))
+    renderPage()
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '恢复这个需求' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('恢复这个需求'))
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    expect(await screen.findByText('收到，我开始处理。')).toBeInTheDocument()
+    expect(screen.getByText('恢复这个需求')).toBeInTheDocument()
+  })
+
   it('applies a recovery snapshot returned with a failed command', async () => {
     const snapshot = {
       interaction_id: 'workspace-1', mode_id: 'profile', lifecycle: 'reconnecting', generation: 2,

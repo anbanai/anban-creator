@@ -27,7 +27,7 @@ type AssistantInteractionRepository interface {
 	UpdateMode(context.Context, string, string, time.Time) error
 	UpdateContext(context.Context, string, string, string, string, time.Time) error
 	UpdateProject(context.Context, string, string, time.Time) error
-	CompareAndSwapGeneration(context.Context, string, int64, int64, time.Time) (bool, error)
+	CompareAndSwapGeneration(context.Context, string, int64, int64, time.Time, time.Time) (bool, error)
 	CreateRuntimeBinding(context.Context, *model.AssistantInteractionRuntime) error
 	FindCurrentRuntime(context.Context, string, int64) (*model.AssistantInteractionRuntime, error)
 	CloseRuntime(context.Context, string, time.Time) error
@@ -180,8 +180,8 @@ func (r *assistantInteractionRepository) UpdateProject(ctx context.Context, id, 
 	}
 	return r.db.WithContext(ctx).Model(&model.AssistantInteraction{}).Where("id = ?", id).Updates(updates).Error
 }
-func (r *assistantInteractionRepository) CompareAndSwapGeneration(ctx context.Context, id string, expected, next int64, at time.Time) (bool, error) {
-	result := r.db.WithContext(ctx).Model(&model.AssistantInteraction{}).Where("id = ? AND generation = ? AND closed_at IS NULL", id, expected).Updates(map[string]any{"generation": next, "last_activity_at": at, "updated_at": at})
+func (r *assistantInteractionRepository) CompareAndSwapGeneration(ctx context.Context, id string, expected, next int64, at, expiresAt time.Time) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&model.AssistantInteraction{}).Where("id = ? AND generation = ? AND closed_at IS NULL", id, expected).Updates(map[string]any{"generation": next, "expires_at": expiresAt, "last_activity_at": at, "updated_at": at})
 	return result.RowsAffected == 1, result.Error
 }
 func (r *assistantInteractionRepository) CreateRuntimeBinding(ctx context.Context, value *model.AssistantInteractionRuntime) error {
