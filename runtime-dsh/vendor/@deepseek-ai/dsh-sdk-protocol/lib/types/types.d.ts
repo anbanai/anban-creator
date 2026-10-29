@@ -159,6 +159,7 @@ export interface SubagentFinishedNotification {
 export interface HarnessSdkNotificationMap {
     'user-question.cancelled': SdkUserQuestionCancelled;
     'session.event': SessionEventNotification;
+    'session.question': { sessionId: string; callId: string; questions: unknown[] };
     'session.status': SessionStatusNotification;
     'subagent.started': SubagentStartedNotification;
     'subagent.finished': SubagentFinishedNotification;
@@ -169,9 +170,17 @@ export interface HarnessSdkRequestMap {
         params: InitializeParams;
         result: InitializeResult;
     };
+    'session/start': {
+        params: { sessionId: string; presetId: string; initialContext?: string };
+        result: { sessionId: string; presetId: string };
+    };
     'session/prompt': {
         params: SessionPromptParams;
         result: SessionPromptResult;
+    };
+    'session/answer': {
+        params: { sessionId: string; callId: string; answer: { answers: Array<{ id: string; selected: string[]; custom?: string }> } };
+        result: { accepted: true };
     };
     'session/resume': {
         params: SessionResumeParams;
