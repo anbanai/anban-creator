@@ -161,7 +161,7 @@ function parseQuestions(value: unknown): DshQuestion[] {
   })
 }
 
-function draftReceiptToDraft(receipt: AssistantInteractionSnapshot['drafts'][number]): Draft {
+function draftReceiptToDraft(receipt: AssistantInteractionDraftReceipt): Draft {
   const payload = recordValue(receipt.payload) ?? {}
   return {
     ...payload,
@@ -175,8 +175,8 @@ function draftReceiptToDraft(receipt: AssistantInteractionSnapshot['drafts'][num
 }
 
 function draftsFromSnapshot(snapshot: AssistantInteractionSnapshot): Record<string, Draft | null> {
-  const latest = new Map<string, AssistantInteractionSnapshot['drafts'][number]>()
-  for (const receipt of snapshot.drafts) {
+  const latest = new Map<string, AssistantInteractionDraftReceipt>()
+  for (const receipt of snapshot.drafts ?? []) {
     const current = latest.get(receipt.mode_id)
     if (!current || receipt.revision > current.revision) latest.set(receipt.mode_id, receipt)
   }

@@ -62,6 +62,11 @@ export interface InitializeResult {
         name: string;
         version: string;
     };
+    /** Optional interactive protocol extensions advertised by the runtime. */
+    capabilities?: {
+        sessionStart?: boolean;
+        sessionAnswer?: boolean;
+    };
 }
 /** One user turn on one SDK session. */
 export interface SessionPromptParams {
