@@ -339,6 +339,9 @@ var HarnessClient = class {
 	spawnError;
 	streamsSettled = Promise.resolve();
 	closeTask;
+	userQuestions = /* @__PURE__ */ new Map();
+	userQuestionHandler;
+	requestHandler;
 	constructor(options = {}, runtime) {
 		this.options = options;
 		this.runtime = runtime ?? resolveDshLaunch(options);
@@ -350,6 +353,7 @@ var HarnessClient = class {
 	start() {
 		if (this.closeTask !== void 0) throw new TransportClosedError("DeepSeek Harness runtime client is closed");
 		if (this.child !== void 0) return;
+		this.userQuestionHandler = this.options.onUserQuestion;
 		const child = spawn(this.runtime.command, this.runtime.args, {
 			cwd: this.runtime.cwd,
 			env: this.runtime.environment(),
@@ -403,7 +407,35 @@ var HarnessClient = class {
 			this.transport?.close();
 		});
 		const transport = new JsonRpcLineTransport(child.stdout, child.stdin);
+		transport.onRequest(async (method, params) => {
+			if (method !== "user-question/ask") {
+				if (this.requestHandler !== void 0) return this.requestHandler(method, params);
+				throw new SdkProtocolError(`unknown runtime request: ${method}`);
+			}
+			const handler = this.userQuestionHandler;
+			if (handler === void 0) throw new SdkProtocolError("user-question/ask requires an onUserQuestion callback");
+			if (!isUserQuestionRequest(params)) throw new SdkProtocolError("user-question/ask requires requestId, sessionId, and questions");
+			const requestId = params.requestId;
+			if (this.userQuestions.has(requestId)) throw new SdkProtocolError("duplicate user-question requestId");
+			const controller = new AbortController();
+			this.userQuestions.set(requestId, controller);
+			const cancelled = Promise.withResolvers();
+			const onAbort = () => {
+				cancelled.reject(controller.signal.reason);
+			};
+			controller.signal.addEventListener("abort", onAbort, { once: true });
+			try {
+				return await Promise.race([Promise.resolve().then(() => {
+					controller.signal.throwIfAborted();
+					return handler(params, { signal: controller.signal });
+				}), cancelled.promise]);
+			} finally {
+				controller.signal.removeEventListener("abort", onAbort);
+				this.userQuestions.delete(requestId);
+			}
+		});
 		transport.onNotification((method, params) => {
+			if (method === "user-question.cancelled" && typeof params.requestId === "string") this.userQuestions.get(params.requestId)?.abort(/* @__PURE__ */ new Error("SDK runtime cancelled the user question"));
 			this.dispatchNotification({
 				method,
 				params
@@ -413,25 +445,34 @@ var HarnessClient = class {
 		this.transport = transport;
 	}
 	/**
-	* Perform the process-wide handshake.
+	* Install the additional-request handler; native questions retain their onUserQuestion callback.
+	* @param handler - receives wire parameters and returns the JSON-RPC result; rejection sends an error.
+	* @throws when the client has not started or has already closed.
+	*/
+	onRequest(handler) {
+		if (this.closeTask !== void 0) throw new TransportClosedError("DeepSeek Harness runtime client is closed; create a new client to install a request handler");
+		if (this.transport === void 0) throw new TransportClosedError("start the SDK client before installing a request handler");
+		this.requestHandler = handler;
+	}
+	/**
+	* Start the runtime if needed, then perform the process-wide handshake.
 	* @param params - workspace cwd plus the provider/model route.
 	* @returns the runtime's wire identity.
 	*/
 	async initialize(params) {
-		const result = await this.request("initialize", { ...params }, this.runtime.initializeTimeoutMs);
+		this.start();
+		const result = await this.request("initialize", {
+			...params,
+			...this.userQuestionHandler === void 0 ? {} : { capabilities: {
+				...params.capabilities,
+				userQuestions: true
+			} }
+		}, this.runtime.initializeTimeoutMs);
 		if (!isRecord(result) || !isRecord(result.serverInfo) || typeof result.serverInfo.name !== "string" || typeof result.serverInfo.version !== "string") throw new SdkProtocolError(`initialize returned no server identity: ${JSON.stringify(result)}`);
-		const advertised = isRecord(result.capabilities) ? result.capabilities : void 0;
-		return { serverInfo: { name: result.serverInfo.name, version: result.serverInfo.version }, ...advertised === void 0 ? {} : { capabilities: advertised } };
-	}
-	async startSession(sessionId, presetId) {
-		const result = await this.request("session/start", { sessionId, presetId });
-		if (!isRecord(result) || result.sessionId !== sessionId || result.presetId !== presetId) throw new SdkProtocolError(`session/start returned an invalid receipt: ${JSON.stringify(result)}`);
-		return { sessionId, presetId };
-	}
-	async answerSession(sessionId, callId, answer) {
-		const result = await this.request("session/answer", { sessionId, callId, answer });
-		if (!isRecord(result) || result.accepted !== true) throw new SdkProtocolError(`session/answer was not accepted: ${JSON.stringify(result)}`);
-		return { accepted: true };
+		return { serverInfo: {
+			name: result.serverInfo.name,
+			version: result.serverInfo.version
+		} };
 	}
 	/**
 	* Queue one prompt and return its durable inbox identity.
@@ -572,6 +613,7 @@ var HarnessClient = class {
 		return this.closeTask;
 	}
 	async performClose() {
+		this.abortUserQuestions(new TransportClosedError("SDK client is closing"));
 		const child = this.child;
 		if (child === void 0) return;
 		try {
@@ -610,7 +652,11 @@ var HarnessClient = class {
 		return false;
 	}
 	failSubscriptions(error) {
+		this.abortUserQuestions(error);
 		for (const subscription of this.subscriptions.values()) subscription.fail(error);
+	}
+	abortUserQuestions(error) {
+		for (const controller of this.userQuestions.values()) controller.abort(error);
 	}
 	appendStderr(lines) {
 		const kept = lines.filter((line) => line.length > 0);
@@ -643,6 +689,10 @@ function errorMessage(error) {
 	/* v8 ignore next -- the transport and dispose ladder reject only with Errors */
 	return error instanceof Error ? error.message : String(error);
 }
+/** Check the question envelope before handing runtime input to application code. */
+function isUserQuestionRequest(value) {
+	return isRecord(value) && typeof value.requestId === "string" && value.requestId.length > 0 && typeof value.sessionId === "string" && Array.isArray(value.questions) && value.questions.length > 0 && value.questions.every((question) => isRecord(question) && typeof question.id === "string" && typeof question.question === "string");
+}
 //#endregion
 //#region lib/types/api.js
 /**
@@ -666,6 +716,7 @@ var DeepSeekHarness = class {
 	model;
 	reasoningEffort;
 	maxTokens;
+	approvalRequests;
 	initialized;
 	closed = false;
 	constructor(options = {}, clientFactory) {
@@ -676,6 +727,7 @@ var DeepSeekHarness = class {
 		this.model = options.model ?? "deepseek-v4-flash";
 		this.reasoningEffort = options.reasoningEffort;
 		this.maxTokens = options.maxTokens;
+		this.approvalRequests = options.approvalRequests;
 	}
 	/**
 	* The underlying JSON-RPC client (exposed for low-level access). A failed
@@ -706,7 +758,8 @@ var DeepSeekHarness = class {
 					provider: this.provider,
 					model: this.model,
 					...this.reasoningEffort === void 0 ? {} : { reasoningEffort: this.reasoningEffort },
-					...this.maxTokens === void 0 ? {} : { maxTokens: this.maxTokens }
+					...this.maxTokens === void 0 ? {} : { maxTokens: this.maxTokens },
+					...this.approvalRequests === void 0 ? {} : { approvalRequests: this.approvalRequests }
 				});
 			} catch (error) {
 				this.initialized = void 0;
