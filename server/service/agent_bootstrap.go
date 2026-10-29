@@ -1063,7 +1063,7 @@ func (s *AgentBootstrapService) buildTalkingHeadEditorFiles(ctx context.Context,
 	}
 	files = append(files, BootstrapFile{Path: "talking-head-editor-input.json", Text: string(raw), Mode: 0644})
 	policy := map[string]any{
-		"skills":            []string{"auto-editor", "video-use", "erduo-broll-loop-engineering"},
+		"skills":            []string{"auto-editor", "video-use", "erduo-broll-loop-engineering", "content-tagging"},
 		"video_use_api_key": "server-injected",
 		"review_gate":       "motion-sample",
 		"review_decision":   task.ReviewDecision,
