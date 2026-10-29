@@ -2925,7 +2925,8 @@
         "skills": [
           "auto-editor",
           "video-use",
-          "erduo-broll-loop-engineering"
+          "erduo-broll-loop-engineering",
+          "content-tagging"
         ],
         "max_turns": 220
       },
@@ -3012,31 +3013,31 @@
           "role": "motion_sample",
           "path": "output/motion-sample.mp4",
           "mime_type": "video/mp4",
-          "required": false
+          "required": true
         },
         {
           "role": "motion_review",
           "path": "output/motion-review.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "motion_source_manifest",
           "path": "output/motion-source-manifest.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "rough_cut",
           "path": "output/rough-cut.mp4",
           "mime_type": "video/mp4",
-          "required": false
+          "required": true
         },
         {
           "role": "semantic_cut",
           "path": "output/semantic-cut.mp4",
           "mime_type": "video/mp4",
-          "required": false
+          "required": true
         },
         {
           "role": "subtitles",
@@ -3048,7 +3049,7 @@
           "role": "delivery_manifest",
           "path": "output/delivery-manifest.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "quality_evidence",
@@ -3073,6 +3074,28 @@
           "path": "output/progress-state.json",
           "mime_type": "application/json",
           "required": false
+        }
+      ],
+      "artifact_stages": [
+        {
+          "id": "motion_review",
+          "trigger": "output/motion-sample.mp4",
+          "required": [
+            "output/rough-cut.mp4",
+            "output/transcript.json",
+            "output/edit-decision-list.json",
+            "output/edit-strategy.md",
+            "output/semantic-cut.mp4",
+            "output/motion-sample.mp4",
+            "output/visual-plan.json",
+            "output/motion-review.json",
+            "output/motion-source-manifest.json"
+          ]
+        },
+        {
+          "id": "final_delivery",
+          "trigger": "output/final.mp4",
+          "terminal": true
         }
       ],
       "delivery": [
@@ -3172,7 +3195,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "0c50bbcbdf802e829f7d48b6a0fea70484573f83d528254917647580d9649556"
+      "digest": "272f09a355711638d22652ecd4393089a5b47384723c7036553d26964e58d9fb"
     },
     {
       "id": "video-edit",
@@ -3612,7 +3635,7 @@
         }
       ],
       "ui": {},
-      "digest": "92da8fbdb275219d450faad239f9569a6b1e4c852992ab7988ce119cda33cbe5"
+      "digest": "57260a61d091994b0466868bfd60c5da606394c93308f9705f8d4c5318e066ca"
     },
     {
       "id": "wechat-article",
