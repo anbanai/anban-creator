@@ -1097,6 +1097,9 @@ func TestTalkingHeadEditorDockerfileValidatesErduoMotionContract(t *testing.T) {
 		"HyperFrames `0.8.214`",
 		"HyperFrames lint",
 		"aesthetic review",
+		"/anbanai/skills/talking-head-sound-design/SKILL.md",
+		"/anbanai/skills/talking-head-sound-design/assets/sfx/manifest.json",
+		"sound_pass.py --help",
 	} {
 		if !strings.Contains(dockerfile, want) {
 			t.Fatalf("talking-head-editor Dockerfile missing runtime contract %q", want)

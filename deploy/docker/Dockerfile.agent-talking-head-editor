@@ -37,6 +37,10 @@ RUN set -eux; \
     grep -Fq 'HyperFrames `0.8.214`' "$skill"; \
     grep -Fq 'HyperFrames lint' "$skill"; \
     grep -Fq 'aesthetic review' "$skill"; \
+    sound_skill=/anbanai/skills/talking-head-sound-design/SKILL.md; \
+    test -s "$sound_skill"; \
+    test -s /anbanai/skills/talking-head-sound-design/assets/sfx/manifest.json; \
+    python3 /anbanai/skills/talking-head-sound-design/scripts/sound_pass.py --help >/dev/null; \
     chown -R root:root /anbanai /app/runtime-claude; \
     chmod -R a=rX /anbanai /app/runtime-claude; \
     chmod 0755 /usr/local/bin/anban
