@@ -74,10 +74,12 @@ wechat:
   app_id: "${ANBAN_WECHAT_APP_ID}"
   app_secret: "${ANBAN_WECHAT_APP_SECRET}"
 
-# Optional third-party platform configuration for project-scoped QR authorization.
-# Refresh-token encryption key accepts 32 bytes or base64-encoded 32 bytes.
-# Set these values through the optional anban-wechat-open-platform Kubernetes
-# Secret only when project-scoped WeChat QR authorization is configured.
+# Optional WeChat Open Platform third-party app configuration. All five values
+# are required together; without them the project settings page hides QR binding.
+# In Kubernetes, populate the anban-wechat-open-platform Secret described in
+# docs/wechat-open-platform-setup.md. For local/Compose, set the same variables
+# in the Server container environment. Generate the encryption key with
+# `openssl rand -base64 32`; it accepts 32 raw bytes or base64-encoded 32 bytes.
 wechat_open_platform:
   component_app_id: "${ANBAN_WECHAT_COMPONENT_APP_ID}"
   component_app_secret: "${ANBAN_WECHAT_COMPONENT_APP_SECRET}"
