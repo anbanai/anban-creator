@@ -419,7 +419,7 @@ func (s *AgentProjectProfileService) talkingHeadEditorProfile(project *model.Pro
 		},
 		"upstream_revisions": map[string]string{
 			"auto-editor":                  "29.3.1",
-			"auto-editor-source":           "pypi:auto-editor==29.3.1",
+			"auto-editor-source":           "github-release:WyattBlue/auto-editor@29.3.1/auto-editor-linux-x86_64",
 			"hyperframes":                  "0.8.214",
 			"video-use":                    "43cfc566833548093455c9d4a46bd69913b7e552",
 			"erduo-broll-loop-engineering": "managed-release",
