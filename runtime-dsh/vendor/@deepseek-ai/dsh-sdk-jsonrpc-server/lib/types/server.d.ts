@@ -47,7 +47,7 @@ export declare class HarnessSdkJsonRpcServer {
      * @returns server identity for the handshake.
      */
     initialize(params: InitializeParams): Promise<InitializeResult>;
-    start(params: { sessionId: string; presetId: string }): Promise<{ sessionId: string; presetId: string }>;
+    start(params: { sessionId: string; presetId: string; initialContext?: string }): Promise<{ sessionId: string; presetId: string }>;
     answer(params: { sessionId: string; callId: string; answer: { answers: Array<{ id: string; selected: string[]; custom?: string }> } }): Promise<{ accepted: true }>;
     /**
      * Queue one identified prompt without assigning later activity to it.

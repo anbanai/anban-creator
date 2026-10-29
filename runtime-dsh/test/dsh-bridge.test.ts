@@ -84,40 +84,21 @@ describe("DSH bridge protocol", () => {
       },
     })).toEqual([{ event: "assistant.message", data: { session_id: "s", text: "hello world" } }]);
 
-    expect(mapHarnessNotification({
-      method: "session.event",
-      params: {
-        sessionId: "s",
-        event: {
-          type: "tool/call",
-          data: {
-            callId: "call-1",
-            name: "ask_user_question",
-            arguments: JSON.stringify({ questions: [{ id: "q", question: "What?", multiSelect: true }] }),
-          },
-        },
-      },
-    })).toEqual([{ event: "question.opened", data: { session_id: "s", call_id: "call-1", questions: [{ id: "q", question: "What?", multiSelect: true }] } }]);
+    expect(mapHarnessNotification({ method: "session.question", params: {
+      sessionId: "s", callId: "call-1", questions: [{ id: "q", question: "What?", multiSelect: true }],
+    } })).toEqual([{ event: "question.opened", data: { session_id: "s", call_id: "call-1", questions: [{ id: "q", question: "What?", multiSelect: true }] } }]);
   });
 
-  test("preserves structured recommendation metadata on question options", () => {
-    expect(mapHarnessNotification({
-      method: "session.event",
-      params: {
-        sessionId: "s",
-        event: {
-          type: "tool/call",
-          data: {
-            callId: "call-recommendation",
-            name: "ask_user_question",
-            arguments: JSON.stringify({ questions: [{
-              id: "q", question: "选择主平台",
-              options: [{ label: "公众号", description: "适合深度内容", recommended: true }],
-            }] }),
-          },
-        },
-      },
-    })).toEqual([{ event: "question.opened", data: {
+  test("does not open a question before its answer handler is ready", () => {
+    expect(mapHarnessNotification({ method: "session.event", params: {
+      sessionId: "s", event: { type: "tool/call", data: { callId: "call-1", name: "ask_user_question", arguments: JSON.stringify({ questions: [{ id: "q", question: "What?" }] }) } },
+    } })).toEqual([]);
+  });
+
+  test("preserves structured recommendation metadata on ready question options", () => {
+    expect(mapHarnessNotification({ method: "session.question", params: {
+      sessionId: "s", callId: "call-recommendation", questions: [{ id: "q", question: "选择主平台", options: [{ label: "公众号", description: "适合深度内容", recommended: true }] }],
+    } })).toEqual([{ event: "question.opened", data: {
       session_id: "s", call_id: "call-recommendation",
       questions: [{ id: "q", question: "选择主平台", options: [{ label: "公众号", description: "适合深度内容", recommended: true }] }],
     } }]);
@@ -240,36 +221,13 @@ describe("DSH bridge protocol", () => {
     }]);
   });
 
-  test("rejects AskUserQuestion notifications without a call id", () => {
-    expect(mapHarnessNotification({
-      method: "session.event",
-      params: {
-        sessionId: "s",
-        event: {
-          type: "tool/call",
-          data: { name: "ask_user_question", arguments: JSON.stringify({ questions: [{ id: "q", question: "What?" }] }) },
-        },
-      },
-    })).toEqual([{ event: "session.error", data: { session_id: "s", message: "AskUserQuestion call id is missing" } }]);
+  test("rejects ready question notifications without a call id", () => {
+    expect(mapHarnessNotification({ method: "session.question", params: { sessionId: "s", questions: [{ id: "q", question: "What?" }] } })).toEqual([{ event: "session.error", data: { session_id: "s", message: "AskUserQuestion call id is missing" } }]);
   });
 
   test("turns child Agent questions into an error instead of exposing them", () => {
-    expect(mapHarnessNotification({
-      method: "session.event",
-      params: {
-        sessionId: "child",
-        event: {
-          type: "tool/call",
-          data: {
-            callId: "child-call",
-            name: "ask_user_question",
-            arguments: JSON.stringify({ questions: [{ id: "q", question: "Hidden?" }] }),
-          },
-        },
-      },
-    }, "root")).toEqual([{
-      event: "session.error",
-      data: { session_id: "child", message: "AskUserQuestion from a child Agent is not allowed" },
+    expect(mapHarnessNotification({ method: "session.question", params: { sessionId: "child", callId: "child-call", questions: [{ id: "q", question: "Hidden?" }] } }, "root")).toEqual([{
+      event: "session.error", data: { session_id: "child", message: "AskUserQuestion from a child Agent is not allowed" },
     }]);
   });
 
