@@ -1083,19 +1083,23 @@ func TestTalkingHeadEditorDockerfileValidatesErduoMotionContract(t *testing.T) {
 	root := repositoryRoot(t)
 	dockerfile := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.agent-talking-head-editor"))
 	for _, want := range []string{
-		"ARG AUTO_EDITOR_REPO=https://github.com/WyattBlue/auto-editor.git",
-		"ARG AUTO_EDITOR_REF=c6d755e590fa1fd3db0cdb3747bc92cf8af1a0bd",
-		"/opt/video-use-venv/bin/pip install --no-cache-dir \"git+${AUTO_EDITOR_REPO}@${AUTO_EDITOR_REF}\"",
+		"ARG AUTO_EDITOR_VERSION=29.3.1",
+		"ARG HYPERFRAMES_VERSION=0.8.214",
+		"/opt/video-use-venv/bin/pip install --no-cache-dir \"auto-editor==${AUTO_EDITOR_VERSION}\"",
 		"importlib.metadata as m; print(m.version(\"auto-editor\"))",
 		"/opt/video-use-venv/bin/auto-editor --version",
+		"npm install --global --omit=dev \"hyperframes@${HYPERFRAMES_VERSION}\"",
+		"test \"$(hyperframes --version)\" = \"$HYPERFRAMES_VERSION\"",
 		"for helper in transcribe.py transcribe_batch.py pack_transcripts.py timeline_view.py grade.py render.py",
 		"/opt/video-use/helpers/$helper\" --help",
 		"43cfc566833548093455c9d4a46bd69913b7e552",
 		"/anbanai/skills/erduo-broll-loop-engineering/SKILL.md",
-		"HyperFrames/Remotion",
-		"Shotcraft",
-		"parallel agents",
+		"HyperFrames `0.8.214`",
+		"HyperFrames lint",
 		"aesthetic review",
+		"/anbanai/skills/talking-head-sound-design/SKILL.md",
+		"/anbanai/skills/talking-head-sound-design/assets/sfx/manifest.json",
+		"sound_pass.py --help",
 	} {
 		if !strings.Contains(dockerfile, want) {
 			t.Fatalf("talking-head-editor Dockerfile missing runtime contract %q", want)

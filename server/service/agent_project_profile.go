@@ -418,10 +418,12 @@ func (s *AgentProjectProfileService) talkingHeadEditorProfile(project *model.Pro
 			"timeout_minutes":      s.talkingHeadEditor.TimeoutMinutes,
 		},
 		"upstream_revisions": map[string]string{
-			"auto-editor":                  "28.1.0",
-			"auto-editor-source":           "c6d755e590fa1fd3db0cdb3747bc92cf8af1a0bd",
+			"auto-editor":                  "29.3.1",
+			"auto-editor-source":           "pypi:auto-editor==29.3.1",
+			"hyperframes":                  "0.8.214",
 			"video-use":                    "43cfc566833548093455c9d4a46bd69913b7e552",
 			"erduo-broll-loop-engineering": "managed-release",
+			"talking-head-sound-design":    "motion-graphics:3d83d987d658601d8a1269eb691622bdcd427335",
 		},
 		"workspace_input_file": "talking-head-editor-input.json",
 		"policy_file":          "talking-head-editor-policy.json",
@@ -439,8 +441,8 @@ func (s *AgentProjectProfileService) talkingHeadEditorProfile(project *model.Pro
 			"output/quality-evidence.json",
 			"output/content-tags.json",
 		},
-		"optional_artifacts": []string{"output/rough-cut.mp4", "output/semantic-cut.mp4", "output/motion-sample.mp4", "output/subtitles.srt", "output/failure-state.json", "output/failure-diagnosis.md", "output/progress-state.json"},
-		"runtime_contract":   "Use only the three Server-pinned talking-head-editor Skills. Execute rough cut and semantic cut continuously, stop at the motion-sample review gate, and add sound only after approval. Never load video-edit or silently downgrade to it.",
+		"optional_artifacts": []string{"output/final-picture.mp4", "output/rough-cut.mp4", "output/semantic-cut.mp4", "output/motion-sample.mp4", "output/subtitles.srt", "output/failure-state.json", "output/failure-diagnosis.md", "output/progress-state.json"},
+		"runtime_contract":   "Use the five Server-pinned talking-head-editor Skills; content-tagging is read-only metadata support. Execute rough cut and semantic cut continuously, stop at the motion-sample review gate, then after approval use the local CC0 sound-design Skill to render event-synced SFX. Never load video-edit or silently downgrade to it.",
 	}
 }
 

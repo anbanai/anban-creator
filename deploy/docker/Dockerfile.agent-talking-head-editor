@@ -11,19 +11,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 WORKDIR /opt/video-use
 ARG VIDEO_USE_REPO=https://github.com/browser-use/video-use.git
 ARG VIDEO_USE_REF=43cfc566833548093455c9d4a46bd69913b7e552
-ARG AUTO_EDITOR_REPO=https://github.com/WyattBlue/auto-editor.git
-ARG AUTO_EDITOR_REF=c6d755e590fa1fd3db0cdb3747bc92cf8af1a0bd
+ARG AUTO_EDITOR_VERSION=29.3.1
+ARG HYPERFRAMES_VERSION=0.8.214
 RUN git init . && git remote add origin "$VIDEO_USE_REPO" && git fetch --depth 1 origin "$VIDEO_USE_REF" && git checkout --detach FETCH_HEAD && test "$(git rev-parse HEAD)" = "$VIDEO_USE_REF" && printf '%s\n' "$VIDEO_USE_REF" > .anban-source-revision && rm -rf .git
 RUN set -eux; \
     python3 -m venv /opt/video-use-venv; \
     /opt/video-use-venv/bin/pip install --no-cache-dir -e /opt/video-use; \
-    /opt/video-use-venv/bin/pip install --no-cache-dir "git+${AUTO_EDITOR_REPO}@${AUTO_EDITOR_REF}"; \
-    test "$(/opt/video-use-venv/bin/python -c 'import importlib.metadata as m; print(m.version("auto-editor"))')" = "28.1.0"; \
+    /opt/video-use-venv/bin/pip install --no-cache-dir "auto-editor==${AUTO_EDITOR_VERSION}"; \
+    test "$(/opt/video-use-venv/bin/python -c 'import importlib.metadata as m; print(m.version("auto-editor"))')" = "$AUTO_EDITOR_VERSION"; \
     /opt/video-use-venv/bin/auto-editor --version >/dev/null; \
     /opt/video-use-venv/bin/python -m compileall -q /opt/video-use/helpers; \
     for helper in transcribe.py transcribe_batch.py pack_transcripts.py timeline_view.py grade.py render.py; do \
       /opt/video-use-venv/bin/python "/opt/video-use/helpers/$helper" --help >/dev/null; \
     done
+RUN npm install --global --omit=dev "hyperframes@${HYPERFRAMES_VERSION}" && \
+    test "$(hyperframes --version)" = "$HYPERFRAMES_VERSION"
 RUN install -d -m 0770 -o 1000 -g 1000 /workspace /workspace/.claude /run/secrets/anban
 COPY --from=builder /app/runtime-claude/node_modules /app/runtime-claude/node_modules
 COPY --from=builder /app/runtime-claude/dist /app/runtime-claude/dist
@@ -32,10 +34,13 @@ COPY deploy/docker/anban-agent-launcher /usr/local/bin/anban
 RUN set -eux; \
     skill=/anbanai/skills/erduo-broll-loop-engineering/SKILL.md; \
     test -s "$skill"; \
-    grep -Fq 'HyperFrames/Remotion' "$skill"; \
-    grep -Fq 'Shotcraft' "$skill"; \
-    grep -Fq 'parallel agents' "$skill"; \
+    grep -Fq 'HyperFrames `0.8.214`' "$skill"; \
+    grep -Fq 'HyperFrames lint' "$skill"; \
     grep -Fq 'aesthetic review' "$skill"; \
+    sound_skill=/anbanai/skills/talking-head-sound-design/SKILL.md; \
+    test -s "$sound_skill"; \
+    test -s /anbanai/skills/talking-head-sound-design/assets/sfx/manifest.json; \
+    python3 /anbanai/skills/talking-head-sound-design/scripts/sound_pass.py --help >/dev/null; \
     chown -R root:root /anbanai /app/runtime-claude; \
     chmod -R a=rX /anbanai /app/runtime-claude; \
     chmod 0755 /usr/local/bin/anban

@@ -37,6 +37,7 @@ type Manifest struct {
 	BillingOperations   map[string]string         `yaml:"billing_operations" json:"billing_operations,omitempty"`
 	Artifacts           []ArtifactSpec            `yaml:"artifacts" json:"artifacts,omitempty"`
 	ArtifactsByTaskType map[string][]ArtifactSpec `yaml:"artifacts_by_task_type" json:"artifacts_by_task_type,omitempty"`
+	ArtifactStages      []ArtifactStageSpec       `yaml:"artifact_stages" json:"artifact_stages,omitempty"`
 	Delivery            []DeliverySpec            `yaml:"delivery" json:"delivery,omitempty"`
 	DataDeliveries      []DataDeliverySpec        `yaml:"data_delivery" json:"data_delivery,omitempty"`
 	DeliveryByTaskType  map[string][]DeliverySpec `yaml:"delivery_by_task_type" json:"delivery_by_task_type,omitempty"`
@@ -117,6 +118,16 @@ type ArtifactSpec struct {
 	Path     string `yaml:"path" json:"path"`
 	MIMEType string `yaml:"mime_type" json:"mime_type"`
 	Required bool   `yaml:"required" json:"required"`
+}
+
+// ArtifactStageSpec describes a review gate or terminal artifact set. The
+// runtime selects a matching terminal stage before a matching review stage.
+// Terminal stages may omit required paths to reuse the Pack-wide contract.
+type ArtifactStageSpec struct {
+	ID       string   `yaml:"id" json:"id"`
+	Trigger  string   `yaml:"trigger" json:"trigger"`
+	Required []string `yaml:"required,omitempty" json:"required,omitempty"`
+	Terminal bool     `yaml:"terminal,omitempty" json:"terminal,omitempty"`
 }
 
 // DeliverySpec declares a file that should be presented and downloadable as

@@ -2916,7 +2916,7 @@
     {
       "id": "talking-head-editor",
       "channel": "talking-head-editor",
-      "version": "2.0.2",
+      "version": "2.0.3",
       "kind": "managed",
       "display_name": "口播精剪",
       "description": "按固定口播工作流自动完成静音粗剪、语义精剪、动效素材包装和音效 BGM 收尾，并保留可复核的剪辑证据。",
@@ -2925,7 +2925,9 @@
         "skills": [
           "auto-editor",
           "video-use",
-          "erduo-broll-loop-engineering"
+          "erduo-broll-loop-engineering",
+          "talking-head-sound-design",
+          "content-tagging"
         ],
         "max_turns": 220
       },
@@ -2959,6 +2961,12 @@
           "path": "output/final.mp4",
           "mime_type": "video/mp4",
           "required": true
+        },
+        {
+          "role": "final_picture",
+          "path": "output/final-picture.mp4",
+          "mime_type": "video/mp4",
+          "required": false
         },
         {
           "role": "edit_decision_list",
@@ -3012,31 +3020,31 @@
           "role": "motion_sample",
           "path": "output/motion-sample.mp4",
           "mime_type": "video/mp4",
-          "required": false
+          "required": true
         },
         {
           "role": "motion_review",
           "path": "output/motion-review.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "motion_source_manifest",
           "path": "output/motion-source-manifest.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "rough_cut",
           "path": "output/rough-cut.mp4",
           "mime_type": "video/mp4",
-          "required": false
+          "required": true
         },
         {
           "role": "semantic_cut",
           "path": "output/semantic-cut.mp4",
           "mime_type": "video/mp4",
-          "required": false
+          "required": true
         },
         {
           "role": "subtitles",
@@ -3048,7 +3056,7 @@
           "role": "delivery_manifest",
           "path": "output/delivery-manifest.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "quality_evidence",
@@ -3073,6 +3081,28 @@
           "path": "output/progress-state.json",
           "mime_type": "application/json",
           "required": false
+        }
+      ],
+      "artifact_stages": [
+        {
+          "id": "motion_review",
+          "trigger": "output/motion-sample.mp4",
+          "required": [
+            "output/rough-cut.mp4",
+            "output/transcript.json",
+            "output/edit-decision-list.json",
+            "output/edit-strategy.md",
+            "output/semantic-cut.mp4",
+            "output/motion-sample.mp4",
+            "output/visual-plan.json",
+            "output/motion-review.json",
+            "output/motion-source-manifest.json"
+          ]
+        },
+        {
+          "id": "final_delivery",
+          "trigger": "output/final.mp4",
+          "terminal": true
         }
       ],
       "delivery": [
@@ -3172,7 +3202,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "0c50bbcbdf802e829f7d48b6a0fea70484573f83d528254917647580d9649556"
+      "digest": "fdbdde75c1b73fb36d6f6c49da836bfd82e155ecbfce3c06c1a4706ecfd37feb"
     },
     {
       "id": "video-edit",
@@ -3612,7 +3642,7 @@
         }
       ],
       "ui": {},
-      "digest": "92da8fbdb275219d450faad239f9569a6b1e4c852992ab7988ce119cda33cbe5"
+      "digest": "57260a61d091994b0466868bfd60c5da606394c93308f9705f8d4c5318e066ca"
     },
     {
       "id": "wechat-article",
