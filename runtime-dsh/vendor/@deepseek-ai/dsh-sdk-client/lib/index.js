@@ -469,10 +469,11 @@ var HarnessClient = class {
 			} }
 		}, this.runtime.initializeTimeoutMs);
 		if (!isRecord(result) || !isRecord(result.serverInfo) || typeof result.serverInfo.name !== "string" || typeof result.serverInfo.version !== "string") throw new SdkProtocolError(`initialize returned no server identity: ${JSON.stringify(result)}`);
+		const advertised = isRecord(result.capabilities) ? result.capabilities : void 0;
 		return { serverInfo: {
 			name: result.serverInfo.name,
 			version: result.serverInfo.version
-		} };
+		}, ...advertised === void 0 ? {} : { capabilities: advertised } };
 	}
 	/**
 	* Queue one prompt and return its durable inbox identity.

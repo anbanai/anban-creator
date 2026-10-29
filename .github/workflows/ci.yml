@@ -94,6 +94,14 @@ jobs:
         run: bun run test
       - name: Build
         run: npm run build
+      - name: Test real SDK startup and assistant presets
+        run: bun run test:startup
+      - name: Test startup with production dependencies
+        run: |
+          npm prune --omit=dev
+          npm run patch:dependencies
+          node test/fixtures/project-creator-start.mjs
+          node test/fixtures/assistant-presets-start.mjs
 
   frontend:
     runs-on: ubuntu-latest
