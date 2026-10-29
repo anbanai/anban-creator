@@ -15,6 +15,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const interactionRuntimeTTL = 24 * time.Hour
+
 type AssistantInteractionInput struct {
 	ModeID              string `json:"mode_id"`
 	ProjectID           string `json:"project_id,omitempty"`
@@ -176,7 +178,7 @@ func (s *AssistantInteractionService) CreateOrResume(ctx context.Context, userID
 		interaction.ContentID = in.ContentID
 		interaction.UpdatedAt = now
 	} else {
-		interaction, _, err = s.repo.AssistantInteractions().FindOrCreateActive(ctx, &model.AssistantInteraction{ID: uuid.NewString(), UserID: userID, ModeID: in.ModeID, ProjectID: in.ProjectID, ContentID: in.ContentID, Lifecycle: model.AssistantInteractionActive, Generation: 1, ExpiresAt: now.Add(24 * time.Hour), LastActivityAt: now, CreatedAt: now, UpdatedAt: now})
+		interaction, _, err = s.repo.AssistantInteractions().FindOrCreateActive(ctx, &model.AssistantInteraction{ID: uuid.NewString(), UserID: userID, ModeID: in.ModeID, ProjectID: in.ProjectID, ContentID: in.ContentID, Lifecycle: model.AssistantInteractionActive, Generation: 1, ExpiresAt: now.Add(interactionRuntimeTTL), LastActivityAt: now, CreatedAt: now, UpdatedAt: now})
 		if err != nil {
 			return InteractionSnapshot{}, err
 		}
@@ -439,6 +441,11 @@ func (s *AssistantInteractionService) ensureRuntimeLocked(ctx context.Context, u
 	if terminalErr := interactionRuntimeTerminalError(interaction.Lifecycle); terminalErr != nil {
 		return RuntimeBindingView{}, terminalErr
 	}
+	// Expiry fences the runtime generation, not the durable conversation. A
+	// replacement must receive a fresh lease before its MCP handshake starts.
+	if !s.clock().Before(interaction.ExpiresAt) {
+		return s.replaceRuntimeLocked(ctx, userID, interaction, interaction.Generation, "runtime_expired")
+	}
 	current, err := s.repo.AssistantInteractions().FindCurrentRuntime(ctx, interaction.ID, interaction.Generation)
 	if err == nil {
 		if runtime := s.runtimeFor(interaction.ID, interaction.Generation); runtime != nil {
@@ -461,7 +468,8 @@ func (s *AssistantInteractionService) ensureRuntimeLocked(ctx context.Context, u
 		now := s.clock()
 		_ = s.repo.AssistantInteractions().CloseRuntime(ctx, current.ID, now)
 		s.clearModeSessions(interaction.ID, interaction.Generation)
-		if ok, casErr := s.repo.AssistantInteractions().CompareAndSwapGeneration(ctx, interaction.ID, interaction.Generation, interaction.Generation+1, now); casErr != nil || !ok {
+		expiresAt := now.Add(interactionRuntimeTTL)
+		if ok, casErr := s.repo.AssistantInteractions().CompareAndSwapGeneration(ctx, interaction.ID, interaction.Generation, interaction.Generation+1, now, expiresAt); casErr != nil || !ok {
 			if casErr != nil {
 				return RuntimeBindingView{}, casErr
 			}
@@ -470,6 +478,7 @@ func (s *AssistantInteractionService) ensureRuntimeLocked(ctx context.Context, u
 		s.metrics.observeGenerationReplacement()
 		s.metrics.observeRecovery("server_restart", "replaced")
 		interaction.Generation++
+		interaction.ExpiresAt = expiresAt
 		_ = s.repo.AssistantInteractions().UpdateLifecycle(ctx, interaction.ID, model.AssistantInteractionReconnecting, now)
 		// The old binding has been fenced and the next generation must follow
 		// the normal runtime creation path below.
@@ -668,7 +677,7 @@ func (s *AssistantInteractionService) ResolveRuntimeCapability(token string) (us
 	s.runtimeMu.RLock()
 	capability, ok := s.capabilities[hash]
 	s.runtimeMu.RUnlock()
-	if !ok || s.clock().After(capability.ExpiresAt) {
+	if !ok || !s.clock().Before(capability.ExpiresAt) {
 		return "", "", "", "", 0, time.Time{}, ErrInteractiveToken
 	}
 	if s.repo == nil || s.repo.AssistantInteractions() == nil {
@@ -754,7 +763,8 @@ func (s *AssistantInteractionService) replaceRuntimeLocked(ctx context.Context, 
 			_ = runtime.Close()
 		}
 	}
-	if ok, casErr := s.repo.AssistantInteractions().CompareAndSwapGeneration(ctx, interaction.ID, failedGeneration, failedGeneration+1, now); casErr != nil || !ok {
+	expiresAt := now.Add(interactionRuntimeTTL)
+	if ok, casErr := s.repo.AssistantInteractions().CompareAndSwapGeneration(ctx, interaction.ID, failedGeneration, failedGeneration+1, now, expiresAt); casErr != nil || !ok {
 		if casErr != nil {
 			return RuntimeBindingView{}, casErr
 		}
@@ -763,6 +773,7 @@ func (s *AssistantInteractionService) replaceRuntimeLocked(ctx context.Context, 
 	s.metrics.observeGenerationReplacement()
 	s.metrics.observeRecovery(cause, "replaced")
 	interaction.Generation = failedGeneration + 1
+	interaction.ExpiresAt = expiresAt
 	interaction.Lifecycle = model.AssistantInteractionReconnecting
 	_ = cause
 	binding, startErr := s.ensureRuntimeLocked(ctx, userID, interaction)

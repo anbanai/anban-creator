@@ -9,6 +9,21 @@ vi.mock('@/lib/http-client', () => ({
 
 afterEach(() => vi.clearAllMocks())
 
+it('reports missing drafts when checkpointing or committing an empty snapshot', async () => {
+  vi.mocked(http.get).mockResolvedValue({ data: { data: {
+    interaction_id: 'empty-interaction', mode_id: 'profile', lifecycle: 'active', generation: 1,
+    runtime_status: 'running', expires_at: '', last_activity_at: '', available_actions: ['send_message'],
+  } } })
+
+  await expect(assistantApi.workspaceCheckpoint('empty-interaction', 'profile', {
+    schema_version: '1.0', payload: {}, summary: '', status: 'draft',
+  })).rejects.toThrow('当前计划尚未保存，请重试暂存')
+  await expect(assistantApi.workspaceCommit('empty-interaction', 'profile', {
+    checkpoint_id: 'missing', checkpoint_digest: '', idempotency_key: 'commit-empty',
+  })).rejects.toThrow('当前计划尚未保存，请恢复计划')
+  expect(http.post).not.toHaveBeenCalled()
+})
+
 it('creates Assistant sessions with mode and selected context only', async () => {
   vi.mocked(http.post).mockResolvedValue({ data: { data: { id: 'session-1' } } })
 

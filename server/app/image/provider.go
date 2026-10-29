@@ -175,11 +175,13 @@ func NewProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (Provider, error)
 		return NewGeminiProvider(apiCfg, log)
 	case "volcengine", "volcengine_ark", "volc", "seedream":
 		return NewVolcengineProvider(apiCfg, log)
+	case "tokenplayer":
+		return NewTokenplayerProvider(apiCfg, log)
 	default:
 		return nil, &config.ConfigError{
 			Field:   "ImageProvider",
 			Message: fmt.Sprintf("未知的图片服务提供者: %s", apiCfg.Provider),
-			HintMsg: "支持的提供者: openai (wangcai_openai), gemini (google), volcengine (volcengine_ark, volc, seedream)",
+			HintMsg: "支持的提供者: openai (wangcai_openai), gemini (google), volcengine (volcengine_ark, volc, seedream), tokenplayer",
 		}
 	}
 }

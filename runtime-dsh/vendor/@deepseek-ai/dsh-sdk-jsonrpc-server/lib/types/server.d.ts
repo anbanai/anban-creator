@@ -34,6 +34,12 @@ export declare class HarnessSdkJsonRpcServer {
     private shutdownTask;
     private shuttingDown;
     private initialized;
+    private approvalRequests;
+    private readonly lifetime;
+    private readonly userQuestions;
+    private readonly initialization;
+    /** Restored by a reminder and available for the client's first resume. */
+    private readonly scheduledSessions;
     constructor(ctx: Context, transport: JsonRpcTransportPeer, options?: HarnessSdkJsonRpcServerOptions);
     /**
      * Validate and configure the SDK route, mounting the DeepSeek fallback only when unowned.
@@ -65,6 +71,7 @@ export declare class HarnessSdkJsonRpcServer {
      * @returns an empty result after the root stays idle across the descendant check.
      */
     wait(params: SessionWaitParams): Promise<Record<string, never>>;
+    private ownsAgent;
     private assertLiveAgent;
     /**
      * Read a Session's effective directory, recovering a missing directory to its origin.

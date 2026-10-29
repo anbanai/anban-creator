@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { HarnessClient } from '@deepseek-ai/dsh-sdk-client'
-import { writeDshRouteSettings } from '../../dist/dsh-bridge.js'
+import { assertInteractiveRuntimeCapabilities, writeDshRouteSettings } from '../../dist/dsh-bridge.js'
 
 const repo = fileURLToPath(new URL('../../../', import.meta.url))
 const root = mkdtempSync(join(tmpdir(), 'anban-assistant-presets-'))
@@ -16,7 +16,7 @@ const presets = [
 ]
 mkdirSync(staged, { recursive: true })
 cpSync(join(repo, 'harness/dsh/plugins'), join(staged, 'plugins'), { recursive: true })
-cpSync(join(repo, 'harness/dsh/lib'), join(staged, 'lib'), { recursive: true })
+cpSync(join(repo, 'runtime-dsh/dist/harness-dsh/lib'), join(staged, 'lib'), { recursive: true })
 for (const preset of [...presets, { id: 'project-creator' }]) {
   cpSync(join(repo, `harness/dsh/${preset.id}.patch.yml`), join(staged, `${preset.id}.patch.yml`))
   cpSync(join(repo, `harness/dsh/presets/${preset.id}/skills`), join(staged, `presets/${preset.id}/skills`), { recursive: true })
@@ -116,7 +116,8 @@ try {
     client.start()
     for (let attempt = 0; ; attempt += 1) {
       try {
-        await client.initialize({ cwd: root, provider: 'anthropic', model: 'smoke' })
+        const initialized = await client.initialize({ cwd: root, provider: 'anthropic', model: 'smoke' })
+        assertInteractiveRuntimeCapabilities(initialized)
         break
       } catch (error) {
         if (attempt >= 20 || !error.message.includes('no adapter registered')) throw error

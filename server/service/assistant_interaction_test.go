@@ -378,6 +378,8 @@ func TestCompletedInteractionSnapshotDoesNotRestartRuntime(t *testing.T) {
 	svc.runtimeMu.Lock()
 	svc.runtimes = map[string]Runtime{}
 	svc.runtimeMu.Unlock()
+	createdAt := svc.clock()
+	svc.clock = func() time.Time { return createdAt.Add(25 * time.Hour) }
 	if _, err := svc.Snapshot(context.Background(), "user-1", snapshot.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -907,6 +909,8 @@ func TestAssistantInteractionSnapshotKeepsReadyDraftWhenRuntimeReplacementFails(
 
 	// The durable draft must remain readable even if the old runtime is gone
 	// and the replacement cannot start. Confirmation no longer depends on it.
+	createdAt := svc.clock()
+	svc.clock = func() time.Time { return createdAt.Add(25 * time.Hour) }
 	restarted := NewAssistantInteractionService(svc.repo, assistantInteractionFailingFactory{}, svc.clock)
 	recovered, err := restarted.Snapshot(context.Background(), "user-1", snapshot.ID)
 	if err != nil {

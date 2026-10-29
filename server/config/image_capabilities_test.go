@@ -184,6 +184,14 @@ func TestValidateEnabledImageCapabilityRejectsProviderWithoutSemanticTaskRatioPr
 	}
 }
 
+func TestValidateEnabledImageCapabilityAcceptsTokenplayer(t *testing.T) {
+	route := validCapabilityForConfigTest()
+	route.Provider = "tokenplayer"
+	if err := validateEnabledImageCapability("model_routes.image_generation.capabilities.standard", "standard", route); err != nil {
+		t.Fatalf("validateEnabledImageCapability() rejected tokenplayer: %v", err)
+	}
+}
+
 func TestValidateEnabledImageCapabilityRejectsPresetWithoutResolutionTier(t *testing.T) {
 	route := validCapabilityForConfigTest()
 	route.GenerationFeatures.DefaultSize = "3:4"

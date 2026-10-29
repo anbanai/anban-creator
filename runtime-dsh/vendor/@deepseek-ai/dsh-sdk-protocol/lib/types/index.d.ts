@@ -9,5 +9,5 @@
  */
 export { JsonRpcLineTransport, JsonRpcResponseError } from './transport.ts';
 export type { JsonRpcTransportPeer } from './transport.ts';
-export type { HarnessSdkNotificationMap, HarnessSdkRequestMap, InitializeParams, InitializeResult, SdkEncodedImageBlock, SdkPromptContentBlock, SdkRunStatus, SessionEventNotification, SessionStatusNotification, SessionPromptParams, SessionPromptResult, SessionResumeParams, SessionWaitParams, SessionWorkingDirectoryParams, SessionWorkingDirectorySetParams, SessionWorkingDirectoryResult, SubagentFinishedNotification, SubagentStartedNotification, } from './types.ts';
+export type { ApprovalRequestParams, ApprovalRequestResult, HarnessSdkClientRequestMap, HarnessSdkNotificationMap, HarnessSdkRequestMap, HarnessSdkHostRequestMap, InitializeParams, InitializeResult, SdkEncodedImageBlock, SdkPromptContentBlock, SdkRunStatus, SdkUserQuestionRequest, SdkUserQuestionAnswer, SdkUserQuestionCancelled, SessionEventNotification, SessionStatusNotification, SessionPromptParams, SessionPromptResult, SessionResumeParams, SessionWaitParams, SessionWorkingDirectoryParams, SessionWorkingDirectorySetParams, SessionWorkingDirectoryResult, SubagentFinishedNotification, SubagentStartedNotification, } from './types.ts';
 //# sourceMappingURL=index.d.ts.map

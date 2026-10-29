@@ -22,7 +22,7 @@ const sdkPackages = [
 describe("vendored DSH interactive SDK contract", () => {
   test("allows only pinned install scripts required by the Linux DSH runtime", () => {
     const approvals = packageJSON.allowScripts ?? {};
-    expect(approvals["@deepseek-ai/dsh-subprocess-local@0.2.1-rc.2"]).toBe(true);
+    expect(approvals["@deepseek-ai/dsh-subprocess-local@0.2.2-alpha.2"]).toBe(true);
     expect(approvals["node-pty@1.2.0-beta.15"]).toBe(true);
     expect(approvals["koffi@3.1.1"]).toBe(true);
     expect(approvals["@google/genai"]).toBe(false);
@@ -66,7 +66,7 @@ describe("vendored DSH interactive SDK contract", () => {
   test("ships the pinned transport-cause dependency patch", () => {
     const patch = readFileSync(join(runtimeDir, "scripts/patch-dsh-dependencies.mjs"), "utf8");
     expect(patch).toContain("Anban transport-cause preservation patch");
-    expect(patch).toContain("unsupported @deepseek-ai/dsh-llm rc.2 layout");
+    expect(patch).toContain("unsupported @deepseek-ai/dsh-llm alpha.2 layout");
   });
 
   test("keeps malformed provider tool input recoverable", () => {
@@ -75,7 +75,7 @@ describe("vendored DSH interactive SDK contract", () => {
       "utf8",
     );
     expect(adapter).toContain("Anban malformed-tool-input recovery patch");
-    expect(adapter).toContain("ToolRuntime validates malformed provider arguments");
+    expect(adapter).toContain("preserve truncated arguments");
     expect(adapter).not.toContain('return malformed("tool input is invalid JSON")');
   });
 });
