@@ -5,9 +5,9 @@ RUN npm ci
 COPY runtime-claude/ ./
 RUN npm run build && npm prune --omit=dev
 
-FROM node:24.22.0-bookworm-slim
+FROM node:24.22.0-trixie-slim
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git ffmpeg python3 python3-venv tini && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git ffmpeg python3 python3-venv tini && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/video-use
 ARG VIDEO_USE_REPO=https://github.com/browser-use/video-use.git
 ARG VIDEO_USE_REF=43cfc566833548093455c9d4a46bd69913b7e552
@@ -18,6 +18,11 @@ RUN set -eux; \
     python3 -m venv /opt/video-use-venv; \
     /opt/video-use-venv/bin/pip install --no-cache-dir -e /opt/video-use; \
     /opt/video-use-venv/bin/pip install --no-cache-dir "auto-editor==${AUTO_EDITOR_VERSION}"; \
+    test "$(uname -m)" = x86_64; \
+    auto_editor_binary="$(/opt/video-use-venv/bin/python -c 'import auto_editor; from pathlib import Path; print(Path(auto_editor.__file__).parent / "bin" / "auto-editor")')"; \
+    install -d "$(dirname "$auto_editor_binary")"; \
+    curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 "https://github.com/WyattBlue/auto-editor/releases/download/${AUTO_EDITOR_VERSION}/auto-editor-linux-x86_64" --output "$auto_editor_binary"; \
+    chmod 0755 "$auto_editor_binary"; \
     test "$(/opt/video-use-venv/bin/python -c 'import importlib.metadata as m; print(m.version("auto-editor"))')" = "$AUTO_EDITOR_VERSION"; \
     /opt/video-use-venv/bin/auto-editor --version >/dev/null; \
     /opt/video-use-venv/bin/python -m compileall -q /opt/video-use/helpers; \

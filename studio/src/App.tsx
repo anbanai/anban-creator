@@ -18,6 +18,7 @@ import { lazyWithRecovery } from '@/lib/lazy-with-recovery'
 
 // Lazy-loaded pages
 const LoginPage = lazyWithRecovery(() => import('@/pages/LoginPage'))
+const LandingPage = lazyWithRecovery(() => import('@/pages/LandingPage'))
 const RegisterPage = lazyWithRecovery(() => import('@/pages/RegisterPage'))
 const DashboardPage = lazyWithRecovery(() => import('@/pages/DashboardPage'))
 const AssistantWorkspace = lazyWithRecovery(() => import('@/pages/AssistantWorkspace'))
@@ -102,6 +103,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const location = useLocation()
 
   if (!isAuthenticated) {
+    if (location.pathname === '/') {
+      return <LazyPage component={LandingPage} />
+    }
     return <Navigate to="/login" state={{ from: location }} replace />
   }
 

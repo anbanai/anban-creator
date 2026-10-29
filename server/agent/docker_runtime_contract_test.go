@@ -1083,9 +1083,15 @@ func TestTalkingHeadEditorDockerfileValidatesErduoMotionContract(t *testing.T) {
 	root := repositoryRoot(t)
 	dockerfile := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.agent-talking-head-editor"))
 	for _, want := range []string{
+		"FROM node:24.22.0-trixie-slim",
 		"ARG AUTO_EDITOR_VERSION=29.3.1",
 		"ARG HYPERFRAMES_VERSION=0.8.214",
 		"/opt/video-use-venv/bin/pip install --no-cache-dir \"auto-editor==${AUTO_EDITOR_VERSION}\"",
+		"test \"$(uname -m)\" = x86_64",
+		"auto-editor-linux-x86_64",
+		"Path(auto_editor.__file__).parent / \"bin\" / \"auto-editor\"",
+		"chmod 0755 \"$auto_editor_binary\"",
+		"curl --fail --location --retry 5 --retry-all-errors",
 		"importlib.metadata as m; print(m.version(\"auto-editor\"))",
 		"/opt/video-use-venv/bin/auto-editor --version",
 		"npm install --global --omit=dev \"hyperframes@${HYPERFRAMES_VERSION}\"",
@@ -1102,6 +1108,15 @@ func TestTalkingHeadEditorDockerfileValidatesErduoMotionContract(t *testing.T) {
 	} {
 		if !strings.Contains(dockerfile, want) {
 			t.Fatalf("talking-head-editor Dockerfile missing runtime contract %q", want)
+		}
+	}
+	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
+	for _, want := range []string{
+		"docker build --platform linux/amd64 -f deploy/docker/Dockerfile.agent-talking-head-editor",
+		"--build-arg AUTO_EDITOR_VERSION=\"$(AUTO_EDITOR_VERSION)\"",
+	} {
+		if !strings.Contains(makefile, want) {
+			t.Fatalf("talking-head-editor Makefile contract missing %q", want)
 		}
 	}
 }

@@ -262,8 +262,9 @@ docker-video-edit-agent-image: docker-agent-build-check
 
 docker-talking-head-editor-agent-image: docker-agent-build-check
 	@echo "Building $(TALKING_HEAD_EDITOR_AGENT_IMAGE)..." && \
-	docker build -f deploy/docker/Dockerfile.agent-talking-head-editor \
+	docker build --platform linux/amd64 -f deploy/docker/Dockerfile.agent-talking-head-editor \
 		--build-arg VIDEO_USE_REPO="$(VIDEO_USE_SOURCE_REPO)" --build-arg VIDEO_USE_REF="$(VIDEO_USE_SOURCE_REF)" \
+		--build-arg AUTO_EDITOR_VERSION="$(AUTO_EDITOR_VERSION)" \
 		-t $(TALKING_HEAD_EDITOR_AGENT_IMAGE) . && echo "Image build complete: $(TALKING_HEAD_EDITOR_AGENT_IMAGE)"
 
 # Build the Moments Agent image.
