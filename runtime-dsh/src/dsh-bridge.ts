@@ -9,6 +9,7 @@ const DSH_BRIDGE_PROVIDER_API_KEY_ENV = "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY";
 const PROVIDER_REGISTRATION_RETRIES = 20;
 const PROVIDER_REGISTRATION_RETRY_MS = 50;
 const RUNTIME_HEARTBEAT_INTERVAL_MS = 30_000;
+const SDK_INITIALIZE_TIMEOUT_MS = 120_000;
 const DSH_RETRY_POLICY = [
   "  retryPolicy:",
   "    mode: normal",
@@ -463,6 +464,7 @@ export class DshBridge {
           patches: patchPaths,
           processCwd: process.cwd(),
           env: process.env,
+          initializeTimeoutMs: SDK_INITIALIZE_TIMEOUT_MS,
         });
       })();
       if (this.closed) {
