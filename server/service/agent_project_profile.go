@@ -417,13 +417,10 @@ func (s *AgentProjectProfileService) talkingHeadEditorProfile(project *model.Pro
 			"max_assets":           s.talkingHeadEditor.MaxAssets,
 			"timeout_minutes":      s.talkingHeadEditor.TimeoutMinutes,
 		},
-		"upstream_revisions": map[string]string{
-			"auto-editor":                  "29.3.1",
-			"auto-editor-source":           "pypi:auto-editor==29.3.1",
-			"hyperframes":                  "0.8.214",
-			"video-use":                    "43cfc566833548093455c9d4a46bd69913b7e552",
-			"erduo-broll-loop-engineering": "managed-release",
-			"talking-head-sound-design":    "motion-graphics:3d83d987d658601d8a1269eb691622bdcd427335",
+		"runtime_capabilities": map[string]any{
+			"auto_editor": map[string]any{"command": "auto-editor", "required": true},
+			"hyperframes": map[string]any{"command": "hyperframes", "required": true},
+			"video_use":   map[string]any{"helper_root": "/opt/video-use/helpers", "transcription": true},
 		},
 		"workspace_input_file": "talking-head-editor-input.json",
 		"policy_file":          "talking-head-editor-policy.json",
@@ -442,7 +439,7 @@ func (s *AgentProjectProfileService) talkingHeadEditorProfile(project *model.Pro
 			"output/content-tags.json",
 		},
 		"optional_artifacts": []string{"output/final-picture.mp4", "output/rough-cut.mp4", "output/semantic-cut.mp4", "output/motion-sample.mp4", "output/subtitles.srt", "output/failure-state.json", "output/failure-diagnosis.md", "output/progress-state.json"},
-		"runtime_contract":   "Use the five Server-pinned talking-head-editor Skills; content-tagging is read-only metadata support. Execute rough cut and semantic cut continuously, stop at the motion-sample review gate, then after approval use the local CC0 sound-design Skill to render event-synced SFX. Never load video-edit or silently downgrade to it.",
+		"runtime_contract":   "Use the available talking-head-editor Skills; content-tagging is read-only metadata support. Check required runtime capabilities and record observed versions without requiring exact version matches. Execute rough cut and semantic cut continuously, stop at the motion-sample review gate, then after approval use the local CC0 sound-design Skill to render event-synced SFX. Never load video-edit or silently downgrade to it.",
 	}
 }
 

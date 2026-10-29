@@ -860,7 +860,7 @@ func (s *AgentBootstrapService) runtimeEnv(task *model.Task) map[string]string {
 			}
 		}
 		if key := strings.TrimSpace(s.cfg.TalkingHeadEditor.VideoUseAPIKey); key != "" {
-			env["VIDEO_USE_API_KEY"] = key
+			env["ELEVENLABS_API_KEY"] = key
 		}
 		return env
 	}

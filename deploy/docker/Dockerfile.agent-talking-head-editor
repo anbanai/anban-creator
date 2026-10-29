@@ -34,7 +34,6 @@ COPY deploy/docker/anban-agent-launcher /usr/local/bin/anban
 RUN set -eux; \
     skill=/anbanai/skills/erduo-broll-loop-engineering/SKILL.md; \
     test -s "$skill"; \
-    grep -Fq 'HyperFrames `0.8.214`' "$skill"; \
     grep -Fq 'HyperFrames lint' "$skill"; \
     grep -Fq 'aesthetic review' "$skill"; \
     sound_skill=/anbanai/skills/talking-head-sound-design/SKILL.md; \

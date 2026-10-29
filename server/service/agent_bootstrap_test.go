@@ -1368,6 +1368,29 @@ func TestRuntimeEnvScopesVideoEditScribeCredential(t *testing.T) {
 	}
 }
 
+func TestRuntimeEnvMapsTalkingHeadTranscriptionCredentialToUpstreamVariable(t *testing.T) {
+	svc := &AgentBootstrapService{cfg: AgentBootstrapConfig{
+		TalkingHeadEditor: config.TalkingHeadEditorConfig{
+			VideoUseAPIKey: "server-managed-talking-head-scribe-key",
+			Env:            map[string]string{"TALKING_HEAD_OPTION": "enabled"},
+		},
+		MontageEnv: map[string]string{"MONTAGE_PROVIDER_KEY": "montage-only-key"},
+	}}
+	got := svc.runtimeEnv(&model.Task{Type: model.PlatformTalkingHeadEditor})
+	if got["ELEVENLABS_API_KEY"] != "server-managed-talking-head-scribe-key" || got["TALKING_HEAD_OPTION"] != "enabled" {
+		t.Fatalf("talking-head runtime env = %#v, want upstream transcription credential and configured environment", got)
+	}
+	if _, exists := got["VIDEO_USE_API_KEY"]; exists {
+		t.Fatalf("talking-head runtime env exposes an unused credential variable: %#v", got)
+	}
+	if _, exists := got["MONTAGE_PROVIDER_KEY"]; exists {
+		t.Fatalf("talking-head runtime env contains Montage credential: %#v", got)
+	}
+	if got := svc.runtimeEnv(&model.Task{Type: model.PlatformMontage}); got["ELEVENLABS_API_KEY"] != "" {
+		t.Fatalf("Montage runtime env leaked talking-head transcription credential: %#v", got)
+	}
+}
+
 func TestBootstrapMaterializesOnlyOwnedFinalizedVideoEditAssets(t *testing.T) {
 	repo := openBootstrapTestRepository(t)
 	store := &videoEditBootstrapStore{bootstrapSecurityStore: &bootstrapSecurityStore{signFakeStore: &signFakeStore{}}}
