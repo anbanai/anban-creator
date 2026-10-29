@@ -1083,6 +1083,7 @@ func TestTalkingHeadEditorDockerfileValidatesErduoMotionContract(t *testing.T) {
 	root := repositoryRoot(t)
 	dockerfile := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.agent-talking-head-editor"))
 	for _, want := range []string{
+		"FROM node:24.22.0-trixie-slim",
 		"ARG AUTO_EDITOR_VERSION=29.3.1",
 		"ARG HYPERFRAMES_VERSION=0.8.214",
 		"/opt/video-use-venv/bin/pip install --no-cache-dir \"auto-editor==${AUTO_EDITOR_VERSION}\"",

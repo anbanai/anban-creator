@@ -5,7 +5,7 @@ RUN npm ci
 COPY runtime-claude/ ./
 RUN npm run build && npm prune --omit=dev
 
-FROM node:24.22.0-bookworm-slim
+FROM node:24.22.0-trixie-slim
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git ffmpeg python3 python3-venv tini && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/video-use
