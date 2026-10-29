@@ -95,7 +95,7 @@ func TestAssistantInteractionRepositoryAppendEventFencesGenerationAndAllocatesSe
 		t.Fatal(err)
 	}
 	for sequence := uint64(1); sequence <= 2; sequence++ {
-		accepted, err := repo.AssistantInteractions().AppendEvent(context.Background(), interaction.ID, 1, &model.AssistantInteractionEvent{ID: uuid.NewString(), Type: "runtime.ready", Data: json.RawMessage(`{}`), CreatedAt: now})
+		accepted, err := repo.AssistantInteractions().AppendEvent(context.Background(), interaction.ID, 1, interaction.ProjectID, &model.AssistantInteractionEvent{ID: uuid.NewString(), Type: "runtime.ready", Data: json.RawMessage(`{}`), CreatedAt: now})
 		if err != nil || !accepted {
 			t.Fatalf("append event %d = accepted=%v, err=%v", sequence, accepted, err)
 		}
@@ -103,11 +103,11 @@ func TestAssistantInteractionRepositoryAppendEventFencesGenerationAndAllocatesSe
 	if ok, err := repo.AssistantInteractions().CompareAndSwapGeneration(context.Background(), interaction.ID, 1, 2, now); err != nil || !ok {
 		t.Fatalf("generation CAS = %v, %v", ok, err)
 	}
-	accepted, err := repo.AssistantInteractions().AppendEvent(context.Background(), interaction.ID, 1, &model.AssistantInteractionEvent{ID: uuid.NewString(), Type: "late", Data: json.RawMessage(`{}`), CreatedAt: now})
+	accepted, err := repo.AssistantInteractions().AppendEvent(context.Background(), interaction.ID, 1, interaction.ProjectID, &model.AssistantInteractionEvent{ID: uuid.NewString(), Type: "late", Data: json.RawMessage(`{}`), CreatedAt: now})
 	if err != nil || accepted {
 		t.Fatalf("stale append = accepted=%v, err=%v", accepted, err)
 	}
-	accepted, err = repo.AssistantInteractions().AppendEvent(context.Background(), interaction.ID, 2, &model.AssistantInteractionEvent{ID: uuid.NewString(), Type: "runtime.replaced", Data: json.RawMessage(`{}`), CreatedAt: now})
+	accepted, err = repo.AssistantInteractions().AppendEvent(context.Background(), interaction.ID, 2, interaction.ProjectID, &model.AssistantInteractionEvent{ID: uuid.NewString(), Type: "runtime.replaced", Data: json.RawMessage(`{}`), CreatedAt: now})
 	if err != nil || !accepted {
 		t.Fatalf("current append = accepted=%v, err=%v", accepted, err)
 	}

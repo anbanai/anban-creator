@@ -40,7 +40,7 @@ type AssistantInteractionRepository interface {
 	ExpireDrafts(context.Context, time.Time) (int64, error)
 	UpdateDraftState(context.Context, string, string, time.Time) error
 	CreateEvent(context.Context, *model.AssistantInteractionEvent) error
-	AppendEvent(context.Context, string, int64, *model.AssistantInteractionEvent) (bool, error)
+	AppendEvent(context.Context, string, int64, string, *model.AssistantInteractionEvent) (bool, error)
 	NextEventSequence(context.Context, string) (uint64, error)
 	ListEventsAfter(context.Context, string, int64, uint64, int) ([]*model.AssistantInteractionEvent, error)
 	CreateAttempt(context.Context, *model.AssistantInteractionAttempt) error
@@ -356,11 +356,11 @@ func (r *assistantInteractionRepository) CreateEvent(ctx context.Context, value 
 	return r.db.WithContext(ctx).Create(value).Error
 }
 
-// AppendEvent fences the generation check, sequence allocation, and insert in
+// AppendEvent fences the generation/project check, sequence allocation, and insert in
 // one transaction. A late runtime event therefore cannot slip between a
 // generation read and the replacement CAS, and concurrent writers cannot
 // allocate the same sequence number.
-func (r *assistantInteractionRepository) AppendEvent(ctx context.Context, interactionID string, generation int64, value *model.AssistantInteractionEvent) (bool, error) {
+func (r *assistantInteractionRepository) AppendEvent(ctx context.Context, interactionID string, generation int64, expectedProjectID string, value *model.AssistantInteractionEvent) (bool, error) {
 	if value == nil || strings.TrimSpace(interactionID) == "" || generation < 1 {
 		return false, errors.New("assistant interaction event identity is required")
 	}
@@ -376,7 +376,7 @@ func (r *assistantInteractionRepository) AppendEvent(ctx context.Context, intera
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", interactionID).First(&interaction).Error; err != nil {
 		return rollback(err)
 	}
-	if interaction.Generation != generation {
+	if interaction.Generation != generation || interaction.ProjectID != expectedProjectID {
 		return rollback(nil)
 	}
 	if interaction.Lifecycle == model.AssistantInteractionCompleted || interaction.Lifecycle == model.AssistantInteractionAbandoned {

@@ -773,6 +773,10 @@ func assistantWorkTitle(task *model.Task) string {
 }
 
 func (s *InteractiveService) reviewAnalyticsSnapshot(ctx context.Context, userID, projectID, contentID, platform string) ([]byte, int64, error) {
+	return assistantReviewAnalyticsContext(ctx, s.repo, userID, projectID, contentID, platform)
+}
+
+func assistantReviewAnalyticsContext(ctx context.Context, repo repository.Repository, userID, projectID, contentID, platform string) ([]byte, int64, error) {
 	now := time.Now().UTC()
 	from := now.AddDate(0, 0, -90).Format("2006-01-02")
 	to := now.Format("2006-01-02")
@@ -781,7 +785,7 @@ func (s *InteractiveService) reviewAnalyticsSnapshot(ctx context.Context, userID
 		From: from, To: to, MetricBasis: "cumulative", Observations: []AnalyticsObservationView{},
 	}
 	if platform != model.PlatformWechat && platform != model.PlatformSeednote {
-		state, err := s.repo.Analytics().State(ctx, projectID)
+		state, err := repo.Analytics().State(ctx, projectID)
 		if err != nil {
 			return nil, 0, errors.Join(ErrInteractivePersistence, err)
 		}
@@ -790,15 +794,17 @@ func (s *InteractiveService) reviewAnalyticsSnapshot(ctx context.Context, userID
 		encoded, err := json.Marshal(snapshot)
 		return encoded, snapshot.AnalyticsRev, err
 	}
-	state, err := s.repo.Analytics().State(ctx, projectID)
+	state, err := repo.Analytics().State(ctx, projectID)
 	if err != nil {
 		return nil, 0, errors.Join(ErrInteractivePersistence, err)
 	}
 	revision := state.Revision
-	page, err := NewAnalyticsService(s.repo).Observations(ctx, userID, projectID, "task:"+contentID, AnalyticsQuery{
+	page, err := NewAnalyticsService(repo).Observations(ctx, userID, projectID, "task:"+contentID, AnalyticsQuery{
 		Platform: platform, From: from, To: to, MetricBasis: "cumulative", Limit: 30, ExpectedRevision: &revision,
 	})
-	if err != nil {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		page = AnalyticsObservationPage{Revision: revision, Items: []AnalyticsObservationView{}}
+	} else if err != nil {
 		return nil, 0, errors.Join(ErrInteractivePersistence, err)
 	}
 	snapshot.AnalyticsRev = page.Revision

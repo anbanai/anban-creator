@@ -125,6 +125,7 @@ export interface SubagentFinishedNotification {
 /** Server-to-client notifications by JSON-RPC method name. */
 export interface HarnessSdkNotificationMap {
     'session.event': SessionEventNotification;
+    'session.question': { sessionId: string; callId: string; questions: unknown[] };
     'session.status': SessionStatusNotification;
     'subagent.started': SubagentStartedNotification;
     'subagent.finished': SubagentFinishedNotification;
@@ -136,7 +137,7 @@ export interface HarnessSdkRequestMap {
         result: InitializeResult;
     };
     'session/start': {
-        params: { sessionId: string; presetId: string };
+        params: { sessionId: string; presetId: string; initialContext?: string };
         result: { sessionId: string; presetId: string };
     };
     'session/prompt': {

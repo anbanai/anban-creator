@@ -264,6 +264,19 @@ function mapHarnessNotificationBase(notification: HarnessNotification, rootSessi
       },
     }];
   }
+  if (notification.method === "session.question") {
+    const sessionId = typeof params.sessionId === "string" ? params.sessionId : undefined;
+    if (rootSessionId !== undefined && sessionId !== rootSessionId) {
+      return [{ event: "session.error", data: { session_id: sessionId, message: "AskUserQuestion from a child Agent is not allowed" } }];
+    }
+    if (typeof params.callId !== "string" || !params.callId.trim()) {
+      return [{ event: "session.error", data: { session_id: sessionId, message: "AskUserQuestion call id is missing" } }];
+    }
+    return [{ event: "question.opened", data: {
+      session_id: sessionId, call_id: params.callId,
+      questions: Array.isArray(params.questions) ? params.questions.map(normalizeQuestion) : [],
+    } }];
+  }
   if (notification.method === "session.status") {
     if (rootSessionId !== undefined && params.sessionId !== rootSessionId) return [];
     return [{ event: "session.status", data: { session_id: params.sessionId, status: params.status } }];
@@ -325,50 +338,13 @@ function mapHarnessNotificationBase(notification: HarnessNotification, rootSessi
   }
   if (event.type === "tool/call") {
     const name = typeof data.name === "string" ? data.name.trim() : "";
-    if (name.toLowerCase() !== "ask_user_question") {
-      if (!name) return [];
-      return [{
-        event: "agent.activity",
-        data: {
-          session_id: sessionId,
-          ...(typeof data.callId === "string" && data.callId.trim() !== "" ? { call_id: data.callId } : {}),
-          name: name.replace(/^mcp__(?:anban|creator)__/, "").slice(0, 128),
-        },
-      }];
-    }
-    if (rootSessionId !== undefined && sessionId !== rootSessionId) {
-      return [{
-        event: "session.error",
-        data: {
-          session_id: sessionId,
-          message: "AskUserQuestion from a child Agent is not allowed",
-        },
-      }];
-    }
-    let args: JsonRecord = {};
-    if (typeof data.arguments === "string") {
-      try {
-        const parsed: unknown = JSON.parse(data.arguments);
-        if (isRecord(parsed)) args = parsed;
-      } catch {
-        return [{ event: "session.error", data: { session_id: sessionId, message: "AskUserQuestion arguments are invalid" } }];
-      }
-    }
-    const questions = Array.isArray(args.questions)
-      ? args.questions.map(normalizeQuestion)
-      : Array.isArray(args.items) ? args.items.map(normalizeQuestion) : [];
-    const callId = typeof data.callId === "string" ? data.callId : data.call_id;
-    if (typeof callId !== "string" || callId.trim() === "") {
-      return [{ event: "session.error", data: { session_id: sessionId, message: "AskUserQuestion call id is missing" } }];
-    }
-    return [{
-      event: "question.opened",
-      data: {
-        session_id: sessionId,
-        call_id: callId,
-        questions,
-      },
-    }];
+    // A tool call is only an intention; expose questions after the SDK has an answer handler.
+    if (!name || name.toLowerCase() === "ask_user_question") return [];
+    return [{ event: "agent.activity", data: {
+      session_id: sessionId,
+      ...(typeof data.callId === "string" && data.callId.trim() !== "" ? { call_id: data.callId } : {}),
+      name: name.replace(/^mcp__(?:anban|creator)__/, "").slice(0, 128),
+    } }];
   }
   if (event.type === "tool/result") {
     const message = isRecord(data.message) ? data.message : {};

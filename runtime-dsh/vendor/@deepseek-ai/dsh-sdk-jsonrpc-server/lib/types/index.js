@@ -13,8 +13,7 @@ import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol';
 import { HarnessSdkJsonRpcServer } from "./server.js";
 export * from "./server.js";
 export const name = 'sdk-jsonrpc-server';
-// Only the agent factory is required; initialize reads the optional LLM seam with ctx.get().
-export const inject = ['agents'];
+export const inject = ['agents', 'workingDirectory', 'userQuestions'];
 export const Config = Schema.object({
     maxTokensAsSuccess: Schema.boolean().default(false),
     interactiveQuestions: Schema.boolean().default(false),

@@ -174,10 +174,14 @@ var HarnessSdkJsonRpcServer = class {
 	async start(params) {
 		if (!this.initialized) throw new Error("SDK server is not initialized");
 		if (!params.sessionId.trim() || !params.presetId.trim()) throw new TypeError("session/start requires non-empty sessionId and presetId");
+		if (params.initialContext !== undefined && (typeof params.initialContext !== "string" || Buffer.byteLength(params.initialContext, "utf8") > 256 * 1024)) throw new TypeError("session/start initialContext must be a string of at most 256 KiB");
 		const rec = await this.getOrCreateSession(params.sessionId, params.presetId);
 		if (rec.presetId !== params.presetId) throw new Error(`session ${params.sessionId} is already bound to a different preset`);
 		this.assertLiveAgent(rec, params.sessionId);
 		if (!rec.started) {
+			if (params.initialContext) rec.handle.agent.ctx.systemPrompt.context({
+				name: "anban-interaction-context", order: 1000, text: params.initialContext, interpolate: false, required: true,
+			});
 			const start = rec.handle.agent.start;
 			if (typeof start !== "function") throw new Error("session/start requires an Agent runtime with message-free start support");
 			try {
@@ -250,6 +254,7 @@ var HarnessSdkJsonRpcServer = class {
 				removeAbortListener = () => request.signal?.removeEventListener("abort", onAbort);
 				pending.removeAbortListener = removeAbortListener;
 			}
+			this.transport.notify("session.question", { sessionId, callId, questions: request.questions });
 		});
 	}
 	/**
@@ -459,7 +464,7 @@ var HarnessSdkJsonRpcServer = class {
 * @module @deepseek-ai/dsh-sdk-jsonrpc-server
 */
 const name = "sdk-jsonrpc-server";
-const inject = ["agents", "workingDirectory"];
+const inject = ["agents", "workingDirectory", "userQuestions"];
 const Config = Schema.object({ maxTokensAsSuccess: Schema.boolean().default(false), interactiveQuestions: Schema.boolean().default(false) });
 /**
 * Serve SDK requests over the configured streams. Effect disposal shuts down

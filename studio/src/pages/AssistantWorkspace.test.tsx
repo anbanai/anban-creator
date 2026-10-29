@@ -989,6 +989,185 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(within(conversation).queryByRole('heading', { name: '先确定作品主题？' })).not.toBeInTheDocument())
   })
 
+  it('releases the composer when the matching question tool fails', async () => {
+    mocks.streamEvents = [
+      { event: 'question.opened', id: 'question-1', data: JSON.stringify({ call_id: 'call-1', questions: [{ id: 'q1', question: '选择作品主题', options: [{ label: '主题一' }] }] }) },
+      { event: 'tool.result', id: 'tool-result-1', data: JSON.stringify({ call_id: 'call-1', name: '', ok: false, message: 'No user question answerer is available' }) },
+    ]
+    renderPage()
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(await screen.findByText('问题未能送达，请直接发送消息继续。')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '提交回答' })).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '作品主题是人工智能' } })
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
+  })
+
+  it('keeps another live question blocking the composer after an unrelated tool failure', async () => {
+    mocks.streamEvents = [
+      { event: 'question.opened', id: 'question-1', data: JSON.stringify({ call_id: 'call-1', questions: [{ id: 'q1', question: '选择作品主题', options: [{ label: '主题一' }] }] }) },
+      { event: 'tool.result', id: 'tool-result-2', data: JSON.stringify({ call_id: 'call-2', ok: false }) },
+    ]
+    renderPage()
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await screen.findByRole('heading', { name: '选择作品主题' })
+
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
+    expect(screen.getByRole('radio', { name: '主题一' })).toBeEnabled()
+  })
+
+  it('preserves an editable answer after the answer request fails', async () => {
+    mocks.streamEvents = [
+      { event: 'question.opened', id: 'question-1', data: JSON.stringify({ call_id: 'call-1', questions: [{ id: 'q1', question: '补充作品主题' }] }) },
+    ]
+    mocks.workspaceAnswer.mockRejectedValueOnce(new Error('暂时无法提交'))
+    renderPage()
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '问题补充说明' }), { target: { value: '保留我的创作主题' } })
+    fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
+
+    await screen.findAllByText('暂时无法提交')
+    expect(screen.getByRole('textbox', { name: '问题补充说明' })).toHaveValue('保留我的创作主题')
+    expect(screen.getByRole('button', { name: '提交回答' })).toBeEnabled()
+    expect(screen.queryByText('已回答')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '补充作品主题' })).not.toBeInTheDocument())
+  })
+
+  it('expires unanswered cards when recovery replaces the runtime generation', async () => {
+    mocks.streamEvents = [
+      { event: 'question.opened', id: 'question-1', data: JSON.stringify({ call_id: 'call-1', questions: [{ id: 'q1', question: '补充作品主题' }] }) },
+    ]
+    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'profile', generation: 1, runtime_status: 'running', expires_at: '' })
+    mocks.workspaceAnswer.mockRejectedValueOnce(Object.assign(new Error('generation changed'), { response: { status: 409, data: {
+      error_code: 'assistant_interaction_generation_changed', data: {
+        interaction_id: 'workspace-1', mode_id: 'profile', lifecycle: 'active', generation: 2,
+        runtime_status: 'running', expires_at: '', last_activity_at: '', available_actions: ['send_message'], drafts: [],
+      },
+    } } }))
+    renderPage()
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '问题补充说明' }), { target: { value: '保留我的创作主题' } })
+    fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
+
+    expect(await screen.findByText('问题已过期，请按页面提示恢复对话。')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
+    expect(screen.getByRole('textbox', { name: '问题补充说明' })).toHaveValue('保留我的创作主题')
+    expect(screen.getByRole('button', { name: '提交回答' })).toBeDisabled()
+  })
+
+  it('restores the attempted answer after refreshing a failed submission', async () => {
+    mocks.streamEvents = [
+      { event: 'question.opened', id: 'question-1', data: JSON.stringify({ call_id: 'call-1', questions: [{ id: 'q1', question: '补充作品主题' }] }) },
+    ]
+    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'profile', generation: 1, runtime_status: 'running', expires_at: '' })
+    mocks.getInteractionSnapshot.mockResolvedValue({
+      interaction_id: 'workspace-1', mode_id: 'profile', lifecycle: 'active', generation: 1,
+      runtime_status: 'running', expires_at: '', last_activity_at: '', available_actions: ['send_message'], drafts: [],
+    })
+    mocks.workspaceAnswer.mockRejectedValueOnce(new Error('暂时无法提交'))
+    const first = renderPage()
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '问题补充说明' }), { target: { value: '刷新后保留我的主题' } })
+    fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
+    await screen.findAllByText('暂时无法提交')
+    first.unmount()
+    renderPage()
+
+    expect(await screen.findByRole('textbox', { name: '问题补充说明' })).toHaveValue('刷新后保留我的主题')
+    expect(screen.queryByText('已回答')).not.toBeInTheDocument()
+  })
+
+  it('requires explicit confirmation to retry an answer with an unknown outcome', async () => {
+    mocks.streamEvents = [
+      { event: 'question.opened', id: 'question-1', data: JSON.stringify({ call_id: 'call-1', questions: [{ id: 'q1', question: '补充作品主题' }] }) },
+    ]
+    mocks.workspaceAnswer.mockRejectedValueOnce(Object.assign(new Error('unknown'), { response: { status: 409, data: { error_code: 'assistant_command_outcome_unknown' } } }))
+    renderPage()
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '问题补充说明' }), { target: { value: '保留不确定的回答' } })
+    fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
+
+    await screen.findByRole('button', { name: '仍然重试' })
+    expect(screen.getByRole('textbox', { name: '问题补充说明' })).toHaveValue('保留不确定的回答')
+    expect(screen.getByRole('button', { name: '提交回答' })).toBeDisabled()
+    expect(screen.queryByText('已回答')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '仍然重试' }))
+    await waitFor(() => expect(mocks.workspaceAnswer).toHaveBeenLastCalledWith('workspace-1', 'profile', 'call-1', [{ id: 'q1', selected: [], custom: '保留不确定的回答' }], true))
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '补充作品主题' })).not.toBeInTheDocument())
+  })
+
+  it('expires live question cards when their runtime session ends', async () => {
+    mocks.streamEvents = [
+      { event: 'question.opened', id: 'question-1', data: JSON.stringify({ call_id: 'call-1', questions: [{ id: 'q1', question: '补充作品主题' }] }) },
+      { event: 'session.expired', id: 'expired-1', data: JSON.stringify({ status: 'expired' }) },
+    ]
+    renderPage()
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(await screen.findByText('问题已过期，请按页面提示恢复对话。')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '提交回答' })).toBeDisabled()
+  })
+
+  it('dispatches one explicit answer retry while its response is pending', async () => {
+    mocks.streamEvents = [
+      { event: 'question.opened', id: 'question-1', data: JSON.stringify({ call_id: 'call-1', questions: [{ id: 'q1', question: '补充作品主题' }] }) },
+    ]
+    let resolveRetry!: () => void
+    mocks.workspaceAnswer
+      .mockRejectedValueOnce(Object.assign(new Error('unknown'), { response: { status: 409, data: { error_code: 'assistant_command_outcome_unknown' } } }))
+      .mockImplementation(() => new Promise<void>((resolve) => { resolveRetry = resolve }))
+    renderPage()
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '问题补充说明' }), { target: { value: '不要重复提交这份答案' } })
+    fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
+    const retry = await screen.findByRole('button', { name: '仍然重试' })
+    fireEvent.click(retry)
+    fireEvent.click(retry)
+
+    expect(mocks.workspaceAnswer).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('textbox', { name: '问题补充说明' })).toHaveValue('不要重复提交这份答案')
+    expect(screen.queryByText('已回答')).not.toBeInTheDocument()
+    await act(async () => { resolveRetry() })
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '补充作品主题' })).not.toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: '仍然重试' })).not.toBeInTheDocument()
+  })
+
+  it('keeps a concurrent question editable instead of marking an unsent answer submitted', async () => {
+    mocks.streamEvents = [
+      { event: 'question.opened', id: 'question-1', data: JSON.stringify({ call_id: 'call-1', questions: [{ id: 'q1', question: '第一道问题' }] }) },
+      { event: 'question.opened', id: 'question-2', data: JSON.stringify({ call_id: 'call-2', questions: [{ id: 'q2', question: '第二道问题' }] }) },
+    ]
+    let resolveFirst!: () => void
+    mocks.workspaceAnswer.mockImplementation(() => new Promise<void>((resolve) => { resolveFirst = resolve }))
+    renderPage()
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    const first = within((await screen.findByRole('heading', { name: '第一道问题' })).closest('section')!)
+    const second = within(screen.getByRole('heading', { name: '第二道问题' }).closest('section')!)
+    fireEvent.change(first.getByRole('textbox'), { target: { value: '第一份答案' } })
+    fireEvent.click(first.getByRole('button', { name: '提交回答' }))
+    fireEvent.change(second.getByRole('textbox'), { target: { value: '稍后再提交的答案' } })
+    fireEvent.click(second.getByRole('button', { name: '提交回答' }))
+
+    expect(await second.findByText('正在提交回答，请稍候。')).toBeInTheDocument()
+    expect(mocks.workspaceAnswer).toHaveBeenCalledTimes(1)
+    expect(second.getByRole('textbox')).toHaveValue('稍后再提交的答案')
+    expect(second.queryByText('已回答')).not.toBeInTheDocument()
+    await act(async () => { resolveFirst() })
+    expect(second.getByRole('button', { name: '提交回答' })).toBeEnabled()
+  })
+
   it('opens profile setup from the create persona card before starting a workspace', async () => {
     renderPage()
     fireEvent.click(await screen.findByRole('button', { name: '创建新人设' }))

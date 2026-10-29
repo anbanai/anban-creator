@@ -4,6 +4,9 @@ These four packages are vendored from the published DeepSeek Harness
 `0.2.1-rc.2` packages. The published SDK provides the current session
 resume/wait protocol; Anban adds a small compatibility extension for the
 interactive `session/start` and `session/answer` requests used by Studio.
+`session/start.initialContext` injects the Server snapshot into that logical
+session before its first turn. `session.question` announces a question only
+after its answer handler is registered, so Studio can submit immediately.
 The upstream package remains the source of truth for all other runtime code.
 
 Only the package runtime JavaScript and declaration files are tracked. Build

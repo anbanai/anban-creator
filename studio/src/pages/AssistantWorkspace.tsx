@@ -47,7 +47,7 @@ import './AssistantWorkspace.css'
 
 type Message = { id: string; role: 'user' | 'assistant'; text: string; order: number }
 type HomePersona = AssistantProject & { platform: Project['platform'] }
-type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers']; order: number }
+type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers']; draftAnswers?: DshQuestionAnswer['answers']; generation?: number; closed?: 'failed' | 'expired'; order: number }
 type Draft = Record<string, unknown>
 type RouteState = AssistantRouteState
 type UncertainRetry =
@@ -96,7 +96,7 @@ function parsePersistedMessages(value: unknown): Record<string, Message[]> | und
   return result
 }
 
-function parsePersistedQuestions(value: unknown): Record<string, QuestionBatch[]> | undefined {
+function parsePersistedQuestions(value: unknown, generation?: number): Record<string, QuestionBatch[]> | undefined {
   const source = recordValue(value)
   if (!source) return undefined
   const result: Record<string, QuestionBatch[]> = {}
@@ -107,7 +107,8 @@ function parsePersistedQuestions(value: unknown): Record<string, QuestionBatch[]
       const callId = stringValue(item?.callId)
       const questions = parseQuestions(item?.questions)
       if (!callId || !questions.length) return []
-      return [{ callId, questions, answers: Array.isArray(item?.answers) ? item.answers as DshQuestionAnswer['answers'] : undefined, order: typeof item?.order === 'number' ? item.order : entries.length + index + 1 }]
+      const closed = item?.closed === 'failed' || item?.closed === 'expired' ? item.closed : undefined
+      return [{ callId, questions, answers: Array.isArray(item?.answers) ? item.answers as DshQuestionAnswer['answers'] : undefined, draftAnswers: Array.isArray(item?.draftAnswers) ? item.draftAnswers as DshQuestionAnswer['answers'] : undefined, generation: typeof item?.generation === 'number' ? item.generation : generation, closed, order: typeof item?.order === 'number' ? item.order : entries.length + index + 1 }]
     })
   }
   return result
@@ -287,7 +288,7 @@ function readPersistedWorkspace(): PersistedWorkspace | null {
       contentId: typeof candidate.contentId === 'string' ? candidate.contentId : undefined,
       composer: typeof candidate.composer === 'string' ? candidate.composer : undefined,
       messagesByMode: parsePersistedMessages(candidate.messagesByMode),
-      questionsByMode: parsePersistedQuestions(candidate.questionsByMode),
+      questionsByMode: parsePersistedQuestions(candidate.questionsByMode, candidate.workspace?.generation),
       draftByMode: parsePersistedDrafts(candidate.draftByMode),
       uncertainRetry: parsePersistedUncertainRetry(candidate.uncertainRetry),
     }
@@ -344,12 +345,21 @@ export default function AssistantWorkspace() {
   const workspaceResetVersion = useRef(0)
   const workspaceCreateKey = useRef<string | null>(null)
   const sendInFlight = useRef(false)
+  const answerInFlight = useRef(false)
   const commitIdempotencyKeys = useRef<Record<string, string>>({})
   const modeChosenByUser = useRef(false)
   const imageRatioContextKey = useRef<string | null>(null)
   const conversationOrder = useRef<Record<string, number>>({})
   const uncertainRetryRef = useRef<(() => void) | null>(null)
   const initialSnapshotRequired = useRef(Boolean(!routeHasContext && persisted?.workspace))
+
+  useEffect(() => {
+    const generation = workspace?.generation
+    if (generation === undefined) return
+    setQuestionsByMode((current) => Object.fromEntries(Object.entries(current).map(([questionMode, batches]) => [questionMode,
+      batches.map((batch) => !batch.answers && !batch.closed && batch.generation !== undefined && batch.generation !== generation ? { ...batch, closed: 'expired' as const } : batch),
+    ])))
+  }, [workspace?.generation])
 
   const applyInteractionSnapshot = (snapshot: AssistantInteractionSnapshot) => {
     setInteractionSnapshot(snapshot)
@@ -477,7 +487,7 @@ export default function AssistantWorkspace() {
   })
   const activeMessages = messagesByMode[mode] ?? []
   const activeQuestions = questionsByMode[mode] ?? []
-  const pendingQuestions = activeQuestions.filter((question) => !question.answers)
+  const pendingQuestions = activeQuestions.filter((question) => !question.answers && !question.closed)
   const activeDraft = draftByMode[mode]
   const draftPending = Boolean(activeDraft)
   const bootstrapMode = bootstrap?.modes.find((candidate) => candidate.id === mode)
@@ -518,6 +528,9 @@ export default function AssistantWorkspace() {
   const resetExpiredWorkspace = (preservedComposer?: string) => {
     workspaceResetVersion.current += 1
     setResponding(false)
+    setQuestionsByMode((current) => Object.fromEntries(Object.entries(current).map(([questionMode, batches]) => [questionMode,
+      batches.map((batch) => !batch.answers && !batch.closed ? { ...batch, closed: 'expired' as const } : batch),
+    ])))
     setInteractionSnapshotReady(false)
     setError('连接已结束，当前计划和输入已保留，请恢复后继续。')
     const preserved = preservedComposer ?? lastSubmittedMessage.current
@@ -700,8 +713,11 @@ export default function AssistantWorkspace() {
             const questions = parseQuestions(data.questions)
             if (callId && questions.length) {
               const order = nextConversationOrder(eventMode)
-              setQuestionsByMode((current) => ({ ...current, [eventMode]: [...(current[eventMode] ?? []).filter((item) => item.callId !== callId), { callId, questions, order }] }))
+              setQuestionsByMode((current) => (current[eventMode] ?? []).some((item) => item.callId === callId) ? current : { ...current, [eventMode]: [...(current[eventMode] ?? []), { callId, questions, generation: workspace.generation, order }] })
             }
+          } else if (event.event === 'tool.result' && data.ok === false) {
+            const callId = stringValue(data.call_id)
+            if (callId) setQuestionsByMode((current) => ({ ...current, [eventMode]: (current[eventMode] ?? []).map((batch) => batch.callId === callId && !batch.answers ? { ...batch, closed: 'failed' } : batch) }))
           } else if (event.event === 'draft.ready') {
             const stagedDraft = recordValue(data.draft) ?? recordValue(data.value)
               ?? (data.ready === true || data.confirmation_token ? data : undefined)
@@ -916,7 +932,10 @@ export default function AssistantWorkspace() {
   }
 
   const submitAnswers = async (batch: QuestionBatch, answer: DshQuestionAnswer, forceNewAttempt = false) => {
-    if (!workspace) return
+    if (!workspace) throw new Error('连接已结束，请重新开始。')
+    if (answerInFlight.current) throw new Error('正在提交回答，请稍候。')
+    answerInFlight.current = true
+    setQuestionsByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).map((item) => item.callId === batch.callId ? { ...item, draftAnswers: answer.answers } : item) }))
     try {
       const mediaIDs = [...new Set(answer.answers.flatMap((item) => item.selected).flatMap((label) => {
         const match = /^media_asset:(.+)$/.exec(label.trim())
@@ -947,7 +966,7 @@ export default function AssistantWorkspace() {
       if (recoveredSnapshot) applyInteractionSnapshot(recoveredSnapshot)
       const errorCode = assistantWorkspaceErrorCode(answerError)
       if (errorCode === 'assistant_command_outcome_unknown') {
-        uncertainRetryRef.current = () => { void submitAnswers(batch, answer, true) }
+        uncertainRetryRef.current = () => { void submitAnswers(batch, answer, true).catch(() => undefined) }
         setUncertainRetry({ kind: 'answer', mode, callId: batch.callId, answers: answer.answers })
       }
       if (errorCode?.startsWith('assistant_')) dispatchInteraction({ type: 'error', code: errorCode })
@@ -960,6 +979,9 @@ export default function AssistantWorkspace() {
       }
       const conflictMessage = assistantWorkspaceConflictMessage(errorCode, 'answer')
       if (conflictMessage && errorCode !== 'assistant_workspace_busy') setError(conflictMessage)
+      throw new Error(conflictMessage ?? assistantInteractionErrorMessage(errorCode, answerError instanceof Error ? answerError.message : '提交回答失败'))
+    } finally {
+      answerInFlight.current = false
     }
   }
 
@@ -1302,7 +1324,7 @@ export default function AssistantWorkspace() {
           if (uncertainRetry?.kind === 'message') return void sendMessage(uncertainRetry.text, { forceNewAttempt: true })
           if (uncertainRetry?.kind === 'answer') {
             const batch = (questionsByMode[uncertainRetry.mode] ?? []).find((item) => item.callId === uncertainRetry.callId)
-            if (batch) return void submitAnswers(batch, { answers: uncertainRetry.answers }, true)
+            if (batch) return void submitAnswers(batch, { answers: uncertainRetry.answers }, true).catch(() => undefined)
           }
         }}
         onRestoreDraft={() => { void refreshInteractionSnapshot() }}
@@ -1334,7 +1356,7 @@ export default function AssistantWorkspace() {
             {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && (
               <VideoEditReviewResults query={reviewVideoQuery} />
             )}
-            <Conversation messages={activeMessages} questions={activeQuestions} responding={responding} disabled={draftPending} userAvatarURL={personaImageURL(selectedProject)} onAnswer={submitAnswers} />
+            <Conversation messages={activeMessages} questions={activeQuestions} responding={responding} disabled={draftPending || interactionState.status === 'command_uncertain'} userAvatarURL={personaImageURL(selectedProject)} onAnswer={submitAnswers} />
             {activeReviewSelectors}
             {activeDraft && confirmationDraft && <DraftConfirmationCard mode={mode} draft={confirmationDraft} committing={committing} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => { setDraftByMode((current) => ({ ...current, [mode]: null })); setError(null) }} />}
             {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
@@ -1613,5 +1635,5 @@ function Conversation({ messages, questions, responding, disabled, userAvatarURL
   ].sort((left, right) => left.order - right.order)
   return <div className="min-w-0 space-y-5">{entries.map((entry) => entry.kind === 'message'
     ? <div key={entry.message.id} className={`flex min-w-0 gap-3 ${entry.message.role === 'user' ? 'justify-end' : ''}`}><div className={`flex min-w-0 max-w-[min(900px,100%)] gap-3 ${entry.message.role === 'user' ? 'flex-row-reverse' : ''}`}><div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{entry.message.role === 'user' ? userAvatarURL ? <SignedImage src={userAvatarURL} alt="当前人设头像" className="size-7 rounded-full object-cover" fallbackIcon={<UserRound className="size-3.5" />} fallbackClassName="bg-primary text-primary-foreground" /> : <UserRound className="size-3.5" /> : <Bot className="size-3.5" />}</div><div className={`min-w-0 max-w-full rounded-2xl px-4 py-3 text-sm leading-6 ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'} [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto`}><Streamdown>{entry.message.text}</Streamdown></div></div></div>
-    : <DshQuestionComposer key={entry.batch.callId} questions={entry.batch.questions} submitted={Boolean(entry.batch.answers)} answers={entry.batch.answers} disabled={disabled} onSubmit={(answer) => onAnswer(entry.batch, answer)} />)}{responding && <div role="status" className="flex items-center gap-2 px-10 text-sm text-muted-foreground"><Bot className="size-4" /><Loader2 className="size-4 animate-spin" />AI 正在处理…</div>}<div ref={endRef} aria-hidden="true" className="h-px" /></div>
+    : <DshQuestionComposer key={entry.batch.callId} questions={entry.batch.questions} submitted={Boolean(entry.batch.answers)} answers={entry.batch.answers ?? entry.batch.draftAnswers} closed={entry.batch.closed} disabled={disabled} onSubmit={(answer) => onAnswer(entry.batch, answer)} />)}{responding && <div role="status" className="flex items-center gap-2 px-10 text-sm text-muted-foreground"><Bot className="size-4" /><Loader2 className="size-4 animate-spin" />AI 正在处理…</div>}<div ref={endRef} aria-hidden="true" className="h-px" /></div>
 }

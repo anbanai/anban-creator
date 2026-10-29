@@ -16,6 +16,7 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -178,7 +179,7 @@ func newAssistantInteractionServiceTest(t *testing.T) (*AssistantInteractionServ
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.AssistantInteraction{}, &model.AssistantInteractionRuntime{}, &model.AssistantInteractionDraft{}, &model.AssistantInteractionEvent{}, &model.AssistantInteractionAttempt{}, &model.Project{}, &model.ProjectProfileState{}, &model.ProjectProfileRevision{}); err != nil {
+	if err := db.AutoMigrate(&model.AssistantInteraction{}, &model.AssistantInteractionRuntime{}, &model.AssistantInteractionDraft{}, &model.AssistantInteractionEvent{}, &model.AssistantInteractionAttempt{}, &model.Project{}, &model.ProjectProfileState{}, &model.ProjectProfileRevision{}, &model.Task{}, &model.TaskFile{}, &model.AnalyticsState{}, &model.AnalyticsContent{}, &model.AnalyticsObservation{}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { sqlDB, _ := db.DB(); _ = sqlDB.Close() })
@@ -452,6 +453,7 @@ func TestInteractionModeSwitchUsesOneRuntimeAndModeScopedLogicalSessions(t *test
 
 func TestAssistantInteractionCreateOrResumeReusesScope(t *testing.T) {
 	svc, factory := newAssistantInteractionServiceTest(t)
+	createInteractionContextFixture(t, svc.repo, "project-1", "content-1")
 	input := AssistantInteractionInput{ModeID: "creation", ProjectID: "project-1", ContentID: "content-1", AgentID: "project-creator", Intent: "create"}
 	first, err := svc.CreateOrResume(context.Background(), "user-1", input, "attempt-1")
 	if err != nil {
@@ -468,6 +470,7 @@ func TestAssistantInteractionCreateOrResumeReusesScope(t *testing.T) {
 
 func TestAssistantInteractionCreateOrResumeReplaysIdempotencyAfterCompletion(t *testing.T) {
 	svc, _ := newAssistantInteractionServiceTest(t)
+	createInteractionContextFixture(t, svc.repo, "project-1", "content-1")
 	input := AssistantInteractionInput{ModeID: AssistantModeCreation, ProjectID: "project-1", ContentID: "content-1"}
 	first, err := svc.CreateOrResume(context.Background(), "user-1", input, "stable-create")
 	if err != nil {
@@ -488,6 +491,7 @@ func TestAssistantInteractionCreateOrResumeReplaysIdempotencyAfterCompletion(t *
 
 func TestAssistantInteractionCreateOrResumeRejectsIdempotencyKeyReuseWithDifferentInput(t *testing.T) {
 	svc, _ := newAssistantInteractionServiceTest(t)
+	createInteractionContextFixture(t, svc.repo, "project-1", "")
 	if _, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation, ProjectID: "project-1"}, "stable-create"); err != nil {
 		t.Fatal(err)
 	}
@@ -511,6 +515,7 @@ func TestAssistantInteractionCreateOrResumeRejectsUnknownMode(t *testing.T) {
 
 func TestAssistantInteractionModesShareOneInteraction(t *testing.T) {
 	svc, _ := newAssistantInteractionServiceTest(t)
+	createInteractionContextFixture(t, svc.repo, "project-1", "")
 	first, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation, ProjectID: "project-1"}, "create")
 	if err != nil {
 		t.Fatal(err)
@@ -529,6 +534,10 @@ func TestAssistantInteractionModesShareOneInteraction(t *testing.T) {
 
 func TestAssistantInteractionResumeUpdatesModeAndContextOnSameInteraction(t *testing.T) {
 	svc, _ := newAssistantInteractionServiceTest(t)
+	createInteractionContextFixture(t, svc.repo, "project-1", "")
+	createInteractionContextFixture(t, svc.repo, "project-2", "content-2")
+	logger := zerolog.Nop()
+	svc.SetTaskService(NewTaskService(svc.repo, nil, nil, &logger, "", nil, nil))
 	first, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation, ProjectID: "project-1"}, "create")
 	if err != nil {
 		t.Fatal(err)
