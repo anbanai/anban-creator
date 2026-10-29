@@ -146,10 +146,15 @@ func (s *TaskService) validateExecutionDelivery(ctx context.Context, taskID stri
 
 func talkingHeadEditorSampleRequiredArtifacts(required []agentpack.ArtifactSpec) []agentpack.ArtifactSpec {
 	allowed := map[string]struct{}{
-		"output/edit-decision-list.json": {},
-		"output/transcript.json":         {},
-		"output/edit-strategy.md":        {},
-		"output/visual-plan.json":        {},
+		"output/rough-cut.mp4":               {},
+		"output/transcript.json":             {},
+		"output/edit-decision-list.json":     {},
+		"output/edit-strategy.md":            {},
+		"output/semantic-cut.mp4":            {},
+		"output/motion-sample.mp4":           {},
+		"output/visual-plan.json":            {},
+		"output/motion-review.json":          {},
+		"output/motion-source-manifest.json": {},
 	}
 	filtered := make([]agentpack.ArtifactSpec, 0, len(required))
 	for _, artifact := range required {
