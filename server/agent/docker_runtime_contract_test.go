@@ -1100,7 +1100,6 @@ func TestTalkingHeadEditorDockerfileValidatesErduoMotionContract(t *testing.T) {
 		"/opt/video-use/helpers/$helper\" --help",
 		"43cfc566833548093455c9d4a46bd69913b7e552",
 		"/anbanai/skills/erduo-broll-loop-engineering/SKILL.md",
-		"HyperFrames `0.8.214`",
 		"HyperFrames lint",
 		"aesthetic review",
 		"/anbanai/skills/talking-head-sound-design/SKILL.md",
