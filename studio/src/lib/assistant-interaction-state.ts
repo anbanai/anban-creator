@@ -1,6 +1,6 @@
-import type { AssistantInteractionCommitResult, AssistantInteractionDraftReceipt, AssistantInteractionSnapshot } from '@/lib/api/assistant'
+import type { AssistantBlockingIssue, AssistantInteractionCommitResult, AssistantInteractionDraftReceipt, AssistantInteractionSnapshot } from '@/lib/api/assistant'
 
-export type AssistantInteractionStatus = 'connecting' | 'reconnecting' | 'needs_confirmation' | 'input_retryable' | 'command_uncertain' | 'draft_retryable' | 'restart_required' | 'completed'
+export type AssistantInteractionStatus = 'connecting' | 'reconnecting' | 'needs_confirmation' | 'input_retryable' | 'command_uncertain' | 'draft_retryable' | 'draft_editable' | 'restart_required' | 'completed'
 
 export interface AssistantInteractionState {
   interactionId?: string
@@ -20,7 +20,7 @@ export type AssistantInteractionAction =
   | { type: 'message'; message: { id: string; role: 'user' | 'assistant'; text: string } }
   | { type: 'draft_ready'; draft: AssistantInteractionDraftReceipt }
   | { type: 'generation_changed'; generation: number }
-  | { type: 'error'; code: string }
+  | { type: 'error'; code: string; availableActions?: string[]; blockingIssues?: AssistantBlockingIssue[] }
   | { type: 'clear_error' }
   | { type: 'commit_result'; result: AssistantInteractionCommitResult }
   | { type: 'restart' }
@@ -37,28 +37,50 @@ export function assistantInteractionReducer(state: AssistantInteractionState, ac
   switch (action.type) {
     case 'snapshot': {
       const snapshot = action.snapshot
-      const readyDraft = (snapshot.drafts ?? []).some((draft) => draft.ready && draft.confirmation_state !== 'consumed')
+      const latestDraft = (snapshot.drafts ?? []).filter((draft) => draft.mode_id === snapshot.mode_id).sort((a, b) => b.revision - a.revision)[0]
+      const readyDraft = snapshot.mode_id === 'creation'
+        ? latestDraft?.ready && latestDraft.confirmation_state === 'pending' && snapshot.available_actions.includes('confirm_draft')
+        : (snapshot.drafts ?? []).some((draft) => draft.ready && draft.confirmation_state !== 'consumed') || snapshot.lifecycle === 'needs_confirmation'
       const status = snapshot.recovery_error_code === 'assistant_command_outcome_unknown'
         ? 'command_uncertain'
-        : snapshot.recovery_error_code === 'assistant_commit_reconciliation_required'
+        : snapshot.recovery_error_code === 'assistant_commit_reconciliation_required' || snapshot.mode_id === 'creation' && latestDraft?.confirmation_state === 'confirmed'
         ? 'restart_required'
-        : snapshot.lifecycle === 'completed' ? 'completed' : readyDraft || snapshot.lifecycle === 'needs_confirmation' ? 'needs_confirmation' : snapshot.lifecycle === 'reconnecting' ? 'reconnecting' : 'connecting'
-      return { ...state, interactionId: snapshot.interaction_id, generation: snapshot.generation, status, availableActions: snapshot.available_actions ?? [], drafts: snapshot.drafts ?? [], errorCode: snapshot.recovery_error_code, taskId: snapshot.commit_result?.task_id }
+        : snapshot.recovery_error_code && ['assistant_creation_inputs_missing', 'assistant_draft_invalid', 'assistant_draft_not_ready'].includes(snapshot.recovery_error_code)
+        ? 'draft_editable'
+        : snapshot.lifecycle === 'completed' ? 'completed' : readyDraft ? 'needs_confirmation' : snapshot.lifecycle === 'reconnecting' ? 'reconnecting' : 'connecting'
+      return { ...state, interactionId: snapshot.interaction_id, generation: snapshot.generation, status, availableActions: snapshot.available_actions ?? [], drafts: snapshot.drafts ?? [], errorCode: snapshot.recovery_error_code ?? (status === 'restart_required' ? 'assistant_commit_reconciliation_required' : undefined), taskId: snapshot.commit_result?.task_id }
     }
     case 'composer': return { ...state, composer: action.value }
     case 'message': return { ...state, messages: [...state.messages, action.message], status: 'connecting', errorCode: undefined }
     case 'draft_ready': {
+      if (action.draft.mode_id === 'creation') {
+        if (state.status === 'completed' || state.errorCode === 'assistant_commit_reconciliation_required') return state
+        const latest = state.drafts.filter((draft) => draft.mode_id === 'creation').sort((a, b) => b.revision - a.revision)[0]
+        if (latest && (latest.revision > action.draft.revision || latest.revision === action.draft.revision && (latest.confirmation_state !== 'pending' || !latest.ready && action.draft.ready))) return state
+        const drafts = [...state.drafts.filter((draft) => draft.mode_id !== 'creation'), action.draft]
+        if (action.draft.confirmation_state === 'confirmed') return { ...state, drafts, status: 'restart_required', errorCode: 'assistant_commit_reconciliation_required', availableActions: ['view_task', 'reconcile_commit'] }
+        if (action.draft.confirmation_state === 'consumed') return { ...state, drafts, status: 'completed', errorCode: undefined, availableActions: ['view_task', 'restart'] }
+        const ready = action.draft.ready && action.draft.confirmation_state === 'pending'
+        return { ...state, drafts, status: ready ? 'needs_confirmation' : 'connecting', availableActions: ready ? ['confirm_draft', 'continue_editing'] : ['continue_editing', 'send_message'], errorCode: undefined }
+      }
       const drafts = [...state.drafts.filter((draft) => draft.draft_id !== action.draft.draft_id && draft.mode_id !== action.draft.mode_id), action.draft]
       return { ...state, drafts, status: action.draft.ready ? 'needs_confirmation' : state.status, errorCode: undefined }
     }
     case 'generation_changed': return { ...state, generation: action.generation, status: 'reconnecting', availableActions: ['reload_snapshot'], errorCode: 'assistant_interaction_generation_changed' }
     case 'error': {
+      if (['assistant_creation_inputs_missing', 'assistant_draft_invalid', 'assistant_draft_not_ready'].includes(action.code)) {
+        return { ...state, status: 'draft_editable', availableActions: action.availableActions ?? ['continue_editing', 'send_message'], errorCode: action.code, drafts: state.drafts.map((draft) => draft.mode_id === 'creation' ? { ...draft, ready: false, blocking_issues: action.blockingIssues ?? draft.blocking_issues } : draft) }
+      }
       const status: AssistantInteractionStatus = action.code === 'assistant_draft_saved_retryable' || action.code === 'assistant_draft_revision_conflict' ? 'draft_retryable' : action.code === 'assistant_command_outcome_unknown' ? 'command_uncertain' : action.code === 'assistant_interaction_restart_required' || action.code === 'assistant_commit_reconciliation_required' ? 'restart_required' : action.code === 'assistant_interaction_reconnecting' || action.code === 'assistant_interaction_generation_changed' ? 'reconnecting' : action.code === 'assistant_commit_already_applied' ? 'completed' : 'input_retryable'
-      const availableActions = action.code === 'assistant_commit_reconciliation_required' ? ['view_task', 'reconcile_commit'] : action.code === 'assistant_command_outcome_unknown' ? ['retry_with_new_attempt', 'restart'] : action.code === 'assistant_interaction_generation_changed' || action.code === 'assistant_interaction_reconnecting' ? ['reload_snapshot'] : action.code === 'assistant_draft_saved_retryable' || action.code === 'assistant_draft_revision_conflict' ? ['retry_stage', 'restore_draft'] : state.availableActions
+      const availableActions = action.availableActions ?? (action.code === 'assistant_commit_reconciliation_required' ? ['view_task', 'reconcile_commit'] : action.code === 'assistant_command_outcome_unknown' ? ['retry_with_new_attempt', 'restart'] : action.code === 'assistant_interaction_generation_changed' || action.code === 'assistant_interaction_reconnecting' ? ['reload_snapshot'] : action.code === 'assistant_draft_revision_conflict' ? ['reload_snapshot', 'restore_draft'] : action.code === 'assistant_draft_saved_retryable' ? ['retry_stage', 'restore_draft'] : state.availableActions)
       return { ...state, status, availableActions, errorCode: action.code }
     }
-    case 'clear_error': return { ...state, status: 'connecting', availableActions: [], errorCode: undefined }
-    case 'commit_result': return { ...state, status: action.result.status === 'already_created' || action.result.status === 'created' ? 'completed' : action.result.status === 'needs_reconciliation' ? 'restart_required' : state.status, taskId: action.result.task_id }
+    case 'clear_error': return { ...state, status: 'connecting', availableActions: state.drafts.some((draft) => draft.mode_id === 'creation' && !draft.ready && (draft.confirmation_state === 'pending' || draft.confirmation_state === 'superseded')) ? state.availableActions : [], errorCode: undefined }
+    case 'commit_result': {
+      if (action.result.status === 'needs_reconciliation') return { ...state, status: 'restart_required', errorCode: 'assistant_commit_reconciliation_required', availableActions: ['view_task', 'reconcile_commit'], taskId: action.result.task_id }
+      if (action.result.status === 'already_created' || action.result.status === 'created') return { ...state, status: 'completed', errorCode: undefined, availableActions: ['view_task', 'restart'], drafts: state.drafts.map((draft) => draft.mode_id === 'creation' ? { ...draft, ready: false, confirmation_state: 'consumed' } : draft), taskId: action.result.task_id }
+      return state
+    }
     case 'restart': return { ...initialAssistantInteractionState, status: 'connecting' }
     default: return state
   }
@@ -70,6 +92,7 @@ export function assistantInteractionRecoveryLabel(state: AssistantInteractionSta
     case 'command_uncertain': return '上一条操作的结果无法确认，重新提交可能重复执行'
     case 'needs_confirmation': return '计划已准备好，请确认'
     case 'input_retryable': return '刚才的消息未送出，内容已保留'
+    case 'draft_editable': return state.errorCode === 'assistant_creation_inputs_missing' ? '计划仍有必要信息待补充，可以继续讨论' : '计划尚未就绪，可以继续修改'
     case 'draft_retryable': return state.errorCode === 'assistant_draft_revision_conflict' ? '计划版本已更新，请恢复最新计划' : '计划已保留，可以重试暂存'
     case 'restart_required': return state.errorCode === 'assistant_commit_reconciliation_required' ? '创建结果需要核对，请查看任务状态' : '连接已结束，计划仍然保留'
     case 'completed': return '已创建任务'

@@ -64,6 +64,7 @@ type PersistedWorkspace = {
   questionsByMode?: Record<string, QuestionBatch[]>
   draftByMode?: Record<string, Draft | null>
   uncertainRetry?: UncertainRetry
+  commitIdempotencyKeys?: Record<string, string>
 }
 
 const WORKSPACE_STORAGE_KEY = 'anban:assistant-workspace'
@@ -171,6 +172,7 @@ function draftReceiptToDraft(receipt: AssistantInteractionSnapshot['drafts'][num
     payload_digest: receipt.payload_digest,
     ready: receipt.ready,
     confirmation_state: receipt.confirmation_state,
+    blocking_issues: receipt.blocking_issues,
   }
 }
 
@@ -230,6 +232,9 @@ function assistantInteractionErrorMessage(errorCode: string | undefined, fallbac
     case 'assistant_message_not_accepted': return '刚才的消息未送出，内容已保留，请重试。'
     case 'assistant_draft_saved_retryable': return '计划已保留，但暂存未完成，请重试暂存。'
     case 'assistant_draft_revision_conflict': return '计划版本已更新，请恢复最新计划后再确认。'
+    case 'assistant_creation_inputs_missing': return '计划仍有必要信息待补充，请继续讨论。'
+    case 'assistant_draft_invalid': return '计划内容需要调整，请继续讨论。'
+    case 'assistant_draft_not_ready': return '计划尚未就绪，请继续讨论。'
     case 'assistant_commit_reconciliation_required': return '创建结果需要核对，请查看任务状态。'
     case 'assistant_commit_already_applied': return '任务已经创建，请查看任务。'
     default: return safeFallback
@@ -290,6 +295,7 @@ function readPersistedWorkspace(): PersistedWorkspace | null {
       questionsByMode: parsePersistedQuestions(candidate.questionsByMode),
       draftByMode: parsePersistedDrafts(candidate.draftByMode),
       uncertainRetry: parsePersistedUncertainRetry(candidate.uncertainRetry),
+      commitIdempotencyKeys: Object.fromEntries(Object.entries(recordValue(candidate.commitIdempotencyKeys) ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
     }
   } catch {
     return null
@@ -344,7 +350,7 @@ export default function AssistantWorkspace() {
   const workspaceResetVersion = useRef(0)
   const workspaceCreateKey = useRef<string | null>(null)
   const sendInFlight = useRef(false)
-  const commitIdempotencyKeys = useRef<Record<string, string>>({})
+  const [commitIdempotencyKeys, setCommitIdempotencyKeys] = useState<Record<string, string>>(persisted?.commitIdempotencyKeys ?? {})
   const modeChosenByUser = useRef(false)
   const imageRatioContextKey = useRef<string | null>(null)
   const conversationOrder = useRef<Record<string, number>>({})
@@ -414,11 +420,12 @@ export default function AssistantWorkspace() {
         questionsByMode,
         draftByMode,
         uncertainRetry,
+        commitIdempotencyKeys,
       } satisfies PersistedWorkspace))
     } catch {
       // Conversation recovery is best effort when browser storage is unavailable or full.
     }
-  }, [workspace, creationType, mode, projectId, contentId, composer, messagesByMode, questionsByMode, draftByMode, uncertainRetry])
+  }, [workspace, creationType, mode, projectId, contentId, composer, messagesByMode, questionsByMode, draftByMode, uncertainRetry, commitIdempotencyKeys])
 
   const projects = bootstrap?.projects ?? []
   const projectsQuery = useQuery({ queryKey: ['projects', 'assistant-home'], queryFn: () => api.projects.list({ status: 'active' }), staleTime: 30_000 })
@@ -478,8 +485,10 @@ export default function AssistantWorkspace() {
   const activeMessages = messagesByMode[mode] ?? []
   const activeQuestions = questionsByMode[mode] ?? []
   const pendingQuestions = activeQuestions.filter((question) => !question.answers)
-  const activeDraft = draftByMode[mode]
-  const draftPending = Boolean(activeDraft)
+  const creationReceipt = interactionState.drafts.filter((draft) => draft.mode_id === 'creation').sort((a, b) => b.revision - a.revision)[0]
+  const activeDraft = mode === 'creation' ? creationReceipt && creationReceipt.confirmation_state !== 'consumed' ? draftReceiptToDraft(creationReceipt) : null : draftByMode[mode]
+  const creationCanConfirm = Boolean(creationReceipt?.ready && creationReceipt.confirmation_state === 'pending' && interactionState.availableActions.includes('confirm_draft'))
+  const draftPending = mode === 'creation' ? interactionState.status === 'completed' || interactionState.errorCode === 'assistant_commit_reconciliation_required' || Boolean(activeDraft) && (creationCanConfirm || !interactionState.availableActions.some((action) => action === 'continue_editing' || action === 'send_message')) : Boolean(activeDraft)
   const bootstrapMode = bootstrap?.modes.find((candidate) => candidate.id === mode)
   const isRuntimeUnavailable = bootstrapMode?.disabledReason === '助手运行环境暂不可用，请稍后重试'
   const activeMode = bootstrapMode && !isRuntimeUnavailable && mode === 'creation'
@@ -964,20 +973,23 @@ export default function AssistantWorkspace() {
   }
 
   const commitDraft = async () => {
-    if (!workspace || !activeDraft || committing) return
+    if (!workspace || !activeDraft || committing || mode === 'creation' && !creationCanConfirm) return
     setCommitting(true)
     try {
       const draftID = stringValue(activeDraft.draft_id) ?? stringValue(activeDraft.id) ?? 'draft'
       const draftRevision = typeof activeDraft.revision === 'number' ? activeDraft.revision : 0
-      const commitKeyID = `${workspace.id}:${draftID}:${draftRevision}`
-      const idempotencyKey = commitIdempotencyKeys.current[commitKeyID] ?? crypto.randomUUID()
-      commitIdempotencyKeys.current[commitKeyID] = idempotencyKey
+      const retryKey = (options?: Record<string, unknown>) => {
+        const commitKeyID = JSON.stringify([workspace.id, draftID, draftRevision, options])
+        const key = commitIdempotencyKeys[commitKeyID] ?? crypto.randomUUID()
+        setCommitIdempotencyKeys((current) => ({ ...current, [commitKeyID]: key }))
+        return key
+      }
       const tokenValue = stringValue(activeDraft.confirmation_token)
       let result: Awaited<ReturnType<typeof api.assistant.workspaceCommit>>
       if (mode === 'profile' && tokenValue) {
         result = await api.assistant.workspaceCommit(workspace.id, mode, {
           confirmation_token: tokenValue,
-          idempotency_key: idempotencyKey,
+          idempotency_key: retryKey(isVideoEditProfile ? { video_edit_defaults: videoEditDefaults } : undefined),
           ...(isVideoEditProfile ? { video_edit_defaults: videoEditDefaults } : {}),
         })
       } else {
@@ -1042,8 +1054,13 @@ export default function AssistantWorkspace() {
           const planOptions = Object.fromEntries(optionKeys.filter((key) => Object.prototype.hasOwnProperty.call(plan, key)).map((key) => [key, plan[key]]))
           commitOptions = { plan: planOptions }
         }
-        const checkpoint = await api.assistant.workspaceCheckpoint(workspace.id, mode, { schema_version: '1.0', payload, summary: `${modeLabel(mode)}草稿`, status: 'ready' })
-        result = await api.assistant.workspaceCommit(workspace.id, mode, { checkpoint_id: checkpoint.id, checkpoint_digest: checkpoint.payload_digest, idempotency_key: idempotencyKey, options: commitOptions })
+        const idempotencyKey = retryKey(commitOptions)
+        if (mode === 'creation') {
+          result = await api.assistant.workspaceCommit(workspace.id, mode, { draft_id: draftID, revision: draftRevision, idempotency_key: idempotencyKey, options: commitOptions })
+        } else {
+          const checkpoint = await api.assistant.workspaceCheckpoint(workspace.id, mode, { schema_version: '1.0', payload, summary: `${modeLabel(mode)}草稿`, status: 'ready' })
+          result = await api.assistant.workspaceCommit(workspace.id, mode, { checkpoint_id: checkpoint.id, checkpoint_digest: checkpoint.payload_digest, idempotency_key: idempotencyKey, options: commitOptions })
+        }
       }
       const committedProjectID = stringValue(result.project?.id)
       if (mode === 'profile' && committedProjectID) {
@@ -1068,17 +1085,44 @@ export default function AssistantWorkspace() {
       const committedTaskID = stringValue(result.task?.id) ?? stringValue((result as { task_id?: unknown }).task_id)
       const interactionStatus = stringValue((result as { interaction_status?: unknown }).interaction_status) ?? 'created'
       dispatchInteraction({ type: 'commit_result', result: { status: interactionStatus, task_id: committedTaskID } })
-      setDraftByMode((current) => ({ ...current, [mode]: null }))
+      if (interactionStatus !== 'needs_reconciliation') setDraftByMode((current) => ({ ...current, [mode]: null }))
       if (mode === 'creation' && committedTaskID) navigate(`/tasks/${encodeURIComponent(committedTaskID)}`)
     } catch (commitError) {
       const recoveredSnapshot = assistantInteractionSnapshotFromError(commitError)
       if (recoveredSnapshot) applyInteractionSnapshot(recoveredSnapshot)
       const errorCode = assistantWorkspaceErrorCode(commitError)
-      if (errorCode?.startsWith('assistant_')) dispatchInteraction({ type: 'error', code: errorCode })
+      if (errorCode?.startsWith('assistant_')) {
+        const details = (commitError as { response?: { data?: { available_actions?: string[]; blocking_issues?: AssistantInteractionDraftReceipt['blocking_issues'] } } }).response?.data
+        dispatchInteraction({ type: 'error', code: errorCode, availableActions: details?.available_actions, blockingIssues: details?.blocking_issues })
+      }
       setError(assistantWorkspaceConflictMessage(errorCode, 'commit') ?? assistantInteractionErrorMessage(errorCode, commitError instanceof Error ? commitError.message : '确认失败'))
       if (errorCode === 'project_profile_revision_conflict') {
         void queryClient.invalidateQueries({ queryKey: ['assistant-bootstrap'] })
       }
+    } finally {
+      setCommitting(false)
+    }
+  }
+
+  const continueDraft = async () => {
+    if (!workspace || !activeDraft || committing) return
+    if (mode !== 'creation') {
+      setDraftByMode((current) => ({ ...current, [mode]: null }))
+      setError(null)
+      return
+    }
+    if (!creationReceipt || !interactionState.availableActions.includes('continue_editing')) return
+    setCommitting(true)
+    try {
+      const snapshot = await api.assistant.continueInteraction(workspace.id, { draft_id: creationReceipt.draft_id, revision: creationReceipt.revision })
+      applyInteractionSnapshot(snapshot)
+      setError(null)
+    } catch (continueError) {
+      const snapshot = assistantInteractionSnapshotFromError(continueError)
+      if (snapshot) applyInteractionSnapshot(snapshot)
+      const code = assistantWorkspaceErrorCode(continueError)
+      if (code) dispatchInteraction({ type: 'error', code })
+      setError(assistantInteractionErrorMessage(code, continueError instanceof Error ? continueError.message : '继续讨论失败，请重试。'))
     } finally {
       setCommitting(false)
     }
@@ -1247,7 +1291,7 @@ export default function AssistantWorkspace() {
         loading: imageCapabilitiesQuery.isLoading,
         disabled: imageCapabilitiesQuery.isError,
       } : undefined}
-      disabled={switching || committing || sending || responding || draftPending}
+      disabled={switching || committing || sending || responding || mode !== 'creation' && draftPending}
       label="选择参数"
     />
   )
@@ -1336,7 +1380,7 @@ export default function AssistantWorkspace() {
             )}
             <Conversation messages={activeMessages} questions={activeQuestions} responding={responding} disabled={draftPending} userAvatarURL={personaImageURL(selectedProject)} onAnswer={submitAnswers} />
             {activeReviewSelectors}
-            {activeDraft && confirmationDraft && <DraftConfirmationCard mode={mode} draft={confirmationDraft} committing={committing} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => { setDraftByMode((current) => ({ ...current, [mode]: null })); setError(null) }} />}
+            {activeDraft && confirmationDraft && <DraftConfirmationCard mode={mode} draft={confirmationDraft} committing={committing} confirmable={mode !== 'creation' || creationCanConfirm} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => void continueDraft()} />}
             {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
           </div>
           <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} /> : undefined} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
@@ -1460,20 +1504,21 @@ function PersonaRail({ projects, selectedProjectId, disabled, onSelect, onCreate
   </section>
 }
 
-function DraftConfirmationCard({ mode, draft, committing, disabled, onCommit, onContinue }: { mode: AssistantModeID; draft: Draft; committing: boolean; disabled: boolean; onCommit: () => void; onContinue: () => void }) {
+function DraftConfirmationCard({ mode, draft, committing, confirmable, disabled, onCommit, onContinue }: { mode: AssistantModeID; draft: Draft; committing: boolean; confirmable: boolean; disabled: boolean; onCommit: () => void; onContinue: () => void }) {
   const isCreation = mode === 'creation'
   const isProfile = mode === 'profile'
-  const title = isCreation ? '确认创作' : isProfile ? '保存人设' : '确认复盘结论'
+  const title = isCreation ? confirmable ? '确认创作' : '创作草稿' : isProfile ? '保存人设' : '确认复盘结论'
   const buttonLabel = isCreation ? '创作作品' : isProfile ? '保存人设' : '保存复盘结论'
   const continueLabel = isCreation ? '继续讨论' : '继续深入访谈'
   return <section role="region" aria-label={title} className="mt-6 rounded-xl border border-primary/30 bg-primary/[0.04] p-4">
     <div className="flex items-center gap-2 text-sm font-medium"><Check className="size-4 text-emerald-600" />{title}</div>
-    <p className="mt-2 text-xs leading-5 text-muted-foreground">{isCreation ? '确认后会按这份计划创建作品，也可以继续讨论细节。' : isProfile ? '确认后保存当前人设，也可以继续补充访谈内容。' : '确认后保存当前结构化结果。'}</p>
+    {(!isCreation || confirmable) && <p className="mt-2 text-xs leading-5 text-muted-foreground">{isCreation ? '确认后会按这份计划创建作品，也可以继续讨论细节。' : isProfile ? '确认后保存当前人设，也可以继续补充访谈内容。' : '确认后保存当前结构化结果。'}</p>}
     {isCreation || mode === 'review' ? <div className="mt-4 rounded-lg border border-border/70 bg-background/70 p-3"><AssistantDraftSummary draft={draft as unknown as InteractiveDraft} mode={mode} compact /></div> : <ProfileDraftSummary draft={draft} />}
     <div className="mt-4 flex flex-wrap items-center gap-2">
-      <Button size="sm" disabled={committing || disabled} onClick={onCommit}>{committing ? <Loader2 className="size-4 animate-spin" /> : buttonLabel}</Button>
-      {isCreation || isProfile ? <Button type="button" variant="outline" size="sm" disabled={committing} onClick={onContinue}>{continueLabel}</Button> : null}
+      {confirmable && <Button size="sm" disabled={committing || disabled} onClick={onCommit}>{committing ? <Loader2 className="size-4 animate-spin" /> : buttonLabel}</Button>}
+      {isCreation && confirmable || isProfile ? <Button type="button" variant="outline" size="sm" disabled={committing} onClick={onContinue}>{continueLabel}</Button> : null}
     </div>
+    {isCreation && Array.isArray(draft.blocking_issues) && <ul className="mt-3 space-y-1 text-sm text-amber-700">{(draft.blocking_issues as NonNullable<AssistantInteractionDraftReceipt['blocking_issues']>).map((issue) => <li key={`${issue.code}:${issue.field}`}>{issue.message}</li>)}</ul>}
   </section>
 }
 

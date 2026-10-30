@@ -8,6 +8,12 @@ export type AssistantModeID = 'profile' | 'creation' | 'review'
 
 export type AssistantInteractionLifecycle = 'active' | 'reconnecting' | 'needs_confirmation' | 'completed' | 'abandoned' | string
 
+export interface AssistantBlockingIssue {
+  code: string
+  field: string
+  message: string
+}
+
 export interface AssistantInteractionDraftReceipt {
   draft_id: string
   mode_id: AssistantModeID
@@ -16,6 +22,7 @@ export interface AssistantInteractionDraftReceipt {
   payload_digest: string
   ready: boolean
   confirmation_state: 'pending' | 'confirmed' | 'consumed' | 'superseded' | string
+  blocking_issues?: AssistantBlockingIssue[]
 }
 
 export interface AssistantInteractionSnapshot {
@@ -218,12 +225,19 @@ export const assistantApi = {
     return { id: draft.draft_id, payload_digest: draft.payload_digest, revision: draft.revision, schema_version: checkpoint.schema_version, payload: draft.payload, summary: checkpoint.summary, status: draft.ready ? 'ready' : 'draft', user_id: '', mode_id: modeId, project_id: snapshot.project_id, content_id: snapshot.content_id, source_session_id: workspaceId, expires_at: snapshot.expires_at } satisfies AssistantCheckpoint
   },
 
-  workspaceCommit: async (workspaceId: string, _modeId: AssistantModeID, payload: AssistantCommitRequest) => {
-    const snapshot = await assistantApi.getInteractionSnapshot(workspaceId)
-    const requestedID = 'checkpoint_id' in payload ? payload.checkpoint_id : undefined
-    const draft = snapshot.drafts.find((item) => item.draft_id === requestedID) ?? snapshot.drafts.find((item) => item.ready)
-    if (!draft) throw new Error('当前计划尚未保存，请恢复计划')
-    const result = await assistantApi.commitInteraction(workspaceId, { draft_id: draft.draft_id, revision: draft.revision, idempotency_key: payload.idempotency_key, options: payload.options })
+  workspaceCommit: async (workspaceId: string, modeId: AssistantModeID, payload: AssistantCommitRequest | AssistantInteractionCommitRequest) => {
+    let request: AssistantInteractionCommitRequest
+    if ('draft_id' in payload) {
+      request = payload
+    } else {
+      if (modeId === 'creation') throw new Error('当前计划尚未保存，请恢复计划')
+      const snapshot = await assistantApi.getInteractionSnapshot(workspaceId)
+      const requestedID = 'checkpoint_id' in payload ? payload.checkpoint_id : undefined
+      const draft = snapshot.drafts.find((item) => item.draft_id === requestedID) ?? snapshot.drafts.find((item) => item.ready)
+      if (!draft) throw new Error('当前计划尚未保存，请恢复计划')
+      request = { draft_id: draft.draft_id, revision: draft.revision, idempotency_key: payload.idempotency_key, options: payload.options }
+    }
+    const result = await assistantApi.commitInteraction(workspaceId, request)
     if (result.result && typeof result.result === 'object') return { ...result.result as InteractiveCommitResult & Record<string, unknown>, interaction_status: result.status, task_id: result.task_id } as InteractiveCommitResult & Record<string, unknown>
     return { interaction_status: result.status, task_id: result.task_id, task: result.task_id ? { id: result.task_id } : undefined }
   },
@@ -243,6 +257,8 @@ export const assistantApi = {
     unwrap<{ accepted: boolean }>(http.post(`/assistant/interactions/${encodeURIComponent(interactionId)}/answers`, { ...payload, call_id: callId }, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
   commitInteraction: (interactionId: string, payload: AssistantInteractionCommitRequest) =>
     unwrap<AssistantInteractionCommitResult>(http.post(`/assistant/interactions/${encodeURIComponent(interactionId)}/commit`, payload, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
+  continueInteraction: (interactionId: string, payload: { draft_id: string; revision: number }) =>
+    unwrap<AssistantInteractionSnapshot>(http.post(`/assistant/interactions/${encodeURIComponent(interactionId)}/continue`, payload, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
 }
 
 function interactionSnapshotAsWorkspace(snapshot: AssistantInteractionSnapshot): AssistantWorkspace {
