@@ -120,6 +120,25 @@ func (h *AssistantHandler) InteractionCommit(c fiber.Ctx) error {
 	return Success(c, result)
 }
 
+func (h *AssistantHandler) InteractionContinue(c fiber.Ctx) error {
+	uid := GetUserID(c)
+	if uid == "" {
+		return Error(c, 401, "unauthorized")
+	}
+	if h.interactionSvc == nil {
+		return Error(c, 503, "assistant unavailable")
+	}
+	var req service.InteractionContinueRequest
+	if err := decodeInteractiveJSON(c.Body(), &req); err != nil {
+		return Error(c, 400, "invalid request body")
+	}
+	snapshot, err := h.interactionSvc.ContinueInteraction(c.Context(), uid, c.Params("id"), req)
+	if err != nil {
+		return interactiveError(c, err)
+	}
+	return Success(c, snapshot)
+}
+
 func (h *AssistantHandler) InteractionDelete(c fiber.Ctx) error {
 	uid := GetUserID(c)
 	if uid == "" {
