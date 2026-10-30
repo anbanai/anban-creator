@@ -121,6 +121,10 @@ func TestWechatPlatformConfigStoresDeliveryModeForBothWechatChannels(t *testing.
 			t.Fatalf("%s mode = %#v, %v", channel, config, err)
 		}
 	}
+	manual, err := svc.SetWechatDeliveryMode(ctx, userID, projectID, model.WechatDeliveryModeUserAssisted)
+	if err != nil || manual.DeliveryMode != model.WechatDeliveryModeUserAssisted {
+		t.Fatalf("manual delivery mode = %#v, %v", manual, err)
+	}
 	if _, err := svc.SetWechatDeliveryMode(ctx, userID, projectID, "publish_without_confirmation"); !errors.Is(err, ErrInvalidWechatPlatformConfig) {
 		t.Fatalf("invalid delivery mode error = %v", err)
 	}

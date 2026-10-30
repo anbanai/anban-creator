@@ -10,10 +10,22 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import { ProjectIdentity, type ProjectIdentityProject } from '@/components/agent-prompt/ProjectIdentity'
 
 type Credentials = { appID: string; secret: string }
+type WechatDeliveryMode = 'user_assisted' | 'draft' | 'direct_publish'
+
+const deliveryModeOptions: Array<{ value: WechatDeliveryMode; label: string; description: string }> = [
+  { value: 'user_assisted', label: '手动复制', description: '生成后复制内容，自己粘贴到公众号后台。' },
+  { value: 'draft', label: '发布到草稿箱', description: '生成后自动保存到公众号草稿箱，发布前可继续编辑。' },
+  { value: 'direct_publish', label: '正式发布', description: '任务详情确认后提交，不会静默发布。' },
+]
+
+function normalizeDeliveryMode(config: WechatPlatformConfig): WechatDeliveryMode {
+  if (config.delivery_mode === 'direct_publish') return 'direct_publish'
+  if (config.delivery_mode === 'user_assisted') return 'user_assisted'
+  return config.automatic_delivery_enabled === true ? 'draft' : 'user_assisted'
+}
 interface Props {
   project: ProjectIdentityProject
   onClose: () => void
@@ -42,11 +54,9 @@ function ChannelConfigEditor({ project, config, onClose, onStateChange, embedded
   const [saved, setSaved] = useState(draft)
   const [secretConfigured, setSecretConfigured] = useState(config.secret_configured)
   const [credentialsConflict, setCredentialsConflict] = useState(config.credentials_conflict)
-  const [automaticDeliveryEnabled, setAutomaticDeliveryEnabled] = useState(config.automatic_delivery_enabled === true)
-  const [savedAutomaticDeliveryEnabled, setSavedAutomaticDeliveryEnabled] = useState(config.automatic_delivery_enabled === true)
-  const initialDeliveryMode = config.delivery_mode === 'direct_publish' ? 'direct_publish' : 'draft'
-  const [deliveryMode, setDeliveryMode] = useState<'draft' | 'direct_publish'>(initialDeliveryMode)
-  const [savedDeliveryMode, setSavedDeliveryMode] = useState<'draft' | 'direct_publish'>(initialDeliveryMode)
+  const initialDeliveryMode = normalizeDeliveryMode(config)
+  const [deliveryMode, setDeliveryMode] = useState<WechatDeliveryMode>(initialDeliveryMode)
+  const [savedDeliveryMode, setSavedDeliveryMode] = useState<WechatDeliveryMode>(initialDeliveryMode)
   const [disconnectOpen, setDisconnectOpen] = useState(false)
   const connection = config.connection
   const authorizationEnabled = config.authorization_enabled === true
@@ -57,9 +67,7 @@ function ChannelConfigEditor({ project, config, onClose, onStateChange, embedded
   const accountChanged = draft.appID.trim() !== saved.appID.trim()
   const requiresSecret = !secretConfigured || credentialsConflict || accountChanged
   const legacyCanSave = Boolean(draft.appID.trim()) && (!requiresSecret || Boolean(draft.secret.trim()))
-    || (!draft.appID.trim() && automaticDeliveryEnabled !== savedAutomaticDeliveryEnabled)
-  const canSave = (hasAuthorizationRecord ? automaticDeliveryEnabled !== savedAutomaticDeliveryEnabled : legacyCanSave)
-    || deliveryMode !== savedDeliveryMode
+  const canSave = (hasAuthorizationRecord ? false : legacyCanSave) || deliveryMode !== savedDeliveryMode
   const credentialsReady = connected
     ? canCreateDraft
     : Boolean(draft.appID.trim()) && secretConfigured && !credentialsConflict && !accountChanged
@@ -67,21 +75,19 @@ function ChannelConfigEditor({ project, config, onClose, onStateChange, embedded
     mutationFn: (credentials: Credentials) => api.projects.upsertWechatPlatformConfig(project.id, {
       ...(credentials.appID.trim() ? { app_id: credentials.appID.trim() } : {}),
       ...(credentials.secret.trim() ? { secret: credentials.secret.trim() } : {}),
-      automatic_delivery_enabled: automaticDeliveryEnabled,
+      automatic_delivery_enabled: deliveryMode !== 'user_assisted',
       delivery_mode: deliveryMode,
     }),
     onSuccess: (result, credentials) => {
       void queryClient.invalidateQueries({ queryKey: ['project-wechat-platform-config', project.id], refetchType: 'none' })
       if (!active.current) return
-      toast.success(authorizationEnabled ? '公众号草稿箱设置已保存' : '公众号设置已保存')
+      toast.success(authorizationEnabled ? '公众号交付设置已保存' : '公众号设置已保存')
       const clean = { appID: credentials.appID.trim(), secret: '' }
       setDraft(clean)
       setSaved(clean)
       setSecretConfigured(result.secret_configured)
       setCredentialsConflict(result.credentials_conflict)
-      setAutomaticDeliveryEnabled(result.automatic_delivery_enabled === true)
-      setSavedAutomaticDeliveryEnabled(result.automatic_delivery_enabled === true)
-      const nextMode = result.delivery_mode === 'direct_publish' ? 'direct_publish' : 'draft'
+      const nextMode = normalizeDeliveryMode(result)
       setDeliveryMode(nextMode)
       setSavedDeliveryMode(nextMode)
     },
@@ -117,7 +123,7 @@ function ChannelConfigEditor({ project, config, onClose, onStateChange, embedded
       if (active.current) toast.error(getApiErrorMessage(error, '解绑失败，请重试'))
     },
   })
-  const dirty = draft.appID !== saved.appID || draft.secret !== saved.secret || automaticDeliveryEnabled !== savedAutomaticDeliveryEnabled || deliveryMode !== savedDeliveryMode
+  const dirty = draft.appID !== saved.appID || draft.secret !== saved.secret || deliveryMode !== savedDeliveryMode
   useEffect(() => {
     onStateChange(dirty, save.isPending || startAuthorization.isPending || disconnect.isPending)
   }, [dirty, save.isPending, startAuthorization.isPending, disconnect.isPending, onStateChange])
@@ -150,7 +156,7 @@ function ChannelConfigEditor({ project, config, onClose, onStateChange, embedded
       ? '微信已撤销授权，自动保存已暂停。请重新扫码绑定；系统不会回退到旧凭据。'
       : hasAuthorizationRecord
         ? '当前未连接公众号。重新扫码绑定后即可恢复草稿箱交付。'
-        : '绑定后，生成结果可自动保存到草稿箱；不会发布或群发。'
+        : '绑定后可启用草稿箱交付；不会发布或群发。'
 
   return (
     <>
@@ -194,35 +200,38 @@ function ChannelConfigEditor({ project, config, onClose, onStateChange, embedded
       )}
       <fieldset className="space-y-2 border-t pt-4">
         <legend className="text-sm font-medium">默认交付方式</legend>
-        <div className="grid grid-cols-2 gap-1 rounded-md border bg-muted/40 p-1" role="group" aria-label="默认交付方式">
-          <Button type="button" variant={deliveryMode === 'draft' ? 'secondary' : 'ghost'} aria-pressed={deliveryMode === 'draft'} disabled={save.isPending} onClick={() => setDeliveryMode('draft')}>草稿箱</Button>
-          <Button type="button" variant={deliveryMode === 'direct_publish' ? 'secondary' : 'ghost'} aria-pressed={deliveryMode === 'direct_publish'} disabled={save.isPending || (connected && (!canCreateDraft || !connection?.can_formally_publish))} onClick={() => setDeliveryMode('direct_publish')}>正式发布</Button>
+        <div className="grid gap-2 sm:grid-cols-3" role="group" aria-label="默认交付方式">
+          {deliveryModeOptions.map((option) => {
+            const unavailable = option.value === 'draft'
+              ? connected && !canCreateDraft
+              : option.value === 'direct_publish' && connected && (!canCreateDraft || !connection?.can_formally_publish)
+            const selected = deliveryMode === option.value
+            return (
+              <Button
+                key={option.value}
+                type="button"
+                variant={selected ? 'secondary' : 'outline'}
+                aria-pressed={selected}
+                className="h-auto min-h-24 items-start justify-start whitespace-normal p-3 text-left"
+                disabled={save.isPending || unavailable}
+                onClick={() => setDeliveryMode(option.value)}
+              >
+                <span className="block">
+                  <span className="block font-medium">{option.label}</span>
+                  <span className="mt-1 block text-xs font-normal leading-relaxed text-muted-foreground">{option.description}</span>
+                </span>
+              </Button>
+            )
+          })}
         </div>
         <p className="text-xs text-muted-foreground">
           {connected && (!canCreateDraft || !connection?.can_formally_publish)
             ? canCreateDraft
               ? '当前账号未授予正式发布权限；重新扫码并授予后可选。'
               : '当前授权缺少草稿箱权限；重新扫码并授予相应权限后可选。'
-            : '正式发布只会在任务详情中确认后提交；项目默认值不会自动发布。'}
+            : '手动复制适合需要自己把关的内容；另外两种方式会按任务流程交付。'}
         </p>
       </fieldset>
-      <label className="flex items-center justify-between gap-4 border-t pt-4 text-sm">
-        <span>
-          <span className="block font-medium">{authorizationEnabled ? '自动存入公众号草稿箱' : '允许自动交付'}</span>
-          <span className="mt-1 block text-xs text-muted-foreground">
-            {authorizationEnabled ? '自动交付会先保存到公众号草稿箱；正式发布需在任务详情确认。' : '关闭后，生成的文章需要复制到公众号后台完成草稿。'}
-          </span>
-        </span>
-        <Switch
-          checked={automaticDeliveryEnabled}
-          onCheckedChange={(checked) => {
-            if (checked && hasAuthorizationRecord && (!connected || !canCreateDraft)) return
-            setAutomaticDeliveryEnabled(checked)
-          }}
-          aria-label={authorizationEnabled ? '自动存入公众号草稿箱' : '允许自动交付'}
-          disabled={save.isPending}
-        />
-      </label>
       {showLegacyCredentials && (
         <details open={!authorizationEnabled} className={authorizationEnabled ? 'border-t pt-4' : 'space-y-4 border-t pt-4'}>
           {authorizationEnabled && <summary className="cursor-pointer text-sm font-medium">使用存量 AppID 配置</summary>}
@@ -294,7 +303,7 @@ export function ProjectChannelConfigDialog({ project, onClose }: Props) {
           <DialogTitle>公众号设置</DialogTitle>
           <DialogDescription className="space-y-2">
             <ProjectIdentity project={project} compact showAgents={false} className="max-w-full" />
-            <span className="block">管理此人设的公众号绑定与草稿箱交付。</span>
+            <span className="block">管理此人设的公众号绑定与交付方式。</span>
           </DialogDescription>
         </DialogHeader>
         <WechatPlatformSettingsPanel project={project} onStateChange={onEditorStateChange} onClose={requestClose} embedded={false} />
