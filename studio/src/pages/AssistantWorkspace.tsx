@@ -350,6 +350,7 @@ export default function AssistantWorkspace() {
   const lastSubmittedMessage = useRef('')
   const workspaceResetVersion = useRef(0)
   const workspaceCreateKey = useRef<string | null>(null)
+  const workspaceHandedOff = useRef(false)
   const sendInFlight = useRef(false)
   const answerInFlight = useRef(false)
   const [commitIdempotencyKeys, setCommitIdempotencyKeys] = useState<Record<string, string>>(persisted?.commitIdempotencyKeys ?? {})
@@ -418,6 +419,7 @@ export default function AssistantWorkspace() {
   }, [messagesByMode, questionsByMode])
 
   useEffect(() => {
+    if (workspaceHandedOff.current) return
     try {
       sessionStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({
         workspace,
@@ -998,6 +1000,19 @@ export default function AssistantWorkspace() {
     }
   }
 
+  const openCreatedTask = (taskId: string) => {
+    if (mode === 'creation') {
+      // Pending renders must not restore this completed conversation after navigation.
+      workspaceHandedOff.current = true
+      try {
+        sessionStorage.removeItem(WORKSPACE_STORAGE_KEY)
+      } catch {
+        // Task navigation still works when browser storage is unavailable.
+      }
+    }
+    navigate(`/tasks/${encodeURIComponent(taskId)}`)
+  }
+
   const commitDraft = async () => {
     if (!workspace || !activeDraft || committing || mode === 'creation' && !creationCanConfirm) return
     setCommitting(true)
@@ -1112,7 +1127,7 @@ export default function AssistantWorkspace() {
       const interactionStatus = stringValue((result as { interaction_status?: unknown }).interaction_status) ?? 'created'
       dispatchInteraction({ type: 'commit_result', result: { status: interactionStatus, task_id: committedTaskID } })
       if (interactionStatus !== 'needs_reconciliation') setDraftByMode((current) => ({ ...current, [mode]: null }))
-      if (mode === 'creation' && committedTaskID) navigate(`/tasks/${encodeURIComponent(committedTaskID)}`)
+      if (mode === 'creation' && committedTaskID && (interactionStatus === 'created' || interactionStatus === 'already_created')) openCreatedTask(committedTaskID)
     } catch (commitError) {
       const recoveredSnapshot = assistantInteractionSnapshotFromError(commitError)
       if (recoveredSnapshot) applyInteractionSnapshot(recoveredSnapshot)
@@ -1383,7 +1398,7 @@ export default function AssistantWorkspace() {
         }}
         onRestoreDraft={() => { void refreshInteractionSnapshot() }}
         onRestart={() => { void restartInteraction() }}
-        onViewTask={() => { if (interactionState.taskId) navigate(`/tasks/${encodeURIComponent(interactionState.taskId)}`) }}
+        onViewTask={() => { if (interactionState.taskId) openCreatedTask(interactionState.taskId) }}
       />
       {!workspace ? (
         <section className="assistant-home mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col justify-center gap-3 overflow-hidden px-4 py-4 md:px-8 md:py-8">

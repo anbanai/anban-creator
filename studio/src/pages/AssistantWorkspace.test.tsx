@@ -221,7 +221,7 @@ describe('AssistantWorkspace', () => {
 
   it('retains the plan and disables creation and discussion when the result needs reconciliation', async () => {
     restoreCreation()
-    mocks.workspaceCommit.mockResolvedValue({ interaction_status: 'needs_reconciliation' })
+    mocks.workspaceCommit.mockResolvedValue({ interaction_status: 'needs_reconciliation', task_id: 'uncertain-task' })
     renderPage()
     fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '创作作品' }))
     expect(await screen.findByRole('button', { name: '核对结果' })).toBeInTheDocument()
@@ -231,6 +231,55 @@ describe('AssistantWorkspace', () => {
     expect(screen.queryByRole('button', { name: '重新开始' })).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
     expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('保留我的输入')
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/$/)
+    expect(JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!).workspace.id).toBe('workspace-1')
+  })
+
+  it.each(['created', 'already_created'])('returns to persona selection after opening a %s task and revisiting home', async (status) => {
+    restoreCreation()
+    mocks.workspaceCommit.mockResolvedValue({ interaction_status: status, task_id: 'created-task' })
+    const queryClient = createTestQueryClient()
+    const page = render(<QueryClientProvider client={queryClient}><MemoryRouter><nav><Link to="/">首页</Link></nav><Routes><Route path="/" element={<AssistantWorkspace />} /><Route path="/tasks/:id" element={<h1>任务详情</h1>} /></Routes><LocationProbe /></MemoryRouter></QueryClientProvider>)
+
+    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '创作作品' }))
+    await screen.findByRole('heading', { name: '任务详情' })
+    expect(screen.getByTestId('location')).toHaveTextContent('/tasks/created-task')
+    expect(screen.queryByTestId('assistant-workspace')).not.toBeInTheDocument()
+    expect(sessionStorage.getItem('anban:assistant-workspace')).toBeNull()
+    expect(mocks.closeWorkspace).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('link', { name: '首页' }))
+    await screen.findByRole('region', { name: '首页人设选择' })
+    expect(screen.queryByText('已经讨论过的需求')).not.toBeInTheDocument()
+    expect(screen.queryByText('已创建任务')).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('')
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
+    expect(mocks.getInteractionSnapshot).toHaveBeenCalledTimes(1)
+
+    page.unmount()
+    renderPage(undefined, queryClient)
+    await screen.findByRole('region', { name: '首页人设选择' })
+    expect(mocks.getInteractionSnapshot).toHaveBeenCalledTimes(1)
+    mocks.createWorkspace.mockResolvedValue({ id: 'next-workspace', mode_id: 'creation', project_id: 'project-1', runtime_status: 'starting', expires_at: '' })
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '下一篇创作需求' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('next-workspace', 'creation', expect.stringContaining('下一篇创作需求')))
+    expect(mocks.workspaceCommit).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears a recovered completed creation when opening its task without restoring it on return', async () => {
+    const snapshot = restoreCreation()
+    mocks.getInteractionSnapshot.mockResolvedValue({ ...snapshot, lifecycle: 'completed', available_actions: ['view_task', 'restart'], drafts: snapshot.drafts.map((draft) => ({ ...draft, ready: false, confirmation_state: 'consumed' })), commit_result: { status: 'created', task_id: 'recovered-task' } })
+    const page = renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: '查看任务' }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tasks/recovered-task'))
+    expect(sessionStorage.getItem('anban:assistant-workspace')).toBeNull()
+
+    page.unmount()
+    renderPage()
+    await screen.findByRole('region', { name: '首页人设选择' })
+    expect(mocks.workspaceCommit).not.toHaveBeenCalled()
+    expect(mocks.getInteractionSnapshot).toHaveBeenCalledTimes(1)
   })
 
   it('keeps retry identity through refresh and allocates a different key for changed final options', async () => {
