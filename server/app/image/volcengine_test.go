@@ -492,6 +492,47 @@ func TestSanitizeImageProviderEndpointRemovesCredentialsAndQuery(t *testing.T) {
 	}
 }
 
+func TestDiagnosticRoundTripperOnlyCachesCorrelatableHTTPErrorObservations(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		echoRequestID    bool
+		wantCachedRecord bool
+	}{
+		{name: "provider echoes client request id", echoRequestID: true, wantCachedRecord: true},
+		{name: "provider omits client request id", echoRequestID: false, wantCachedRecord: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.echoRequestID {
+					w.Header().Set(model.ClientRequestHeader, r.Header.Get(model.ClientRequestHeader))
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
+			}))
+			defer srv.Close()
+
+			diagnostics := &imageProviderDiagnostics{}
+			transport := &diagnosticRoundTripper{base: http.DefaultTransport, diagnostics: diagnostics}
+			req, err := http.NewRequest(http.MethodPost, srv.URL+"/images/generations", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set(model.ClientRequestHeader, "client-request-1")
+			resp, err := transport.RoundTrip(req)
+			if err != nil {
+				t.Fatalf("RoundTrip() error = %v", err)
+			}
+			_ = resp.Body.Close()
+
+			_, cached := diagnostics.observations.Load("client-request-1")
+			if cached != tc.wantCachedRecord {
+				t.Fatalf("cached request observation = %v, want %v", cached, tc.wantCachedRecord)
+			}
+		})
+	}
+}
+
 func TestGenerateErrorIncludesSafeRequestDiagnostics(t *testing.T) {
 	err := &GenerateError{
 		Provider:          "TokenPlayer",

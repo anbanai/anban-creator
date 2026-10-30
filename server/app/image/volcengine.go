@@ -84,7 +84,9 @@ func (t *diagnosticRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 	} else if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices && !isJSONContentType(observation.ResponseContentType) {
 		observation.TransportPhase = "protocol"
 	}
-	if requestID != "" && t.diagnostics != nil && observation.TransportPhase != "" {
+	responseRequestID := strings.TrimSpace(resp.Header.Get(model.ClientRequestHeader))
+	correlatable := observation.TransportPhase == "protocol" || responseRequestID == requestID
+	if requestID != "" && t.diagnostics != nil && observation.TransportPhase != "" && correlatable {
 		t.diagnostics.observations.Store(requestID, observation)
 	}
 	return resp, nil
