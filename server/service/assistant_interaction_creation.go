@@ -18,15 +18,8 @@ func (e *assistantCreationPreflightError) Unwrap() error { return e.error }
 
 func knownCreationPreflightFailure(err error) bool {
 	var preflight *assistantCreationPreflightError
-	if errors.As(err, &preflight) {
-		return true
-	}
-	for _, known := range []error{ErrAssistantCheckpointInvalid, ErrAssistantCreationInputsMissing, ErrAssistantCreationAssetUnavailable, ErrAssistantCheckpointConflict, ErrTaskCreationProjectInactive, ErrProjectNotFound, ErrProjectOwnedByUser, ErrAgentProfileInvalid, ErrAgentProfileNotFound, ErrAgentProfileUnavailable, ErrAgentProfileAccessDenied, ErrAgentProfileSnapshotInvalid, ErrAgentProfileSnapshotConflict, ErrBillingInsufficientForTask, ErrBillingDebtOutstanding, ErrBillingQuoteMismatch, ErrReferenceAssetUnavailable, ErrUserMediaUnavailable} {
-		if errors.Is(err, known) {
-			return true
-		}
-	}
-	return false
+	var taskPreflight *taskCreationPreflightError
+	return errors.As(err, &preflight) || errors.As(err, &taskPreflight)
 }
 
 func (s *AssistantInteractionService) creationCommitAuthority(ctx context.Context, userID string, interaction *model.AssistantInteraction) (InteractionCommitResult, bool, error) {
@@ -132,6 +125,12 @@ func (s *AssistantInteractionService) commitCreationInteraction(ctx context.Cont
 			return InteractionCommitResult{}, errors.Join(ErrInteractivePersistence, persistErr)
 		}
 		if known {
+			var inputErr *taskCreationInputError
+			if errors.As(err, &inputErr) {
+				structured := creationDraftError(InteractionErrorDraftInvalid, []InteractionBlockingIssue{{Code: "invalid", Field: inputErr.field, Message: inputErr.Error()}})
+				structured.cause = err
+				return InteractionCommitResult{}, s.creationErrorWithSnapshot(ctx, userID, interaction, structured)
+			}
 			if !errors.Is(err, ErrAssistantCheckpointInvalid) && !errors.Is(err, ErrAssistantCreationInputsMissing) {
 				return InteractionCommitResult{}, err
 			}

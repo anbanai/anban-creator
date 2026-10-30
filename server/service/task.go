@@ -696,6 +696,29 @@ func validateUserMediaInputAttachments(ctx context.Context, repo repository.Repo
 // Style/author/theme dimensions are snapshotted from the project at creation.
 // Editing the project later does not change existing pending/running tasks.
 func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([]*model.Task, error) {
+	return s.createManual(ctx, p, false)
+}
+
+type taskCreationPreflightError struct{ error }
+
+func (e *taskCreationPreflightError) Unwrap() error { return e.error }
+
+type taskCreationInputError struct {
+	error
+	field string
+}
+
+func (e *taskCreationInputError) Unwrap() error { return e.error }
+
+// Only assistant confirmation needs the error phase to decide whether its
+// durable claim can be released. Ordinary CreateManual callers keep raw errors.
+func (s *TaskService) createManual(ctx context.Context, p CreateManualParams, trackCreationPhase bool) (created []*model.Task, resultErr error) {
+	persistenceStarted := false
+	defer func() {
+		if trackCreationPhase && resultErr != nil && !persistenceStarted {
+			resultErr = &taskCreationPreflightError{resultErr}
+		}
+	}()
 	if strings.TrimSpace(p.ExecutionProfile) == "" {
 		return nil, fmt.Errorf("execution_profile is required")
 	}
@@ -818,7 +841,11 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		effectiveImageRatio = model.DefaultImageRatioForChannel(channel)
 	}
 	if len(model.SupportedImageRatiosForChannel(channel)) > 0 && !model.IsBusinessImageRatioAllowedForChannel(channel, effectiveImageRatio) {
-		return nil, fmt.Errorf("%s for channel %s: %s", model.ValidImageRatioHint, channel, effectiveImageRatio)
+		err := fmt.Errorf("%s for channel %s: %s", model.ValidImageRatioHint, channel, effectiveImageRatio)
+		if trackCreationPhase {
+			return nil, &taskCreationInputError{error: err, field: "plan.image_ratio"}
+		}
+		return nil, err
 	}
 	agentInput, err := validateAndCloneAgentInput(taskType, p.AgentInput)
 	if err != nil {
@@ -1145,6 +1172,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 
 		tasks = append(tasks, task)
 	}
+	persistenceStarted = true
 	if err := s.persistTasksWithFixedAdmission(ctx, tasks, p.HasContentImage, p); err != nil {
 		if s.topicPoolSvc != nil {
 			for _, task := range tasks {

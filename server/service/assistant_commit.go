@@ -522,7 +522,7 @@ func commitAssistantCreation(ctx context.Context, userID string, checkpoint *mod
 		params.InputAttachments = inputAttachments
 	}
 	creationStarted = true
-	created, err := tasks.CreateManual(ctx, params)
+	created, err := tasks.createManual(ctx, params, true)
 	if err != nil {
 		if existing, lookupErr := repo.Tasks().FindByAssistantCheckpointID(ctx, userID, checkpoint.ID); lookupErr == nil {
 			if existing.ProjectID != checkpoint.ProjectID || existing.Prompt != prompt {
