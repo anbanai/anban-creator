@@ -79,11 +79,15 @@ type contentMetadataTag struct {
 }
 
 type contentTagEvidence struct {
-	SourceFile   string `json:"source_file"`
-	LineStart    int    `json:"line_start"`
-	LineEnd      int    `json:"line_end"`
-	Quote        string `json:"quote"`
-	EvidenceKind string `json:"evidence_kind"`
+	SourceFile    string   `json:"source_file"`
+	LineStart     int      `json:"line_start,omitempty"`
+	LineEnd       int      `json:"line_end,omitempty"`
+	StartSeconds  *float64 `json:"start_seconds,omitempty"`
+	EndSeconds    *float64 `json:"end_seconds,omitempty"`
+	TimecodeStart string   `json:"timecode_start,omitempty"`
+	TimecodeEnd   string   `json:"timecode_end,omitempty"`
+	Quote         string   `json:"quote"`
+	EvidenceKind  string   `json:"evidence_kind"`
 }
 
 func (s *ContentMetadataService) Submit(ctx context.Context, input ContentMetadataInput) (*model.ContentMetadataReport, error) {
@@ -147,7 +151,9 @@ func (s *ContentMetadataService) submit(ctx context.Context, input ContentMetada
 			return nil, fmt.Errorf("semantic tag %q requires structured evidence", tag.Dimension)
 		}
 		for _, item := range evidence {
-			if strings.TrimSpace(item.SourceFile) == "" || item.LineStart < 1 || item.LineEnd < item.LineStart || strings.TrimSpace(item.Quote) == "" || strings.TrimSpace(item.EvidenceKind) == "" {
+			lineEvidence := item.LineStart >= 1 && item.LineEnd >= item.LineStart
+			timeEvidence := item.StartSeconds != nil && item.EndSeconds != nil && *item.StartSeconds >= 0 && *item.EndSeconds > *item.StartSeconds
+			if lineEvidence == timeEvidence || strings.TrimSpace(item.SourceFile) == "" || strings.TrimSpace(item.Quote) == "" || strings.TrimSpace(item.EvidenceKind) == "" {
 				return nil, fmt.Errorf("semantic tag %q has invalid evidence location", tag.Dimension)
 			}
 		}

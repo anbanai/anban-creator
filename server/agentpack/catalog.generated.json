@@ -2911,7 +2911,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "47611b95b9b86d52be625a22ed3351afe470c32738a943bf5d0521c3d47c8906"
+      "digest": "a92520f39ef3e2573261ee60cced4e2f20b8d199ce677985ee7954b90a3b54bf"
     },
     {
       "id": "talking-head-editor",
@@ -3202,7 +3202,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "f9718b968b81741f9f97419d8b14fec7f2da484b5a1044aa37ccedd6df49eaa7"
+      "digest": "7e5555707bee6c32918f919864552f9e29549e4993d7aabf5d279c665a4c055b"
     },
     {
       "id": "video-edit",
@@ -3355,7 +3355,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "a1f8face31ebef9fa6240db7f0da087947a8bfd46d67347e3165233f477444fc"
+      "digest": "be13cc6b4ab2e49ad1aeb55d40e415d97d31eebbe54bed5bdb70c1d733a32e58"
     },
     {
       "id": "viral-ip-video-editor",
@@ -3642,7 +3642,7 @@
         }
       ],
       "ui": {},
-      "digest": "886297dfef99fed664920d8542c1f54e93e86040e76105cb79ec7e16081a9cd3"
+      "digest": "a9856b1700326164d8fbdcf5c975d4da594812253bdb5e0eac2dd88e17060d2e"
     },
     {
       "id": "wechat-article",
@@ -3906,7 +3906,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "b07c0df2117a04be89e2e651f889c86975fda11c0197f86be4f750137f2de09a"
+      "digest": "bffb52149e4f0df7ffc15e69403cda0bc806f8ccf9433e4758d47b603bc521bd"
     },
     {
       "id": "wechat-picture",
