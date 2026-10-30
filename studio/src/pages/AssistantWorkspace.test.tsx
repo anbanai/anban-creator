@@ -101,11 +101,11 @@ function emptyDimensions(): NonNullable<Project['profile']>['dimensions'] {
 describe('AssistantWorkspace', () => {
   function restoreCreation(ready = true, confirmationState = 'pending') {
     setBootstrap({ defaultModeId: 'creation', modes: [{ id: 'creation', displayName: '创作模式', description: '制定计划', available: true }], projects: [{ id: 'project-1', name: '我的人设', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }] })
-    const snapshot: AssistantInteractionSnapshot = {
+    const snapshot = {
       interaction_id: 'workspace-1', mode_id: 'creation', project_id: 'project-1', lifecycle: ready ? 'needs_confirmation' : 'active', generation: 2, runtime_status: 'failed', expires_at: '', last_activity_at: '',
       available_actions: ready ? ['confirm_draft', 'continue_editing'] : ['continue_editing', 'send_message'],
       drafts: [{ draft_id: 'displayed-draft', mode_id: 'creation', revision: 4, payload_digest: 'displayed-digest', payload: { plan: { goal: '保留创作计划', content_type: 'wechat-article', topic: '春茶', angle: '冲泡', expression_form: '教程' } }, ready, confirmation_state: confirmationState, ...(!ready ? { blocking_issues: [{ code: 'missing_input', field: 'plan.missing_inputs', message: '请补充必要的活动日期' }] } : {}) }],
-    }
+    } satisfies AssistantInteractionSnapshot
     sessionStorage.setItem('anban:assistant-workspace', JSON.stringify({ workspace: { id: 'workspace-1', mode_id: 'creation', project_id: 'project-1', runtime_status: 'failed', expires_at: '' }, mode: 'creation', projectId: 'project-1', composer: '保留我的输入', messagesByMode: { creation: [{ id: 'local', role: 'user', text: '已经讨论过的需求', order: 1 }] }, questionsByMode: { creation: [{ callId: 'answered', order: 2, questions: [{ id: 'q', question: '已回答的问题' }], answers: [{ id: 'q', selected: ['回答已保留'] }] }] } }))
     mocks.getInteractionSnapshot.mockResolvedValue(snapshot)
     return snapshot
