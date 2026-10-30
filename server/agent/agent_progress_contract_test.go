@@ -31,7 +31,7 @@ func TestManagedAgentsOwnDynamicLifecycleReporting(t *testing.T) {
 				wantVersion = "2.0.3"
 			}
 			if pack.ID == "talking-head-editor" {
-				wantVersion = "2.0.6"
+				wantVersion = "2.0.7"
 			}
 			if pack.ID == "content-planning" {
 				wantVersion = "1.0.0"
