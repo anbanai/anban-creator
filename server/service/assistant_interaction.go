@@ -280,7 +280,24 @@ func (s *AssistantInteractionService) Snapshot(ctx context.Context, userID, inte
 }
 
 func (s *AssistantInteractionService) snapshotWithDrafts(ctx context.Context, userID string, interaction *model.AssistantInteraction) (InteractionSnapshot, error) {
+	var drafts []*model.AssistantInteractionDraft
+	var receipt *model.AssistantInteractionAttempt
+	var draftErr, receiptErr error
+	if interaction.ModeID == AssistantModeCreation {
+		interaction, drafts, receipt, draftErr = s.repo.AssistantInteractions().ReadCreationState(ctx, userID, interaction.ID)
+		if draftErr != nil {
+			return InteractionSnapshot{}, errors.Join(ErrInteractivePersistence, draftErr)
+		}
+		if receipt == nil {
+			receiptErr = gorm.ErrRecordNotFound
+		}
+	} else {
+		drafts, draftErr = s.repo.AssistantInteractions().ListDrafts(ctx, userID, interaction.ID)
+	}
 	snapshot := s.snapshotFromInteraction(interaction)
+	if interaction.ModeID == AssistantModeCreation {
+		snapshot.StateSequence = interaction.CommandSequence
+	}
 	if current, runtimeErr := s.repo.AssistantInteractions().FindCurrentRuntime(ctx, interaction.ID, interaction.Generation); runtimeErr == nil {
 		snapshot.RuntimeStatus = current.Status
 		if current.Status != model.AssistantInteractionRuntimeClosed && s.runtimeFor(interaction.ID, interaction.Generation) == nil {
@@ -296,7 +313,7 @@ func (s *AssistantInteractionService) snapshotWithDrafts(ctx context.Context, us
 	} else {
 		snapshot.RuntimeStatus = model.AssistantInteractionRuntimeStarting
 	}
-	if drafts, draftErr := s.repo.AssistantInteractions().ListDrafts(ctx, userID, interaction.ID); draftErr == nil {
+	if draftErr == nil {
 		snapshot.Drafts = make([]InteractionDraftView, 0, len(drafts))
 		latest := map[string]bool{}
 		claimed := false
@@ -308,6 +325,9 @@ func (s *AssistantInteractionService) snapshotWithDrafts(ctx context.Context, us
 		for _, draft := range drafts {
 			eligible := !latest[draft.ModeID] && !claimed && draft.ExpiresAt.After(s.clock()) && interaction.Lifecycle != model.AssistantInteractionCompleted && interaction.Lifecycle != model.AssistantInteractionAbandoned
 			view := interactionDraftView(draft, eligible)
+			if draft.ModeID == AssistantModeCreation {
+				view.StateSequence = snapshot.StateSequence
+			}
 			if draft.ModeID == AssistantModeCreation && !latest[draft.ModeID] && interaction.Lifecycle != model.AssistantInteractionCompleted && interaction.Lifecycle != model.AssistantInteractionAbandoned {
 				snapshot.AvailableActions = creationDraftActions(view)
 				if view.Ready {
@@ -326,7 +346,10 @@ func (s *AssistantInteractionService) snapshotWithDrafts(ctx context.Context, us
 	} else {
 		return InteractionSnapshot{}, errors.Join(ErrInteractivePersistence, draftErr)
 	}
-	if receipt, receiptErr := s.repo.AssistantInteractions().FindLatestCommitAttempt(ctx, interaction.ID); receiptErr == nil {
+	if interaction.ModeID != AssistantModeCreation {
+		receipt, receiptErr = s.repo.AssistantInteractions().FindLatestCommitAttempt(ctx, interaction.ID)
+	}
+	if receiptErr == nil {
 		if receipt.ErrorCode == InteractionErrorCommitReconciliationRequired {
 			// An ambiguous external side effect is durable evidence in its own
 			// right. Surface the reconciliation action after a restart instead of
@@ -395,6 +418,14 @@ func (s *AssistantInteractionService) Events(ctx context.Context, userID, intera
 	events, err := s.repo.AssistantInteractions().ListEventsAfter(ctx, interactionID, current.Generation, after, 200)
 	if err != nil {
 		return nil, err
+	}
+	// A transition may commit between the snapshot and event queries. Never
+	// consume its cursor while hydrating it with an older claim/release view.
+	if current.ModeID == AssistantModeCreation && len(events) > 0 && events[len(events)-1].Sequence > snapshot.StateSequence {
+		snapshot, err = s.snapshotWithDrafts(ctx, userID, current)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// Runtime messages are retained in memory for the active process so the
 	// live stream remains useful, while the durable rows contain metadata only.

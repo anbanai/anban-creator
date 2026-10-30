@@ -101,8 +101,9 @@ func (s *AssistantInteractionService) commitCreationInteraction(ctx context.Cont
 		return InteractionCommitResult{}, err
 	}
 	attemptID := "commit:" + req.IdempotencyKey
-	attempt := &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: interaction.ID, UserID: userID, AttemptID: attemptID, Operation: string(InteractionOperationCommit), Generation: interaction.Generation, PayloadDigest: digest, Status: model.AssistantInteractionAttemptPending, CreatedAt: s.clock(), ExpiresAt: s.clock().Add(InteractionCommitReceiptRetention)}
-	if err := s.repo.AssistantInteractions().TransitionCreationDraft(ctx, userID, interaction.ID, draft.ID, draft.Revision, attempt, s.clock()); err != nil {
+	now := s.clock()
+	attempt := &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: interaction.ID, UserID: userID, AttemptID: attemptID, Operation: string(InteractionOperationCommit), Generation: interaction.Generation, PayloadDigest: digest, Status: model.AssistantInteractionAttemptPending, CreatedAt: now, ExpiresAt: now.Add(InteractionCommitReceiptRetention)}
+	if err := s.repo.AssistantInteractions().TransitionCreationDraft(ctx, userID, interaction.ID, draft.ID, draft.Revision, attempt, now); err != nil {
 		if errors.Is(err, repository.ErrInteractionDraftState) {
 			if result, handled, authorityErr := s.creationCommitAuthority(ctx, userID, interaction); handled || authorityErr != nil {
 				return result, authorityErr

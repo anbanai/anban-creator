@@ -127,6 +127,7 @@ func interactionCommandDigest(method, attemptID string, params map[string]any) s
 }
 
 type InteractionSnapshot struct {
+	StateSequence     uint64                   `json:"state_sequence,omitempty"`
 	ID                string                   `json:"interaction_id"`
 	ModeID            string                   `json:"mode_id"`
 	ProjectID         string                   `json:"project_id,omitempty"`
@@ -143,6 +144,7 @@ type InteractionSnapshot struct {
 }
 
 type InteractionDraftView struct {
+	StateSequence     uint64                     `json:"state_sequence,omitempty"`
 	ID                string                     `json:"draft_id"`
 	ModeID            string                     `json:"mode_id"`
 	Revision          int64                      `json:"revision"`

@@ -6,6 +6,43 @@ const snapshot = { interaction_id: 'i-1', mode_id: 'creation' as const, lifecycl
 describe('assistant interaction state', () => {
   const draft = { draft_id: 'd-1', mode_id: 'creation' as const, revision: 1, payload: {}, payload_digest: 'digest', ready: true, confirmation_state: 'pending' }
 
+  it('recovers another window after an ordered claim release and rejects delayed snapshots and events', () => {
+    const pending = { ...snapshot, state_sequence: 10, drafts: [{ ...draft, state_sequence: 10 }] }
+    const claimedSnapshot = { ...pending, state_sequence: 11, recovery_error_code: 'assistant_commit_reconciliation_required', available_actions: ['view_task', 'reconcile_commit'], drafts: [{ ...draft, state_sequence: 11, ready: false, confirmation_state: 'confirmed' }] }
+    const claimed = assistantInteractionReducer(initialAssistantInteractionState, { type: 'snapshot', snapshot: claimedSnapshot })
+    expect(assistantInteractionReducer(claimed, { type: 'snapshot', snapshot: pending })).toEqual(claimed)
+    expect(assistantInteractionReducer(claimed, { type: 'draft_ready', draft: pending.drafts[0] })).toEqual(claimed)
+    const releasedSnapshot = { ...pending, state_sequence: 12, drafts: [{ ...draft, state_sequence: 12 }] }
+    const released = assistantInteractionReducer(claimed, { type: 'snapshot', snapshot: releasedSnapshot })
+    expect(released.status).toBe('needs_confirmation')
+    expect(released.errorCode).toBeUndefined()
+    expect(released.drafts[0]?.ready).toBe(true)
+    expect(assistantInteractionReducer(released, { type: 'snapshot', snapshot: claimedSnapshot })).toEqual(released)
+    expect(assistantInteractionReducer(released, { type: 'draft_ready', draft: claimedSnapshot.drafts[0] })).toEqual(released)
+    expect(assistantInteractionReducer(released, { type: 'snapshot', snapshot: { ...claimedSnapshot, state_sequence: undefined } })).toEqual(released)
+    expect(assistantInteractionReducer(released, { type: 'draft_ready', draft: { ...claimedSnapshot.drafts[0], state_sequence: undefined } })).toEqual(released)
+    const later = { ...draft, draft_id: 'd-2', revision: 2, state_sequence: 13 }
+    expect(assistantInteractionReducer(released, { type: 'draft_ready', draft: later }).drafts).toEqual([later])
+    expect(assistantInteractionReducer(claimed, { type: 'draft_ready', draft: later }).status).toBe('needs_confirmation')
+  })
+
+  it('retains a true uncertain receipt even in a newer authoritative snapshot', () => {
+    const ready = assistantInteractionReducer(initialAssistantInteractionState, { type: 'snapshot', snapshot: { ...snapshot, state_sequence: 10 } })
+    const uncertain = assistantInteractionReducer(ready, { type: 'commit_result', result: { status: 'needs_reconciliation' } })
+    const recovered = assistantInteractionReducer(uncertain, { type: 'snapshot', snapshot: { ...snapshot, state_sequence: 12, recovery_error_code: 'assistant_commit_reconciliation_required', available_actions: ['view_task', 'reconcile_commit'], drafts: [{ ...draft, state_sequence: 12, ready: false, confirmation_state: 'confirmed' }] } })
+    expect(recovered.errorCode).toBe('assistant_commit_reconciliation_required')
+    expect(recovered.availableActions).not.toContain('confirm_draft')
+    expect(assistantInteractionReducer(recovered, { type: 'snapshot', snapshot })).toEqual(recovered)
+  })
+
+  it('keeps final option errors separate from authoritative draft readiness', () => {
+    const ready = assistantInteractionReducer(initialAssistantInteractionState, { type: 'snapshot', snapshot })
+    const invalid = assistantInteractionReducer(ready, { type: 'error', code: 'assistant_draft_invalid', availableActions: ['continue_editing'], blockingIssues: [{ code: 'invalid', field: 'plan.image_ratio', message: '请选择有效的图片画幅' }] })
+    expect(invalid.drafts).toEqual(ready.drafts)
+    expect(invalid.availableActions).toContain('confirm_draft')
+    expect(assistantInteractionReducer(invalid, { type: 'snapshot', snapshot }).status).toBe('needs_confirmation')
+  })
+
   it('keeps incomplete and withdrawn snapshots editable despite stale lifecycle', () => {
     for (const receipt of [{ ...draft, ready: false }, { ...draft, confirmation_state: 'superseded' }]) {
       const state = assistantInteractionReducer(initialAssistantInteractionState, { type: 'snapshot', snapshot: { ...snapshot, available_actions: ['continue_editing', 'send_message'], drafts: [receipt] } })

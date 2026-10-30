@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -38,6 +39,7 @@ type AssistantInteractionRepository interface {
 	CreateDraftAttemptEventAtGeneration(context.Context, *model.AssistantInteractionDraft, *model.AssistantInteractionAttempt, *model.AssistantInteractionEvent, int64) (*model.AssistantInteractionDraft, *model.AssistantInteractionEvent, bool, error)
 	FindDraftForUser(context.Context, string, string) (*model.AssistantInteractionDraft, error)
 	FindLatestDraft(context.Context, string, string, string) (*model.AssistantInteractionDraft, error)
+	ReadCreationState(context.Context, string, string) (*model.AssistantInteraction, []*model.AssistantInteractionDraft, *model.AssistantInteractionAttempt, error)
 	ListDrafts(context.Context, string, string) ([]*model.AssistantInteractionDraft, error)
 	ExpireDrafts(context.Context, time.Time) (int64, error)
 	UpdateDraftState(context.Context, string, string, time.Time) error
@@ -402,6 +404,32 @@ func (r *assistantInteractionRepository) ListDrafts(ctx context.Context, userID,
 		Order("assistant_interaction_drafts.mode_id ASC, assistant_interaction_drafts.revision DESC").Find(&values).Error
 	return values, err
 }
+
+// ReadCreationState uses the same row fence as stage/claim/release. The sequence,
+// drafts and receipt must describe one committed state, never a mixed read.
+func (r *assistantInteractionRepository) ReadCreationState(ctx context.Context, userID, interactionID string) (*model.AssistantInteraction, []*model.AssistantInteractionDraft, *model.AssistantInteractionAttempt, error) {
+	var interaction model.AssistantInteraction
+	var drafts []*model.AssistantInteractionDraft
+	var receipt *model.AssistantInteractionAttempt
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND user_id = ?", interactionID, userID).First(&interaction).Error; err != nil {
+			return err
+		}
+		repo := &assistantInteractionRepository{db: tx}
+		var err error
+		drafts, err = repo.ListDrafts(ctx, userID, interactionID)
+		if err != nil {
+			return err
+		}
+		receipt, err = repo.FindLatestCommitAttempt(ctx, interactionID)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	})
+	return &interaction, drafts, receipt, err
+}
+
 func (r *assistantInteractionRepository) ExpireDrafts(ctx context.Context, before time.Time) (int64, error) {
 	result := r.db.WithContext(ctx).Where("expires_at <= ?", before).Delete(&model.AssistantInteractionDraft{})
 	return result.RowsAffected, result.Error
@@ -452,7 +480,10 @@ func (r *assistantInteractionRepository) TransitionCreationDraft(ctx context.Con
 		if err := tx.Model(&model.AssistantInteractionDraft{}).Where("id = ?", draftID).Updates(map[string]any{"confirmation_state": state, "updated_at": at}).Error; err != nil {
 			return err
 		}
-		return tx.Model(&model.AssistantInteraction{}).Where("id = ?", interactionID).Updates(map[string]any{"lifecycle": lifecycle, "updated_at": at, "last_activity_at": at}).Error
+		if err := tx.Model(&model.AssistantInteraction{}).Where("id = ?", interactionID).Updates(map[string]any{"lifecycle": lifecycle, "updated_at": at, "last_activity_at": at}).Error; err != nil {
+			return err
+		}
+		return appendCreationStateEvent(tx, &interaction, draftID, at)
 	})
 }
 
@@ -485,12 +516,29 @@ func (r *assistantInteractionRepository) FinishCreationCommit(ctx context.Contex
 		if err := tx.Model(&model.AssistantInteractionDraft{}).Where("id = ? AND confirmation_state = ?", draftID, model.AssistantInteractionDraftConfirmed).Updates(map[string]any{"confirmation_state": state, "updated_at": at}).Error; err != nil {
 			return err
 		}
+		if err := appendCreationStateEvent(tx, &interaction, draftID, at); err != nil {
+			return err
+		}
 		if len(result) > 0 {
 			return tx.Model(&model.AssistantInteraction{}).Where("id = ?", interactionID).Updates(map[string]any{"lifecycle": model.AssistantInteractionCompleted, "active_scope": nil, "updated_at": at, "last_activity_at": at}).Error
 		}
 		return nil
 	})
 }
+
+// Allocate state ordering and its metadata-only event together. The stream cursor
+// remains contiguous; the service hydrates these events from authoritative drafts.
+func appendCreationStateEvent(tx *gorm.DB, interaction *model.AssistantInteraction, draftID string, at time.Time) error {
+	if err := tx.Model(&model.AssistantInteraction{}).Where("id = ?", interaction.ID).UpdateColumn("command_sequence", gorm.Expr("command_sequence + 1")).Error; err != nil {
+		return err
+	}
+	data, err := json.Marshal(map[string]any{"durable": true, "mode_id": "creation", "draft_id": draftID})
+	if err != nil {
+		return err
+	}
+	return tx.Create(&model.AssistantInteractionEvent{ID: uuid.NewString(), InteractionID: interaction.ID, Generation: interaction.Generation, Sequence: interaction.CommandSequence + 1, Type: "draft.ready", Data: data, CreatedAt: at}).Error
+}
+
 func (r *assistantInteractionRepository) CreateEvent(ctx context.Context, value *model.AssistantInteractionEvent) error {
 	return r.db.WithContext(ctx).Create(value).Error
 }

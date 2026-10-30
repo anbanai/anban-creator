@@ -181,17 +181,42 @@ describe('AssistantWorkspace', () => {
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
   })
 
-  it('applies top-level validation issues and the recovery snapshot without losing input or answers', async () => {
+  it('keeps option validation attempt-local and confirms the same draft with corrected options', async () => {
     const snapshot = restoreCreation()
     const issues = [{ code: 'invalid', field: 'plan.image_ratio', message: '请选择有效的图片画幅' }]
-    mocks.workspaceCommit.mockRejectedValue(Object.assign(new Error('invalid'), { response: { status: 422, data: { error_code: 'assistant_draft_invalid', available_actions: ['continue_editing'], blocking_issues: issues, data: { ...snapshot, lifecycle: 'active', available_actions: ['continue_editing', 'send_message'], drafts: snapshot.drafts.map((draft) => ({ ...draft, ready: false })) } } } }))
+    mocks.workspaceCommit.mockRejectedValueOnce(Object.assign(new Error('invalid'), { response: { status: 422, data: { error_code: 'assistant_draft_invalid', available_actions: ['continue_editing'], blocking_issues: issues, data: snapshot } } }))
+    mocks.workspaceCommit.mockResolvedValue({ interaction_status: 'created', task: { id: 'corrected-task' } })
     renderPage()
     fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '创作作品' }))
-    expect(within(await screen.findByRole('region', { name: '创作草稿' })).getByText('请选择有效的图片画幅')).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
+    expect(await screen.findByText('请选择有效的图片画幅')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '确认创作' })).toHaveTextContent('保留创作计划')
     expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('保留我的输入')
     expect(JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!).questionsByMode.creation[0].answers).toEqual([{ id: 'q', selected: ['回答已保留'] }])
     expect(screen.queryByRole('button', { name: '重试发送' })).not.toBeInTheDocument()
+    const first = mocks.workspaceCommit.mock.calls[0]?.[2]
+    fireEvent.click(screen.getByRole('button', { name: /选择参数：/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '1:1' }))
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
+    fireEvent.click(screen.getByRole('button', { name: '创作作品' }))
+    await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledTimes(2))
+    const corrected = mocks.workspaceCommit.mock.calls[1]?.[2]
+    expect(corrected).toEqual(expect.objectContaining({ draft_id: 'displayed-draft', revision: 4, options: { plan: { ...first.options.plan, image_ratio: '1:1' } } }))
+    expect(corrected.idempotency_key).not.toBe(first.idempotency_key)
+    await waitFor(() => expect(screen.queryByRole('region', { name: '确认创作' })).not.toBeInTheDocument())
+    expect(mocks.workspaceCheckpoint).not.toHaveBeenCalled()
+  })
+
+  it('reloads a claim observed in another window after the Server releases it', async () => {
+    const pending = restoreCreation()
+    const claimed = { ...pending, state_sequence: 11, recovery_error_code: 'assistant_commit_reconciliation_required', available_actions: ['view_task', 'reconcile_commit'], drafts: pending.drafts.map((draft) => ({ ...draft, state_sequence: 11, ready: false, confirmation_state: 'confirmed' })) }
+    const released = { ...pending, state_sequence: 12, drafts: pending.drafts.map((draft) => ({ ...draft, state_sequence: 12 })) }
+    mocks.getInteractionSnapshot.mockResolvedValueOnce(claimed).mockResolvedValue(released)
+    renderPage()
+    expect(await screen.findByRole('region', { name: '创作草稿' })).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: '核对结果' }))
+    expect(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '创作作品' })).toBeEnabled()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('保留我的输入')
+    expect(mocks.workspaceCommit).not.toHaveBeenCalled()
   })
 
   it('retains the plan and disables creation and discussion when the result needs reconciliation', async () => {

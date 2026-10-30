@@ -132,6 +132,9 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 	// same event sequence is replaced with this process-local form; after a
 	// restart, Snapshot supplies the durable draft payload instead.
 	view := interactionDraftView(persisted, true)
+	if persisted.ModeID == AssistantModeCreation {
+		view.StateSequence = durableEvent.Sequence
+	}
 	s.cacheLiveEvent(in.InteractionID, in.Generation, durableEvent, map[string]any{
 		"durable": true,
 		"mode_id": persisted.ModeID,

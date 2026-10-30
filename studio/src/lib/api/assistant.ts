@@ -15,6 +15,7 @@ export interface AssistantBlockingIssue {
 }
 
 export interface AssistantInteractionDraftReceipt {
+  state_sequence?: number
   draft_id: string
   mode_id: AssistantModeID
   revision: number
@@ -26,6 +27,7 @@ export interface AssistantInteractionDraftReceipt {
 }
 
 export interface AssistantInteractionSnapshot {
+  state_sequence?: number
   interaction_id: string
   mode_id: AssistantModeID
   project_id?: string

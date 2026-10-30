@@ -1384,7 +1384,7 @@ export default function AssistantWorkspace() {
             )}
             <Conversation messages={activeMessages} questions={activeQuestions} responding={responding} disabled={draftPending} userAvatarURL={personaImageURL(selectedProject)} onAnswer={submitAnswers} />
             {activeReviewSelectors}
-            {activeDraft && confirmationDraft && <DraftConfirmationCard mode={mode} draft={confirmationDraft} committing={committing} confirmable={mode !== 'creation' || creationCanConfirm} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => void continueDraft()} />}
+            {activeDraft && confirmationDraft && <DraftConfirmationCard attemptIssues={mode === 'creation' ? interactionState.blockingIssues : undefined} mode={mode} draft={confirmationDraft} committing={committing} confirmable={mode !== 'creation' || creationCanConfirm} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => void continueDraft()} />}
             {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
           </div>
           <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} /> : undefined} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
@@ -1508,8 +1508,9 @@ function PersonaRail({ projects, selectedProjectId, disabled, onSelect, onCreate
   </section>
 }
 
-function DraftConfirmationCard({ mode, draft, committing, confirmable, disabled, onCommit, onContinue }: { mode: AssistantModeID; draft: Draft; committing: boolean; confirmable: boolean; disabled: boolean; onCommit: () => void; onContinue: () => void }) {
+function DraftConfirmationCard({ mode, draft, attemptIssues, committing, confirmable, disabled, onCommit, onContinue }: { mode: AssistantModeID; draft: Draft; attemptIssues?: AssistantInteractionDraftReceipt['blocking_issues']; committing: boolean; confirmable: boolean; disabled: boolean; onCommit: () => void; onContinue: () => void }) {
   const isCreation = mode === 'creation'
+  const issues = attemptIssues ?? draft.blocking_issues
   const isProfile = mode === 'profile'
   const title = isCreation ? confirmable ? '确认创作' : '创作草稿' : isProfile ? '保存人设' : '确认复盘结论'
   const buttonLabel = isCreation ? '创作作品' : isProfile ? '保存人设' : '保存复盘结论'
@@ -1522,7 +1523,7 @@ function DraftConfirmationCard({ mode, draft, committing, confirmable, disabled,
       {confirmable && <Button size="sm" disabled={committing || disabled} onClick={onCommit}>{committing ? <Loader2 className="size-4 animate-spin" /> : buttonLabel}</Button>}
       {isCreation && confirmable || isProfile ? <Button type="button" variant="outline" size="sm" disabled={committing} onClick={onContinue}>{continueLabel}</Button> : null}
     </div>
-    {isCreation && Array.isArray(draft.blocking_issues) && <ul className="mt-3 space-y-1 text-sm text-amber-700">{(draft.blocking_issues as NonNullable<AssistantInteractionDraftReceipt['blocking_issues']>).map((issue) => <li key={`${issue.code}:${issue.field}`}>{issue.message}</li>)}</ul>}
+    {isCreation && Array.isArray(issues) && <ul className="mt-3 space-y-1 text-sm text-amber-700">{(issues as NonNullable<AssistantInteractionDraftReceipt['blocking_issues']>).map((issue) => <li key={`${issue.code}:${issue.field}`}>{issue.message}</li>)}</ul>}
   </section>
 }
 
