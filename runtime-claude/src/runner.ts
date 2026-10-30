@@ -379,10 +379,9 @@ export function buildQueryOptions(
       const pending = managedBackgroundTaskStopGuard(input);
       if (pending) return pending;
     }
-    // An honest failed Seednote outcome must reach artifact upload and the
-    // Server completion callback, without running success-only metadata hooks.
-    if (input.hook_event_name === "Stop" && data.task_type === "seednote"
-      && await readWorkflowFailureState(cwd)) return {};
+    // A validated recoverable failure is terminal for every managed Pack.
+    // It must reach artifact upload and Server finalization without success hooks.
+    if (input.hook_event_name === "Stop" && await readWorkflowFailureState(cwd)) return {};
     const result = await stopHook(input, toolUseID, hookOptions);
     const specific = "hookSpecificOutput" in result ? result.hookSpecificOutput as { permissionDecision?: string } : undefined;
     if (("decision" in result && result.decision === "block") || specific?.permissionDecision === "deny") return result;

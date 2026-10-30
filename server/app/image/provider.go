@@ -108,11 +108,13 @@ type ProviderCapabilities struct {
 
 // GenerateError 图片生成错误
 type GenerateError struct {
-	Provider string // 提供者名称
-	Code     string // 错误码
-	Message  string // 用户友好的错误信息
-	HintMsg  string // 解决提示
-	Original error  // 原始错误
+	Provider          string // 提供者名称
+	Code              string // 错误码
+	Message           string // 用户友好的错误信息
+	HintMsg           string // 解决提示
+	HTTPStatusCode    int
+	ProviderRequestID string
+	Original          error // 原始错误
 }
 
 func (e *GenerateError) Error() string {

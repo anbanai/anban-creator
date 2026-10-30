@@ -3472,7 +3472,7 @@
       "ui": {
         "renderer": "custom:talking-head-montage"
       },
-      "digest": "8bb15d9285375b14aaea139626d73efd88a675ee9e6d09a8d7567db907266275"
+      "digest": "41862a6b6d2a2163dfe16d2417910c6ed46ea663c0c86169974ae6f9b0616bde"
     },
     {
       "id": "video-edit",
@@ -4182,7 +4182,7 @@
       "id": "wechat-picture",
       "channel": "wechat-picture",
       "plan_task_kind": "content_generation",
-      "version": "1.0.8",
+      "version": "1.0.9",
       "kind": "managed",
       "display_name": "微信公众号贴图",
       "description": "研究选题、编排图片消息并生成公众号 newspic 草稿交付包。",
@@ -4354,7 +4354,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "5fc329a3d686007d964327ab3a17f82a915aec50df5b9e7e68f1f7a1e2c60184"
+      "digest": "673f5ecd2d7e66e3f240613f1da4464d96287712fa1f10bd052e08d745a12abc"
     },
     {
       "id": "whiteboard-animation",

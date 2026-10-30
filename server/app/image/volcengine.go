@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/app/config"
@@ -251,9 +252,16 @@ func (p *VolcengineProvider) buildReferenceImageInput(opts *GenerateOptions) (an
 }
 
 // convertSDKError 将 SDK 错误转换为 GenerateError
-func (p *VolcengineProvider) convertSDKError(err error) error {
+func (p *VolcengineProvider) convertSDKError(err error) (result error) {
 	var apiErr *model.APIError
 	if errors.As(err, &apiErr) {
+		defer func() {
+			var generateErr *GenerateError
+			if errors.As(result, &generateErr) {
+				generateErr.HTTPStatusCode = apiErr.HTTPStatusCode
+				generateErr.ProviderRequestID = strings.TrimSpace(apiErr.RequestId)
+			}
+		}()
 		switch apiErr.HTTPStatusCode {
 		case 401:
 			return &GenerateError{
@@ -317,11 +325,13 @@ func (p *VolcengineProvider) convertSDKError(err error) error {
 	var reqErr *model.RequestError
 	if errors.As(err, &reqErr) {
 		return &GenerateError{
-			Provider: p.Name(),
-			Code:     "network_error",
-			Message:  "网络请求失败，请检查网络连接",
-			HintMsg:  "确认网络连接正常，API 地址正确",
-			Original: err,
+			Provider:          p.Name(),
+			Code:              "network_error",
+			Message:           "网络请求失败，请检查网络连接",
+			HintMsg:           "确认网络连接正常，API 地址正确",
+			HTTPStatusCode:    reqErr.HTTPStatusCode,
+			ProviderRequestID: strings.TrimSpace(reqErr.RequestId),
+			Original:          err,
 		}
 	}
 
