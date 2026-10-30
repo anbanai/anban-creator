@@ -33,15 +33,31 @@ export const initialAssistantInteractionState: AssistantInteractionState = {
   drafts: [],
 }
 
+function creationDraftRegresses(current: AssistantInteractionDraftReceipt | undefined, incoming: AssistantInteractionDraftReceipt | undefined): boolean {
+  if (!current) return false
+  if (!incoming) return true
+  if (incoming.revision !== current.revision) return incoming.revision < current.revision
+  if (incoming.draft_id !== current.draft_id) return true
+  if (current.confirmation_state !== 'pending' && incoming.confirmation_state !== current.confirmation_state) {
+    return current.confirmation_state !== 'confirmed' || incoming.confirmation_state !== 'consumed'
+  }
+  return current.confirmation_state === 'pending' && incoming.confirmation_state === 'pending' && !current.ready && incoming.ready
+}
+
 export function assistantInteractionReducer(state: AssistantInteractionState, action: AssistantInteractionAction): AssistantInteractionState {
   switch (action.type) {
     case 'snapshot': {
       const snapshot = action.snapshot
       const latestDraft = (snapshot.drafts ?? []).filter((draft) => draft.mode_id === snapshot.mode_id).sort((a, b) => b.revision - a.revision)[0]
+      const creationCompleted = snapshot.mode_id === 'creation' && (snapshot.lifecycle === 'completed' || latestDraft?.confirmation_state === 'consumed' || snapshot.commit_result?.status === 'created' || snapshot.commit_result?.status === 'already_created')
+      if (snapshot.mode_id === 'creation' && (!state.interactionId || state.interactionId === snapshot.interaction_id) && !creationCompleted) {
+        const currentDraft = state.drafts.filter((draft) => draft.mode_id === 'creation').sort((a, b) => b.revision - a.revision)[0]
+        if (state.status === 'completed' || state.errorCode === 'assistant_commit_reconciliation_required' && latestDraft?.confirmation_state !== 'confirmed' || creationDraftRegresses(currentDraft, latestDraft)) return state
+      }
       const readyDraft = snapshot.mode_id === 'creation'
         ? latestDraft?.ready && latestDraft.confirmation_state === 'pending' && snapshot.available_actions.includes('confirm_draft')
         : (snapshot.drafts ?? []).some((draft) => draft.ready && draft.confirmation_state !== 'consumed') || snapshot.lifecycle === 'needs_confirmation'
-      const status = snapshot.recovery_error_code === 'assistant_command_outcome_unknown'
+      const status = creationCompleted ? 'completed' : snapshot.recovery_error_code === 'assistant_command_outcome_unknown'
         ? 'command_uncertain'
         : snapshot.recovery_error_code === 'assistant_commit_reconciliation_required' || snapshot.mode_id === 'creation' && latestDraft?.confirmation_state === 'confirmed'
         ? 'restart_required'
@@ -54,9 +70,9 @@ export function assistantInteractionReducer(state: AssistantInteractionState, ac
     case 'message': return { ...state, messages: [...state.messages, action.message], status: 'connecting', errorCode: undefined }
     case 'draft_ready': {
       if (action.draft.mode_id === 'creation') {
-        if (state.status === 'completed' || state.errorCode === 'assistant_commit_reconciliation_required') return state
+        if (state.status === 'completed' || state.errorCode === 'assistant_commit_reconciliation_required' && action.draft.confirmation_state !== 'consumed') return state
         const latest = state.drafts.filter((draft) => draft.mode_id === 'creation').sort((a, b) => b.revision - a.revision)[0]
-        if (latest && (latest.revision > action.draft.revision || latest.revision === action.draft.revision && (latest.confirmation_state !== 'pending' || !latest.ready && action.draft.ready))) return state
+        if (creationDraftRegresses(latest, action.draft)) return state
         const drafts = [...state.drafts.filter((draft) => draft.mode_id !== 'creation'), action.draft]
         if (action.draft.confirmation_state === 'confirmed') return { ...state, drafts, status: 'restart_required', errorCode: 'assistant_commit_reconciliation_required', availableActions: ['view_task', 'reconcile_commit'] }
         if (action.draft.confirmation_state === 'consumed') return { ...state, drafts, status: 'completed', errorCode: undefined, availableActions: ['view_task', 'restart'] }

@@ -122,6 +122,19 @@ describe('AssistantWorkspace', () => {
     expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
   })
 
+  it('preserves saved answers when recovery replays their question and keeps discussion editable', async () => {
+    restoreCreation(false)
+    mocks.streamEvents = [{ event: 'question.opened', id: 'replayed-answered-question', data: JSON.stringify({ mode_id: 'creation', call_id: 'answered', questions: [{ id: 'q', question: '已回答的问题' }] }) }]
+    renderPage()
+    await screen.findByText('请补充必要的活动日期')
+    await waitFor(() => {
+      expect(JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!).questionsByMode.creation[0].answers).toEqual([{ id: 'q', selected: ['回答已保留'] }])
+      expect(screen.queryByText('已回答的问题')).not.toBeInTheDocument()
+      expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
+    })
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('保留我的输入')
+  })
+
   it('commits exactly the displayed receipt without checkpoint reload and reuses uncertain retry identity', async () => {
     restoreCreation()
     mocks.workspaceCommit.mockRejectedValue(new Error('request timed out'))

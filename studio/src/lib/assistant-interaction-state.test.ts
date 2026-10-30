@@ -58,6 +58,31 @@ describe('assistant interaction state', () => {
     expect(claimed.availableActions).toEqual(['view_task', 'reconcile_commit'])
   })
 
+  it('rejects a snapshot response captured before a newer non-ready SSE revision', () => {
+    const captured = { ...snapshot, drafts: [{ ...draft, revision: 4 }] }
+    const viewed = assistantInteractionReducer(initialAssistantInteractionState, { type: 'snapshot', snapshot: captured })
+    const newer = assistantInteractionReducer(viewed, { type: 'draft_ready', draft: { ...draft, revision: 5, ready: false } })
+    const late = assistantInteractionReducer(newer, { type: 'snapshot', snapshot: captured })
+    expect(late).toEqual(newer)
+    expect(late.availableActions).not.toContain('confirm_draft')
+  })
+
+  it('does not restore an earlier pending snapshot after withdrawal of the same revision', () => {
+    const withdrawn = assistantInteractionReducer(initialAssistantInteractionState, { type: 'snapshot', snapshot: { ...snapshot, lifecycle: 'active', available_actions: ['continue_editing', 'send_message'], drafts: [{ ...draft, ready: false, confirmation_state: 'superseded' }] } })
+    expect(assistantInteractionReducer(withdrawn, { type: 'snapshot', snapshot })).toEqual(withdrawn)
+  })
+
+  it('advances a claimed snapshot to consumed SSE completion while rejecting pending replay', () => {
+    const claimed = assistantInteractionReducer(initialAssistantInteractionState, { type: 'snapshot', snapshot: { ...snapshot, lifecycle: 'active', available_actions: ['view_task', 'reconcile_commit'], drafts: [{ ...draft, ready: false, confirmation_state: 'confirmed' }] } })
+    expect(assistantInteractionReducer(claimed, { type: 'draft_ready', draft })).toEqual(claimed)
+    const completed = assistantInteractionReducer(claimed, { type: 'draft_ready', draft: { ...draft, ready: false, confirmation_state: 'consumed' } })
+    expect(completed.status).toBe('completed')
+    expect(completed.errorCode).toBeUndefined()
+    expect(completed.availableActions).toEqual(['view_task', 'restart'])
+    expect(completed.drafts[0]?.confirmation_state).toBe('consumed')
+    expect(assistantInteractionReducer(completed, { type: 'snapshot', snapshot })).toEqual(completed)
+  })
+
   it('restores actionable validation failures from a refreshed snapshot', () => {
     const editing = assistantInteractionReducer(initialAssistantInteractionState, { type: 'snapshot', snapshot: { ...snapshot, recovery_error_code: 'assistant_creation_inputs_missing', available_actions: ['continue_editing', 'send_message'], drafts: [{ ...draft, ready: false }] } })
     expect(editing.status).toBe('draft_editable')
