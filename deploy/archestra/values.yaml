@@ -1,0 +1,65 @@
+# Initial ACK deployment for Archestra. Keep this file free of credentials.
+# The release script injects the selected app version and creates the bootstrap
+# Secret from Yunxiao secure variables.
+archestra:
+  image: archestra/platform
+  imageTag: "1.4.12"
+  imagePullPolicy: IfNotPresent
+  replicaCount: 1
+
+  resources:
+    requests:
+      cpu: "2"
+      memory: 2Gi
+    limits:
+      cpu: "2"
+      memory: 3Gi
+
+  env:
+    ARCHESTRA_ANALYTICS: disabled
+    ARCHESTRA_LOGGING_FORMAT: json
+
+  envFrom:
+    - secretRef:
+        name: archestra-bootstrap
+
+  worker:
+    enabled: true
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: "1"
+        memory: 1Gi
+      limits:
+        cpu: "2"
+        memory: 2Gi
+
+  service:
+    type: ClusterIP
+
+  ingress:
+    enabled: false
+
+  fileStorage:
+    # Store application files in PostgreSQL for the initial single-cluster
+    # rollout. A shared filesystem requires an explicitly provisioned RWX
+    # StorageClass because both web and worker pods use the same claim.
+    provider: db
+
+postgresql:
+  enabled: true
+  auth:
+    database: archestra
+    username: archestra
+  primary:
+    persistence:
+      enabled: true
+      size: 20Gi
+      storageClass: ""
+    resources:
+      requests:
+        cpu: "1"
+        memory: 1Gi
+      limits:
+        cpu: "1"
+        memory: 2Gi
