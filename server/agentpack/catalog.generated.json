@@ -3205,6 +3205,276 @@
       "digest": "d09b3877c3ac80183adb54c31f472b2a52506cf9d16d58ef6a5258338565c426"
     },
     {
+      "id": "talking-head-montage",
+      "version": "1.0.0",
+      "kind": "plugin",
+      "display_name": "口播 Montage 制作",
+      "description": "以 OpenMontage hybrid 为主引擎，完成真人口播、生成视频素材、图片素材和图形动效的本地制作与文件审核。",
+      "agent": {
+        "name": "talking-head-montage",
+        "skills": [
+          "talking-head-montage",
+          "talking-head-sound-design",
+          "content-tagging"
+        ],
+        "max_turns": 260
+      },
+      "interaction": {},
+      "bindings": {},
+      "runtime": {
+        "profile": "talking-head-montage",
+        "adapter": "openmontage"
+      },
+      "surfaces": [
+        "plugin"
+      ],
+      "features": [
+        "talking-head",
+        "generated-video-inserts",
+        "image-inserts",
+        "motion-graphics",
+        "local-review-gate"
+      ],
+      "artifacts": [
+        {
+          "role": "rough_cut",
+          "path": "output/rough-cut.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "semantic_cut",
+          "path": "output/semantic-cut.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "transcript",
+          "path": "output/transcript.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "edit_decision_list",
+          "path": "output/edit-decision-list.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "edit_strategy",
+          "path": "output/edit-strategy.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "asset_requirements",
+          "path": "output/asset-requirements.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "visual_plan_draft",
+          "path": "output/visual-plan-draft.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "asset_source_policy",
+          "path": "output/asset-source-policy.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "generated_video_manifest",
+          "path": "output/generated-video-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "generated_video_review",
+          "path": "output/generated-video-review.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "asset_source_manifest",
+          "path": "output/asset-source-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "visual_plan",
+          "path": "output/visual-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "motion_sample",
+          "path": "output/motion-sample.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "motion_review",
+          "path": "output/motion-review.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "motion_source_manifest",
+          "path": "output/motion-source-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "final_picture",
+          "path": "output/final-picture.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "sfx_cues",
+          "path": "output/sfx-cues.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "bgm_plan",
+          "path": "output/bgm-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "audio_source_manifest",
+          "path": "output/audio-source-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "quality_evidence",
+          "path": "output/quality-evidence.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "review_decision",
+          "path": "output/review-decision.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "failure_diagnosis",
+          "path": "output/failure-diagnosis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json",
+          "required": false
+        }
+      ],
+      "artifact_stages": [
+        {
+          "id": "motion_review",
+          "trigger": "output/motion-sample.mp4",
+          "required": [
+            "output/rough-cut.mp4",
+            "output/transcript.json",
+            "output/edit-decision-list.json",
+            "output/edit-strategy.md",
+            "output/semantic-cut.mp4",
+            "output/asset-requirements.json",
+            "output/visual-plan-draft.json",
+            "output/asset-source-policy.json",
+            "output/generated-video-manifest.json",
+            "output/generated-video-review.json",
+            "output/asset-source-manifest.json",
+            "output/visual-plan.json",
+            "output/motion-sample.mp4",
+            "output/motion-review.json",
+            "output/motion-source-manifest.json"
+          ]
+        },
+        {
+          "id": "final_delivery",
+          "trigger": "output/final.mp4",
+          "terminal": true
+        }
+      ],
+      "delivery": [
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "final_picture",
+          "path": "output/final-picture.mp4",
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "sfx_cues",
+          "path": "output/sfx-cues.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "bgm_plan",
+          "path": "output/bgm-plan.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "audio_source_manifest",
+          "path": "output/audio-source-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "quality_evidence",
+          "path": "output/quality-evidence.json",
+          "mime_type": "application/json"
+        }
+      ],
+      "ui": {
+        "renderer": "custom:talking-head-montage"
+      },
+      "digest": "8bb15d9285375b14aaea139626d73efd88a675ee9e6d09a8d7567db907266275"
+    },
+    {
       "id": "video-edit",
       "channel": "video-edit",
       "version": "1.0.1",
