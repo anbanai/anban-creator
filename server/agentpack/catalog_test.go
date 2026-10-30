@@ -1031,8 +1031,8 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if err != nil {
 		t.Fatalf("LoadCatalog repository Packs: %v", err)
 	}
-	if len(catalog.Packs) != 18 {
-		t.Fatalf("Pack count = %d, want 18", len(catalog.Packs))
+	if len(catalog.Packs) != 19 {
+		t.Fatalf("Pack count = %d, want 19", len(catalog.Packs))
 	}
 	autoVideoEditor, ok := catalog.Pack("talking-head-editor")
 	if !ok {

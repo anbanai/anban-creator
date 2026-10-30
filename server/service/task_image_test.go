@@ -47,6 +47,7 @@ func (f *taskImageResolverFake) ResolveFrozenImageModelForGeneration(_ context.C
 
 type taskImageGeneratorFake struct {
 	result         *ImageResult
+	err            error
 	calls          int
 	analyzeCalls   int
 	uploadCalls    int
@@ -78,9 +79,40 @@ func (f *taskImageGeneratorFake) GenerateImage(_ context.Context, _, _, prompt, 
 			f.referenceData = append(f.referenceData, data)
 		}
 	}
+	if f.err != nil {
+		return nil, f.err
+	}
 	copy := *f.result
 	copy.FilePath = outputPath
 	return &copy, nil
+}
+
+func TestGenerateTaskImageLogsSanitizedProviderDiagnostics(t *testing.T) {
+	f := newTaskImageFixture(t)
+	var logs bytes.Buffer
+	logger := zerolog.New(&logs)
+	f.service.logger = &logger
+	f.generator.err = &appimage.GenerateError{
+		Provider: "provider-name", Code: "server_error", Message: "provider secret text",
+		HTTPStatusCode: 503, ProviderRequestID: "upstream-request-42",
+	}
+	_, err := f.service.Generate(context.Background(), f.request())
+	var failure *ImageProviderFailureError
+	if !errors.As(err, &failure) || failure.CorrelationID == "" {
+		t.Fatalf("error = %v, want correlated provider failure", err)
+	}
+	for _, want := range []string{
+		`"correlation_id":"` + failure.CorrelationID + `"`,
+		`"provider":"openai"`, `"error_code":"server_error"`,
+		`"http_status":503`, `"duration_ms":`, `"provider_request_id":"upstream-request-42"`,
+	} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatalf("log missing %q: %s", want, logs.String())
+		}
+	}
+	if strings.Contains(logs.String(), "provider secret text") || strings.Contains(logs.String(), "draw a tea cover") {
+		t.Fatalf("provider log exposed raw error or prompt: %s", logs.String())
+	}
 }
 
 func (f *taskImageGeneratorFake) AnalyzeImage() { f.analyzeCalls++ }

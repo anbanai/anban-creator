@@ -11,7 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
 	appimage "github.com/anbanai/anban-creator/server/app/image"
@@ -19,6 +21,14 @@ import (
 )
 
 const taskImageSettlementScope = "mcp-image-settlement"
+
+type ImageProviderFailureError struct {
+	CorrelationID string
+	Err           error
+}
+
+func (e *ImageProviderFailureError) Error() string { return e.Err.Error() }
+func (e *ImageProviderFailureError) Unwrap() error { return e.Err }
 
 type GenerateTaskImageRequest struct {
 	UserID         string
@@ -238,17 +248,43 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 	}()
 
 	req.Prompt = appendStrictImageRatioRequirement(req.Prompt, req.AspectRatio)
+	providerStartedAt := time.Now()
 	result, err := s.generator.GenerateImage(ctx, req.UserID, req.ProjectID, req.Prompt, req.ImageType, req.OutputPath, "", referencePaths, req.TaskID, req.AspectRatio, resolved, req.Watermark)
 	if err != nil {
 		var providerError *appimage.GenerateError
+		correlationID := uuid.NewString()
 		ambiguousOperation = true
 		if errors.As(err, &providerError) {
 			switch providerError.Code {
 			case "unauthorized", "rate_limit", "safety_blocked", "bad_request", "payment_required", "not_found", "refer_error", "mask_error", "client_error":
 				ambiguousOperation = false
 			}
+			if s.logger != nil {
+				s.logger.Error().
+					Str("correlation_id", correlationID).
+					Str("task_id", req.TaskID).
+					Str("execution_id", req.ExecutionID).
+					Str("provider", resolved.Provider).
+					Str("model", resolved.Model).
+					Str("error_code", providerError.Code).
+					Int("http_status", providerError.HTTPStatusCode).
+					Int64("duration_ms", time.Since(providerStartedAt).Milliseconds()).
+					Str("provider_request_id", providerError.ProviderRequestID).
+					Bool("retryable", providerError.Retryable()).
+					Msg("task image provider failed")
+			}
+		} else if s.logger != nil {
+			s.logger.Error().
+				Str("correlation_id", correlationID).
+				Str("task_id", req.TaskID).
+				Str("execution_id", req.ExecutionID).
+				Str("provider", resolved.Provider).
+				Str("model", resolved.Model).
+				Str("error_code", "image_generation_error").
+				Int64("duration_ms", time.Since(providerStartedAt).Milliseconds()).
+				Msg("task image provider failed")
 		}
-		return nil, fmt.Errorf("generate image: %w", err)
+		return nil, fmt.Errorf("generate image: %w", &ImageProviderFailureError{CorrelationID: correlationID, Err: err})
 	}
 	if result == nil {
 		return nil, errors.New("generate image: image generator returned no result")

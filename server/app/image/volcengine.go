@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/app/config"
@@ -184,8 +186,27 @@ func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *
 
 	resp, err := p.client.GenerateImages(ctx, req)
 	if err != nil {
-		p.log.Error().Err(err).Str("model", p.model).Dur("elapsed", time.Since(start)).Msg("volcengine: image generation failed")
-		return nil, p.convertSDKError(err)
+		converted := p.convertSDKError(err)
+		var generateErr *GenerateError
+		if errors.As(converted, &generateErr) {
+			p.log.Error().
+				Str("provider", p.Name()).
+				Str("model", p.model).
+				Str("error_code", generateErr.Code).
+				Int("http_status", generateErr.HTTPStatusCode).
+				Str("provider_request_id", generateErr.ProviderRequestID).
+				Bool("retryable", generateErr.Retryable()).
+				Dur("elapsed", time.Since(start)).
+				Msg("volcengine: image generation failed")
+		} else {
+			p.log.Error().
+				Str("provider", p.Name()).
+				Str("model", p.model).
+				Str("error_code", "image_generation_error").
+				Dur("elapsed", time.Since(start)).
+				Msg("volcengine: image generation failed")
+		}
+		return nil, converted
 	}
 
 	if len(resp.Data) == 0 || resp.Data[0].Url == nil || *resp.Data[0].Url == "" {
@@ -251,9 +272,16 @@ func (p *VolcengineProvider) buildReferenceImageInput(opts *GenerateOptions) (an
 }
 
 // convertSDKError 将 SDK 错误转换为 GenerateError
-func (p *VolcengineProvider) convertSDKError(err error) error {
+func (p *VolcengineProvider) convertSDKError(err error) (result error) {
 	var apiErr *model.APIError
 	if errors.As(err, &apiErr) {
+		defer func() {
+			var generateErr *GenerateError
+			if errors.As(result, &generateErr) {
+				generateErr.HTTPStatusCode = apiErr.HTTPStatusCode
+				generateErr.ProviderRequestID = strings.TrimSpace(apiErr.RequestId)
+			}
+		}()
 		switch apiErr.HTTPStatusCode {
 		case 401:
 			return &GenerateError{
@@ -316,12 +344,25 @@ func (p *VolcengineProvider) convertSDKError(err error) error {
 
 	var reqErr *model.RequestError
 	if errors.As(err, &reqErr) {
+		if reqErr.HTTPStatusCode >= http.StatusOK && reqErr.HTTPStatusCode < http.StatusMultipleChoices {
+			return &GenerateError{
+				Provider:          p.Name(),
+				Code:              "endpoint_protocol",
+				Message:           "图片服务返回了无法解析的非 JSON 响应",
+				HintMsg:           "请检查火山方舟 Base URL，应指向官方 Ark API（通常以 /api/v3 结尾），不要使用网页地址或不兼容的 OpenAI 网关",
+				HTTPStatusCode:    reqErr.HTTPStatusCode,
+				ProviderRequestID: strings.TrimSpace(reqErr.RequestId),
+				Original:          err,
+			}
+		}
 		return &GenerateError{
-			Provider: p.Name(),
-			Code:     "network_error",
-			Message:  "网络请求失败，请检查网络连接",
-			HintMsg:  "确认网络连接正常，API 地址正确",
-			Original: err,
+			Provider:          p.Name(),
+			Code:              "network_error",
+			Message:           "网络请求失败，请检查网络连接",
+			HintMsg:           "确认网络连接正常，API 地址正确",
+			HTTPStatusCode:    reqErr.HTTPStatusCode,
+			ProviderRequestID: strings.TrimSpace(reqErr.RequestId),
+			Original:          err,
 		}
 	}
 
