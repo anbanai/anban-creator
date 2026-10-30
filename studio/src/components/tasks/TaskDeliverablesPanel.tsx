@@ -1,6 +1,7 @@
-import { AlertCircle, CheckCircle2, CircleDashed, FolderOpen, LoaderCircle, Send } from 'lucide-react'
+import { AlertCircle, CheckCircle2, CircleDashed, FolderOpen, LoaderCircle, ScrollText, Send } from 'lucide-react'
 import type { TaskFile, TaskLifecycle, TaskOutcome, TaskStatus, WorkflowStatus } from '@/types'
 import { Button } from '@/components/common/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { TaskFileDownloads, TaskStageFiles } from './TaskStageFiles'
 import { CompletionSummary, TaskExecutionRail } from './TaskExecutionRail'
 import { taskFailurePresentation } from '@/lib/labels'
@@ -66,6 +67,12 @@ export function TaskDeliverablesPanel({ taskId, taskStatus, files, taskType, tas
         <div className="flex items-center gap-2">
           {shareable ? <TaskSharePopover taskId={taskId} canCreate={hasShareBody && !filesLoading && !filesError} /> : null}
           {hasFiles ? <TaskFileDownloads taskId={taskId} files={coreFiles} /> : null}
+          {onOpenLogs ? <Tooltip>
+            <TooltipTrigger render={<Button type="button" size="icon-md" variant="ghost" className="hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent" onClick={onOpenLogs} aria-label="查看完整日志" />}>
+              <ScrollText className="size-4" aria-hidden="true" />
+            </TooltipTrigger>
+            <TooltipContent>查看完整日志</TooltipContent>
+          </Tooltip> : null}
         </div>
       </div>
       {taskStatus === 'failed' || taskStatus === 'cancelled' ? (

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server } from '@/test/mocks/server'
 import { TaskDeliverablesPanel } from './TaskDeliverablesPanel'
@@ -42,5 +42,14 @@ describe('TaskDeliverablesPanel', () => {
     expect(screen.getByRole('heading', { name: '交付结果' })).toBeVisible()
     expect(screen.getByText('final.md')).toBeVisible()
     expect(screen.queryByRole('region', { name: '分享设置' })).not.toBeInTheDocument()
+  })
+
+  it.each(['awaiting_review', 'completed', 'failed', 'cancelled'] as const)('keeps logs available in the %s state', (taskStatus) => {
+    const onOpenLogs = vi.fn()
+    render(<TaskDeliverablesPanel taskId="task-1" taskStatus={taskStatus} files={files} isAdmin={false} onOpenLogs={onOpenLogs} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '查看完整日志' }))
+
+    expect(onOpenLogs).toHaveBeenCalledOnce()
   })
 })
