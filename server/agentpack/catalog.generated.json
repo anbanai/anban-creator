@@ -2916,7 +2916,7 @@
     {
       "id": "talking-head-editor",
       "channel": "talking-head-editor",
-      "version": "2.0.6",
+      "version": "2.0.7",
       "kind": "managed",
       "display_name": "口播精剪",
       "description": "按固定口播工作流自动完成静音粗剪、语义精剪、动效素材包装和音效 BGM 收尾，并保留可复核的剪辑证据。",
@@ -2927,7 +2927,8 @@
           "video-use",
           "erduo-broll-loop-engineering",
           "talking-head-sound-design",
-          "content-tagging"
+          "content-tagging",
+          "short-video-cover"
         ],
         "max_turns": 220
       },
@@ -3063,6 +3064,60 @@
           "path": "output/quality-evidence.json",
           "mime_type": "application/json",
           "required": true
+        },
+        {
+          "role": "cover_reference_input",
+          "path": "output/input-manifest.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_reference_image",
+          "path": "output/reference-cover.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "cover_reference_compressed_image",
+          "path": "output/reference-cover-compressed.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "cover_reference_analysis",
+          "path": "output/reference-analysis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_plan",
+          "path": "output/cover-plan.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "cover_reference_prompts",
+          "path": "output/cover-prompts.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_review",
+          "path": "output/cover-review.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_candidate",
+          "path": "output/cover_v2.png",
+          "mime_type": "image/png",
+          "required": false
         },
         {
           "role": "failure_state",
@@ -3202,11 +3257,11 @@
           "funnel_stage"
         ]
       },
-      "digest": "68d1946519304d91f9b9a8e9d09175b5dc51b9dcd7e9426a6d7fdc1fe27979f8"
+      "digest": "75be78b786ec5dd361acb63a29fb68527fbaf69e4d4ee7e9092a9860b5283297"
     },
     {
       "id": "talking-head-montage",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "kind": "plugin",
       "display_name": "口播 Montage 制作",
       "description": "以 OpenMontage hybrid 为主引擎，完成真人口播、生成视频素材、图片素材和图形动效的本地制作与文件审核。",
@@ -3214,7 +3269,8 @@
         "name": "talking-head-montage",
         "skills": [
           "talking-head-sound-design",
-          "content-tagging"
+          "content-tagging",
+          "short-video-cover"
         ],
         "max_turns": 260
       },
@@ -3374,6 +3430,60 @@
           "required": true
         },
         {
+          "role": "cover_reference_input",
+          "path": "output/input-manifest.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_reference_image",
+          "path": "output/reference-cover.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "cover_reference_compressed_image",
+          "path": "output/reference-cover-compressed.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "cover_reference_analysis",
+          "path": "output/reference-analysis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_plan",
+          "path": "output/cover-plan.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "cover_reference_prompts",
+          "path": "output/cover-prompts.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_review",
+          "path": "output/cover-review.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_candidate",
+          "path": "output/cover_v2.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
           "role": "review_decision",
           "path": "output/review-decision.json",
           "mime_type": "application/json",
@@ -3471,7 +3581,7 @@
       "ui": {
         "renderer": "custom:talking-head-montage"
       },
-      "digest": "e2c8cf69cfcd92a5bc8782ad2970ac84cf74b1bc8a4542e0cbac5a3ddc1f32bb"
+      "digest": "2480370e7fff8a7a03d8825f0d308452412615a555dfac0656cd16987cfa54e1"
     },
     {
       "id": "video-edit",
@@ -3911,7 +4021,7 @@
         }
       ],
       "ui": {},
-      "digest": "a9856b1700326164d8fbdcf5c975d4da594812253bdb5e0eac2dd88e17060d2e"
+      "digest": "2410e2588d1219842d5a9d6b66b5ceec2006675bc3d1ec4f7951ece713ca20d2"
     },
     {
       "id": "wechat-article",

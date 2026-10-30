@@ -174,8 +174,10 @@ func TestVisualProductionScopesMatchGetProjectProfileSchema(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if strings.Contains(string(body), `scope="article"`) {
-				t.Fatalf("%s uses unsupported get_project_profile scope=article; use scope=wechat", path)
+			for _, unsupported := range []string{`scope="article"`, `scope="short-video-cover"`} {
+				if strings.Contains(string(body), unsupported) {
+					t.Fatalf("%s uses unsupported get_project_profile %s", path, unsupported)
+				}
 			}
 			return nil
 		})
