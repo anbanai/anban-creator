@@ -114,6 +114,9 @@ func classifyImageTransportPhase(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "timeout"
 	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
+	}
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		return "timeout"

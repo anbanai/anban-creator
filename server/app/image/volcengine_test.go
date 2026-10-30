@@ -515,6 +515,7 @@ func TestClassifyImageTransportPhase(t *testing.T) {
 		{name: "connect", err: &net.OpError{Op: "dial", Err: errors.New("connection refused")}, want: "connect"},
 		{name: "tls", err: &net.OpError{Op: "dial", Err: &tls.CertificateVerificationError{Err: errors.New("x509: unknown authority")}}, want: "tls"},
 		{name: "timeout", err: context.DeadlineExceeded, want: "timeout"},
+		{name: "canceled", err: context.Canceled, want: "canceled"},
 		{name: "unknown", err: errors.New("unexpected transport failure"), want: "unknown"},
 	}
 	for _, tt := range tests {
