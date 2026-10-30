@@ -283,6 +283,7 @@ func TestClassifyImageToolFailureReturnsStableProviderContract(t *testing.T) {
 		{name: "authentication", code: "unauthorized"},
 		{name: "parameters", code: "bad_request"},
 		{name: "safety", code: "safety_blocked"},
+		{name: "endpoint protocol", code: "endpoint_protocol"},
 		{name: "rate limit", code: "rate_limit", retryable: true},
 		{name: "upstream", code: "server_error", retryable: true},
 		{name: "network", code: "network_error", retryable: true},

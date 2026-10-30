@@ -214,6 +214,8 @@ func safeImageFailureHint(code string) string {
 		return "Check the frozen task image parameters. Do not switch provider or ratio."
 	case "safety_blocked":
 		return "Revise the prompt to comply with the provider's content policy. Do not retry the unchanged prompt."
+	case "endpoint_protocol":
+		return "Check the image provider Base URL. For Volcengine use the official Ark API endpoint, usually ending in /api/v3; do not use a web page or incompatible gateway."
 	case "rate_limit", "server_error", "network_error", "provider_timeout", "operation_timeout":
 		return "A transient provider failure may be retried with bounded backoff."
 	case "request_cancelled":
