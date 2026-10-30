@@ -1,19 +1,23 @@
 package image
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/app/config"
 	"github.com/rs/zerolog"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime"
+	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 )
 
 func TestParseVolcengineSize(t *testing.T) {
@@ -348,5 +352,56 @@ func TestVolcengineGenerate_ContentSafetyBlocked(t *testing.T) {
 	}
 	if genErr.Code != "safety_blocked" {
 		t.Errorf("expected code=safety_blocked, got %q", genErr.Code)
+	}
+}
+
+func TestVolcengineConvertSDKError_ClassifiesHTMLResponseAtHTTP200(t *testing.T) {
+	p := &VolcengineProvider{name: "Volcengine"}
+	err := &model.RequestError{
+		HTTPStatusCode: http.StatusOK,
+		RequestId:      "request-html-200",
+		Err:            errors.New("invalid character '<' looking for beginning of value"),
+	}
+
+	converted := p.convertSDKError(err)
+	genErr, ok := converted.(*GenerateError)
+	if !ok {
+		t.Fatalf("converted error = %T, want *GenerateError", converted)
+	}
+	if genErr.Code != "endpoint_protocol" || genErr.Retryable() {
+		t.Fatalf("error = %#v, want non-retryable endpoint_protocol", genErr)
+	}
+	if genErr.HTTPStatusCode != http.StatusOK || genErr.ProviderRequestID != "request-html-200" {
+		t.Fatalf("diagnostics = %#v", genErr)
+	}
+	if genErr.Message == "" || genErr.HintMsg == "" {
+		t.Fatalf("error lacks safe operator guidance: %#v", genErr)
+	}
+}
+
+func TestVolcengineGenerate_LogsStructuredProtocolFailureWithoutRawBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("<html>gateway error</html>"))
+	}))
+	defer srv.Close()
+
+	var logs bytes.Buffer
+	logger := zerolog.New(&logs)
+	p := makeVolcengineProvider(t, srv.URL, nil)
+	p.log = &logger
+	_, err := p.Generate(context.Background(), "a cat", nil)
+	genErr, ok := err.(*GenerateError)
+	if !ok || genErr.Code != "endpoint_protocol" {
+		t.Fatalf("error = %#v, want endpoint_protocol GenerateError", err)
+	}
+	if strings.Contains(logs.String(), "invalid character") || strings.Contains(logs.String(), "gateway error") {
+		t.Fatalf("log exposed raw provider response: %s", logs.String())
+	}
+	for _, field := range []string{"endpoint_protocol", "http_status", "provider_request_id", "retryable"} {
+		if !strings.Contains(logs.String(), field) {
+			t.Fatalf("structured log missing %q: %s", field, logs.String())
+		}
 	}
 }
