@@ -1112,7 +1112,7 @@ func (s *ProjectService) SetWechatDeliveryMode(ctx context.Context, userID, proj
 func (s *ProjectService) SetWechatDeliverySettings(ctx context.Context, userID, projectID string, mode *string, automaticEnabled *bool) (*WechatPlatformConfig, error) {
 	if mode != nil {
 		value := strings.TrimSpace(*mode)
-		if value != model.WechatDeliveryModeDraft && value != model.WechatDeliveryModeDirectPublish {
+		if value != model.WechatDeliveryModeUserAssisted && value != model.WechatDeliveryModeDraft && value != model.WechatDeliveryModeDirectPublish {
 			return nil, ErrInvalidWechatPlatformConfig
 		}
 		mode = &value
