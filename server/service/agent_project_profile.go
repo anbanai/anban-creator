@@ -45,8 +45,8 @@ func validateWechatDeliveryContext(req AgentProjectProfileRequest, task *model.T
 	if !articleTask && !pictureTask {
 		return fmt.Errorf("公众号 profile scope 与当前任务类型不匹配")
 	}
-	if scope == "wechat-picture" && !pictureTask {
-		return fmt.Errorf("公众号贴图 profile scope 与当前任务类型不匹配")
+	if scope == "wechat-picture" {
+		return fmt.Errorf("公众号贴图任务必须使用统一的 wechat profile scope")
 	}
 	return nil
 }
@@ -56,8 +56,12 @@ func validateWechatDeliveryDecision(task *model.Task, decision model.WechatDeliv
 		return nil
 	}
 	switch decision.Mode {
-	case model.WechatDeliveryModeAutomatic:
-		if !decision.AutomaticEnabled || !decision.AppIDConfigured || !decision.SecretConfigured {
+	case model.WechatDeliveryModeDraft:
+		if !decision.AutomaticEnabled || !decision.AppIDConfigured || (!decision.OpenPlatformConnected && !decision.SecretConfigured) || !decision.CanCreateDraft {
+			return ErrWechatDeliveryDecisionUnavailable
+		}
+	case model.WechatDeliveryModeDirectPublish:
+		if !decision.AutomaticEnabled || !decision.AppIDConfigured || !decision.CanCreateDraft || !decision.CanFormallyPublish {
 			return ErrWechatDeliveryDecisionUnavailable
 		}
 	case model.WechatDeliveryModeUserAssisted:
@@ -74,15 +78,23 @@ func wechatDeliveryInstructions(task *model.Task, decision model.WechatDeliveryD
 	if task == nil || (task.Type != model.TaskTypeWechatArticle && task.Type != model.TaskTypeWechatPicture) {
 		return ""
 	}
-	automatic := decision.Mode == model.WechatDeliveryModeAutomatic && decision.AutomaticEnabled && decision.AppIDConfigured && decision.SecretConfigured
+	automatic := decision.Mode == model.WechatDeliveryModeDraft && decision.AutomaticEnabled && decision.AppIDConfigured && (decision.OpenPlatformConnected || decision.SecretConfigured) && decision.CanCreateDraft
+	directPublish := decision.Mode == model.WechatDeliveryModeDirectPublish && decision.AutomaticEnabled && decision.AppIDConfigured && decision.CanCreateDraft && decision.CanFormallyPublish
 	if task.Type == model.TaskTypeWechatPicture {
 		if pictureTaskDraftDisabled(task) {
 			automatic = false
+			directPublish = false
+		}
+		if directPublish {
+			return "当前任务是微信公众号贴图，采用自动正式发布交付。请生成符合公众号官方贴图发布要求的标题、caption 和按顺序排列的图片发布包，图片以当前任务内的相对文件路径提供；Server finalizer 会在持久化校验通过后上传图片并负责正式发布。不要直接调用微信发布能力。任一必需图片缺失或审核未通过时，不得报告交付完成，必须保留 blocked 结果。"
 		}
 		if automatic {
 			return "当前任务是微信公众号贴图，采用自动草稿交付。请生成符合公众号官方贴图发布要求的标题、caption 和按顺序排列的图片发布包，图片以当前任务内的相对文件路径提供；Server 会上传这些图片并创建公众号贴图草稿。不要直接调用微信发布能力。任一必需图片缺失或审核未通过时，不得报告交付完成，必须保留 blocked 结果。"
 		}
 		return "当前任务是微信公众号贴图，采用手动复制交付。请生成包含标题、caption 和全部图片的完整图文内容，图片必须按视觉顺序排列并使用稳定公开的图片地址；Studio 会一次复制完整图文供用户粘贴到公众号后台。不能只交付文案，也不能要求用户逐张复制或重新组装图片。任一必需图片缺失或无法公开访问时，不得报告交付完成，必须保留 blocked 结果。"
+	}
+	if directPublish {
+		return "当前任务是微信公众号文章，采用自动正式发布交付。请生成完整公众号文章交付包并遵循内容审核要求；Server finalizer 会在持久化校验通过后负责创建并正式发布，不要直接调用微信发布能力。任一必需内容缺失或审核未通过时，不得报告交付完成，必须保留 blocked 结果。"
 	}
 	if automatic {
 		return "当前任务是微信公众号文章，采用自动草稿交付。请生成包含全部必需正文配图的公众号文章 HTML，并使用微信素材图片地址；Server 会负责创建公众号草稿。不要直接调用微信发布能力。任一必需图片没有进入最终 HTML 时，不得报告交付完成，必须保留 blocked 结果。"

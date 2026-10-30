@@ -29,6 +29,20 @@ func testLogger() *zerolog.Logger {
 	return &l
 }
 
+func TestWrapSDKErrorPreservesSafeProviderDiagnostics(t *testing.T) {
+	provider := &OpenAIProvider{}
+	response := &http.Response{Header: make(http.Header)}
+	response.Header.Set("x-request-id", "request-safe-id")
+	err := provider.wrapSDKError(&openai.Error{StatusCode: http.StatusServiceUnavailable, Response: response})
+	var generateErr *GenerateError
+	if !errors.As(err, &generateErr) {
+		t.Fatalf("error = %T, want GenerateError", err)
+	}
+	if generateErr.Code != "server_error" || generateErr.HTTPStatusCode != http.StatusServiceUnavailable || generateErr.ProviderRequestID != "request-safe-id" {
+		t.Fatalf("diagnostics = %#v", generateErr)
+	}
+}
+
 func TestMapToImageSize(t *testing.T) {
 	tests := []struct {
 		name  string

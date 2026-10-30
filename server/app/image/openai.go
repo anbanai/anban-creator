@@ -1179,7 +1179,15 @@ func normalizeBase64ImageData(value string) string {
 func (p *OpenAIProvider) wrapSDKError(err error) error {
 	e, ok := errors.AsType[*openai.Error](err)
 	if ok {
-		return p.wrapAPIError(e)
+		wrapped := p.wrapAPIError(e)
+		var generateErr *GenerateError
+		if errors.As(wrapped, &generateErr) {
+			generateErr.HTTPStatusCode = e.StatusCode
+			if e.Response != nil {
+				generateErr.ProviderRequestID = strings.TrimSpace(e.Response.Header.Get("x-request-id"))
+			}
+		}
+		return wrapped
 	}
 
 	errMsg := err.Error()
