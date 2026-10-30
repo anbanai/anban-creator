@@ -49,7 +49,7 @@ func RequestLogger(logger *zerolog.Logger) fiber.Handler {
 
 		event.
 			Str("method", c.Method()).
-			Str("path", redactedRequestPath(c.Path())).
+			Str("path", redactedRequestPath(string(c.Request().URI().PathOriginal()))).
 			Int("status", status).
 			Dur("duration", duration).
 			Str("ip", c.IP())
