@@ -7,6 +7,7 @@ import (
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/storage"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -86,6 +87,9 @@ func (s *TaskService) validateHypitReports(ctx context.Context, t *model.Task, f
 	return nil
 }
 func taskArtifactByteLimit(t *model.Task, p string) int64 {
+	if t != nil && model.IsTalkingHeadEditorPlatform(t.Type) {
+		return talkingHeadArtifactByteLimit(p)
+	}
 	if t != nil && model.IsHypitPlatform(t.Type) {
 		l := readHypitSnapshot(t).Limits
 		switch p {
@@ -97,6 +101,30 @@ func taskArtifactByteLimit(t *model.Task, p string) int64 {
 			if l.MaxVideoBytes > 0 {
 				return l.MaxVideoBytes
 			}
+		}
+	}
+	return maxTaskArtifactUploadBytes
+}
+
+const (
+	talkingHeadIntermediateVideoBytes = 200 << 20
+	talkingHeadFinalVideoBytes        = 512 << 20
+	talkingHeadJSONBytes              = 8 << 20
+	talkingHeadTextBytes              = 8 << 20
+	talkingHeadTotalArtifactBytes     = 1 << 30
+)
+
+func talkingHeadArtifactByteLimit(p string) int64 {
+	switch filepath.ToSlash(strings.TrimSpace(p)) {
+	case "output/final.mp4":
+		return talkingHeadFinalVideoBytes
+	case "output/final-picture.mp4", "output/rough-cut.mp4", "output/semantic-cut.mp4", "output/motion-sample.mp4":
+		return talkingHeadIntermediateVideoBytes
+	case "output/subtitles.srt", "output/edit-strategy.md", "output/failure-diagnosis.md":
+		return talkingHeadTextBytes
+	default:
+		if strings.HasPrefix(filepath.ToSlash(strings.TrimSpace(p)), "output/") && strings.HasSuffix(strings.ToLower(p), ".json") {
+			return talkingHeadJSONBytes
 		}
 	}
 	return maxTaskArtifactUploadBytes
