@@ -3,16 +3,18 @@ package handler
 import (
 	"fmt"
 
+	"github.com/anbanai/anban-creator/server/service"
 	"github.com/gofiber/fiber/v3"
 )
 
 // Response is the standard JSON envelope for all API responses.
 type Response struct {
-	Code             int         `json:"code"`
-	Msg              string      `json:"msg"`
-	ErrorCode        string      `json:"error_code,omitempty"`
-	AvailableActions []string    `json:"available_actions,omitempty"`
-	Data             interface{} `json:"data,omitempty"`
+	Code             int                                `json:"code"`
+	Msg              string                             `json:"msg"`
+	ErrorCode        string                             `json:"error_code,omitempty"`
+	AvailableActions []string                           `json:"available_actions,omitempty"`
+	BlockingIssues   []service.InteractionBlockingIssue `json:"blocking_issues,omitempty"`
+	Data             interface{}                        `json:"data,omitempty"`
 }
 
 // Success returns a JSON response with code 0 and the given data.

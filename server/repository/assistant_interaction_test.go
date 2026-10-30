@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,124 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestCreationDraftTransitionsFenceOtherRepositoryInstances(t *testing.T) {
+	for _, winner := range []string{"commit", "continue", "stage"} {
+		t.Run(winner, func(t *testing.T) {
+			repo, db := newAssistantInteractionTestRepository(t)
+			other := New(db).AssistantInteractions()
+			ctx, now := context.Background(), time.Now().UTC()
+			interaction := &model.AssistantInteraction{ID: uuid.NewString(), UserID: "user-1", ModeID: "creation", Lifecycle: model.AssistantInteractionActive, Generation: 1, ExpiresAt: now.Add(time.Hour), LastActivityAt: now, CreatedAt: now, UpdatedAt: now}
+			if err := repo.AssistantInteractions().Create(ctx, interaction); err != nil {
+				t.Fatal(err)
+			}
+			draft := &model.AssistantInteractionDraft{ID: uuid.NewString(), InteractionID: interaction.ID, ModeID: "creation", Ready: true, ConfirmationState: model.AssistantInteractionDraftPending, Payload: json.RawMessage(`{}`), PayloadDigest: "plan", SourceGeneration: 1, ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now}
+			stage := func(id string) (*model.AssistantInteractionDraft, error) {
+				copy := *draft
+				copy.ID = id
+				copy.Revision = 0
+				persisted, _, err := other.CreateDraftIfAttemptNewAtGeneration(ctx, &copy, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: interaction.ID, AttemptID: id, Operation: "stage", Generation: 1, PayloadDigest: id, CreatedAt: now, ExpiresAt: now.Add(time.Hour)}, 1)
+				return persisted, err
+			}
+			first, err := stage(draft.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			claim := func() error {
+				return repo.AssistantInteractions().TransitionCreationDraft(ctx, "user-1", interaction.ID, first.ID, first.Revision, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: interaction.ID, UserID: "user-1", AttemptID: "commit:key", Operation: "commit", Generation: 1, PayloadDigest: "commit", Status: model.AssistantInteractionAttemptPending, CreatedAt: now, ExpiresAt: now.Add(time.Hour)}, now)
+			}
+			withdraw := func() error {
+				return other.TransitionCreationDraft(ctx, "user-1", interaction.ID, first.ID, first.Revision, nil, now)
+			}
+			switch winner {
+			case "commit":
+				if err := claim(); err != nil {
+					t.Fatal(err)
+				}
+				if err := withdraw(); !errors.Is(err, ErrInteractionDraftState) {
+					t.Fatalf("withdraw after claim = %v", err)
+				}
+				if _, err := stage("replacement"); !errors.Is(err, ErrInteractionCommitClaimed) {
+					t.Fatalf("stage after claim = %v", err)
+				}
+			case "continue":
+				if err := withdraw(); err != nil {
+					t.Fatal(err)
+				}
+				if err := withdraw(); err != nil {
+					t.Fatalf("idempotent continue = %v", err)
+				}
+				if err := claim(); !errors.Is(err, ErrInteractionDraftState) {
+					t.Fatalf("claim withdrawn = %v", err)
+				}
+				if _, err := stage("replacement"); err != nil {
+					t.Fatal(err)
+				}
+				if err := withdraw(); !errors.Is(err, ErrInteractionDraftState) {
+					t.Fatalf("withdraw old = %v", err)
+				}
+			case "stage":
+				if _, err := stage("replacement"); err != nil {
+					t.Fatal(err)
+				}
+				if err := claim(); !errors.Is(err, ErrInteractionDraftState) {
+					t.Fatalf("claim replaced = %v", err)
+				}
+				if err := withdraw(); !errors.Is(err, ErrInteractionDraftState) {
+					t.Fatalf("withdraw replaced = %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestCreationCompetingTransitionsCannotOvertakeAcceptedClaim(t *testing.T) {
+	for range 8 {
+		repo, db := newAssistantInteractionTestRepository(t)
+		ctx, now := context.Background(), time.Now().UTC()
+		id, draftID := uuid.NewString(), uuid.NewString()
+		if err := repo.AssistantInteractions().Create(ctx, &model.AssistantInteraction{ID: id, UserID: "user-1", ModeID: "creation", Lifecycle: model.AssistantInteractionActive, Generation: 1, ExpiresAt: now.Add(time.Hour), LastActivityAt: now, CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		draft := &model.AssistantInteractionDraft{ID: draftID, InteractionID: id, ModeID: "creation", Revision: 1, Payload: json.RawMessage(`{}`), PayloadDigest: "plan", Ready: true, ConfirmationState: model.AssistantInteractionDraftPending, ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now}
+		if _, _, err := repo.AssistantInteractions().CreateDraftIfAttemptNewAtGeneration(ctx, draft, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: id, AttemptID: "stage", Operation: "stage", Generation: 1, PayloadDigest: "plan", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}, 1); err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		results := make([]error, 3)
+		for operation := range 3 {
+			wg.Add(1)
+			go func(operation int) {
+				defer wg.Done()
+				<-start
+				r := New(db).AssistantInteractions()
+				switch operation {
+				case 0:
+					results[operation] = r.TransitionCreationDraft(ctx, "user-1", id, draftID, 1, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: id, UserID: "user-1", AttemptID: "commit:race", Operation: "commit", Generation: 1, PayloadDigest: "commit", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}, now)
+				case 1:
+					results[operation] = r.TransitionCreationDraft(ctx, "user-1", id, draftID, 1, nil, now)
+				case 2:
+					copy := *draft
+					copy.ID = uuid.NewString()
+					copy.Revision = 0
+					_, _, results[operation] = r.CreateDraftIfAttemptNewAtGeneration(ctx, &copy, &model.AssistantInteractionAttempt{ID: uuid.NewString(), InteractionID: id, AttemptID: "replacement", Operation: "stage", Generation: 1, PayloadDigest: "replacement", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}, 1)
+				}
+			}(operation)
+		}
+		close(start)
+		wg.Wait()
+		if results[0] == nil && (results[1] == nil || results[2] == nil) {
+			t.Fatalf("claim and competing mutation both accepted: %v", results)
+		}
+		if results[0] == nil {
+			stored, err := repo.AssistantInteractions().FindDraftForUser(ctx, "user-1", draftID)
+			if err != nil || stored.ConfirmationState != model.AssistantInteractionDraftConfirmed {
+				t.Fatalf("accepted claim lost: %#v, %v", stored, err)
+			}
+		}
+	}
+}
 
 func newAssistantInteractionTestRepository(t *testing.T) (Repository, *gorm.DB) {
 	t.Helper()

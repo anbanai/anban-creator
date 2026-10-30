@@ -46,6 +46,9 @@ const (
 	InteractionErrorDraftRevisionConflict        = "assistant_draft_revision_conflict"
 	InteractionErrorCommitAlreadyApplied         = "assistant_commit_already_applied"
 	InteractionErrorCommitReconciliationRequired = "assistant_commit_reconciliation_required"
+	InteractionErrorCreationInputsMissing        = "assistant_creation_inputs_missing"
+	InteractionErrorDraftInvalid                 = "assistant_draft_invalid"
+	InteractionErrorDraftNotReady                = "assistant_draft_not_ready"
 )
 
 type InteractionOperation string
@@ -78,11 +81,12 @@ func interactionCreatePayloadDigest(input AssistantInteractionInput) string {
 // InteractionError is safe to serialize to the client. Internal causes are
 // retained through Unwrap but are never included in JSON.
 type InteractionError struct {
-	Code             string               `json:"error_code"`
-	Status           int                  `json:"status"`
-	Message          string               `json:"message"`
-	AvailableActions []string             `json:"available_actions,omitempty"`
-	Snapshot         *InteractionSnapshot `json:"snapshot,omitempty"`
+	Code             string                     `json:"error_code"`
+	Status           int                        `json:"status"`
+	Message          string                     `json:"message"`
+	AvailableActions []string                   `json:"available_actions,omitempty"`
+	Snapshot         *InteractionSnapshot       `json:"snapshot,omitempty"`
+	BlockingIssues   []InteractionBlockingIssue `json:"blocking_issues,omitempty"`
 	cause            error
 }
 
@@ -123,6 +127,7 @@ func interactionCommandDigest(method, attemptID string, params map[string]any) s
 }
 
 type InteractionSnapshot struct {
+	StateSequence     uint64                   `json:"state_sequence,omitempty"`
 	ID                string                   `json:"interaction_id"`
 	ModeID            string                   `json:"mode_id"`
 	ProjectID         string                   `json:"project_id,omitempty"`
@@ -139,13 +144,21 @@ type InteractionSnapshot struct {
 }
 
 type InteractionDraftView struct {
-	ID                string          `json:"draft_id"`
-	ModeID            string          `json:"mode_id"`
-	Revision          int64           `json:"revision"`
-	Payload           json.RawMessage `json:"payload"`
-	PayloadDigest     string          `json:"payload_digest"`
-	Ready             bool            `json:"ready"`
-	ConfirmationState string          `json:"confirmation_state"`
+	StateSequence     uint64                     `json:"state_sequence,omitempty"`
+	ID                string                     `json:"draft_id"`
+	ModeID            string                     `json:"mode_id"`
+	Revision          int64                      `json:"revision"`
+	Payload           json.RawMessage            `json:"payload"`
+	PayloadDigest     string                     `json:"payload_digest"`
+	Ready             bool                       `json:"ready"`
+	ConfirmationState string                     `json:"confirmation_state"`
+	BlockingIssues    []InteractionBlockingIssue `json:"blocking_issues,omitempty"`
+}
+
+type InteractionBlockingIssue struct {
+	Code    string `json:"code"`
+	Field   string `json:"field"`
+	Message string `json:"message"`
 }
 
 type InteractionStageInput struct {
@@ -159,11 +172,17 @@ type InteractionStageInput struct {
 }
 
 type InteractionStageResult struct {
-	DraftID              string   `json:"draft_id"`
-	Revision             int64    `json:"revision"`
-	ConfirmationRequired bool     `json:"confirmation_required"`
-	AvailableActions     []string `json:"available_actions,omitempty"`
-	Durable              bool     `json:"durable"`
+	DraftID              string                `json:"draft_id"`
+	Revision             int64                 `json:"revision"`
+	ConfirmationRequired bool                  `json:"confirmation_required"`
+	AvailableActions     []string              `json:"available_actions,omitempty"`
+	Durable              bool                  `json:"durable"`
+	Draft                *InteractionDraftView `json:"draft,omitempty"`
+}
+
+type InteractionContinueRequest struct {
+	DraftID  string `json:"draft_id"`
+	Revision int64  `json:"revision"`
 }
 
 type InteractionCommitRequest struct {
