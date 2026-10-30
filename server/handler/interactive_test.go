@@ -146,6 +146,30 @@ func TestInteractionErrorIncludesRecoveryActions(t *testing.T) {
 	}
 }
 
+func TestInteractionErrorIncludesCreationBlockingIssuesAndSnapshot(t *testing.T) {
+	err := service.NewInteractionError(service.InteractionErrorCreationInputsMissing, 422, "missing", "continue_editing")
+	err.BlockingIssues = []service.InteractionBlockingIssue{{Code: "missing_input", Field: "plan.missing_inputs", Message: "contact"}}
+	err.WithSnapshot(service.InteractionSnapshot{ID: "interaction-1"})
+	app := fiber.New()
+	app.Post("/", func(c fiber.Ctx) error { return interactiveError(c, err) })
+	resp, requestErr := app.Test(httptest.NewRequest(http.MethodPost, "/", nil))
+	if requestErr != nil {
+		t.Fatal(requestErr)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		ErrorCode string                             `json:"error_code"`
+		Issues    []service.InteractionBlockingIssue `json:"blocking_issues"`
+		Snapshot  service.InteractionSnapshot        `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 422 || body.ErrorCode != service.InteractionErrorCreationInputsMissing || len(body.Issues) != 1 || body.Issues[0].Field != "plan.missing_inputs" || body.Snapshot.ID != "interaction-1" {
+		t.Fatalf("response = %#v", body)
+	}
+}
+
 func TestInteractiveSessionNotFoundIsUserSafe(t *testing.T) {
 	app := fiber.New()
 	app.Post("/", func(c fiber.Ctx) error { return interactiveError(c, service.ErrInteractiveSessionNotFound) })

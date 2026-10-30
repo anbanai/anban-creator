@@ -882,7 +882,7 @@ func TestAssistantInteractionSnapshotKeepsReadyDraftWhenRuntimeReplacementFails(
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload := json.RawMessage(`{"plan":{"goal":"runtime independent confirmation"}}`)
+	payload := json.RawMessage(completeInteractionPlan)
 	digest := sha256.Sum256(payload)
 	if _, err := svc.StageDraftForInteraction(context.Background(), "user-1", InteractionStageInput{
 		InteractionID: snapshot.ID,

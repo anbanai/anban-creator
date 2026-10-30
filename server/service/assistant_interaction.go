@@ -242,6 +242,9 @@ func (s *AssistantInteractionService) Snapshot(ctx context.Context, userID, inte
 	// or lifecycle update did not.
 	if drafts, draftErr := s.repo.AssistantInteractions().ListDrafts(ctx, userID, interaction.ID); draftErr == nil {
 		for _, draft := range drafts {
+			if draft != nil && draft.ModeID == AssistantModeCreation {
+				return s.snapshotWithDrafts(ctx, userID, interaction)
+			}
 			if draft != nil && draft.Ready && draft.ConfirmationState != model.AssistantInteractionDraftConsumed {
 				if interaction.Lifecycle != model.AssistantInteractionNeedsConfirmation {
 					// Derive this terminal-for-runtime state from the durable draft
@@ -295,9 +298,33 @@ func (s *AssistantInteractionService) snapshotWithDrafts(ctx context.Context, us
 	}
 	if drafts, draftErr := s.repo.AssistantInteractions().ListDrafts(ctx, userID, interaction.ID); draftErr == nil {
 		snapshot.Drafts = make([]InteractionDraftView, 0, len(drafts))
+		latest := map[string]bool{}
+		claimed := false
 		for _, draft := range drafts {
-			snapshot.Drafts = append(snapshot.Drafts, InteractionDraftView{ID: draft.ID, ModeID: draft.ModeID, Revision: draft.Revision, Payload: draft.Payload, PayloadDigest: draft.PayloadDigest, Ready: draft.Ready, ConfirmationState: draft.ConfirmationState})
+			if draft.ModeID == AssistantModeCreation && (draft.ConfirmationState == model.AssistantInteractionDraftConfirmed || draft.ConfirmationState == model.AssistantInteractionDraftConsumed) {
+				claimed = true
+			}
 		}
+		for _, draft := range drafts {
+			eligible := !latest[draft.ModeID] && !claimed && draft.ExpiresAt.After(s.clock()) && interaction.Lifecycle != model.AssistantInteractionCompleted && interaction.Lifecycle != model.AssistantInteractionAbandoned
+			view := interactionDraftView(draft, eligible)
+			if draft.ModeID == AssistantModeCreation && !latest[draft.ModeID] && interaction.Lifecycle != model.AssistantInteractionCompleted && interaction.Lifecycle != model.AssistantInteractionAbandoned {
+				snapshot.AvailableActions = creationDraftActions(view)
+				if view.Ready {
+					snapshot.Lifecycle = model.AssistantInteractionNeedsConfirmation
+				} else if snapshot.Lifecycle == model.AssistantInteractionNeedsConfirmation {
+					snapshot.Lifecycle = model.AssistantInteractionActive
+				}
+			}
+			latest[draft.ModeID] = true
+			snapshot.Drafts = append(snapshot.Drafts, view)
+		}
+		if claimed && interaction.Lifecycle != model.AssistantInteractionCompleted && interaction.Lifecycle != model.AssistantInteractionAbandoned {
+			snapshot.RecoveryErrorCode = InteractionErrorCommitReconciliationRequired
+			snapshot.AvailableActions = []string{"view_task", "reconcile_commit"}
+		}
+	} else {
+		return InteractionSnapshot{}, errors.Join(ErrInteractivePersistence, draftErr)
 	}
 	if receipt, receiptErr := s.repo.AssistantInteractions().FindLatestCommitAttempt(ctx, interaction.ID); receiptErr == nil {
 		if receipt.ErrorCode == InteractionErrorCommitReconciliationRequired {
@@ -306,18 +333,45 @@ func (s *AssistantInteractionService) snapshotWithDrafts(ctx context.Context, us
 			// presenting a ready draft that invites an unsafe blind retry.
 			snapshot.RecoveryErrorCode = receipt.ErrorCode
 			snapshot.AvailableActions = []string{"view_task", "reconcile_commit"}
+		} else if receipt.Status == model.AssistantInteractionAttemptPending && receipt.ErrorCode == "" && len(receipt.Result) == 0 && receipt.Operation == string(InteractionOperationCommit) {
+			snapshot.RecoveryErrorCode = InteractionErrorCommitReconciliationRequired
+			snapshot.AvailableActions = []string{"view_task", "reconcile_commit"}
 		} else if len(receipt.Result) > 0 {
 			var result InteractionCommitResult
 			if err := json.Unmarshal(receipt.Result, &result); err != nil {
 				return InteractionSnapshot{}, errors.Join(ErrInteractivePersistence, err)
 			}
 			snapshot.CommitResult = &result
+			snapshot.RecoveryErrorCode = ""
 			// A successful receipt is the durable authority even if the process
 			// stopped after writing it and before the lifecycle update committed.
 			// Surface the terminal state immediately so refresh cannot offer a
 			// misleading second confirmation.
 			snapshot.Lifecycle = model.AssistantInteractionCompleted
 			snapshot.AvailableActions = []string{"view_task", "restart"}
+		} else if receipt.ErrorCode == InteractionErrorDraftRevisionConflict && interaction.ModeID == AssistantModeCreation {
+			for _, view := range snapshot.Drafts {
+				if view.ModeID != AssistantModeCreation {
+					continue
+				}
+				if receipt.PayloadDigest == commitPayloadDigest(InteractionCommitRequest{DraftID: view.ID, Revision: view.Revision}) {
+					if draft, err := s.repo.AssistantInteractions().FindDraftForUser(ctx, userID, view.ID); err == nil {
+						if structured := s.legacyCreationFailure(ctx, userID, draft); structured != nil {
+							snapshot.RecoveryErrorCode = structured.Code
+						}
+					}
+				}
+				break
+			}
+		}
+	} else if !errors.Is(receiptErr, gorm.ErrRecordNotFound) {
+		return InteractionSnapshot{}, errors.Join(ErrInteractivePersistence, receiptErr)
+	}
+	if snapshot.CommitResult != nil || snapshot.RecoveryErrorCode == InteractionErrorCommitReconciliationRequired {
+		for i := range snapshot.Drafts {
+			if snapshot.Drafts[i].ModeID == AssistantModeCreation {
+				snapshot.Drafts[i].Ready = false
+			}
 		}
 	}
 	if snapshot.CommitResult == nil && snapshot.RecoveryErrorCode == "" {
@@ -330,7 +384,8 @@ func (s *AssistantInteractionService) snapshotWithDrafts(ctx context.Context, us
 }
 
 func (s *AssistantInteractionService) Events(ctx context.Context, userID, interactionID string, after uint64) ([]*model.AssistantInteractionEvent, error) {
-	if _, err := s.Snapshot(ctx, userID, interactionID); err != nil {
+	snapshot, err := s.Snapshot(ctx, userID, interactionID)
+	if err != nil {
 		return nil, err
 	}
 	current, err := s.repo.AssistantInteractions().FindByIDForUser(ctx, userID, interactionID)
@@ -359,9 +414,6 @@ func (s *AssistantInteractionService) Events(ctx context.Context, userID, intera
 	}
 	live = kept
 	s.runtimeMu.Unlock()
-	if len(live) == 0 || len(events) == 0 {
-		return events, nil
-	}
 	bySequence := make(map[uint64]*model.AssistantInteractionEvent, len(live))
 	for _, item := range live {
 		if item.generation == current.Generation && item.event != nil {
@@ -371,6 +423,25 @@ func (s *AssistantInteractionService) Events(ctx context.Context, userID, intera
 	for i, event := range events {
 		if replacement := bySequence[event.Sequence]; replacement != nil {
 			events[i] = replacement
+		}
+		if events[i].Type == "draft.ready" {
+			var data struct {
+				DraftID string                `json:"draft_id"`
+				Draft   *InteractionDraftView `json:"draft"`
+			}
+			if json.Unmarshal(events[i].Data, &data) == nil {
+				if data.Draft != nil {
+					data.DraftID = data.Draft.ID
+				}
+				for _, view := range snapshot.Drafts {
+					if view.ID == data.DraftID && view.ModeID == AssistantModeCreation {
+						copy := *events[i]
+						copy.Data, _ = json.Marshal(map[string]any{"durable": true, "mode_id": view.ModeID, "draft": view})
+						events[i] = &copy
+						break
+					}
+				}
+			}
 		}
 	}
 	return events, nil

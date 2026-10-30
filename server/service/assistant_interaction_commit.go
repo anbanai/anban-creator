@@ -190,12 +190,30 @@ func (s *AssistantInteractionService) CommitInteraction(ctx context.Context, use
 			}
 			return replay, nil
 		}
+		if interaction.ModeID == AssistantModeCreation {
+			if result, handled, authorityErr := s.creationCommitAuthority(ctx, userID, interaction); handled || authorityErr != nil {
+				return result, authorityErr
+			}
+		}
 		if attempt.ErrorCode == InteractionErrorDraftRevisionConflict {
+			if draft, draftErr := s.repo.AssistantInteractions().FindDraftForUser(ctx, userID, req.DraftID); draftErr == nil && draft.InteractionID == interactionID && draft.Revision == req.Revision && draft.ModeID == AssistantModeCreation {
+				if structured := s.legacyCreationFailure(ctx, userID, draft); structured != nil {
+					return InteractionCommitResult{}, s.creationErrorWithSnapshot(ctx, userID, interaction, structured)
+				}
+			}
 			return InteractionCommitResult{}, NewInteractionError(InteractionErrorDraftRevisionConflict, 409, "计划当前不可确认，请恢复最新计划", "reload_snapshot", "restore_draft")
+		}
+		if attempt.Status == model.AssistantInteractionAttemptFailed {
+			return InteractionCommitResult{}, s.creationErrorWithSnapshot(ctx, userID, interaction, creationDraftError(attempt.ErrorCode, nil))
 		}
 		return InteractionCommitResult{}, NewInteractionError(InteractionErrorCommitReconciliationRequired, 409, "创建结果需要核对，请查看任务状态", "view_task", "reconcile_commit")
 	} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
 		return InteractionCommitResult{}, errors.Join(ErrInteractivePersistence, findErr)
+	}
+	if interaction.ModeID == AssistantModeCreation {
+		if result, handled, authorityErr := s.creationCommitAuthority(ctx, userID, interaction); handled || authorityErr != nil {
+			return result, authorityErr
+		}
 	}
 	if interaction.Lifecycle == model.AssistantInteractionCompleted {
 		if latest, latestErr := s.repo.AssistantInteractions().FindLatestCommitAttempt(ctx, interactionID); latestErr == nil && len(latest.Result) > 0 {
@@ -215,8 +233,11 @@ func (s *AssistantInteractionService) CommitInteraction(ctx context.Context, use
 	// cleanup at the shared 30-day retention boundary cannot turn an already
 	// applied commit into a false revision conflict.
 	draft, err := s.repo.AssistantInteractions().FindDraftForUser(ctx, userID, req.DraftID)
-	if err != nil || draft.InteractionID != interaction.ID || draft.Revision != req.Revision || !draft.Ready {
+	if err != nil || draft.InteractionID != interaction.ID || draft.Revision != req.Revision || (draft.ModeID != AssistantModeCreation && !draft.Ready) {
 		return InteractionCommitResult{}, NewInteractionError(InteractionErrorDraftRevisionConflict, 409, "计划版本已更新，请恢复最新计划后确认", "reload_snapshot", "restore_draft")
+	}
+	if draft.ModeID == AssistantModeCreation {
+		return s.commitCreationInteraction(ctx, userID, interaction, draft, req, digest)
 	}
 	if draft.ModeID == AssistantModeProfile {
 		result, profileErr := s.commitProfileInteraction(ctx, userID, interactionID, interaction.Generation, draft, req, digest)

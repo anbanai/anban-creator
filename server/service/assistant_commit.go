@@ -387,7 +387,7 @@ func decodeAssistantCreationPlan(payload []byte) (assistantCreationPlan, []byte,
 
 func decodeAssistantCreationPlanFields(payload []byte) (assistantCreationPlan, error) {
 	var envelope map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &envelope); err != nil {
+	if err := json.Unmarshal(payload, &envelope); err != nil || envelope == nil {
 		return assistantCreationPlan{}, ErrAssistantCheckpointInvalid
 	}
 	raw := json.RawMessage(payload)
@@ -398,6 +398,9 @@ func decodeAssistantCreationPlanFields(payload []byte) (assistantCreationPlan, e
 			}
 		}
 		raw = nested
+	}
+	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "null" || len(raw) > 24<<10 {
+		return assistantCreationPlan{}, ErrAssistantCheckpointInvalid
 	}
 	var plan assistantCreationPlan
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
@@ -441,7 +444,13 @@ func decodeAssistantReview(payload []byte) (assistantReviewDraft, []byte, error)
 	return review, canonical, nil
 }
 
-func commitAssistantCreation(ctx context.Context, userID string, checkpoint *model.AssistantCheckpoint, tasks *TaskService, repo repository.Repository) (AssistantCommitResult, error) {
+func commitAssistantCreation(ctx context.Context, userID string, checkpoint *model.AssistantCheckpoint, tasks *TaskService, repo repository.Repository) (resultOut AssistantCommitResult, resultErr error) {
+	creationStarted := false
+	defer func() {
+		if resultErr != nil && !creationStarted {
+			resultErr = &assistantCreationPreflightError{resultErr}
+		}
+	}()
 	if tasks == nil {
 		return AssistantCommitResult{}, ErrInteractivePersistence
 	}
@@ -512,6 +521,7 @@ func commitAssistantCreation(ctx context.Context, userID string, checkpoint *mod
 		}
 		params.InputAttachments = inputAttachments
 	}
+	creationStarted = true
 	created, err := tasks.CreateManual(ctx, params)
 	if err != nil {
 		if existing, lookupErr := repo.Tasks().FindByAssistantCheckpointID(ctx, userID, checkpoint.ID); lookupErr == nil {

@@ -277,6 +277,7 @@ func NewRouter(svc *Services) *fiber.App {
 		assistant.Post("/interactions/:id/answers", svc.AssistantHandler.InteractionAnswer)
 		assistant.Get("/interactions/:id/events", svc.AssistantHandler.InteractionEvents)
 		assistant.Post("/interactions/:id/commit", svc.AssistantHandler.InteractionCommit)
+		assistant.Post("/interactions/:id/continue", svc.AssistantHandler.InteractionContinue)
 		assistant.Delete("/interactions/:id", svc.AssistantHandler.InteractionDelete)
 		assistant.Get("/bootstrap", svc.AssistantHandler.Bootstrap)
 		assistant.Get("/projects/:projectId/works", svc.AssistantHandler.Works)
