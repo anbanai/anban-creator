@@ -95,6 +95,8 @@ func TestGenerateTaskImageLogsSanitizedProviderDiagnostics(t *testing.T) {
 	f.generator.err = &appimage.GenerateError{
 		Provider: "provider-name", Code: "server_error", Message: "provider secret text",
 		HTTPStatusCode: 503, ProviderRequestID: "upstream-request-42",
+		RequestMethod: "POST", RequestEndpoint: "https://images.example.test/api/v3/images/generations",
+		ResponseContentType: "application/json", TransportPhase: "http_response",
 	}
 	_, err := f.service.Generate(context.Background(), f.request())
 	var failure *ImageProviderFailureError
@@ -105,6 +107,8 @@ func TestGenerateTaskImageLogsSanitizedProviderDiagnostics(t *testing.T) {
 		`"correlation_id":"` + failure.CorrelationID + `"`,
 		`"provider":"openai"`, `"error_code":"server_error"`,
 		`"http_status":503`, `"duration_ms":`, `"provider_request_id":"upstream-request-42"`,
+		`"request_method":"POST"`, `"request_endpoint":"https://images.example.test/api/v3/images/generations"`,
+		`"response_content_type":"application/json"`, `"transport_phase":"http_response"`,
 	} {
 		if !strings.Contains(logs.String(), want) {
 			t.Fatalf("log missing %q: %s", want, logs.String())

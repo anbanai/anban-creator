@@ -270,6 +270,10 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 					Int("http_status", providerError.HTTPStatusCode).
 					Int64("duration_ms", time.Since(providerStartedAt).Milliseconds()).
 					Str("provider_request_id", providerError.ProviderRequestID).
+					Str("request_method", providerError.RequestMethod).
+					Str("request_endpoint", providerError.RequestEndpoint).
+					Str("response_content_type", providerError.ResponseContentType).
+					Str("transport_phase", providerError.TransportPhase).
 					Bool("retryable", providerError.Retryable()).
 					Msg("task image provider failed")
 			}

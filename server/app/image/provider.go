@@ -108,19 +108,48 @@ type ProviderCapabilities struct {
 
 // GenerateError 图片生成错误
 type GenerateError struct {
-	Provider          string // 提供者名称
-	Code              string // 错误码
-	Message           string // 用户友好的错误信息
-	HintMsg           string // 解决提示
-	HTTPStatusCode    int
-	ProviderRequestID string
-	Original          error // 原始错误
+	Provider            string // 提供者名称
+	Code                string // 错误码
+	Message             string // 用户友好的错误信息
+	HintMsg             string // 解决提示
+	HTTPStatusCode      int
+	ProviderRequestID   string
+	RequestMethod       string
+	RequestEndpoint     string
+	ResponseContentType string
+	TransportPhase      string
+	Original            error // 原始错误
 }
 
 func (e *GenerateError) Error() string {
 	msg := fmt.Sprintf("[%s] %s", e.Provider, e.Message)
 	if e.HintMsg != "" {
 		msg += fmt.Sprintf("\n提示: %s", e.HintMsg)
+	}
+	diagnostics := make([]string, 0, 5)
+	if e.RequestMethod != "" {
+		diagnostics = append(diagnostics, e.RequestMethod)
+	}
+	if e.RequestEndpoint != "" {
+		endpoint := sanitizeImageProviderEndpoint(e.RequestEndpoint)
+		if endpoint != "<invalid-endpoint>" {
+			diagnostics = append(diagnostics, endpoint)
+		}
+	}
+	if e.HTTPStatusCode != 0 {
+		diagnostics = append(diagnostics, fmt.Sprintf("HTTP %d", e.HTTPStatusCode))
+	}
+	if e.ResponseContentType != "" {
+		diagnostics = append(diagnostics, "content_type="+e.ResponseContentType)
+	}
+	if e.TransportPhase != "" {
+		diagnostics = append(diagnostics, "phase="+e.TransportPhase)
+	}
+	if e.ProviderRequestID != "" {
+		diagnostics = append(diagnostics, "request_id="+e.ProviderRequestID)
+	}
+	if len(diagnostics) > 0 {
+		msg += "\n请求: " + strings.Join(diagnostics, " ")
 	}
 	return msg
 }

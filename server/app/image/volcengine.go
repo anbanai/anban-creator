@@ -2,11 +2,15 @@ package image
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/app/config"
@@ -18,12 +22,122 @@ import (
 // VolcengineProvider 火山方舟 Seedream 图片生成服务提供者
 // 使用官方 arkruntime SDK，支持类型安全的请求体和高级选项
 type VolcengineProvider struct {
-	client     *arkruntime.Client
-	model      string
-	log        *zerolog.Logger
-	sizePixel  string // 像素格式 "WIDTHxHEIGHT"，如 "1728x2304"
-	volcConfig *config.VolcengineConfig
-	name       string
+	client      *arkruntime.Client
+	model       string
+	log         *zerolog.Logger
+	sizePixel   string // 像素格式 "WIDTHxHEIGHT"，如 "1728x2304"
+	volcConfig  *config.VolcengineConfig
+	name        string
+	endpoint    string
+	diagnostics *imageProviderDiagnostics
+}
+
+const volcengineImageRequestPath = "/images/generations"
+
+type requestObservation struct {
+	Method              string
+	Endpoint            string
+	HTTPStatusCode      int
+	ResponseContentType string
+	TransportPhase      string
+}
+
+type imageProviderDiagnostics struct {
+	observations sync.Map
+}
+
+type requestTransportError struct {
+	observation requestObservation
+	cause       error
+}
+
+func (e *requestTransportError) Error() string { return "image provider transport request failed" }
+func (e *requestTransportError) Unwrap() error { return e.cause }
+
+type diagnosticRoundTripper struct {
+	base        http.RoundTripper
+	diagnostics *imageProviderDiagnostics
+}
+
+func (t *diagnosticRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	requestID := strings.TrimSpace(req.Header.Get(model.ClientRequestHeader))
+	observation := requestObservation{
+		Method:   req.Method,
+		Endpoint: sanitizeImageProviderEndpoint(req.URL.String()),
+	}
+	resp, err := base.RoundTrip(req)
+	if err != nil {
+		observation.TransportPhase = classifyImageTransportPhase(err)
+		if requestID != "" && t.diagnostics != nil {
+			t.diagnostics.observations.Store(requestID, observation)
+		}
+		return nil, &requestTransportError{observation: observation, cause: err}
+	}
+	observation.HTTPStatusCode = resp.StatusCode
+	observation.ResponseContentType = strings.TrimSpace(resp.Header.Get("Content-Type"))
+	if resp.StatusCode >= http.StatusMultipleChoices {
+		observation.TransportPhase = "http_response"
+	} else if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices && !isJSONContentType(observation.ResponseContentType) {
+		observation.TransportPhase = "protocol"
+	}
+	if requestID != "" && t.diagnostics != nil && observation.TransportPhase != "" {
+		t.diagnostics.observations.Store(requestID, observation)
+	}
+	return resp, nil
+}
+
+func isJSONContentType(contentType string) bool {
+	contentType = strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
+	return contentType == "application/json" || strings.HasSuffix(contentType, "+json")
+}
+
+func sanitizeImageProviderEndpoint(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "<invalid-endpoint>"
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.Fragment = ""
+	u.Path = strings.TrimRight(u.Path, "/")
+	return u.String()
+}
+
+func classifyImageTransportPhase(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "timeout"
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return "dns"
+	}
+	var tlsErr *tls.CertificateVerificationError
+	if errors.As(err, &tlsErr) || strings.Contains(strings.ToLower(err.Error()), "tls") || strings.Contains(strings.ToLower(err.Error()), "x509") {
+		return "tls"
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		switch strings.ToLower(opErr.Op) {
+		case "dial":
+			return "connect"
+		case "read":
+			return "read"
+		case "write":
+			return "write"
+		}
+	}
+	return "unknown"
 }
 
 // volcenginePixelMap 将 aspect_ratio:sizeTier 映射到像素格式
@@ -70,11 +184,20 @@ func newSeedreamProvider(apiCfg *config.ImageAPI, log *zerolog.Logger, name stri
 	if apiCfg.TimeoutSec > 0 {
 		timeout = time.Duration(apiCfg.TimeoutSec) * time.Second
 	}
+	baseURL := strings.TrimRight(apiCfg.BaseURL, "/")
+	if baseURL == "" {
+		baseURL = DefaultVolcengineBaseURL
+	}
+	diagnostics := &imageProviderDiagnostics{}
 	opts := []arkruntime.ConfigOption{
 		arkruntime.WithTimeout(timeout),
+		arkruntime.WithHTTPClient(&http.Client{
+			Timeout:   timeout,
+			Transport: &diagnosticRoundTripper{base: http.DefaultTransport, diagnostics: diagnostics},
+		}),
 	}
 	if apiCfg.BaseURL != "" {
-		opts = append(opts, arkruntime.WithBaseUrl(apiCfg.BaseURL))
+		opts = append(opts, arkruntime.WithBaseUrl(baseURL))
 	}
 	client := arkruntime.NewClientWithApiKey(apiCfg.Key, opts...)
 
@@ -82,12 +205,14 @@ func newSeedreamProvider(apiCfg *config.ImageAPI, log *zerolog.Logger, name stri
 	sizePixel := volcenginePixelSize(aspectRatio, sizeTier)
 
 	return &VolcengineProvider{
-		client:     client,
-		log:        log,
-		model:      mdl,
-		sizePixel:  sizePixel,
-		volcConfig: apiCfg.Volcengine,
-		name:       name,
+		client:      client,
+		log:         log,
+		model:       mdl,
+		sizePixel:   sizePixel,
+		volcConfig:  apiCfg.Volcengine,
+		name:        name,
+		endpoint:    sanitizeImageProviderEndpoint(baseURL + volcengineImageRequestPath),
+		diagnostics: diagnostics,
 	}, nil
 }
 
@@ -195,6 +320,10 @@ func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *
 				Str("error_code", generateErr.Code).
 				Int("http_status", generateErr.HTTPStatusCode).
 				Str("provider_request_id", generateErr.ProviderRequestID).
+				Str("request_method", generateErr.RequestMethod).
+				Str("request_endpoint", generateErr.RequestEndpoint).
+				Str("response_content_type", generateErr.ResponseContentType).
+				Str("transport_phase", generateErr.TransportPhase).
 				Bool("retryable", generateErr.Retryable()).
 				Dur("elapsed", time.Since(start)).
 				Msg("volcengine: image generation failed")
@@ -275,11 +404,13 @@ func (p *VolcengineProvider) buildReferenceImageInput(opts *GenerateOptions) (an
 func (p *VolcengineProvider) convertSDKError(err error) (result error) {
 	var apiErr *model.APIError
 	if errors.As(err, &apiErr) {
+		observation := p.takeRequestObservation(apiErr.RequestId)
 		defer func() {
 			var generateErr *GenerateError
 			if errors.As(result, &generateErr) {
 				generateErr.HTTPStatusCode = apiErr.HTTPStatusCode
 				generateErr.ProviderRequestID = strings.TrimSpace(apiErr.RequestId)
+				p.applyRequestObservation(generateErr, observation)
 			}
 		}()
 		switch apiErr.HTTPStatusCode {
@@ -344,8 +475,29 @@ func (p *VolcengineProvider) convertSDKError(err error) (result error) {
 
 	var reqErr *model.RequestError
 	if errors.As(err, &reqErr) {
+		observation := p.takeRequestObservation(reqErr.RequestId)
+		var transportErr *requestTransportError
+		if errors.As(err, &transportErr) {
+			observation = transportErr.observation
+		}
+		if observation.Method == "" {
+			observation.Method = http.MethodPost
+		}
+		if observation.Endpoint == "" {
+			observation.Endpoint = p.endpoint
+		}
+		if observation.HTTPStatusCode == 0 {
+			observation.HTTPStatusCode = reqErr.HTTPStatusCode
+		}
+		if observation.TransportPhase == "" {
+			if reqErr.HTTPStatusCode >= http.StatusOK && reqErr.HTTPStatusCode < http.StatusMultipleChoices {
+				observation.TransportPhase = "protocol"
+			} else if transportErr == nil {
+				observation.TransportPhase = "http_response"
+			}
+		}
 		if reqErr.HTTPStatusCode >= http.StatusOK && reqErr.HTTPStatusCode < http.StatusMultipleChoices {
-			return &GenerateError{
+			generateErr := &GenerateError{
 				Provider:          p.Name(),
 				Code:              "endpoint_protocol",
 				Message:           "图片服务返回了无法解析的非 JSON 响应",
@@ -354,8 +506,10 @@ func (p *VolcengineProvider) convertSDKError(err error) (result error) {
 				ProviderRequestID: strings.TrimSpace(reqErr.RequestId),
 				Original:          err,
 			}
+			p.applyRequestObservation(generateErr, observation)
+			return generateErr
 		}
-		return &GenerateError{
+		generateErr := &GenerateError{
 			Provider:          p.Name(),
 			Code:              "network_error",
 			Message:           "网络请求失败，请检查网络连接",
@@ -364,6 +518,8 @@ func (p *VolcengineProvider) convertSDKError(err error) (result error) {
 			ProviderRequestID: strings.TrimSpace(reqErr.RequestId),
 			Original:          err,
 		}
+		p.applyRequestObservation(generateErr, observation)
+		return generateErr
 	}
 
 	return &GenerateError{
@@ -371,6 +527,35 @@ func (p *VolcengineProvider) convertSDKError(err error) (result error) {
 		Code:     "unknown",
 		Message:  err.Error(),
 		Original: err,
+	}
+}
+
+func (p *VolcengineProvider) takeRequestObservation(requestID string) requestObservation {
+	if p.diagnostics != nil && strings.TrimSpace(requestID) != "" {
+		if value, ok := p.diagnostics.observations.LoadAndDelete(requestID); ok {
+			if observation, ok := value.(requestObservation); ok {
+				return observation
+			}
+		}
+	}
+	return requestObservation{}
+}
+
+func (p *VolcengineProvider) applyRequestObservation(generateErr *GenerateError, observation requestObservation) {
+	if generateErr == nil {
+		return
+	}
+	if generateErr.RequestMethod == "" {
+		generateErr.RequestMethod = observation.Method
+	}
+	if generateErr.RequestEndpoint == "" {
+		generateErr.RequestEndpoint = observation.Endpoint
+	}
+	if generateErr.ResponseContentType == "" {
+		generateErr.ResponseContentType = observation.ResponseContentType
+	}
+	if generateErr.TransportPhase == "" {
+		generateErr.TransportPhase = observation.TransportPhase
 	}
 }
 
