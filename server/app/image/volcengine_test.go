@@ -473,6 +473,18 @@ func TestVolcengineConvertSDKError_ClassifiesTransportFailureWithConcreteRequest
 	}
 }
 
+func TestVolcengineConvertSDKError_APIErrorIncludesConcreteRequest(t *testing.T) {
+	p := &VolcengineProvider{name: "TokenPlayer", endpoint: "https://token.example.test/api/v3/images/generations"}
+	converted := p.convertSDKError(&model.APIError{HTTPStatusCode: http.StatusUnauthorized, RequestId: "upstream-request-401", Message: "unauthorized"})
+	genErr, ok := converted.(*GenerateError)
+	if !ok {
+		t.Fatalf("converted error = %T, want *GenerateError", converted)
+	}
+	if genErr.RequestMethod != http.MethodPost || genErr.RequestEndpoint != "https://token.example.test/api/v3/images/generations" {
+		t.Fatalf("request diagnostics = %#v", genErr)
+	}
+}
+
 func TestSanitizeImageProviderEndpointRemovesCredentialsAndQuery(t *testing.T) {
 	got := sanitizeImageProviderEndpoint("https://user:secret@example.test/api/v3?key=do-not-log#fragment")
 	if got != "https://example.test/api/v3" {

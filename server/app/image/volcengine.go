@@ -408,6 +408,12 @@ func (p *VolcengineProvider) convertSDKError(err error) (result error) {
 	var apiErr *model.APIError
 	if errors.As(err, &apiErr) {
 		observation := p.takeRequestObservation(apiErr.RequestId)
+		if observation.Method == "" {
+			observation.Method = http.MethodPost
+		}
+		if observation.Endpoint == "" {
+			observation.Endpoint = p.endpoint
+		}
 		defer func() {
 			var generateErr *GenerateError
 			if errors.As(result, &generateErr) {
@@ -531,12 +537,14 @@ func (p *VolcengineProvider) convertSDKError(err error) (result error) {
 		return generateErr
 	}
 
-	return &GenerateError{
+	generateErr := &GenerateError{
 		Provider: p.Name(),
 		Code:     "unknown",
 		Message:  err.Error(),
 		Original: err,
 	}
+	p.applyRequestObservation(generateErr, requestObservation{Method: http.MethodPost, Endpoint: p.endpoint})
+	return generateErr
 }
 
 func (p *VolcengineProvider) takeRequestObservation(requestID string) requestObservation {
