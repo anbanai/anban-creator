@@ -101,6 +101,33 @@ describe('task form mapping', () => {
     expect(source.hypit_input?.brief).toBe('original')
   })
 
+  it('does not carry stale type-specific inputs into a clone', () => {
+    const defaults = cloneTaskFormDefaults(task({
+      type: 'seednote',
+      video_edit_input: {
+        brief: '',
+        source_assets: [],
+      },
+      talking_head_editor_input: {
+        brief: '',
+        primary_video: { role: 'reference' },
+        supporting_assets: [],
+      },
+      local_life_input: {
+        mix_type: '',
+        brief: '',
+        source_assets: [],
+        variant_count: 1,
+        target_duration_seconds: 10,
+        aspect_ratio: '9:16',
+      },
+    }))
+
+    expect(defaults.video_edit_input).toBeUndefined()
+    expect(defaults.talking_head_editor_input).toBeUndefined()
+    expect(defaults.local_life_input).toBeUndefined()
+  })
+
   /* Agent Pack extension snapshots remain separate from typed business fields. */
   it('preserves agent_input through clone defaults and request mapping', () => {
     const defaults = cloneTaskFormDefaults(task({ agent_input: {} }))

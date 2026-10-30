@@ -316,6 +316,31 @@ func TestClassifyImageToolFailureUsesServerCorrelationID(t *testing.T) {
 	}
 }
 
+func TestClassifyImageToolFailureIncludesSafeProviderRequestDiagnostics(t *testing.T) {
+	err := &service.ImageProviderFailureError{
+		CorrelationID: "server-correlation-request-diagnostics",
+		Err: &appimage.GenerateError{
+			Provider:            "TokenPlayer",
+			Code:                "network_error",
+			RequestMethod:       "POST",
+			RequestEndpoint:     "https://token.example.test/api/v3/images/generations",
+			ResponseContentType: "",
+			TransportPhase:      "dns",
+			ProviderRequestID:   "sdk-request-1",
+			HTTPStatusCode:      500,
+			Message:             "private provider detail",
+		},
+	}
+
+	failure := classifyImageToolFailure(context.Background(), context.Background(), err, "generate", time.Minute, false)
+	if failure.Request == nil || failure.Request.Method != "POST" || failure.Request.Endpoint != "https://token.example.test/api/v3/images/generations" || failure.Request.TransportPhase != "dns" || failure.Request.ProviderRequestID != "sdk-request-1" {
+		t.Fatalf("failure request diagnostics = %#v", failure.Request)
+	}
+	if failure.Request.HTTPStatusCode != 500 {
+		t.Fatalf("failure request status = %d, want 500", failure.Request.HTTPStatusCode)
+	}
+}
+
 func TestUploadImageUserAssistedFailureIsStructuredAndNonRetryable(t *testing.T) {
 	result := uploadImageErrorResult(service.ErrWechatDeliveryModeUserAssisted)
 	if result == nil || !result.IsError {

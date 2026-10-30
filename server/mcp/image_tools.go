@@ -124,20 +124,30 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 }
 
 type imageToolFailure struct {
-	Code               string   `json:"code"`
-	Message            string   `json:"message"`
-	Hint               string   `json:"hint"`
-	Stage              string   `json:"stage"`
-	Retryable          bool     `json:"retryable"`
-	CorrelationID      string   `json:"correlation_id"`
-	TimeoutMS          int64    `json:"timeout_ms,omitempty"`
-	Durable            bool     `json:"durable_task_file"`
-	RequestedRatio     string   `json:"requested_ratio,omitempty"`
-	AllowedImageRatios []string `json:"allowed_image_ratios,omitempty"`
-	TaskImageRatio     string   `json:"task_image_ratio,omitempty"`
-	ActualWidth        int      `json:"actual_width,omitempty"`
-	ActualHeight       int      `json:"actual_height,omitempty"`
-	CapabilityKey      string   `json:"capability_key,omitempty"`
+	Code               string                       `json:"code"`
+	Message            string                       `json:"message"`
+	Hint               string                       `json:"hint"`
+	Stage              string                       `json:"stage"`
+	Retryable          bool                         `json:"retryable"`
+	CorrelationID      string                       `json:"correlation_id"`
+	TimeoutMS          int64                        `json:"timeout_ms,omitempty"`
+	Durable            bool                         `json:"durable_task_file"`
+	RequestedRatio     string                       `json:"requested_ratio,omitempty"`
+	AllowedImageRatios []string                     `json:"allowed_image_ratios,omitempty"`
+	TaskImageRatio     string                       `json:"task_image_ratio,omitempty"`
+	ActualWidth        int                          `json:"actual_width,omitempty"`
+	ActualHeight       int                          `json:"actual_height,omitempty"`
+	CapabilityKey      string                       `json:"capability_key,omitempty"`
+	Request            *imageToolRequestDiagnostics `json:"request,omitempty"`
+}
+
+type imageToolRequestDiagnostics struct {
+	Method              string `json:"method,omitempty"`
+	Endpoint            string `json:"endpoint,omitempty"`
+	HTTPStatusCode      int    `json:"http_status,omitempty"`
+	ResponseContentType string `json:"response_content_type,omitempty"`
+	TransportPhase      string `json:"transport_phase,omitempty"`
+	ProviderRequestID   string `json:"provider_request_id,omitempty"`
 }
 
 func imageFailureResult(failure imageToolFailure) *mcp.CallToolResult {
@@ -160,6 +170,16 @@ func classifyImageToolFailure(parentCtx, operationCtx context.Context, err error
 		code = providerErr.Code
 		failure.Retryable = providerErr.Retryable()
 		failure.Hint = safeImageFailureHint(providerErr.Code)
+		if providerErr.RequestMethod != "" || providerErr.RequestEndpoint != "" || providerErr.HTTPStatusCode != 0 || providerErr.ResponseContentType != "" || providerErr.TransportPhase != "" || providerErr.ProviderRequestID != "" {
+			failure.Request = &imageToolRequestDiagnostics{
+				Method:              providerErr.RequestMethod,
+				Endpoint:            providerErr.RequestEndpoint,
+				HTTPStatusCode:      providerErr.HTTPStatusCode,
+				ResponseContentType: providerErr.ResponseContentType,
+				TransportPhase:      providerErr.TransportPhase,
+				ProviderRequestID:   providerErr.ProviderRequestID,
+			}
+		}
 	}
 	var ratioErr *service.ImageRatioNotAllowedError
 	if errors.As(err, &ratioErr) {

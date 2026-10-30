@@ -74,12 +74,12 @@ describe('ProjectChannelConfigDialog', () => {
     expect(api.projects.upsertWechatPlatformConfig).toHaveBeenLastCalledWith(project.id, { app_id: 'wx-new', secret: 'test-secret', automatic_delivery_enabled: true, delivery_mode: 'draft' })
   })
 
-  it('keeps automatic delivery off when legacy configuration omits the switch', async () => {
+  it('defaults legacy configuration without automatic delivery to manual copy', async () => {
     vi.mocked(api.projects.getWechatPlatformConfig).mockResolvedValue({ project_id: project.id, platform: 'wechat', app_id: 'wx-shared', secret_configured: true, credentials_conflict: false } as Awaited<ReturnType<typeof api.projects.getWechatPlatformConfig>>)
     vi.mocked(api.projects.upsertWechatPlatformConfig).mockResolvedValue({ project_id: project.id, platform: 'wechat', app_id: 'wx-shared', secret_configured: true, automatic_delivery_enabled: false, credentials_conflict: false })
     render(<ProjectChannelConfigDialog project={project} onClose={vi.fn()} />)
     await screen.findByDisplayValue('wx-shared')
-    expect(screen.getByLabelText('允许自动交付')).not.toBeChecked()
+    expect(screen.getByRole('button', { name: /手动复制/ })).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('makes QR authorization the primary path and explains the draft default', async () => {
@@ -102,7 +102,7 @@ describe('ProjectChannelConfigDialog', () => {
     })
     render(<ProjectChannelConfigDialog project={project} onClose={vi.fn()} />)
     expect(await screen.findByRole('button', { name: /扫码绑定公众号/ })).toBeInTheDocument()
-    expect(screen.getByText('绑定后，生成结果可自动保存到草稿箱；不会发布或群发。')).toBeInTheDocument()
+    expect(screen.getByText('绑定后可启用草稿箱交付；不会发布或群发。')).toBeInTheDocument()
     expect(screen.getByText('使用存量 AppID 配置').closest('details')).not.toHaveAttribute('open')
   })
 
@@ -113,10 +113,10 @@ describe('ProjectChannelConfigDialog', () => {
       connection: { authorization_enabled: true, authorization_record_exists: true, connected: true, status: 'connected', can_create_draft: true, can_upload_material: true, can_formally_publish: true },
     })
     render(<ProjectChannelConfigDialog project={project} onClose={vi.fn()} />)
-    fireEvent.click(await screen.findByRole('button', { name: '正式发布' }))
+    fireEvent.click(await screen.findByRole('button', { name: /正式发布/ }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(api.projects.upsertWechatPlatformConfig).toHaveBeenCalledWith(project.id, { automatic_delivery_enabled: true, delivery_mode: 'direct_publish' }))
-    expect(screen.getByText(/正式发布只会在任务详情中确认后提交/)).toBeInTheDocument()
+    expect(screen.getByText(/手动复制适合需要自己把关/)).toBeInTheDocument()
   })
 
   it('requires both draft and formal publish capabilities to select formal delivery', async () => {
@@ -126,7 +126,7 @@ describe('ProjectChannelConfigDialog', () => {
       connection: { authorization_enabled: true, authorization_record_exists: true, connected: true, status: 'connected', can_create_draft: false, can_upload_material: false, can_formally_publish: true },
     })
     render(<ProjectChannelConfigDialog project={project} onClose={vi.fn()} />)
-    expect(await screen.findByRole('button', { name: '正式发布' })).toBeDisabled()
+    expect(await screen.findByRole('button', { name: /正式发布/ })).toBeDisabled()
     expect(screen.getByText(/缺少草稿箱权限/)).toBeInTheDocument()
   })
 
@@ -150,7 +150,7 @@ describe('ProjectChannelConfigDialog', () => {
     })
     render(<ProjectChannelConfigDialog project={project} onClose={vi.fn()} />)
     expect(await screen.findByText(/微信已撤销授权/)).toBeInTheDocument()
-    expect(screen.getByLabelText('自动存入公众号草稿箱')).toBeChecked()
+    expect(screen.getByRole('button', { name: /发布到草稿箱/ })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.queryByLabelText('微信 AppSecret')).not.toBeInTheDocument()
   })
 

@@ -93,7 +93,8 @@ func TestAnbanCreatorNamingContractUsesFixedMCPEndpoint(t *testing.T) {
 		t.Fatal("no harness/agents/*.toml files found")
 	}
 	for _, path := range agentPaths {
-		if filepath.Base(path) == "project-creator.toml" {
+		base := filepath.Base(path)
+		if base == "project-creator.toml" || base == "talking-head-montage.toml" {
 			continue
 		}
 		cases = append(cases, struct {
@@ -125,6 +126,17 @@ func TestAnbanCreatorNamingContractUsesFixedMCPEndpoint(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTalkingHeadMontageCodexAgentRemainsLocalOnly(t *testing.T) {
+	path := filepath.Join(repoRoot(t), "harness", "agents", "talking-head-montage.toml")
+	body := readTextFile(t, path)
+	if strings.Contains(body, "[mcp_servers.creator]") || strings.Contains(body, "$ANBAN_API_KEY") || strings.Contains(body, "${ANBAN_API_KEY}") {
+		t.Fatalf("local talking-head-montage Agent must not configure Creator MCP")
+	}
+	if !strings.Contains(body, "不调用 creator MCP") || !strings.Contains(body, "不读取 ANBAN_API_KEY") || !strings.Contains(body, "不连接 Server 或 Studio") {
+		t.Fatalf("local talking-head-montage Agent must retain its explicit no-Creator-MCP boundary")
 	}
 }
 
