@@ -2916,7 +2916,7 @@
     {
       "id": "talking-head-editor",
       "channel": "talking-head-editor",
-      "version": "2.0.5",
+      "version": "2.0.6",
       "kind": "managed",
       "display_name": "口播精剪",
       "description": "按固定口播工作流自动完成静音粗剪、语义精剪、动效素材包装和音效 BGM 收尾，并保留可复核的剪辑证据。",
@@ -3202,7 +3202,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "7e5555707bee6c32918f919864552f9e29549e4993d7aabf5d279c665a4c055b"
+      "digest": "d09b3877c3ac80183adb54c31f472b2a52506cf9d16d58ef6a5258338565c426"
     },
     {
       "id": "video-edit",
