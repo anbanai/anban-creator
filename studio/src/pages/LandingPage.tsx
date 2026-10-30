@@ -52,7 +52,7 @@ function WorkspacePreview({ activeStage, onStageChange }: { activeStage: number;
   return (
     <div
       className="landing-preview"
-      aria-label="Anban Studio 工作流预览"
+      aria-label="Anban AI 工作流预览"
       onPointerMove={(event) => {
         if (event.pointerType === 'touch') return
         const bounds = event.currentTarget.getBoundingClientRect()

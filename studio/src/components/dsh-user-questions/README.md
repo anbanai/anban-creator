@@ -1,6 +1,6 @@
 # DSH User Questions Adapter
 
-This directory adapts the question UX from DeepSeek Harness for Anban Studio.
+This directory adapts the question UX from DeepSeek Harness for Anban AI.
 
 ## Upstream
 
