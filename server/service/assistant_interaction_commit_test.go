@@ -178,7 +178,7 @@ func TestCommitInteractionReplaysDeterministicFailureCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload := json.RawMessage(`{"plan":{"goal":"write"}}`)
+	payload := json.RawMessage(completeInteractionPlan)
 	digest := sha256.Sum256(payload)
 	stage, err := svc.StageDraftForInteraction(context.Background(), "user-1", InteractionStageInput{
 		InteractionID: snapshot.ID, Generation: snapshot.Generation, AttemptID: "failure-stage", ModeID: AssistantModeCreation,

@@ -72,7 +72,6 @@ export function AssistantContextBar(props: AssistantContextBarProps) {
         : projectId ? '已选人设' : '未关联人设'
     return (
       <div data-testid="assistant-context-bar" data-phase="locked" aria-disabled="true" className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 py-3 text-left text-sm text-muted-foreground">
-        <ContextLabel icon={BriefcaseBusiness}>当前模式：{modeLabel(mode)}</ContextLabel>
         <ProjectContextControl mode="readonly" project={selectedProject} noProjectLabel={projectFallback} compact showAgents={false} />
         {status}
         {mode === 'review' && (contentId || selectedWork) ? <ContextLabel icon={FileText}>{selectedWork?.title ?? (loadingWorks ? '加载作品…' : '已选作品')}</ContextLabel> : null}

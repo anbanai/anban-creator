@@ -37,7 +37,7 @@ SERVER_CONFIG := server/config.yaml
 DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null || stat -L -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)
 
 .PHONY: all clean distclean test help lint fmt vet deps ci coverage \
-        server-build server-run server-dev server-test git-sync-setup humanizer-update \
+        server-build server-run server-dev server-test git-sync-setup humanizer-update creative-references-check creative-references-update \
         agent-pack-new agent-pack-generate agent-pack-check \
         runtime-claude-install runtime-claude-test runtime-claude-build \
         runtime-dsh-install runtime-dsh-test runtime-dsh-build \
@@ -95,6 +95,14 @@ git-sync-setup:
 # The child target validates the upstream checkout and plugin manifests.
 humanizer-update:
 	@scripts/update-humanizer.sh
+
+# Validate official creative-reference submodules and native plugin metadata.
+creative-references-check:
+	@cd harness && make creative-references-check
+
+# Advance official creative-reference submodules and review their upstream diff.
+creative-references-update:
+	@scripts/update-creative-references.sh
 
 # Scaffold, generate, and verify the canonical Agent Pack catalog. Pass
 # scaffold flags through ARGS, for example:
@@ -254,8 +262,9 @@ docker-video-edit-agent-image: docker-agent-build-check
 
 docker-talking-head-editor-agent-image: docker-agent-build-check
 	@echo "Building $(TALKING_HEAD_EDITOR_AGENT_IMAGE)..." && \
-	docker build -f deploy/docker/Dockerfile.agent-talking-head-editor \
+	docker build --platform linux/amd64 -f deploy/docker/Dockerfile.agent-talking-head-editor \
 		--build-arg VIDEO_USE_REPO="$(VIDEO_USE_SOURCE_REPO)" --build-arg VIDEO_USE_REF="$(VIDEO_USE_SOURCE_REF)" \
+		--build-arg AUTO_EDITOR_VERSION="$(AUTO_EDITOR_VERSION)" \
 		-t $(TALKING_HEAD_EDITOR_AGENT_IMAGE) . && echo "Image build complete: $(TALKING_HEAD_EDITOR_AGENT_IMAGE)"
 
 # Build the Moments Agent image.

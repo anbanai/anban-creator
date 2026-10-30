@@ -23,6 +23,7 @@ export declare class DeepSeekHarness implements AsyncDisposable {
     private readonly model;
     private readonly reasoningEffort;
     private readonly maxTokens;
+    private readonly approvalRequests;
     private initialized;
     private closed;
     /** @param options - dsh launch configuration plus the session route, effort, and output cap. */

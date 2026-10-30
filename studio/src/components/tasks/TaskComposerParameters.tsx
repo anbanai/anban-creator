@@ -73,10 +73,10 @@ export function TaskComposerParameters({
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        className="max-h-[var(--available-height)] w-[min(48rem,calc(100vw-1rem))] gap-1.5 overflow-y-auto p-2"
+        className="max-h-[var(--available-height)] w-[min(38rem,calc(100vw-1rem))] gap-3 overflow-y-auto p-3"
       >
         <PopoverTitle className="sr-only">{label}</PopoverTitle>
-        <section className="flex flex-col gap-2">
+        <section className="flex flex-col gap-1">
           <h3 className="font-medium">执行配置</h3>
           <ExecutionProfileSelector {...execution} layout="horizontal" />
         </section>

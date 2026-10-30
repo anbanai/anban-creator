@@ -1,13 +1,7 @@
 import { BuildVersion } from '@/components/BuildVersion'
 import { Link } from 'react-router-dom'
-import { PenLine, ImagePlus, Send, TrendingUp, type LucideIcon } from 'lucide-react'
-
-const featurePills: { label: string; icon: LucideIcon }[] = [
-  { label: 'AI 智能写作', icon: PenLine },
-  { label: '一键生图', icon: ImagePlus },
-  { label: '直接发布', icon: Send },
-  { label: 'SEO 优化', icon: TrendingUp },
-]
+import { ArrowUpRight } from 'lucide-react'
+import './AuthLayout.css'
 
 export default function AuthLayout({
   children,
@@ -25,81 +19,42 @@ export default function AuthLayout({
   footerLinkTo: string
 }) {
   return (
-    <div className="relative flex min-h-dvh py-24 items-center justify-center xl:justify-end overflow-hidden bg-gradient-to-br from-amber-50 via-amber-100 to-amber-300 dark:from-amber-950 dark:via-amber-900 dark:to-amber-800">
-      {/* Decorative circles */}
-      <div className="pointer-events-none absolute -right-16 -top-16 h-52 w-52 rounded-full bg-amber-400/30 dark:bg-amber-600/20" />
-      <div className="pointer-events-none absolute -bottom-10 right-80 h-36 w-36 rounded-full bg-amber-500/20 dark:bg-amber-700/20" />
-      <div className="pointer-events-none absolute left-[60%] top-20 h-20 w-20 rounded-full bg-amber-600/15 dark:bg-amber-800/15" />
-
-      {/* Hero section — desktop only */}
-      <div className="absolute inset-y-0 left-0 hidden w-[55%] flex-col justify-center px-16 xl:flex">
-        <div className="mb-4 text-sm font-semibold tracking-widest text-amber-800 dark:text-amber-300">
-          ✦ Anban Studio
-        </div>
-        <h1 className="text-5xl font-black leading-tight text-amber-900 dark:text-amber-100">
-          内容生产
-          <br />
-          持续进化
-        </h1>
-        <p className="mt-4 max-w-sm text-base leading-relaxed text-amber-700 dark:text-amber-300">
-          从选题判断、内容与素材生成，到发布数据回流和效果复盘，帮助团队持续产出高质量内容。
-        </p>
-        <div className="mt-6 flex flex-wrap gap-2">
-          {featurePills.map((pill) => {
-            const Icon = pill.icon
-            return (
-              <span
-                key={pill.label}
-                className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/60 bg-white/70 px-3.5 py-1.5 text-xs font-medium text-amber-800 backdrop-blur-sm dark:border-amber-600/40 dark:bg-amber-800/40 dark:text-amber-200"
-              >
-                <Icon className="size-3.5 text-amber-600 dark:text-amber-400" />
-                {pill.label}
-              </span>
-            )
-          })}
-        </div>
+    <div className="auth-page dark relative flex min-h-dvh items-center overflow-hidden">
+      <div className="auth-brand-panel">
+        <Link to="/" className="auth-brand-panel__logo" aria-label="返回 Anban AI 官网">
+          <img src="/brand/anban-horizontal.png" alt="Anban AI" />
+        </Link>
+        <p className="auth-brand-panel__eyebrow">CONTENT OPERATING SYSTEM</p>
+        <h1>内容生产，<br /><span>持续进化。</span></h1>
+        <p className="auth-brand-panel__description">从选题判断、内容与素材生成，到发布记录和效果复盘，让每一轮创作都成为下一轮的依据。</p>
+        <Link to="/" className="auth-brand-panel__back">探索 Anban AI <ArrowUpRight className="size-4" /></Link>
+        <div className="auth-brand-panel__signature"><span>ANBAN</span><span>01 — 04</span></div>
       </div>
 
-      {/* Form card */}
-      <div className="relative z-10 mx-4 w-full max-w-[380px] rounded-2xl bg-white p-8 shadow-2xl shadow-amber-900/10 dark:bg-amber-950 dark:shadow-black/30 sm:mx-0 xl:mr-24">
-        {/* Mobile brand header */}
-        <div className="mb-6 text-center xl:hidden">
-          <div className="text-xs font-semibold tracking-widest text-amber-700 dark:text-amber-400">
-            ✦ Anban Studio
+      <div className="auth-form-zone">
+        <div className="auth-mobile-brand">
+          <Link to="/" aria-label="返回 Anban AI 官网"><img src="/brand/anban-horizontal.png" alt="Anban AI" /></Link>
+        </div>
+        <div className="auth-form-panel">
+          <div className="auth-form-panel__index">STUDIO / ACCOUNT</div>
+          <div className="mb-6 text-left">
+            <h2 className="text-xl font-semibold tracking-tight text-foreground">{title}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
           </div>
-          <div className="mt-2 text-2xl font-black text-amber-900 dark:text-amber-100">内容智能创作系统</div>
+          {children}
+          <p className="mt-5 text-center text-sm text-muted-foreground">
+            {footerText}{' '}
+            <Link to={footerLinkTo} className="font-medium text-primary hover:text-primary/80">
+              {footerLinkText}
+            </Link>
+          </p>
         </div>
-
-        {/* Form header */}
-        <div className="mb-6 text-center">
-          <h2 className="text-lg font-bold text-foreground">{title}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
-        </div>
-
-        {/* Form content slot */}
-        {children}
-
-        {/* Footer link */}
-        <p className="mt-5 text-center text-sm text-muted-foreground">
-          {footerText}{' '}
-          <Link to={footerLinkTo} className="font-medium text-primary hover:text-primary/80">
-            {footerLinkText}
-          </Link>
-        </p>
       </div>
 
-      {/* ICP footer */}
-      <div className="absolute bottom-4 w-full text-center text-xs text-amber-600/70 dark:text-amber-400/50">
-        <p className="mb-2"><BuildVersion /></p>
-        <p>© {new Date().getFullYear()} 成都北冕星辰科技有限公司</p>
-        <a
-          href="https://beian.miit.gov.cn/"
-          target="_blank"
-          rel="noreferrer"
-          className="hover:text-amber-800 dark:hover:text-amber-300"
-        >
-          蜀ICP备2024071665号-3
-        </a>
+      <div className="auth-footer">
+        <span><BuildVersion /></span>
+        <span>© {new Date().getFullYear()} 成都北冕星辰科技有限公司</span>
+        <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">蜀ICP备2024071665号-3</a>
       </div>
     </div>
   )

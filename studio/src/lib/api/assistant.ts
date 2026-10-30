@@ -39,7 +39,7 @@ export interface AssistantInteractionSnapshot {
   last_activity_at: string
   available_actions: string[]
   recovery_error_code?: string
-  drafts: AssistantInteractionDraftReceipt[]
+  drafts?: AssistantInteractionDraftReceipt[]
   commit_result?: AssistantInteractionCommitResult
 }
 
@@ -222,7 +222,7 @@ export const assistantApi = {
 
   workspaceCheckpoint: async (workspaceId: string, modeId: AssistantModeID, checkpoint: AssistantCheckpointRequest) => {
     const snapshot = await assistantApi.getInteractionSnapshot(workspaceId)
-    const draft = [...snapshot.drafts].filter((item) => item.mode_id === modeId).sort((a, b) => b.revision - a.revision)[0]
+    const draft = [...(snapshot.drafts ?? [])].filter((item) => item.mode_id === modeId).sort((a, b) => b.revision - a.revision)[0]
     if (!draft) throw new Error('当前计划尚未保存，请重试暂存')
     return { id: draft.draft_id, payload_digest: draft.payload_digest, revision: draft.revision, schema_version: checkpoint.schema_version, payload: draft.payload, summary: checkpoint.summary, status: draft.ready ? 'ready' : 'draft', user_id: '', mode_id: modeId, project_id: snapshot.project_id, content_id: snapshot.content_id, source_session_id: workspaceId, expires_at: snapshot.expires_at } satisfies AssistantCheckpoint
   },
@@ -235,7 +235,8 @@ export const assistantApi = {
       if (modeId === 'creation') throw new Error('当前计划尚未保存，请恢复计划')
       const snapshot = await assistantApi.getInteractionSnapshot(workspaceId)
       const requestedID = 'checkpoint_id' in payload ? payload.checkpoint_id : undefined
-      const draft = snapshot.drafts.find((item) => item.draft_id === requestedID) ?? snapshot.drafts.find((item) => item.ready)
+      const drafts = snapshot.drafts ?? []
+      const draft = drafts.find((item) => item.draft_id === requestedID) ?? drafts.find((item) => item.ready)
       if (!draft) throw new Error('当前计划尚未保存，请恢复计划')
       request = { draft_id: draft.draft_id, revision: draft.revision, idempotency_key: payload.idempotency_key, options: payload.options }
     }

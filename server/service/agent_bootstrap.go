@@ -860,7 +860,7 @@ func (s *AgentBootstrapService) runtimeEnv(task *model.Task) map[string]string {
 			}
 		}
 		if key := strings.TrimSpace(s.cfg.TalkingHeadEditor.VideoUseAPIKey); key != "" {
-			env["VIDEO_USE_API_KEY"] = key
+			env["ELEVENLABS_API_KEY"] = key
 		}
 		return env
 	}
@@ -1063,7 +1063,7 @@ func (s *AgentBootstrapService) buildTalkingHeadEditorFiles(ctx context.Context,
 	}
 	files = append(files, BootstrapFile{Path: "talking-head-editor-input.json", Text: string(raw), Mode: 0644})
 	policy := map[string]any{
-		"skills":            []string{"auto-editor", "video-use", "erduo-broll-loop-engineering"},
+		"skills":            []string{"auto-editor", "video-use", "erduo-broll-loop-engineering", "talking-head-sound-design", "content-tagging"},
 		"video_use_api_key": "server-injected",
 		"review_gate":       "motion-sample",
 		"review_decision":   task.ReviewDecision,

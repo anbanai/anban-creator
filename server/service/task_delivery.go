@@ -94,6 +94,7 @@ func (s *TaskService) validateExecutionDelivery(ctx context.Context, taskID stri
 		requiredArtifacts = talkingHeadEditorSampleRequiredArtifacts(requiredArtifacts)
 	}
 	matched := 0
+	var totalBytes int64
 	for _, file := range files {
 		if file == nil || file.TaskID != taskID || file.ExecutionID != execution.ID ||
 			(file.State != model.TaskFileStatePending && file.State != model.TaskFileStateDelivered) {
@@ -109,6 +110,12 @@ func (s *TaskService) validateExecutionDelivery(ctx context.Context, taskID stri
 		}
 		if err := s.validateStoredDeliveryObject(ctx, task, execution.ID, file, spec); err != nil {
 			return err
+		}
+		if model.IsTalkingHeadEditorPlatform(task.Type) {
+			if file.FileSize > 0 && totalBytes > talkingHeadTotalArtifactBytes-file.FileSize {
+				return fmt.Errorf("%w: talking-head artifacts exceed the %d MB total limit", ErrTaskDeliveryObjectInvalid, talkingHeadTotalArtifactBytes/(1024*1024))
+			}
+			totalBytes += file.FileSize
 		}
 	}
 	if matched == 0 {
@@ -146,10 +153,15 @@ func (s *TaskService) validateExecutionDelivery(ctx context.Context, taskID stri
 
 func talkingHeadEditorSampleRequiredArtifacts(required []agentpack.ArtifactSpec) []agentpack.ArtifactSpec {
 	allowed := map[string]struct{}{
-		"output/edit-decision-list.json": {},
-		"output/transcript.json":         {},
-		"output/edit-strategy.md":        {},
-		"output/visual-plan.json":        {},
+		"output/rough-cut.mp4":               {},
+		"output/transcript.json":             {},
+		"output/edit-decision-list.json":     {},
+		"output/edit-strategy.md":            {},
+		"output/semantic-cut.mp4":            {},
+		"output/motion-sample.mp4":           {},
+		"output/visual-plan.json":            {},
+		"output/motion-review.json":          {},
+		"output/motion-source-manifest.json": {},
 	}
 	filtered := make([]agentpack.ArtifactSpec, 0, len(required))
 	for _, artifact := range required {

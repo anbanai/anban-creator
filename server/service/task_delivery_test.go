@@ -426,13 +426,36 @@ func TestValidateExecutionDeliveryRequiresEveryFrozenArtifact(t *testing.T) {
 func TestTalkingHeadEditorSampleRequiredArtifactsExcludeFinalDelivery(t *testing.T) {
 	required := []agentpack.ArtifactSpec{
 		{Role: "final_video", Path: "output/final.mp4", MIMEType: "video/mp4", Required: true},
+		{Role: "rough_cut", Path: "output/rough-cut.mp4", MIMEType: "video/mp4", Required: true},
 		{Role: "transcript", Path: "output/transcript.json", MIMEType: "application/json", Required: true},
+		{Role: "edit_decision_list", Path: "output/edit-decision-list.json", MIMEType: "application/json", Required: true},
+		{Role: "edit_strategy", Path: "output/edit-strategy.md", MIMEType: "text/markdown", Required: true},
+		{Role: "semantic_cut", Path: "output/semantic-cut.mp4", MIMEType: "video/mp4", Required: true},
+		{Role: "motion_sample", Path: "output/motion-sample.mp4", MIMEType: "video/mp4", Required: true},
 		{Role: "visual_plan", Path: "output/visual-plan.json", MIMEType: "application/json", Required: true},
+		{Role: "motion_review", Path: "output/motion-review.json", MIMEType: "application/json", Required: true},
+		{Role: "motion_source_manifest", Path: "output/motion-source-manifest.json", MIMEType: "application/json", Required: true},
 		{Role: "quality", Path: "output/quality-evidence.json", MIMEType: "application/json", Required: true},
 	}
 	got := talkingHeadEditorSampleRequiredArtifacts(required)
-	if len(got) != 2 || got[0].Path != "output/transcript.json" || got[1].Path != "output/visual-plan.json" {
-		t.Fatalf("sample required artifacts = %#v, want transcript and visual plan only", got)
+	want := []string{
+		"output/rough-cut.mp4",
+		"output/transcript.json",
+		"output/edit-decision-list.json",
+		"output/edit-strategy.md",
+		"output/semantic-cut.mp4",
+		"output/motion-sample.mp4",
+		"output/visual-plan.json",
+		"output/motion-review.json",
+		"output/motion-source-manifest.json",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("sample required artifacts = %#v, want %v", got, want)
+	}
+	for i, artifact := range got {
+		if artifact.Path != want[i] {
+			t.Fatalf("sample required artifact %d = %q, want %q", i, artifact.Path, want[i])
+		}
 	}
 }
 

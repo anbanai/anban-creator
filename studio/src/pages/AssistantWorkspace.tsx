@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Bot, Check, ChevronDown, Layers3, Library, Loader2, Plus, Upload, UserRound } from 'lucide-react'
+import { ArrowLeft, Bot, Check, ChevronDown, Layers3, Library, Loader2, Plus, Sparkles, Upload, UserRound } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
@@ -47,7 +47,7 @@ import './AssistantWorkspace.css'
 
 type Message = { id: string; role: 'user' | 'assistant'; text: string; order: number }
 type HomePersona = AssistantProject & { platform: Project['platform'] }
-type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers']; order: number }
+type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers']; draftAnswers?: DshQuestionAnswer['answers']; generation?: number; closed?: 'failed' | 'expired'; order: number }
 type Draft = Record<string, unknown>
 type RouteState = AssistantRouteState
 type UncertainRetry =
@@ -97,7 +97,7 @@ function parsePersistedMessages(value: unknown): Record<string, Message[]> | und
   return result
 }
 
-function parsePersistedQuestions(value: unknown): Record<string, QuestionBatch[]> | undefined {
+function parsePersistedQuestions(value: unknown, generation?: number): Record<string, QuestionBatch[]> | undefined {
   const source = recordValue(value)
   if (!source) return undefined
   const result: Record<string, QuestionBatch[]> = {}
@@ -108,7 +108,8 @@ function parsePersistedQuestions(value: unknown): Record<string, QuestionBatch[]
       const callId = stringValue(item?.callId)
       const questions = parseQuestions(item?.questions)
       if (!callId || !questions.length) return []
-      return [{ callId, questions, answers: Array.isArray(item?.answers) ? item.answers as DshQuestionAnswer['answers'] : undefined, order: typeof item?.order === 'number' ? item.order : entries.length + index + 1 }]
+      const closed = item?.closed === 'failed' || item?.closed === 'expired' ? item.closed : undefined
+      return [{ callId, questions, answers: Array.isArray(item?.answers) ? item.answers as DshQuestionAnswer['answers'] : undefined, draftAnswers: Array.isArray(item?.draftAnswers) ? item.draftAnswers as DshQuestionAnswer['answers'] : undefined, generation: typeof item?.generation === 'number' ? item.generation : generation, closed, order: typeof item?.order === 'number' ? item.order : entries.length + index + 1 }]
     })
   }
   return result
@@ -162,7 +163,7 @@ function parseQuestions(value: unknown): DshQuestion[] {
   })
 }
 
-function draftReceiptToDraft(receipt: AssistantInteractionSnapshot['drafts'][number]): Draft {
+function draftReceiptToDraft(receipt: AssistantInteractionDraftReceipt): Draft {
   const payload = recordValue(receipt.payload) ?? {}
   return {
     ...payload,
@@ -177,8 +178,8 @@ function draftReceiptToDraft(receipt: AssistantInteractionSnapshot['drafts'][num
 }
 
 function draftsFromSnapshot(snapshot: AssistantInteractionSnapshot): Record<string, Draft | null> {
-  const latest = new Map<string, AssistantInteractionSnapshot['drafts'][number]>()
-  for (const receipt of snapshot.drafts) {
+  const latest = new Map<string, AssistantInteractionDraftReceipt>()
+  for (const receipt of snapshot.drafts ?? []) {
     const current = latest.get(receipt.mode_id)
     if (!current || receipt.revision > current.revision) latest.set(receipt.mode_id, receipt)
   }
@@ -292,7 +293,7 @@ function readPersistedWorkspace(): PersistedWorkspace | null {
       contentId: typeof candidate.contentId === 'string' ? candidate.contentId : undefined,
       composer: typeof candidate.composer === 'string' ? candidate.composer : undefined,
       messagesByMode: parsePersistedMessages(candidate.messagesByMode),
-      questionsByMode: parsePersistedQuestions(candidate.questionsByMode),
+      questionsByMode: parsePersistedQuestions(candidate.questionsByMode, candidate.workspace?.generation),
       draftByMode: parsePersistedDrafts(candidate.draftByMode),
       uncertainRetry: parsePersistedUncertainRetry(candidate.uncertainRetry),
       commitIdempotencyKeys: Object.fromEntries(Object.entries(recordValue(candidate.commitIdempotencyKeys) ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
@@ -350,12 +351,21 @@ export default function AssistantWorkspace() {
   const workspaceResetVersion = useRef(0)
   const workspaceCreateKey = useRef<string | null>(null)
   const sendInFlight = useRef(false)
+  const answerInFlight = useRef(false)
   const [commitIdempotencyKeys, setCommitIdempotencyKeys] = useState<Record<string, string>>(persisted?.commitIdempotencyKeys ?? {})
   const modeChosenByUser = useRef(false)
   const imageRatioContextKey = useRef<string | null>(null)
   const conversationOrder = useRef<Record<string, number>>({})
   const uncertainRetryRef = useRef<(() => void) | null>(null)
   const initialSnapshotRequired = useRef(Boolean(!routeHasContext && persisted?.workspace))
+
+  useEffect(() => {
+    const generation = workspace?.generation
+    if (generation === undefined) return
+    setQuestionsByMode((current) => Object.fromEntries(Object.entries(current).map(([questionMode, batches]) => [questionMode,
+      batches.map((batch) => !batch.answers && !batch.closed && batch.generation !== undefined && batch.generation !== generation ? { ...batch, closed: 'expired' as const } : batch),
+    ])))
+  }, [workspace?.generation])
 
   const applyInteractionSnapshot = (snapshot: AssistantInteractionSnapshot) => {
     setInteractionSnapshot(snapshot)
@@ -484,7 +494,7 @@ export default function AssistantWorkspace() {
   })
   const activeMessages = messagesByMode[mode] ?? []
   const activeQuestions = questionsByMode[mode] ?? []
-  const pendingQuestions = activeQuestions.filter((question) => !question.answers)
+  const pendingQuestions = activeQuestions.filter((question) => !question.answers && !question.closed)
   const creationReceipt = interactionState.drafts.filter((draft) => draft.mode_id === 'creation').sort((a, b) => b.revision - a.revision)[0]
   const activeDraft = mode === 'creation' ? creationReceipt && creationReceipt.confirmation_state !== 'consumed' ? draftReceiptToDraft(creationReceipt) : null : draftByMode[mode]
   const creationCanConfirm = Boolean(creationReceipt?.ready && creationReceipt.confirmation_state === 'pending' && interactionState.availableActions.includes('confirm_draft'))
@@ -527,6 +537,9 @@ export default function AssistantWorkspace() {
   const resetExpiredWorkspace = (preservedComposer?: string) => {
     workspaceResetVersion.current += 1
     setResponding(false)
+    setQuestionsByMode((current) => Object.fromEntries(Object.entries(current).map(([questionMode, batches]) => [questionMode,
+      batches.map((batch) => !batch.answers && !batch.closed ? { ...batch, closed: 'expired' as const } : batch),
+    ])))
     setInteractionSnapshotReady(false)
     setError('连接已结束，当前计划和输入已保留，请恢复后继续。')
     const preserved = preservedComposer ?? lastSubmittedMessage.current
@@ -712,9 +725,12 @@ export default function AssistantWorkspace() {
               setQuestionsByMode((current) => {
                 const batches = current[eventMode] ?? []
                 const existing = batches.find((item) => item.callId === callId)
-                return { ...current, [eventMode]: [...batches.filter((item) => item.callId !== callId), { ...existing, callId, questions, order: existing?.order ?? order }] }
+                return { ...current, [eventMode]: [...batches.filter((item) => item.callId !== callId), { ...existing, callId, questions, generation: existing?.generation ?? workspace.generation, order: existing?.order ?? order }] }
               })
             }
+          } else if (event.event === 'tool.result' && data.ok === false) {
+            const callId = stringValue(data.call_id)
+            if (callId) setQuestionsByMode((current) => ({ ...current, [eventMode]: (current[eventMode] ?? []).map((batch) => batch.callId === callId && !batch.answers ? { ...batch, closed: 'failed' } : batch) }))
           } else if (event.event === 'draft.ready') {
             const stagedDraft = recordValue(data.draft) ?? recordValue(data.value)
               ?? (data.ready === true || data.confirmation_token ? data : undefined)
@@ -929,7 +945,10 @@ export default function AssistantWorkspace() {
   }
 
   const submitAnswers = async (batch: QuestionBatch, answer: DshQuestionAnswer, forceNewAttempt = false) => {
-    if (!workspace) return
+    if (!workspace) throw new Error('连接已结束，请重新开始。')
+    if (answerInFlight.current) throw new Error('正在提交回答，请稍候。')
+    answerInFlight.current = true
+    setQuestionsByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).map((item) => item.callId === batch.callId ? { ...item, draftAnswers: answer.answers } : item) }))
     try {
       const mediaIDs = [...new Set(answer.answers.flatMap((item) => item.selected).flatMap((label) => {
         const match = /^media_asset:(.+)$/.exec(label.trim())
@@ -960,7 +979,7 @@ export default function AssistantWorkspace() {
       if (recoveredSnapshot) applyInteractionSnapshot(recoveredSnapshot)
       const errorCode = assistantWorkspaceErrorCode(answerError)
       if (errorCode === 'assistant_command_outcome_unknown') {
-        uncertainRetryRef.current = () => { void submitAnswers(batch, answer, true) }
+        uncertainRetryRef.current = () => { void submitAnswers(batch, answer, true).catch(() => undefined) }
         setUncertainRetry({ kind: 'answer', mode, callId: batch.callId, answers: answer.answers })
       }
       if (errorCode?.startsWith('assistant_')) dispatchInteraction({ type: 'error', code: errorCode })
@@ -973,6 +992,9 @@ export default function AssistantWorkspace() {
       }
       const conflictMessage = assistantWorkspaceConflictMessage(errorCode, 'answer')
       if (conflictMessage && errorCode !== 'assistant_workspace_busy') setError(conflictMessage)
+      throw new Error(conflictMessage ?? assistantInteractionErrorMessage(errorCode, answerError instanceof Error ? answerError.message : '提交回答失败'))
+    } finally {
+      answerInFlight.current = false
     }
   }
 
@@ -1300,7 +1322,12 @@ export default function AssistantWorkspace() {
     />
   )
   const creationComposerParameters = mode === 'creation' ? composerParameters : null
-  const composerContextBar = (
+  const ModeIcon = mode === 'profile' ? UserRound : mode === 'creation' ? Sparkles : Check
+  const composerMode = <span role="status" aria-label="当前模式" className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
+    <ModeIcon aria-hidden="true" className="size-3.5" />{modeLabel(mode)}模式
+    {creationTypeSelector && <span aria-hidden="true" className="ml-1 h-3 border-r border-border" />}
+  </span>
+  const composerContextBar = workspace ? (
     <AssistantContextBar
       phase="locked"
       mode={mode}
@@ -1315,7 +1342,8 @@ export default function AssistantWorkspace() {
       loadingWorks={worksQuery.isLoading}
       status={missingContextInstruction ? <span role="status" className="text-xs text-muted-foreground">{missingContextInstruction}</span> : undefined}
     />
-  )
+  ) : missingContextInstruction ? <div data-testid="assistant-context-bar"><span role="status" className="text-xs text-muted-foreground">{missingContextInstruction}</span></div> : undefined
+  const currentPersona = completeProjects.find((project) => project.id === selectedProject?.id)
   const activeReviewSelectors = workspace && pendingMode === 'review' ? <WorkspaceSelectors mode="review" projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={contentId} works={works} disabled={switching} onProject={selectPersona} onContent={selectReviewContent} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} /> : null
 
   const personaRail = bootstrap ? (
@@ -1350,7 +1378,7 @@ export default function AssistantWorkspace() {
           if (uncertainRetry?.kind === 'message') return void sendMessage(uncertainRetry.text, { forceNewAttempt: true })
           if (uncertainRetry?.kind === 'answer') {
             const batch = (questionsByMode[uncertainRetry.mode] ?? []).find((item) => item.callId === uncertainRetry.callId)
-            if (batch) return void submitAnswers(batch, { answers: uncertainRetry.answers }, true)
+            if (batch) return void submitAnswers(batch, { answers: uncertainRetry.answers }, true).catch(() => undefined)
           }
         }}
         onRestoreDraft={() => { void refreshInteractionSnapshot() }}
@@ -1360,7 +1388,13 @@ export default function AssistantWorkspace() {
       {!workspace ? (
         <section className="assistant-home mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col justify-center gap-3 overflow-hidden px-4 py-4 md:px-8 md:py-8">
           <div data-testid="assistant-conversation" className="assistant-home-content flex min-h-0 flex-col">
-            <HomeStage project={selectedProject} hasPersona={completeProjects.length > 0} />
+            <HomeStage project={selectedProject} mode={mode} hasPersona={completeProjects.length > 0} actions={currentPersona && <>
+              <PersonaCreationSettings project={currentPersona} disabled={switching || committing || sending || responding} />
+              <Button type="button" variant="ghost" size="sm" aria-label={`查看作品：${currentPersona.name}`} onClick={() => viewPersonaWorks(currentPersona.id)} className="h-7 px-1.5 text-[11px]">查看作品</Button>
+              {mode === 'profile'
+                ? <Button type="button" variant="ghost" size="sm" disabled={switching || committing || sending || responding} onClick={() => selectCreationPersona(currentPersona.id)} className="h-7 px-1.5 text-[11px]">开始创作</Button>
+                : <Button type="button" variant="ghost" size="sm" disabled={switching || committing || sending || responding} aria-label={`调整人设：${currentPersona.name}`} onClick={() => editPersona(currentPersona.id)} className="h-7 px-1.5 text-[11px]">调整人设</Button>}
+            </>} />
             {personaRail}
             <div className="assistant-scroll min-h-0 max-h-[45%] overflow-y-auto overscroll-contain">
             {routeHasContext && mode === 'review' && <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} onProject={resetCreationProject} onContent={setContentId} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />}
@@ -1374,7 +1408,7 @@ export default function AssistantWorkspace() {
             {videoEditInputs}
             </div>
           </div>
-          <Composer fadeAbove={false} value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || composerBlocked} /> : undefined} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <Composer fadeAbove={false} value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || composerBlocked} /> : undefined} trailingTools={<>{composerMode}{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       ) : (
         <section className="mx-auto flex min-h-0 w-full max-w-6xl min-w-0 flex-1 flex-col px-4 pb-3 md:px-8">
@@ -1382,12 +1416,12 @@ export default function AssistantWorkspace() {
             {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && (
               <VideoEditReviewResults query={reviewVideoQuery} />
             )}
-            <Conversation messages={activeMessages} questions={activeQuestions} responding={responding} disabled={draftPending} userAvatarURL={personaImageURL(selectedProject)} onAnswer={submitAnswers} />
+            <Conversation messages={activeMessages} questions={activeQuestions} responding={responding} disabled={draftPending || interactionState.status === 'command_uncertain'} userAvatarURL={personaImageURL(selectedProject)} onAnswer={submitAnswers} />
             {activeReviewSelectors}
             {activeDraft && confirmationDraft && <DraftConfirmationCard attemptIssues={mode === 'creation' ? interactionState.blockingIssues : undefined} mode={mode} draft={confirmationDraft} committing={committing} confirmable={mode !== 'creation' || creationCanConfirm} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => void continueDraft()} />}
             {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
           </div>
-          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} /> : undefined} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} /> : undefined} trailingTools={<>{composerMode}{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       )}
       </main>
@@ -1421,7 +1455,7 @@ function platformIntroduction(platform: string) {
   return profileLabAgents.find((agent) => agent.id === agentID)?.detail ?? `${platformDisplayName(platform, '创作')}内容创作`
 }
 
-function HomeStage({ project, hasPersona }: { project?: AssistantProject; hasPersona: boolean }) {
+function HomeStage({ project, hasPersona, mode, actions }: { project?: AssistantProject; hasPersona: boolean; mode: AssistantModeID; actions?: ReactNode }) {
   const imageURL = personaImageURL(project)
   const agents = project ? personaAgentIDs(project) : []
   return <section aria-label="当前人设" className="assistant-home-stage mx-auto flex w-full max-w-xl shrink-0 flex-col px-2 text-left">
@@ -1432,8 +1466,8 @@ function HomeStage({ project, hasPersona }: { project?: AssistantProject; hasPer
     <div className="min-w-0">
       <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{project ? '当前人设' : '准备开始'}</p>
       <h1 className="mt-2 truncate text-xl font-semibold tracking-tight sm:text-3xl" title={project?.name}>{project?.name ?? '神秘人'}</h1>
-      <p className="assistant-home-description mt-2 line-clamp-2 max-w-xl text-sm leading-6 text-muted-foreground">{project?.description || (hasPersona ? '选择一个人设，开始你的下一次创作。' : '为了创建更好的作品，需要先创建您的人设')}</p>
-      {project && <span className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><AgentIconStack agentIds={agents} maxVisible={3} compact emptyLabel="还未选择创作类型" /></span>}
+      <p className="assistant-home-description mt-2 line-clamp-2 max-w-xl text-sm leading-6 text-muted-foreground">{project && mode === 'profile' ? '调整这个人设的定位、风格与创作方向。' : project?.description || (project ? '使用当前人设，开始你的下一次创作。' : hasPersona ? '选择一个人设，开始你的下一次创作。' : '为了创建更好的作品，需要先创建您的人设')}</p>
+      {project && <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground"><AgentIconStack agentIds={agents} maxVisible={3} compact emptyLabel="还未选择创作类型" /><div className="persona-current-actions flex flex-wrap items-center">{actions}</div></div>}
     </div>
     </div>
   </section>
@@ -1451,6 +1485,7 @@ function PersonaRail({ projects, selectedProjectId, disabled, onSelect, onCreate
   const scrollRef = useRef<HTMLDivElement>(null)
   const [hasContentAbove, setHasContentAbove] = useState(false)
   const [hasContentBelow, setHasContentBelow] = useState(false)
+  const hasSelectedProject = projects.some((project) => project.id === selectedProjectId)
 
   useEffect(() => {
     const element = scrollRef.current
@@ -1474,8 +1509,8 @@ function PersonaRail({ projects, selectedProjectId, disabled, onSelect, onCreate
 
   return <section aria-label="首页人设选择" className="mx-auto flex min-h-32 w-full max-w-5xl flex-col pb-1">
     <div data-testid="persona-rail-header" className="mb-3 flex shrink-0 items-center gap-2 px-1">
-      <p className="text-sm font-medium">选择人设</p>
-      <span className="text-xs text-muted-foreground">{projects.length ? `${projects.length} 个可用人设` : '还没有可用人设'}</span>
+      <p className="text-sm font-medium">{hasSelectedProject ? '切换人设' : '选择人设'}</p>
+      <span className="text-xs text-muted-foreground">{projects.length ? `${projects.length} 个人设` : '还没有可用人设'}</span>
     </div>
     <div className="relative h-[14.125rem] min-h-0">
       <div ref={scrollRef} className="assistant-scroll persona-card-scroll grid h-full min-h-0 grid-cols-2 min-[700px]:grid-cols-3 min-[1600px]:grid-cols-4 min-[1900px]:grid-cols-5 min-[2200px]:grid-cols-6 auto-rows-max content-start gap-2 overflow-y-auto overscroll-contain p-1" data-testid="persona-card-scroll" tabIndex={0}>
@@ -1484,15 +1519,16 @@ function PersonaRail({ projects, selectedProjectId, disabled, onSelect, onCreate
           <span className="min-w-0"><span className="block truncate text-sm font-semibold">创建新人设</span><span className="mt-0.5 block truncate text-xs leading-4 text-muted-foreground">聊一聊你的定位与风格</span></span>
         </button>
         {projects.map((project) => {
+          const selected = project.id === selectedProjectId
           const agents = personaAgentIDs(project)
           const imageURL = personaImageURL(project)
-          const selected = selectedProjectId === project.id
-          return <article key={project.id} className={`group relative flex min-h-[5.25rem] min-w-0 flex-col rounded-xl border bg-card p-2 transition-shadow ${selected ? 'border-primary shadow-sm ring-1 ring-primary/25' : 'border-border hover:shadow-sm'}`}>
+          return <article key={project.id} className={`group relative flex min-h-[5.25rem] min-w-0 flex-col rounded-xl border p-2 transition-colors hover:shadow-sm ${selected ? 'border-primary/50 bg-primary/[0.05]' : 'border-border bg-card'}`}>
             <button type="button" aria-label={`选择人设：${project.name}`} aria-pressed={selected} disabled={disabled} onClick={() => onSelect(project.id)} className="flex min-h-10 w-full min-w-0 grow shrink-0 items-start gap-2 text-left">
               <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
                 {imageURL ? <SignedImage src={imageURL} alt="" className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-5 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-5 text-muted-foreground" />}
               </div>
               <span className="min-w-0 flex-1"><span className="flex items-center gap-1 text-sm font-semibold"><span className="truncate">{project.name}</span><AgentIconStack agentIds={agents} maxVisible={1} compact emptyLabel="还未选择创作类型" /></span><span className="block truncate text-xs leading-4 text-muted-foreground">{project.description || (agents.length ? platformIntroduction(project.platform) : '选择创作类型后即可开始')}</span></span>
+              {selected && <Check aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-primary" />}
             </button>
             <div className="persona-card-actions mt-auto flex shrink-0 flex-wrap items-center justify-end gap-1 transition-opacity">
               <PersonaCreationSettings project={project} disabled={disabled} />
@@ -1663,5 +1699,5 @@ function Conversation({ messages, questions, responding, disabled, userAvatarURL
   ].sort((left, right) => left.order - right.order)
   return <div className="min-w-0 space-y-5">{entries.map((entry) => entry.kind === 'message'
     ? <div key={entry.message.id} className={`flex min-w-0 gap-3 ${entry.message.role === 'user' ? 'justify-end' : ''}`}><div className={`flex min-w-0 max-w-[min(900px,100%)] gap-3 ${entry.message.role === 'user' ? 'flex-row-reverse' : ''}`}><div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{entry.message.role === 'user' ? userAvatarURL ? <SignedImage src={userAvatarURL} alt="当前人设头像" className="size-7 rounded-full object-cover" fallbackIcon={<UserRound className="size-3.5" />} fallbackClassName="bg-primary text-primary-foreground" /> : <UserRound className="size-3.5" /> : <Bot className="size-3.5" />}</div><div className={`min-w-0 max-w-full rounded-2xl px-4 py-3 text-sm leading-6 ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'} [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto`}><Streamdown>{entry.message.text}</Streamdown></div></div></div>
-    : <DshQuestionComposer key={entry.batch.callId} questions={entry.batch.questions} submitted={Boolean(entry.batch.answers)} answers={entry.batch.answers} disabled={disabled} onSubmit={(answer) => onAnswer(entry.batch, answer)} />)}{responding && <div role="status" className="flex items-center gap-2 px-10 text-sm text-muted-foreground"><Bot className="size-4" /><Loader2 className="size-4 animate-spin" />AI 正在处理…</div>}<div ref={endRef} aria-hidden="true" className="h-px" /></div>
+    : <DshQuestionComposer key={entry.batch.callId} questions={entry.batch.questions} submitted={Boolean(entry.batch.answers)} answers={entry.batch.answers ?? entry.batch.draftAnswers} closed={entry.batch.closed} disabled={disabled} onSubmit={(answer) => onAnswer(entry.batch, answer)} />)}{responding && <div role="status" className="flex items-center gap-2 px-10 text-sm text-muted-foreground"><Bot className="size-4" /><Loader2 className="size-4 animate-spin" />AI 正在处理…</div>}<div ref={endRef} aria-hidden="true" className="h-px" /></div>
 }

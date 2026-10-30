@@ -108,7 +108,7 @@ func TestCreationErrorAfterEnteringPersistenceRetainsClaim(t *testing.T) {
 	if err != nil || recovered.StateSequence <= stage.Draft.StateSequence || recovered.Drafts[0].Ready || recovered.RecoveryErrorCode != InteractionErrorCommitReconciliationRequired {
 		t.Fatalf("uncertain ordered snapshot = %#v, %v", recovered, err)
 	}
-	if _, err := svc.repo.AssistantInteractions().AppendEvent(context.Background(), snapshot.ID, snapshot.Generation, &model.AssistantInteractionEvent{ID: "uncertain-progress", Type: "progress", Data: json.RawMessage(`{}`), CreatedAt: svc.clock()}); err != nil {
+	if _, err := svc.repo.AssistantInteractions().AppendEvent(context.Background(), snapshot.ID, snapshot.Generation, snapshot.ProjectID, &model.AssistantInteractionEvent{ID: "uncertain-progress", Type: "progress", Data: json.RawMessage(`{}`), CreatedAt: svc.clock()}); err != nil {
 		t.Fatal(err)
 	}
 	newer, err := svc.Snapshot(context.Background(), "user-1", snapshot.ID)

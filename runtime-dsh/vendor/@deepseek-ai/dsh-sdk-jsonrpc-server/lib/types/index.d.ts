@@ -18,7 +18,7 @@ export declare const inject: string[];
 export interface JsonRpcConfig {
     /** Report max-token turn/subagent termination as a successful SDK result. */
     maxTokensAsSuccess?: boolean;
-    /** Enable the Server-owned structured question bridge. */
+    /** Bridge user questions through explicit session/answer requests. */
     interactiveQuestions?: boolean;
     /** Transport input override; production uses `process.stdin`. */
     input?: Readable;

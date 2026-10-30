@@ -142,7 +142,7 @@ func (s *AssistantInteractionService) runRuntimeCommand(ctx context.Context, use
 	if err := s.repo.AssistantInteractions().UpdateAttempt(ctx, interactionID, attemptID, model.AssistantInteractionAttemptCompleted, json.RawMessage(`{"accepted":true}`), ""); err != nil {
 		return errors.Join(ErrInteractivePersistence, err)
 	}
-	_, _ = s.repo.AssistantInteractions().AppendEvent(ctx, interactionID, generation, &model.AssistantInteractionEvent{ID: uuid.NewString(), InteractionID: interactionID, Type: "user.message.accepted", Data: json.RawMessage(fmt.Sprintf(`{"length":%d}`, resultSize)), CreatedAt: now})
+	_, _ = s.repo.AssistantInteractions().AppendEvent(ctx, interactionID, generation, interaction.ProjectID, &model.AssistantInteractionEvent{ID: uuid.NewString(), InteractionID: interactionID, Type: "user.message.accepted", Data: json.RawMessage(fmt.Sprintf(`{"length":%d}`, resultSize)), CreatedAt: now})
 	return nil
 }
 

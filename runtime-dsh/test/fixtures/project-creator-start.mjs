@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { HarnessClient } from '@deepseek-ai/dsh-sdk-client'
-import { writeDshRouteSettings } from '../../dist/dsh-bridge.js'
+import { assertInteractiveRuntimeCapabilities, writeDshRouteSettings } from '../../dist/dsh-bridge.js'
 
 const repo = fileURLToPath(new URL('../../../', import.meta.url))
 const root = mkdtempSync(join(tmpdir(), 'anban-creator-layout-'))
@@ -13,10 +13,11 @@ const staged = join(root, 'harness/dsh')
 mkdirSync(staged, { recursive: true })
 cpSync(join(repo, 'harness/dsh/project-creator.patch.yml'), join(staged, 'project-creator.patch.yml'))
 cpSync(join(repo, 'harness/dsh/plugins'), join(staged, 'plugins'), { recursive: true })
-cpSync(join(repo, 'harness/dsh/lib'), join(staged, 'lib'), { recursive: true })
+cpSync(join(repo, 'runtime-dsh/dist/harness-dsh/lib'), join(staged, 'lib'), { recursive: true })
 cpSync(join(repo, 'harness/dsh/presets/project-creator/skills'), join(staged, 'presets/project-creator/skills'), { recursive: true })
 mkdirSync(join(root, 'runtime-dsh'))
 symlinkSync(join(repo, 'runtime-dsh/node_modules'), join(root, 'runtime-dsh/node_modules'))
+symlinkSync(join(repo, 'runtime-dsh/node_modules'), join(root, 'node_modules'))
 const snapshot = 'PROJECT_CREATOR_SNAPSHOT_SMOKE_MARKER'
 writeFileSync(join(root, 'context.json'), snapshot)
 let resolveModel
@@ -66,7 +67,11 @@ let timer
 try {
   client.start()
   for (let attempt = 0; ; attempt++) {
-    try { await client.initialize({ cwd: root, provider: 'anthropic', model: 'smoke' }); break }
+    try {
+      const initialized = await client.initialize({ cwd: root, provider: 'anthropic', model: 'smoke' })
+      assertInteractiveRuntimeCapabilities(initialized)
+      break
+    }
     catch (error) {
       if (attempt >= 20 || !error.message.includes('no adapter registered')) throw error
       await new Promise(resolve => setTimeout(resolve, 50))

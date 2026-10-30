@@ -2911,12 +2911,12 @@
           "funnel_stage"
         ]
       },
-      "digest": "47611b95b9b86d52be625a22ed3351afe470c32738a943bf5d0521c3d47c8906"
+      "digest": "a92520f39ef3e2573261ee60cced4e2f20b8d199ce677985ee7954b90a3b54bf"
     },
     {
       "id": "talking-head-editor",
       "channel": "talking-head-editor",
-      "version": "2.0.2",
+      "version": "2.0.5",
       "kind": "managed",
       "display_name": "口播精剪",
       "description": "按固定口播工作流自动完成静音粗剪、语义精剪、动效素材包装和音效 BGM 收尾，并保留可复核的剪辑证据。",
@@ -2925,7 +2925,9 @@
         "skills": [
           "auto-editor",
           "video-use",
-          "erduo-broll-loop-engineering"
+          "erduo-broll-loop-engineering",
+          "talking-head-sound-design",
+          "content-tagging"
         ],
         "max_turns": 220
       },
@@ -2959,6 +2961,12 @@
           "path": "output/final.mp4",
           "mime_type": "video/mp4",
           "required": true
+        },
+        {
+          "role": "final_picture",
+          "path": "output/final-picture.mp4",
+          "mime_type": "video/mp4",
+          "required": false
         },
         {
           "role": "edit_decision_list",
@@ -3012,31 +3020,31 @@
           "role": "motion_sample",
           "path": "output/motion-sample.mp4",
           "mime_type": "video/mp4",
-          "required": false
+          "required": true
         },
         {
           "role": "motion_review",
           "path": "output/motion-review.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "motion_source_manifest",
           "path": "output/motion-source-manifest.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "rough_cut",
           "path": "output/rough-cut.mp4",
           "mime_type": "video/mp4",
-          "required": false
+          "required": true
         },
         {
           "role": "semantic_cut",
           "path": "output/semantic-cut.mp4",
           "mime_type": "video/mp4",
-          "required": false
+          "required": true
         },
         {
           "role": "subtitles",
@@ -3048,7 +3056,7 @@
           "role": "delivery_manifest",
           "path": "output/delivery-manifest.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "quality_evidence",
@@ -3073,6 +3081,28 @@
           "path": "output/progress-state.json",
           "mime_type": "application/json",
           "required": false
+        }
+      ],
+      "artifact_stages": [
+        {
+          "id": "motion_review",
+          "trigger": "output/motion-sample.mp4",
+          "required": [
+            "output/rough-cut.mp4",
+            "output/transcript.json",
+            "output/edit-decision-list.json",
+            "output/edit-strategy.md",
+            "output/semantic-cut.mp4",
+            "output/motion-sample.mp4",
+            "output/visual-plan.json",
+            "output/motion-review.json",
+            "output/motion-source-manifest.json"
+          ]
+        },
+        {
+          "id": "final_delivery",
+          "trigger": "output/final.mp4",
+          "terminal": true
         }
       ],
       "delivery": [
@@ -3172,7 +3202,277 @@
           "funnel_stage"
         ]
       },
-      "digest": "0c50bbcbdf802e829f7d48b6a0fea70484573f83d528254917647580d9649556"
+      "digest": "7e5555707bee6c32918f919864552f9e29549e4993d7aabf5d279c665a4c055b"
+    },
+    {
+      "id": "talking-head-montage",
+      "version": "1.0.0",
+      "kind": "plugin",
+      "display_name": "口播 Montage 制作",
+      "description": "以 OpenMontage hybrid 为主引擎，完成真人口播、生成视频素材、图片素材和图形动效的本地制作与文件审核。",
+      "agent": {
+        "name": "talking-head-montage",
+        "skills": [
+          "talking-head-montage",
+          "talking-head-sound-design",
+          "content-tagging"
+        ],
+        "max_turns": 260
+      },
+      "interaction": {},
+      "bindings": {},
+      "runtime": {
+        "profile": "talking-head-montage",
+        "adapter": "openmontage"
+      },
+      "surfaces": [
+        "plugin"
+      ],
+      "features": [
+        "talking-head",
+        "generated-video-inserts",
+        "image-inserts",
+        "motion-graphics",
+        "local-review-gate"
+      ],
+      "artifacts": [
+        {
+          "role": "rough_cut",
+          "path": "output/rough-cut.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "semantic_cut",
+          "path": "output/semantic-cut.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "transcript",
+          "path": "output/transcript.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "edit_decision_list",
+          "path": "output/edit-decision-list.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "edit_strategy",
+          "path": "output/edit-strategy.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "asset_requirements",
+          "path": "output/asset-requirements.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "visual_plan_draft",
+          "path": "output/visual-plan-draft.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "asset_source_policy",
+          "path": "output/asset-source-policy.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "generated_video_manifest",
+          "path": "output/generated-video-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "generated_video_review",
+          "path": "output/generated-video-review.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "asset_source_manifest",
+          "path": "output/asset-source-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "visual_plan",
+          "path": "output/visual-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "motion_sample",
+          "path": "output/motion-sample.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "motion_review",
+          "path": "output/motion-review.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "motion_source_manifest",
+          "path": "output/motion-source-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "final_picture",
+          "path": "output/final-picture.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "sfx_cues",
+          "path": "output/sfx-cues.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "bgm_plan",
+          "path": "output/bgm-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "audio_source_manifest",
+          "path": "output/audio-source-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "quality_evidence",
+          "path": "output/quality-evidence.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "review_decision",
+          "path": "output/review-decision.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "failure_diagnosis",
+          "path": "output/failure-diagnosis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json",
+          "required": false
+        }
+      ],
+      "artifact_stages": [
+        {
+          "id": "motion_review",
+          "trigger": "output/motion-sample.mp4",
+          "required": [
+            "output/rough-cut.mp4",
+            "output/transcript.json",
+            "output/edit-decision-list.json",
+            "output/edit-strategy.md",
+            "output/semantic-cut.mp4",
+            "output/asset-requirements.json",
+            "output/visual-plan-draft.json",
+            "output/asset-source-policy.json",
+            "output/generated-video-manifest.json",
+            "output/generated-video-review.json",
+            "output/asset-source-manifest.json",
+            "output/visual-plan.json",
+            "output/motion-sample.mp4",
+            "output/motion-review.json",
+            "output/motion-source-manifest.json"
+          ]
+        },
+        {
+          "id": "final_delivery",
+          "trigger": "output/final.mp4",
+          "terminal": true
+        }
+      ],
+      "delivery": [
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "final_picture",
+          "path": "output/final-picture.mp4",
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "sfx_cues",
+          "path": "output/sfx-cues.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "bgm_plan",
+          "path": "output/bgm-plan.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "audio_source_manifest",
+          "path": "output/audio-source-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "quality_evidence",
+          "path": "output/quality-evidence.json",
+          "mime_type": "application/json"
+        }
+      ],
+      "ui": {
+        "renderer": "custom:talking-head-montage"
+      },
+      "digest": "2d541414fe1b11b4c39981bcd3754a1f482d4702dfb6cbf571a6dd496f87eba3"
     },
     {
       "id": "video-edit",
@@ -3325,11 +3625,11 @@
           "funnel_stage"
         ]
       },
-      "digest": "a1f8face31ebef9fa6240db7f0da087947a8bfd46d67347e3165233f477444fc"
+      "digest": "be13cc6b4ab2e49ad1aeb55d40e415d97d31eebbe54bed5bdb70c1d733a32e58"
     },
     {
       "id": "viral-ip-video-editor",
-      "version": "1.0.11",
+      "version": "1.0.12",
       "kind": "plugin",
       "display_name": "爆款 IP 视频剪辑",
       "description": "基于 Montage 运行时处理真人 IP 口播素材，完成留存导向的剪辑规划、制作指导和成片质量复核。",
@@ -3612,7 +3912,7 @@
         }
       ],
       "ui": {},
-      "digest": "92da8fbdb275219d450faad239f9569a6b1e4c852992ab7988ce119cda33cbe5"
+      "digest": "a9856b1700326164d8fbdcf5c975d4da594812253bdb5e0eac2dd88e17060d2e"
     },
     {
       "id": "wechat-article",
@@ -3876,13 +4176,13 @@
           "funnel_stage"
         ]
       },
-      "digest": "b07c0df2117a04be89e2e651f889c86975fda11c0197f86be4f750137f2de09a"
+      "digest": "bffb52149e4f0df7ffc15e69403cda0bc806f8ccf9433e4758d47b603bc521bd"
     },
     {
       "id": "wechat-picture",
       "channel": "wechat-picture",
       "plan_task_kind": "content_generation",
-      "version": "1.0.8",
+      "version": "1.0.9",
       "kind": "managed",
       "display_name": "微信公众号贴图",
       "description": "研究选题、编排图片消息并生成公众号 newspic 草稿交付包。",
@@ -4054,7 +4354,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "5fc329a3d686007d964327ab3a17f82a915aec50df5b9e7e68f1f7a1e2c60184"
+      "digest": "673f5ecd2d7e66e3f240613f1da4464d96287712fa1f10bd052e08d745a12abc"
     },
     {
       "id": "whiteboard-animation",

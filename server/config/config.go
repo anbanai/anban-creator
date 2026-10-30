@@ -2090,7 +2090,7 @@ func validateImageCapabilityBaseURL(raw string) error {
 
 func supportsSemanticTaskAspectRatioProvider(provider string) bool {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "openai", "wangcai_openai", "volcengine", "volcengine_ark", "volc", "seedream":
+	case "openai", "wangcai_openai", "volcengine", "volcengine_ark", "volc", "seedream", "tokenplayer":
 		return true
 	default:
 		return false

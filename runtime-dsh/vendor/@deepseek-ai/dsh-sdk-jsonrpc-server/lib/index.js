@@ -1,11 +1,86 @@
 import Schema from "@deepseek-ai/schemastery";
 import { JsonRpcLineTransport } from "@deepseek-ai/dsh-sdk-protocol";
 import { resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { UserQuestionError } from "@deepseek-ai/dsh-user-questions";
 import { brandString } from "@deepseek-ai/dsh-brand";
 import { admitEncodedImages } from "@deepseek-ai/dsh-attachment";
 import { ReasoningEffortId, createUserMessage } from "@deepseek-ai/dsh-llm";
 import { carrierKeyOf } from "@deepseek-ai/dsh-scope";
 import * as LlmDeepSeek from "@deepseek-ai/dsh-llm-deepseek-api-key";
+//#region lib/types/user-questions.js
+/** Native SDK adapter for the shared user-questions seam. */
+/** Owns question forwarding and cancellation for one SDK transport. */
+var SdkUserQuestionBridge = class {
+	ctx;
+	transport;
+	/** Enabled only after the host advertises an answerer at initialization. */
+	enabled = false;
+	questionShutdown = new AbortController();
+	unregister;
+	constructor(ctx, transport, ownsAgent) {
+		this.ctx = ctx;
+		this.transport = transport;
+		this.unregister = ctx.on("user-questions/request", async (request, next) => {
+			const agent = request.agent;
+			if (!this.enabled || agent === void 0 || !ownsAgent(agent)) return next();
+			return this.ask(request, String(agent.session.id));
+		});
+	}
+	/** Stop admission and cancel outstanding questions before SDK Agents drain. */
+	close() {
+		this.enabled = false;
+		this.unregister();
+		this.questionShutdown.abort(new UserQuestionError("SDK server is shutting down", "ASK_ABORTED"));
+	}
+	async ask(request, sessionId) {
+		const params = {
+			requestId: randomUUID(),
+			sessionId,
+			questions: request.questions
+		};
+		const signal = request.signal === void 0 ? this.questionShutdown.signal : AbortSignal.any([request.signal, this.questionShutdown.signal]);
+		signal.throwIfAborted();
+		const cancelled = () => {
+			try {
+				this.transport.notify("user-question.cancelled", {
+					requestId: params.requestId,
+					sessionId
+				});
+			} catch (error) {
+				this.ctx.logger.warn(`SDK question cancellation could not reach the host: ${String(error)}`);
+			}
+		};
+		signal.addEventListener("abort", cancelled, { once: true });
+		try {
+			return parseHostAnswer(await this.transport.request("user-question/ask", params, signal), request.questions.map((question) => question.id));
+		} catch (error) {
+			if (error instanceof UserQuestionError) throw error;
+			throw new UserQuestionError(signal.aborted ? "SDK user question was cancelled" : "SDK host could not answer the user question", signal.aborted ? "ASK_ABORTED" : "PROVIDER_ERROR", { cause: error });
+		} finally {
+			signal.removeEventListener("abort", cancelled);
+		}
+	}
+};
+/** Validate the untrusted host response before it enters a tool result or approval decision. */
+function parseHostAnswer(value, questionIds) {
+	const badAnswer = () => {
+		throw new UserQuestionError("SDK host must answer each question id exactly once with selected labels and optional custom text", "BAD_ANSWER");
+	};
+	if (value === null || typeof value !== "object" || !("answers" in value) || !Array.isArray(value.answers)) return badAnswer();
+	const answers = value.answers.map((answer) => {
+		if (answer === null || typeof answer !== "object" || !("id" in answer) || typeof answer.id !== "string" || !("selected" in answer) || !Array.isArray(answer.selected) || !answer.selected.every((label) => typeof label === "string") || "custom" in answer && typeof answer.custom !== "string") return badAnswer();
+		return {
+			id: answer.id,
+			selected: answer.selected,
+			..."custom" in answer ? { custom: answer.custom } : {}
+		};
+	});
+	const ids = new Set(answers.map((answer) => answer.id));
+	if (ids.size !== answers.length || answers.length !== questionIds.length || !questionIds.every((id) => ids.has(id))) return badAnswer();
+	return { answers };
+}
+//#endregion
 //#region lib/types/server.js
 /**
 * JSON-RPC methods and notifications for out-of-process harness SDKs.
@@ -61,12 +136,52 @@ var HarnessSdkJsonRpcServer = class {
 	shutdownTask;
 	shuttingDown = false;
 	initialized = false;
+	approvalRequests = false;
+	lifetime = new AbortController();
+	userQuestions;
+	initialization = Promise.withResolvers();
+	/** Restored by a reminder and available for the client's first resume. */
+	scheduledSessions = /* @__PURE__ */ new Map();
 	constructor(ctx, transport, options = {}) {
 		this.ctx = ctx;
 		this.transport = transport;
 		this.options = options;
+		this.disposers.push(ctx.on("approval/request", async (request, next) => {
+			if (!this.approvalRequests || !this.ownsAgent(request.agent)) return next();
+			const params = {
+				sessionId: request.agent.session.id,
+				toolName: request.toolName,
+				...request.callId === void 0 ? {} : { callId: request.callId },
+				...request.reason === void 0 ? {} : { reason: request.reason }
+			};
+			const signal = request.signal === void 0 ? this.lifetime.signal : AbortSignal.any([request.signal, this.lifetime.signal]);
+			const result = await this.transport.request("approval/request", params, signal);
+			if (result === null || typeof result !== "object" || !("outcome" in result) || result.outcome !== "allowed-once" && result.outcome !== "rejected" && result.outcome !== "cancelled") throw new TypeError("approval/request response requires an allowed-once, rejected, or cancelled outcome");
+			return result.outcome;
+		}));
 		const serverOptions = this.options;
-		const handleHeadlessQuestion = this.handleHeadlessQuestion.bind(this);
+		this.userQuestions = new SdkUserQuestionBridge(ctx, transport, (agent) => this.sessions.get(agent.session.id)?.handle.agent === agent);
+		const server = this;
+		if (this.options.interactiveQuestions === true) this.disposers.push(ctx.on("user-questions/request", function(request, next) { return server.handleHeadlessQuestion(carrierKeyOf(this), request, next); }));
+		this.disposers.push(ctx.on("schedule/resolve-agent", async (sessionId) => {
+			await this.initialization.promise;
+			if (this.shuttingDown) throw new Error("SDK server is shutting down");
+			const existing = this.sessions.get(sessionId);
+			const pending = this.sessionCreations.get(sessionId);
+			if (existing !== void 0) {
+				this.assertLiveAgent(existing, sessionId);
+				return existing.handle.agent;
+			}
+			if (pending !== void 0) return (await pending).handle.agent;
+			const restoration = this.openSession(sessionId, true);
+			this.scheduledSessions.set(sessionId, restoration);
+			try {
+				return (await restoration).handle.agent;
+			} catch (error) {
+				this.scheduledSessions.delete(sessionId);
+				throw error;
+			}
+		}));
 		this.disposers.push(ctx.on("session/event", (session, event) => {
 			const record = this.sessions.get(session.id);
 			if (event.type === "turn/end" && record?.handle.agent.session === session && record.failure !== void 0 && event.seq >= record.failure.atOffset) record.failure = void 0;
@@ -92,7 +207,7 @@ var HarnessSdkJsonRpcServer = class {
 		}));
 		this.disposers.push(ctx.on("session/created", (session) => {
 			const parentSession = session.header.parentSession;
-			if (parentSession === void 0) return;
+			if (session.header.origin !== "subagent" || parentSession === void 0) return;
 			const payload = {
 				parentSessionId: String(parentSession),
 				childSessionId: String(session.id)
@@ -113,9 +228,6 @@ var HarnessSdkJsonRpcServer = class {
 			};
 			transport.notify("subagent.finished", payload);
 		}));
-		if (this.options.interactiveQuestions === true) this.disposers.push(ctx.on("user-questions/request", function(request, next) {
-			return handleHeadlessQuestion(carrierKeyOf(this), request, next);
-		}));
 	}
 	/**
 	* Validate and configure the SDK route, mounting the DeepSeek fallback only when unowned.
@@ -123,6 +235,7 @@ var HarnessSdkJsonRpcServer = class {
 	* @returns server identity for the handshake.
 	*/
 	async initialize(params) {
+		if (params.approvalRequests !== void 0 && typeof params.approvalRequests !== "boolean") throw new TypeError("initialize approvalRequests must be a boolean");
 		if (params.reasoningEffort !== void 0 && (typeof params.reasoningEffort !== "string" || params.reasoningEffort.length === 0)) throw new TypeError("initialize reasoningEffort must be a non-empty string");
 		if (params.maxTokens !== void 0 && (!Number.isSafeInteger(params.maxTokens) || params.maxTokens <= 0)) throw new TypeError("initialize maxTokens must be a positive safe integer");
 		const cwd = resolve(params.cwd);
@@ -144,14 +257,14 @@ var HarnessSdkJsonRpcServer = class {
 		this.model = model;
 		this.reasoningEffort = reasoningEffort;
 		this.maxTokens = params.maxTokens;
+		this.approvalRequests = params.approvalRequests === true;
+		this.userQuestions.enabled = params.capabilities?.userQuestions === true;
 		this.initialized = true;
-		return {
-			serverInfo: {
-				name: "deepseek-harness-sdk-runtime",
-				version: "0.0.1"
-			},
-			capabilities: { sessionStart: true, sessionAnswer: true }
-		};
+		this.initialization.resolve();
+		return { serverInfo: {
+			name: "deepseek-harness-sdk-runtime",
+			version: "0.0.1"
+		}, capabilities: { sessionStart: true, sessionAnswer: true } };
 	}
 	/**
 	* Queue one identified prompt without assigning later activity to it.
@@ -174,10 +287,14 @@ var HarnessSdkJsonRpcServer = class {
 	async start(params) {
 		if (!this.initialized) throw new Error("SDK server is not initialized");
 		if (!params.sessionId.trim() || !params.presetId.trim()) throw new TypeError("session/start requires non-empty sessionId and presetId");
+		if (params.initialContext !== undefined && (typeof params.initialContext !== "string" || Buffer.byteLength(params.initialContext, "utf8") > 256 * 1024)) throw new TypeError("session/start initialContext must be a string of at most 256 KiB");
 		const rec = await this.getOrCreateSession(params.sessionId, params.presetId);
 		if (rec.presetId !== params.presetId) throw new Error(`session ${params.sessionId} is already bound to a different preset`);
 		this.assertLiveAgent(rec, params.sessionId);
 		if (!rec.started) {
+			if (params.initialContext) rec.handle.agent.ctx.systemPrompt.context({
+				name: "anban-interaction-context", order: 1000, text: params.initialContext, interpolate: false, required: true,
+			});
 			const start = rec.handle.agent.start;
 			if (typeof start !== "function") throw new Error("session/start requires an Agent runtime with message-free start support");
 			try {
@@ -250,6 +367,7 @@ var HarnessSdkJsonRpcServer = class {
 				removeAbortListener = () => request.signal?.removeEventListener("abort", onAbort);
 				pending.removeAbortListener = removeAbortListener;
 			}
+			this.transport.notify("session.question", { sessionId, callId, questions: request.questions });
 		});
 	}
 	/**
@@ -263,6 +381,13 @@ var HarnessSdkJsonRpcServer = class {
 		if (!this.initialized) throw new Error("SDK server is not initialized");
 		if (this.shuttingDown) throw new Error("SDK server is shutting down");
 		const sessionId = params.sessionId;
+		const restoration = this.scheduledSessions.get(sessionId);
+		if (restoration !== void 0) {
+			this.scheduledSessions.delete(sessionId);
+			const record = await restoration;
+			this.assertLiveAgent(record, sessionId);
+			return {};
+		}
 		if (this.sessions.has(sessionId) || this.sessionCreations.has(sessionId)) throw new Error(`SDK session is already open or opening: ${sessionId}`);
 		await this.openSession(sessionId, true);
 		return {};
@@ -291,6 +416,17 @@ var HarnessSdkJsonRpcServer = class {
 				return {};
 			}
 		}
+	}
+	ownsAgent(agent) {
+		const agents = this.ctx.agents;
+		if (agents.get(agent.id) !== agent) return false;
+		const liveAgents = agents.list();
+		const ancestors = new Set([agent]);
+		for (const current of ancestors) {
+			if (this.sessions.get(current.session.id)?.handle.agent === current) return true;
+			for (const parent of liveAgents) if (agents.isOwnedBy(current.id, parent)) ancestors.add(parent);
+		}
+		return false;
 	}
 	assertLiveAgent(rec, sessionId) {
 		if (this.ctx.agents.get(rec.handle.agent.id) !== rec.handle.agent) throw new Error(`session agent was disposed outside the server: ${sessionId}`);
@@ -331,14 +467,18 @@ var HarnessSdkJsonRpcServer = class {
 	}
 	async performShutdown() {
 		this.shuttingDown = true;
+		this.lifetime.abort(/* @__PURE__ */ new Error("SDK server is shutting down"));
+		this.userQuestions.close();
 		for (const [key, pending] of this.pendingQuestions) {
 			this.pendingQuestions.delete(key);
 			pending.removeAbortListener();
 			pending.reject(/* @__PURE__ */ new Error("SDK server is shutting down"));
 		}
+		this.initialization.resolve();
 		const pendingCreations = [...this.sessionCreations.values()];
 		await Promise.allSettled(pendingCreations);
 		this.sessionCreations.clear();
+		this.scheduledSessions.clear();
 		const records = [...this.sessions.values()];
 		this.sessions.clear();
 		const failures = [];
@@ -397,6 +537,7 @@ var HarnessSdkJsonRpcServer = class {
 	}
 	async getOrCreateSession(sessionId, presetId) {
 		if (this.shuttingDown) throw new Error("SDK server is shutting down");
+		this.scheduledSessions.delete(sessionId);
 		const existing = this.sessions.get(sessionId);
 		if (existing) return existing;
 		const pending = this.sessionCreations.get(sessionId);
@@ -420,24 +561,30 @@ var HarnessSdkJsonRpcServer = class {
 			...this.reasoningEffort === void 0 ? {} : { reasoningEffort: this.reasoningEffort },
 			...this.maxTokens === void 0 ? {} : { maxTokens: this.maxTokens }
 		};
-		const presets = this.ctx.get("agentPresets");
-		if (presetId !== undefined && presets === undefined) throw new Error("session/start requires the DSH agent preset registry");
 		const rec = {
 			handle: await (resume ? this.ctx.agents.resume({
 				resumeSessionId: brandString(sessionId),
-				agentOptions
+				agentOptions,
+				setup: (_agentCtx, agent) => {
+					const previous = agent.model.current();
+					const selection = { ...agentOptions };
+					if (selection.reasoningEffort === void 0 && previous !== void 0 && previous.provider === selection.provider && previous.model === selection.model && previous.reasoningEffort !== void 0) selection.reasoningEffort = previous.reasoningEffort;
+					agent.model.select(selection);
+				}
 			}) : this.ctx.agents.create({
 				sessionId: brandString(sessionId),
 				meta: { cwd: this.cwd },
 				agentOptions,
-				...presetId === undefined ? {} : { setup: async (agentCtx, agent) => {
+				...presetId === void 0 ? {} : { setup: async (agentCtx, agent) => {
+					const presets = this.ctx.get("agentPresets");
+					if (presets === void 0) throw new Error("session/start requires the DSH agent preset registry");
 					await presets.mount(agentCtx, presetId);
 					agent.session.append("agent-preset/selected", { agentPreset: presetId });
 				} }
 			})),
 			failure: void 0,
 			started: false,
-			...presetId === undefined ? {} : { presetId }
+			...presetId === void 0 ? {} : { presetId }
 		};
 		this.sessions.set(sessionId, rec);
 		return rec;
@@ -459,7 +606,7 @@ var HarnessSdkJsonRpcServer = class {
 * @module @deepseek-ai/dsh-sdk-jsonrpc-server
 */
 const name = "sdk-jsonrpc-server";
-const inject = ["agents", "workingDirectory"];
+const inject = ["agents", "workingDirectory", "userQuestions"];
 const Config = Schema.object({ maxTokensAsSuccess: Schema.boolean().default(false), interactiveQuestions: Schema.boolean().default(false) });
 /**
 * Serve SDK requests over the configured streams. Effect disposal shuts down
@@ -480,6 +627,7 @@ function apply(ctx, config) {
 	});
 	const transport = new JsonRpcLineTransport(input, output);
 	const server = new HarnessSdkJsonRpcServer(ctx, transport, { maxTokensAsSuccess: resolvedConfig.maxTokensAsSuccess, interactiveQuestions: resolvedConfig.interactiveQuestions });
+	ctx.provide("sdkSessionActivation", { ready: true });
 	let exitTask;
 	const disposeAndExit = () => {
 		exitTask ??= (async () => {

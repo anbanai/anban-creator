@@ -1083,20 +1083,40 @@ func TestTalkingHeadEditorDockerfileValidatesErduoMotionContract(t *testing.T) {
 	root := repositoryRoot(t)
 	dockerfile := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.agent-talking-head-editor"))
 	for _, want := range []string{
-		"/opt/video-use-venv/bin/pip install --no-cache-dir auto-editor==28.1.0",
+		"FROM node:24.22.0-trixie-slim",
+		"ARG AUTO_EDITOR_VERSION=29.3.1",
+		"ARG HYPERFRAMES_VERSION=0.8.214",
+		"/opt/video-use-venv/bin/pip install --no-cache-dir \"auto-editor==${AUTO_EDITOR_VERSION}\"",
+		"test \"$(uname -m)\" = x86_64",
+		"auto-editor-linux-x86_64",
+		"Path(auto_editor.__file__).parent / \"bin\" / \"auto-editor\"",
+		"chmod 0755 \"$auto_editor_binary\"",
+		"curl --fail --location --retry 5 --retry-all-errors",
 		"importlib.metadata as m; print(m.version(\"auto-editor\"))",
 		"/opt/video-use-venv/bin/auto-editor --version",
+		"npm install --global --omit=dev \"hyperframes@${HYPERFRAMES_VERSION}\"",
+		"test \"$(hyperframes --version)\" = \"$HYPERFRAMES_VERSION\"",
 		"for helper in transcribe.py transcribe_batch.py pack_transcripts.py timeline_view.py grade.py render.py",
 		"/opt/video-use/helpers/$helper\" --help",
 		"43cfc566833548093455c9d4a46bd69913b7e552",
 		"/anbanai/skills/erduo-broll-loop-engineering/SKILL.md",
-		"HyperFrames/Remotion",
-		"Shotcraft",
-		"parallel agents",
+		"HyperFrames lint",
 		"aesthetic review",
+		"/anbanai/skills/talking-head-sound-design/SKILL.md",
+		"/anbanai/skills/talking-head-sound-design/assets/sfx/manifest.json",
+		"sound_pass.py --help",
 	} {
 		if !strings.Contains(dockerfile, want) {
 			t.Fatalf("talking-head-editor Dockerfile missing runtime contract %q", want)
+		}
+	}
+	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
+	for _, want := range []string{
+		"docker build --platform linux/amd64 -f deploy/docker/Dockerfile.agent-talking-head-editor",
+		"--build-arg AUTO_EDITOR_VERSION=\"$(AUTO_EDITOR_VERSION)\"",
+	} {
+		if !strings.Contains(makefile, want) {
+			t.Fatalf("talking-head-editor Makefile contract missing %q", want)
 		}
 	}
 }
