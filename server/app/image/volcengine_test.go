@@ -468,6 +468,9 @@ func TestVolcengineConvertSDKError_ClassifiesTransportFailureWithConcreteRequest
 	if genErr.Provider != "TokenPlayer" || genErr.RequestMethod != http.MethodPost || genErr.RequestEndpoint != "https://token.example.test/api/v3/images/generations" || genErr.TransportPhase != "dns" {
 		t.Fatalf("request diagnostics = %#v", genErr)
 	}
+	if genErr.HTTPStatusCode != 0 {
+		t.Fatalf("transport failure status = %d, want 0 because SDK 500 is a sentinel", genErr.HTTPStatusCode)
+	}
 }
 
 func TestSanitizeImageProviderEndpointRemovesCredentialsAndQuery(t *testing.T) {

@@ -486,7 +486,7 @@ func (p *VolcengineProvider) convertSDKError(err error) (result error) {
 		if observation.Endpoint == "" {
 			observation.Endpoint = p.endpoint
 		}
-		if observation.HTTPStatusCode == 0 {
+		if observation.HTTPStatusCode == 0 && transportErr == nil {
 			observation.HTTPStatusCode = reqErr.HTTPStatusCode
 		}
 		if observation.TransportPhase == "" {
@@ -509,12 +509,18 @@ func (p *VolcengineProvider) convertSDKError(err error) (result error) {
 			p.applyRequestObservation(generateErr, observation)
 			return generateErr
 		}
+		statusCode := reqErr.HTTPStatusCode
+		if transportErr != nil {
+			// The SDK uses HTTP 500 as a sentinel for RoundTripper failures;
+			// it is not an upstream response status.
+			statusCode = 0
+		}
 		generateErr := &GenerateError{
 			Provider:          p.Name(),
 			Code:              "network_error",
 			Message:           "网络请求失败，请检查网络连接",
 			HintMsg:           "确认网络连接正常，API 地址正确",
-			HTTPStatusCode:    reqErr.HTTPStatusCode,
+			HTTPStatusCode:    statusCode,
 			ProviderRequestID: strings.TrimSpace(reqErr.RequestId),
 			Original:          err,
 		}
