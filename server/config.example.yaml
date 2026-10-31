@@ -376,7 +376,7 @@ hypit:
 # Montage 视频工作流配置。
 # 生产建议：
 # - 保持 enabled=true。
-# - claude.executor 使用 kubernetes 或 docker，并确保 Montage Agent 镜像继承已发布的 OpenMontage runtime 镜像。
+# - claude.executor 使用 kubernetes 或 docker，并确保已发布内含固定 OpenMontage 源码与依赖的 Montage Agent 镜像。
 montage:
   # 是否启用 Montage 平台。显式 false 会关闭任务/计划创建入口。
   enabled: true
@@ -384,7 +384,7 @@ montage:
   # 生产建议选择已验证的上游 pipeline，例如 cinematic、talking-head、screen-demo、clip-factory。
   default_pipeline: "cinematic"
   # 允许 Studio/API 选择的 pipeline 白名单。新增上游 pipeline 后先做 adapter contract test，
-  # 并确认所选 OpenMontage runtime 镜像内的 pipeline_defs/<name>.yaml 存在。
+  # 并确认所选 Montage Agent 镜像内的 pipeline_defs/<name>.yaml 存在。
   allowed_pipelines: ["cinematic", "talking-head", "screen-demo", "clip-factory"]
   # 单个 Montage 任务允许的最长成片时长，单位秒。
   max_duration_seconds: 600

@@ -31,9 +31,9 @@ The pinned upstream Remotion lockfile has five npm advisories. The image applies
 `deploy/docker/openmontage-remotion-deps.patch`, generated with
 `npm audit fix --package-lock-only` against this exact upstream commit. It only
 updates vulnerable transitive lock entries, leaves upstream `package.json`
-unchanged, runs `npm ci`, and fails the build if production audit reports a
-moderate-or-higher advisory. Regenerate and review this patch whenever the
-OpenMontage source pin changes.
+unchanged, runs `npm ci`, and reports production audit findings at
+moderate-or-higher severity without failing the build. Regenerate and review
+this patch whenever the OpenMontage source pin changes.
 
 ## Build-Time Setup
 

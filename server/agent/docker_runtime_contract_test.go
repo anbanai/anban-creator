@@ -1133,6 +1133,7 @@ func TestViralIPVideoEditorRuntimeProfileIsPackagedAndRegistered(t *testing.T) {
 			"auto-editor==${AUTO_EDITOR_VERSION}",
 			"/bin/auto-editor\" --version",
 			"ARG OPENMONTAGE_REF=c8066452325cb57c8fc1ba8c2a71b6e8842e6b65",
+			"make python3 python3-venv tini",
 			"make setup VENV_DIR=\"$OPENMONTAGE_VENV\"",
 			"test ! -e .venv",
 			"rm -f .env",
