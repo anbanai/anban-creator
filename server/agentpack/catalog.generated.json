@@ -2038,7 +2038,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "03a99a4959e2ab969c7e847e59523fca67c09fc5821b79538394443b3c16d75f"
+      "digest": "22d74da0bbf79a500fcd878382fb3213ab4154e463d883e377ec68eeb156ca94"
     },
     {
       "id": "postmortem-review",
@@ -3257,11 +3257,11 @@
           "funnel_stage"
         ]
       },
-      "digest": "29f612b258b699eb64509059ceab8b7841674768f3d8e2d0b30151b3c3e094ab"
+      "digest": "c43915ba2fb379ac67bd4bb0d7a80b2a27150c4285d252ec0059aa8ef4a252a9"
     },
     {
       "id": "talking-head-montage",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "kind": "plugin",
       "display_name": "口播 Montage 制作",
       "description": "以 OpenMontage hybrid 为主引擎，完成真人口播、生成视频素材、图片素材和图形动效的本地制作与文件审核。",
@@ -3582,7 +3582,7 @@
       "ui": {
         "renderer": "custom:talking-head-montage"
       },
-      "digest": "bbaa1254f71503420fc28987deba3164e20613d0512178dccb16ad48ab71bece"
+      "digest": "7afea000d8ae076532e893b5795d300841370e5ba3da361008dd144057cf255e"
     },
     {
       "id": "video-edit",
@@ -3739,7 +3739,7 @@
     },
     {
       "id": "viral-ip-video-editor",
-      "version": "1.0.13",
+      "version": "1.0.14",
       "kind": "plugin",
       "display_name": "爆款 IP 视频剪辑",
       "description": "基于 Montage 运行时处理真人 IP 口播素材，完成留存导向的剪辑规划、制作指导和成片质量复核。",
@@ -3881,7 +3881,13 @@
           "role": "bgm_plan",
           "path": "output/bgm_plan.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
+        },
+        {
+          "role": "audio_source_manifest",
+          "path": "output/audio-source-manifest.json",
+          "mime_type": "application/json",
+          "required": true
         },
         {
           "role": "captions",
@@ -3899,13 +3905,13 @@
           "role": "content_tags",
           "path": "output/content-tags.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "final_video",
           "path": "output/final.mp4",
           "mime_type": "video/mp4",
-          "required": false
+          "required": true
         },
         {
           "role": "project_manifest",
@@ -3923,7 +3929,7 @@
           "role": "delivery_manifest",
           "path": "output/delivery-manifest.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "content_reuse_brief",
@@ -4020,10 +4026,22 @@
           "path": "output/failure-diagnosis.md",
           "mime_type": "text/markdown",
           "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "quality_evidence",
+          "path": "output/quality-evidence.json",
+          "mime_type": "application/json",
+          "required": true
         }
       ],
       "ui": {},
-      "digest": "3673d34a064fea94349e9bee59ac9961dfbe438b91249fbe0d2df15ce4f94aed"
+      "digest": "0961207eaa0dcab16584449b8f7801af82e57fb2313de7953cb5e49f5d3b5a96"
     },
     {
       "id": "wechat-article",
