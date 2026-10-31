@@ -21,7 +21,7 @@ RUN set -eux; \
       libnss3 libdbus-1-3 libatk1.0-0 libgbm-dev libasound2 \
       libxrandr2 libxkbcommon-dev libxfixes3 libxcomposite1 libxdamage1 \
       libatk-bridge2.0-0 libpango-1.0-0 libcairo2 libcups2 \
-      python3 python3-venv tini; \
+      make python3 python3-venv tini; \
     getent passwd 1000 >/dev/null || { echo >&2 "Node base must provide UID 1000"; exit 1; }; \
     getent group 1000 >/dev/null || { echo >&2 "Node base must provide GID 1000"; exit 1; }; \
     install -d -m 0755 -o 1000 -g 1000 /home/node; \
@@ -44,20 +44,30 @@ RUN set -eux; \
     git apply /tmp/openmontage-remotion-deps.patch; \
     rm -rf .git /tmp/openmontage-remotion-deps.patch
 
+# Run the upstream one-command setup at the pinned revision, then reinstall the
+# Remotion composer from the reviewed lockfile so image contents stay reproducible.
 ENV OPENMONTAGE_VENV=/opt/openmontage-venv
 RUN set -eux; \
-    python3 -m venv "$OPENMONTAGE_VENV"; \
-    "$OPENMONTAGE_VENV/bin/pip" install --no-cache-dir -r /opt/montage-template/requirements.txt; \
-    test -f /opt/montage-template/remotion-composer/package-lock.json; \
-    cd /opt/montage-template/remotion-composer; \
+    cd /opt/montage-template; \
+    cp remotion-composer/package-lock.json /tmp/package-lock.patched.json; \
+    test -f requirements.txt; \
+    HOME=/home/node PIP_NO_CACHE_DIR=1 \
+      make setup VENV_DIR="$OPENMONTAGE_VENV"; \
+    test -x "$OPENMONTAGE_VENV/bin/python"; \
+    test ! -e .venv; \
+    rm -f .env; \
+    cp /tmp/package-lock.patched.json remotion-composer/package-lock.json; \
+    rm -f /tmp/package-lock.patched.json; \
+    test -f remotion-composer/package-lock.json; \
+    cd remotion-composer; \
     npm ci; \
     npm audit --omit=dev --audit-level=moderate || true; \
     ./node_modules/.bin/remotion browser ensure; \
     cd /opt/montage-template; \
     "$OPENMONTAGE_VENV/bin/python" -c "from tools.tool_registry import registry; registry.discover(); summary = registry.provider_menu_summary(); assert isinstance(summary, dict)"; \
     "$OPENMONTAGE_VENV/bin/python" -c "from lib.pipeline_loader import load_pipeline; manifest = load_pipeline('cinematic'); assert manifest.get('name') or manifest.get('display_name')"; \
-    npm cache clean --force; \
-    rm -rf /root/.npm; \
+    rm -rf /root/.npm /home/node/.npm/_cacache /home/node/.npm/_logs; \
+    if [ -d /home/node/.npm ]; then chown -R 1000:1000 /home/node/.npm; chmod -R u+rwX,go+rX /home/node/.npm; fi; \
     chown -R root:root /opt/montage-template "$OPENMONTAGE_VENV"; \
     chmod -R a=rX /opt/montage-template "$OPENMONTAGE_VENV"
 
