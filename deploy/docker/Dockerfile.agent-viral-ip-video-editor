@@ -66,7 +66,7 @@ RUN set -eux; \
     rm -f /tmp/package-lock.patched.json; \
     test -f remotion-composer/package-lock.json; \
     cd remotion-composer; \
-    npm ci; \
+    HOME=/home/node npm ci; \
     npm audit --omit=dev --audit-level=moderate || true; \
     ./node_modules/.bin/remotion browser ensure; \
     cd /opt/montage-template; \
