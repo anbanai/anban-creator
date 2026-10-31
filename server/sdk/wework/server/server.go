@@ -147,13 +147,14 @@ func (srv *Server) handleRequest(ctx fiber.Ctx) (any, error) {
 	if srv.now != nil {
 		now = srv.now()
 	}
-	if !srv.replay.claim(keys, now) {
+	claim, claimed := srv.replay.claim(keys, now)
+	if !claimed {
 		return nil, nil
 	}
 	processed := false
 	defer func() {
 		if !processed {
-			srv.replay.release(keys)
+			srv.replay.release(claim)
 		}
 	}()
 
