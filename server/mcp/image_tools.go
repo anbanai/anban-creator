@@ -235,7 +235,7 @@ func safeImageFailureHint(code string) string {
 	case "safety_blocked":
 		return "Revise the prompt to comply with the provider's content policy. Do not retry the unchanged prompt."
 	case "endpoint_protocol":
-		return "Check the image provider Base URL. For Volcengine use the official Ark API endpoint, usually ending in /api/v3; do not use a web page or incompatible gateway."
+		return "Check the image provider Base URL: generation POSTs to <base_url>/images/generations (or /images/edits for reference-image requests), and that path must return JSON. A web page or console URL answers HTML instead. TokenPlayer image routes carry an API prefix such as .../doubao/api/v3. Do not retry until the endpoint is corrected."
 	case "rate_limit", "server_error", "network_error", "provider_timeout", "operation_timeout":
 		return "A transient provider failure may be retried with bounded backoff."
 	case "request_cancelled":

@@ -305,6 +305,18 @@ func TestClassifyImageToolFailureReturnsStableProviderContract(t *testing.T) {
 	}
 }
 
+func TestSafeImageFailureHintEndpointsTheBaseURLFix(t *testing.T) {
+	hint := safeImageFailureHint("endpoint_protocol")
+	for _, want := range []string{"<base_url>/images/generations", "images/edits", "JSON", "api/v3"} {
+		if !strings.Contains(hint, want) {
+			t.Fatalf("endpoint_protocol hint %q missing %q", hint, want)
+		}
+	}
+	if hint == safeImageFailureHint("network_error") {
+		t.Fatalf("endpoint_protocol hint collapsed into the transient hint: %q", hint)
+	}
+}
+
 func TestClassifyImageToolFailureUsesServerCorrelationID(t *testing.T) {
 	err := &service.ImageProviderFailureError{
 		CorrelationID: "server-correlation-42",

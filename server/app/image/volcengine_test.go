@@ -387,6 +387,59 @@ func TestVolcengineConvertSDKError_ClassifiesHTMLResponseAtHTTP200(t *testing.T)
 	}
 }
 
+func TestVolcengineEndpointProtocolHintIsProviderAware(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		protocol seedreamProtocol
+		want     []string
+		notWant  string
+	}{
+		{name: "TokenPlayer", protocol: seedreamProtocolTokenplayer, want: []string{"<base_url>/images/generations", "tokenplayer.cn/doubao/api/v3"}, notWant: "ark.cn-beijing.volces.com"},
+		{name: "Volcengine", protocol: seedreamProtocolArk, want: []string{"<base_url>/images/generations", "ark.cn-beijing.volces.com/api/v3"}, notWant: "tokenplayer.cn"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &VolcengineProvider{protocol: tc.protocol}
+			hint := p.endpointProtocolHint()
+			for _, want := range tc.want {
+				if !strings.Contains(hint, want) {
+					t.Fatalf("hint %q missing %q", hint, want)
+				}
+			}
+			if strings.Contains(hint, tc.notWant) {
+				t.Fatalf("hint %q references another provider's %q", hint, tc.notWant)
+			}
+		})
+	}
+}
+
+func TestVolcengineConvertSDKErrorUsesProviderAwareEndpointProtocolHint(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		protocol seedreamProtocol
+		want     string
+		notWant  string
+	}{
+		{name: "TokenPlayer", protocol: seedreamProtocolTokenplayer, want: "tokenplayer.cn/doubao/api/v3", notWant: "ark.cn-beijing.volces.com"},
+		{name: "Volcengine", protocol: seedreamProtocolArk, want: "ark.cn-beijing.volces.com/api/v3", notWant: "tokenplayer.cn"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &VolcengineProvider{protocol: tc.protocol, endpoint: "https://images.example.test/images/generations"}
+			converted := p.convertSDKError(&model.RequestError{
+				HTTPStatusCode: http.StatusOK,
+				RequestId:      "html-200",
+				Err:            errors.New("invalid character '<' looking for beginning of value"),
+			})
+			genErr, ok := converted.(*GenerateError)
+			if !ok || genErr.Code != "endpoint_protocol" {
+				t.Fatalf("converted error = %#v, want endpoint_protocol", converted)
+			}
+			if !strings.Contains(genErr.HintMsg, tc.want) || strings.Contains(genErr.HintMsg, tc.notWant) {
+				t.Fatalf("hint = %q, want %q and not %q", genErr.HintMsg, tc.want, tc.notWant)
+			}
+		})
+	}
+}
+
 func TestVolcengineGenerate_LogsStructuredProtocolFailureWithoutRawBody(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -412,7 +465,7 @@ func TestVolcengineGenerate_LogsStructuredProtocolFailureWithoutRawBody(t *testi
 			t.Fatalf("structured log missing %q: %s", field, logs.String())
 		}
 	}
-	for _, field := range []string{"request_method", "request_endpoint", "response_content_type", "transport_phase"} {
+	for _, field := range []string{"request_method", "request_endpoint", "response_content_type", "transport_phase", "<base_url>/images/generations"} {
 		if !strings.Contains(logs.String(), field) {
 			t.Fatalf("structured log missing %q: %s", field, logs.String())
 		}

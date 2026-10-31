@@ -218,7 +218,9 @@ model_providers:
 
   # Optional TokenPlayer chat/LLM route. This block is not required when
   # TokenPlayer is used only for image generation; configure the image route
-  # under model_routes.image_generation below instead.
+  # under model_routes.image_generation below instead. Chat is served from the
+  # /v1 prefix, while the Ark-compatible Seedream image route sits under
+  # /doubao/api/v3 (see the image capability below for the exact base URL).
   # tokenplayer:
   #   protocol: "openai_compatible"
   #   base_url: "https://tokenplayer.cn/v1"
@@ -279,10 +281,22 @@ model_routes:
         # tokenplayer entry under model_providers alone is not sufficient.
         # provider: "tokenplayer"
         # model: "doubao-seedream-5-0-pro-260628"
-        # base_url: "${TOKENPLAYER_IMAGE_BASE_URL}"
+        # base_url: "https://tokenplayer.cn/doubao/api/v3"
         # api_key: "${TOKENPLAYER_API_KEY}"
-        # TOKENPLAYER_IMAGE_BASE_URL must be the TokenPlayer Seedream/Ark-
-        # compatible API base URL, not a chat-only endpoint.
+        # base_url must be the image API root: the Server POSTs to
+        # <base_url>/images/generations and expects JSON. Page-style URLs such
+        # as https://tokenplayer.cn and https://tokenplayer.cn/doubao answer
+        # HTML, so every image task fails with endpoint_protocol
+        # (HTTP 200, text/html) and is not retried. The Ark-compatible Seedream
+        # route used above is https://tokenplayer.cn/doubao/api/v3.
+        # Verify the exact URL before restarting the Server:
+        #   curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' \
+        #     -X POST https://tokenplayer.cn/doubao/api/v3/images/generations \
+        #     -H 'Content-Type: application/json' \
+        #     -H "Authorization: Bearer $TOKENPLAYER_API_KEY" \
+        #     -d '{"model":"doubao-seedream-5-0-pro-260628","prompt":"probe","size":"2K","response_format":"url","stream":false}'
+        # application/json (even a 401) means the base URL is right; text/html
+        # means it points at the web gateway instead of the API.
         timeout: 5m
         enabled: true
         quality_rank: 100
