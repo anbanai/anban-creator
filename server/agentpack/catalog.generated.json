@@ -3261,7 +3261,7 @@
     },
     {
       "id": "talking-head-montage",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "kind": "plugin",
       "display_name": "口播 Montage 制作",
       "description": "以 OpenMontage hybrid 为主引擎，完成真人口播、生成视频素材、图片素材和图形动效的本地制作与文件审核。",
@@ -3270,7 +3270,8 @@
         "skills": [
           "talking-head-sound-design",
           "content-tagging",
-          "short-video-cover"
+          "short-video-cover",
+          "talking-head-visual-focus"
         ],
         "max_turns": 260
       },
@@ -3581,7 +3582,7 @@
       "ui": {
         "renderer": "custom:talking-head-montage"
       },
-      "digest": "467d0181aea440f336b037447655936adf1685d3843a106695bc5475cc419d71"
+      "digest": "bbaa1254f71503420fc28987deba3164e20613d0512178dccb16ad48ab71bece"
     },
     {
       "id": "video-edit",
@@ -3738,7 +3739,7 @@
     },
     {
       "id": "viral-ip-video-editor",
-      "version": "1.0.12",
+      "version": "1.0.13",
       "kind": "plugin",
       "display_name": "爆款 IP 视频剪辑",
       "description": "基于 Montage 运行时处理真人 IP 口播素材，完成留存导向的剪辑规划、制作指导和成片质量复核。",
@@ -3750,6 +3751,7 @@
           "montage",
           "portrait-cover-design",
           "short-video-cover",
+          "talking-head-visual-focus",
           "viral-ip-editing",
           "wechat-video-account-review",
           "auto-editor"
@@ -4021,7 +4023,7 @@
         }
       ],
       "ui": {},
-      "digest": "2410e2588d1219842d5a9d6b66b5ceec2006675bc3d1ec4f7951ece713ca20d2"
+      "digest": "3673d34a064fea94349e9bee59ac9961dfbe438b91249fbe0d2df15ce4f94aed"
     },
     {
       "id": "wechat-article",
