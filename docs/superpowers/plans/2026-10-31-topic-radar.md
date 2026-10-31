@@ -115,6 +115,8 @@
 - [x] Resolve normalized TopicPool duplicates before creating content assets, preserve canonical provenance, and cover same-request, existing manual, and existing adopted topics with RED-to-GREEN regressions.
 - [x] Complete subscription deletion across authenticated API and Studio, stop new admission/scheduling, retain existing history, and verify confirmation, errors, and selected-state refresh.
 - [x] Integrate the latest local-main Harness contracts, preserve both native versions at 4.2.116, and pass DSH tests, packed-artifact checks, profile smoke, and native plugin validation.
-- [ ] Complete independent re-review of the final fixes, integrate the latest root main, and pass full final-tree Go/Studio/Pack verification before the authorized local-main merge.
+- [x] Complete independent re-review of the final fixes, integrate the latest root main, and pass full final-tree Go/Studio/Pack verification before the authorized local-main merge.
+
+Final automated verification on 2026-10-31 (Asia/Shanghai): full Go tests, server build, Go vet, MCP boundary test, Pack generation/check, full Studio tests (175 files / 1,581 tests), and Studio production build pass. Harness DSH tests (476 passed / 1 skipped), packed-artifact integrity, installed-profile smoke, and native Claude plugin validation pass. Independent re-review reports no remaining actionable findings. Native plugin validation retains the existing optional icon/privacy-policy directory warnings.
 
 Live provider calls, actual Docker/Kubernetes execution, and a live MySQL migration are outside the completed automated verification. No remote push is authorized.
