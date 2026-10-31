@@ -51,6 +51,7 @@ require (
 	k8s.io/api v0.37.2
 	k8s.io/apimachinery v0.37.2
 	k8s.io/client-go v0.37.2
+	resty.dev/v3 v3.0.0-rc.4
 )
 
 require (

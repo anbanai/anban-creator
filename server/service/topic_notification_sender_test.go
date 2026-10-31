@@ -72,6 +72,17 @@ func TestSendTopicNotificationRendersSourceAndIntroduction(t *testing.T) {
 	}
 }
 
+func TestSendTopicNotificationAcceptsCaseInsensitiveProvider(t *testing.T) {
+	_, _, radar := seedTopicNotificationDelivery(t, "https://1.1.1.1/hook")
+	radar.notificationClient = topicNotificationTestClient(topicNotificationRoundTripper(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"code":0}`)), Request: req}, nil
+	}))
+	channel := &model.TopicNotificationChannel{Provider: "FEISHU", WebhookURL: "https://1.1.1.1/hook", Enabled: true}
+	if _, err := radar.sendTopicNotificationText(context.Background(), channel, "test"); err != nil {
+		t.Fatalf("send with uppercase provider: %v", err)
+	}
+}
+
 func TestSendTopicNotificationRefusesRedirects(t *testing.T) {
 	var requests atomic.Int32
 	repo, delivery, radar := seedTopicNotificationDelivery(t, "https://1.1.1.1/hook")

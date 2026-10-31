@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/notification"
 )
 
 func (s *TopicRadarService) SendTopicNotification(ctx context.Context, deliveryID string) error {
@@ -76,7 +77,6 @@ func (s *TopicRadarService) SendTopicNotification(ctx context.Context, deliveryI
 
 func renderTopicNotificationText(items []topicNotificationPayload) string {
 	var b strings.Builder
-	b.WriteString("# 选题雷达\n")
 	for i, item := range items {
 		b.WriteString(fmt.Sprintf("\n## %d. %s\n%s\n来源：%s\n", i+1, item.Title, item.Introduction, item.SourceSummary))
 		for _, ref := range item.SourceRefs {
@@ -103,11 +103,11 @@ func renderTopicNotificationText(items []topicNotificationPayload) string {
 func notificationRequestBody(provider, text string) ([]byte, error) {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case model.TopicNotificationProviderFeishu:
-		return json.Marshal(map[string]any{"msg_type": "interactive", "card": map[string]any{"elements": []map[string]any{{"tag": "markdown", "content": text}}}})
+		return notification.MarkdownBody(notification.NotifyTypeLark, "选题雷达", text)
 	case model.TopicNotificationProviderWeCom:
-		return json.Marshal(map[string]any{"msgtype": "markdown", "markdown": map[string]string{"content": text}})
+		return notification.MarkdownBody(notification.NotifyTypeWeWork, "选题雷达", text)
 	case model.TopicNotificationProviderDingTalk:
-		return json.Marshal(map[string]any{"msgtype": "markdown", "markdown": map[string]string{"title": "选题雷达", "text": text}})
+		return notification.MarkdownBody(notification.NotifyTypeDingTalk, "选题雷达", text)
 	default:
 		return nil, fmt.Errorf("unsupported notification provider %q", provider)
 	}
@@ -149,7 +149,7 @@ func (s *TopicRadarService) sendTopicNotificationText(ctx context.Context, chann
 	if err != nil {
 		return model.TopicNotificationInvalid, err
 	}
-	if channel.Provider == model.TopicNotificationProviderWeCom && len([]byte(text)) > 4096 {
+	if strings.EqualFold(strings.TrimSpace(channel.Provider), model.TopicNotificationProviderWeCom) && len([]byte(text)) > 4096 {
 		return model.TopicNotificationInvalid, errors.New("wecom markdown exceeds 4096 UTF-8 bytes")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, channel.WebhookURL, bytes.NewReader(body))
@@ -189,7 +189,7 @@ func (s *TopicRadarService) sendTopicNotificationText(ctx context.Context, chann
 		return model.TopicNotificationFailed, errors.New("notification provider returned invalid acknowledgement")
 	}
 	code := acknowledgement.ErrCode
-	if channel.Provider == model.TopicNotificationProviderFeishu {
+	if strings.EqualFold(strings.TrimSpace(channel.Provider), model.TopicNotificationProviderFeishu) {
 		code = acknowledgement.Code
 		if code == nil {
 			code = acknowledgement.LegacyCode
