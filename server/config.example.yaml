@@ -598,6 +598,7 @@ claude:
     content-planning: "${ANBAN_AGENT_IMAGE_CONTENT_PLANNING:-}"
     profile-analysis: "${ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS:-creator-agent-profile-analysis:latest}"
     feedback-analysis: "${ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS:-creator-agent-feedback-analysis:latest}"
+    topic-radar: "${ANBAN_AGENT_IMAGE_TOPIC_RADAR:-creator-agent-topic-radar:latest}"
     whiteboard-animation: "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}"
     hypit: "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}"
     local-life: "${ANBAN_AGENT_IMAGE_LOCAL_LIFE:-creator-agent-local-life:latest}"

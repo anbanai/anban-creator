@@ -18,6 +18,7 @@ ECOMMERCE_AGENT_IMAGE ?= creator-agent-ecommerce:latest
 CONTENT_PLANNING_AGENT_IMAGE ?= creator-agent-content-planning:latest
 PROFILE_ANALYSIS_AGENT_IMAGE ?= creator-agent-profile-analysis:latest
 FEEDBACK_ANALYSIS_AGENT_IMAGE ?= creator-agent-feedback-analysis:latest
+TOPIC_RADAR_AGENT_IMAGE ?= creator-agent-topic-radar:latest
 WHITEBOARD_ANIMATION_AGENT_IMAGE ?= creator-agent-whiteboard-animation:latest
 HYPIT_AGENT_IMAGE ?= creator-agent-hypit:latest
 LOCAL_LIFE_AGENT_IMAGE ?= creator-agent-local-life:latest
@@ -44,7 +45,7 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
         agent-install agent-test agent-build \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
-        docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-talking-head-editor-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image docker-images \
+        docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-talking-head-editor-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-topic-radar-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image docker-images \
         agent-runtime-release-manifest
 
 .PHONY: docker-runtime-smoke docker-hypit-smoke docker-agent-build-check
@@ -207,7 +208,7 @@ docker-agent-build-check: agent-pack-check
 # start the Compose services. Runtime containers are launched on demand by the
 # Server and are not Compose services; rebuilding the Server here keeps its
 # embedded Agent Pack Catalog aligned with the images just built.
-docker-up: docker-server-image docker-dsh-runtime-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-talking-head-editor-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image
+docker-up: docker-server-image docker-dsh-runtime-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-talking-head-editor-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-topic-radar-agent-image docker-whiteboard-animation-agent-image
 	@DOCKER_GID="$(DOCKER_SOCKET_GID)" docker compose up -d
 
 # Stop infrastructure services
@@ -287,6 +288,10 @@ docker-feedback-analysis-agent-image: docker-agent-build-check
 	docker build -f deploy/docker/Dockerfile.agent-feedback-analysis -t $(FEEDBACK_ANALYSIS_AGENT_IMAGE) . && \
 	echo "Image build complete: $(FEEDBACK_ANALYSIS_AGENT_IMAGE)"
 
+# Build the minimal dedicated Topic Radar Agent runtime.
+docker-topic-radar-agent-image: docker-agent-build-check
+	@docker build -f deploy/docker/Dockerfile.agent-topic-radar -t $(TOPIC_RADAR_AGENT_IMAGE) .
+
 docker-whiteboard-animation-agent-image: docker-agent-build-check
 	docker build -f deploy/docker/Dockerfile.agent-whiteboard-animation \
 		--build-arg WHITEBOARD_ANIMATION_REPO=https://github.com/geeklee/srt-whiteboard-animation.git \
@@ -340,7 +345,7 @@ docker-studio-image:
 	echo "Image build complete: $(STUDIO_IMAGE)"
 
 # Build all supported images.
-docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-talking-head-editor-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image
+docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-talking-head-editor-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-topic-radar-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image
 
 # Validate and record one release set for the Server and every managed Agent
 # runtime. Pass image references through the existing
@@ -414,6 +419,7 @@ help:
 	@echo "  make docker-viral-ip-video-editor-agent-image - Build IP video editor with Auto-Editor and OpenMontage"
 	@echo "  make docker-video-edit-agent-image - Build video-edit Agent with pinned browser-use/video-use"
 	@echo "  make docker-feedback-analysis-agent-image - Build Feedback analysis agent image"
+	@echo "  make docker-topic-radar-agent-image - Build Topic Radar agent image"
 	@echo "  make docker-whiteboard-animation-agent-image - Build whiteboard-animation runtime image"
 	@echo "  make docker-hypit-agent-image - Build video replication runtime from official source"
 	@echo "  make docker-hypit-smoke - Verify official runtime and local render without paid generation"

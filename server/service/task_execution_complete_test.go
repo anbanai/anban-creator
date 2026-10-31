@@ -40,6 +40,27 @@ func setAutomaticWechatDeliverySnapshot(task *model.Task) {
 	}})
 }
 
+func TestCompleteCloudExecutionInvokesTopicRadarFinalizerAfterArtifacts(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	task.Channel = model.ChannelTopicRadar
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	var gotTaskID, gotExecutionID string
+	svc.SetTopicRadarFinalizer(func(_ context.Context, gotTask *model.Task, gotExecution *model.TaskExecution) error {
+		gotTaskID, gotExecutionID = gotTask.ID, gotExecution.ID
+		return nil
+	})
+	result := &agent.ExecutionResult{Success: true, RemoteArtifacts: true}
+	if err := svc.CompleteCloudExecution(ctx, execution.ID, result); err != nil {
+		t.Fatal(err)
+	}
+	if gotTaskID != task.ID || gotExecutionID != execution.ID {
+		t.Fatalf("finalizer received task=%q execution=%q, want %q/%q", gotTaskID, gotExecutionID, task.ID, execution.ID)
+	}
+}
+
 func TestBuildCloudTaskOutcomeUsesAgentReviewForWechatPicture(t *testing.T) {
 	ctx := context.Background()
 	svc, repo, task, execution := setupCloudCompletionTest(t, false)

@@ -96,11 +96,18 @@ type TaskService struct {
 	imageCapabilities    *ImageCapabilityResolver
 	reuseRunFinalizer    func(context.Context, *model.Task) error
 	researchJobFinalizer func(context.Context, *model.Task) error
+	topicRadarFinalizer  func(context.Context, *model.Task, *model.TaskExecution) error
 }
 
 func (s *TaskService) SetResearchJobFinalizer(finalizer func(context.Context, *model.Task) error) {
 	if s != nil {
 		s.researchJobFinalizer = finalizer
+	}
+}
+
+func (s *TaskService) SetTopicRadarFinalizer(finalizer func(context.Context, *model.Task, *model.TaskExecution) error) {
+	if s != nil {
+		s.topicRadarFinalizer = finalizer
 	}
 }
 
@@ -487,6 +494,9 @@ type CreateManualParams struct {
 	ReuseRunID        string
 	ReuseStageID      string
 	ResearchJobID     string
+	// Topic jobs are admitted only by the server-owned workflow.
+	topicDigestID    string
+	topicScriptJobID string
 	// FrozenTaskType and PreserveFrozenConfig are internal clone controls. They
 	// keep a clone on the source task contract even when the project changes.
 	FrozenTaskType       string
@@ -847,6 +857,12 @@ func (s *TaskService) createManual(ctx context.Context, p CreateManualParams, tr
 		}
 		return nil, err
 	}
+	if taskType == model.TaskTypeTopicDigest || taskType == model.TaskTypeTopicScript {
+		if (taskType == model.TaskTypeTopicDigest && p.topicDigestID == "") || (taskType == model.TaskTypeTopicScript && p.topicScriptJobID == "") {
+			return nil, fmt.Errorf("%w: topic radar requires server-owned admission", ErrInvalidAgentInput)
+		}
+		quantity = 1
+	}
 	agentInput, err := validateAndCloneAgentInput(taskType, p.AgentInput)
 	if err != nil {
 		return nil, err
@@ -1148,6 +1164,11 @@ func (s *TaskService) createManual(ctx context.Context, p CreateManualParams, tr
 			task.SetInputAttachments(cloneEntryAttachments(p.InputAttachments))
 		}
 		if agentInput != nil {
+			if taskType == model.TaskTypeTopicDigest || taskType == model.TaskTypeTopicScript {
+				agentInput["task_id"] = task.ID
+				agentInput["execution_id"] = ""
+				agentInput["task_kind"] = task.TaskKind
+			}
 			task.SetAgentInput(agentInput)
 		}
 		if model.IsHypitPlatform(taskType) && p.HypitInput != nil {
@@ -1280,6 +1301,9 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 		return nil
 	}
 	createTask := func(repo repository.Repository, task *model.Task) error {
+		if err := bindTopicManagedTask(ctx, repo, task, manualAdmission); err != nil {
+			return err
+		}
 		if task.ResearchJobID != "" {
 			if err := repo.ContentAssets().BindResearchJobTask(ctx, task); err != nil {
 				return err

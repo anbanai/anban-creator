@@ -81,6 +81,7 @@ type Services struct {
 	TopicPoolHandler                    *handler.TopicPoolHandler
 	ContentAssetHandler                 *handler.ContentAssetHandler
 	TrendsHandler                       *handler.TrendsHandler
+	TopicRadarHandler                   *handler.TopicRadarHandler
 	IlinkHandler                        *handler.IlinkHandler
 	MCPHandler                          http.Handler
 	StorageProvider                     storage.Provider
@@ -396,6 +397,26 @@ func NewRouter(svc *Services) *fiber.App {
 	if svc.TrendsHandler != nil {
 		apiV1.Get("/trends", svc.TrendsHandler.List)
 		apiV1.Post("/trends/refresh", svc.TrendsHandler.Refresh)
+	}
+	if svc.TopicRadarHandler != nil {
+		apiV1.Get("/projects/:project_id/topic-radar/subscriptions", svc.TopicRadarHandler.ListSubscriptions)
+		apiV1.Post("/projects/:project_id/topic-radar/subscriptions", svc.TopicRadarHandler.CreateSubscription)
+		apiV1.Get("/projects/:project_id/topic-radar/notification-channels", svc.TopicRadarHandler.ListNotificationChannels)
+		apiV1.Post("/projects/:project_id/topic-radar/notification-channels", svc.TopicRadarHandler.CreateNotificationChannel)
+		apiV1.Post("/topic-radar/subscriptions/:subscription_id/run", svc.TopicRadarHandler.RunDigest)
+		apiV1.Get("/topic-radar/subscriptions/:subscription_id/digests", svc.TopicRadarHandler.ListDigests)
+		apiV1.Get("/topic-radar/digests/:digest_id/suggestions", svc.TopicRadarHandler.ListSuggestions)
+		apiV1.Patch("/topic-radar/subscriptions/:subscription_id", svc.TopicRadarHandler.UpdateSubscription)
+		apiV1.Delete("/topic-radar/subscriptions/:subscription_id", svc.TopicRadarHandler.DeleteSubscription)
+		apiV1.Get("/topic-radar/digests/:digest_id", svc.TopicRadarHandler.GetDigest)
+		apiV1.Post("/topic-radar/digests/:digest_id/retry", svc.TopicRadarHandler.RetryDigest)
+		apiV1.Get("/topic-radar/scripts/:script_id/artifact", svc.TopicRadarHandler.GetScriptArtifact)
+		apiV1.Post("/topic-radar/notification-channels/:channel_id/test", svc.TopicRadarHandler.TestNotificationChannel)
+		apiV1.Get("/topic-radar/scripts/:script_id", svc.TopicRadarHandler.GetScript)
+		apiV1.Post("/topic-radar/scripts/:script_id/retry", svc.TopicRadarHandler.RetryScript)
+		apiV1.Patch("/topic-radar/notification-channels/:channel_id", svc.TopicRadarHandler.UpdateNotificationChannel)
+		apiV1.Delete("/topic-radar/notification-channels/:channel_id", svc.TopicRadarHandler.DeleteNotificationChannel)
+		apiV1.Post("/topic-radar/suggestions/:suggestion_id/script", svc.TopicRadarHandler.RequestScript)
 	}
 
 	// ---------------------------------------------------------------------------

@@ -105,6 +105,7 @@ const (
 const (
 	TaskExecutionFinalizationTerminal      = "terminal"
 	TaskExecutionFinalizationArtifacts     = "artifacts"
+	TaskExecutionFinalizationDomain        = "domain"
 	TaskExecutionFinalizationResult        = "result"
 	TaskExecutionFinalizationWorkflow      = "workflow"
 	TaskExecutionFinalizationDraftDelivery = "draft_delivery"

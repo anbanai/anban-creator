@@ -87,6 +87,7 @@ if [[ -f "$manifest_path" ]]; then
   content_planning_agent_image_repo=${content_planning_agent_image_repo:-$(jq -r '.images["content-planning"] // empty' "$manifest_path")}
   profile_analysis_agent_image_repo=${profile_analysis_agent_image_repo:-$(jq -r '.images["profile-analysis"] // empty' "$manifest_path")}
   feedback_analysis_agent_image_repo=${feedback_analysis_agent_image_repo:-$(jq -r '.images["feedback-analysis"] // empty' "$manifest_path")}
+  topic_radar_agent_image_repo=${topic_radar_agent_image_repo:-$(jq -r '.images["topic-radar"] // empty' "$manifest_path")}
   whiteboard_animation_agent_image_repo=${whiteboard_animation_agent_image_repo:-$(jq -r '.images["whiteboard-animation"] // empty' "$manifest_path")}
   hypit_agent_image_repo=${hypit_agent_image_repo:-$(jq -r '.images.hypit // empty' "$manifest_path")}
   local_life_agent_image_repo=${local_life_agent_image_repo:-$(jq -r '.images["local-life"] // empty' "$manifest_path")}
@@ -110,6 +111,7 @@ export wechat_article_agent_image_repo wechat_picture_agent_image_repo
 export seednote_agent_image_repo montage_agent_image_repo viral_ip_video_editor_agent_image_repo video_edit_agent_image_repo talking_head_editor_agent_image_repo moments_agent_image_repo
 export ecommerce_agent_image_repo profile_analysis_agent_image_repo
 export feedback_analysis_agent_image_repo whiteboard_animation_agent_image_repo
+export topic_radar_agent_image_repo
 export content_planning_agent_image_repo=${content_planning_agent_image_repo:-}
 export hypit_agent_image_repo local_life_agent_image_repo
 export dsh_image_repo

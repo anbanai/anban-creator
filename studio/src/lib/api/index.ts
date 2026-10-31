@@ -15,6 +15,7 @@ import { postersApi } from './posters'
 import { viralAnalysesApi } from './viral-analyses'
 import { resourcesApi } from './resources'
 import { topicPoolApi } from './topic-pool'
+import { topicRadarApi } from './topic-radar'
 import { imageCapabilitiesApi } from './image-capabilities'
 import { hypitCapabilitiesApi } from './hypit-capabilities'
 import { montageCapabilitiesApi } from './montage-capabilities'
@@ -54,6 +55,7 @@ export const api = {
   viralAnalyses: viralAnalysesApi,
   resources: resourcesApi,
   topicPool: topicPoolApi,
+  topicRadar: topicRadarApi,
   imageCapabilities: imageCapabilitiesApi,
   hypitCapabilities: hypitCapabilitiesApi,
   montageCapabilities: montageCapabilitiesApi,
