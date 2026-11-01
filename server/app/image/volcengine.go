@@ -28,9 +28,19 @@ type VolcengineProvider struct {
 	sizePixel   string // 像素格式 "WIDTHxHEIGHT"，如 "1728x2304"
 	volcConfig  *config.VolcengineConfig
 	name        string
+	protocol    seedreamProtocol
 	endpoint    string
 	diagnostics *imageProviderDiagnostics
 }
+
+// seedreamProtocol 区分使用 Seedream 协议的上游接入方式。
+// 它只影响面向运维的错误提示，不改变请求协议。
+type seedreamProtocol int
+
+const (
+	seedreamProtocolArk seedreamProtocol = iota
+	seedreamProtocolTokenplayer
+)
 
 const volcengineImageRequestPath = "/images/generations"
 
@@ -170,16 +180,16 @@ func volcenginePixelSize(aspectRatio, sizeTier string) string {
 
 // NewVolcengineProvider 创建火山方舟 Seedream Provider
 func NewVolcengineProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (*VolcengineProvider, error) {
-	return newSeedreamProvider(apiCfg, log, "Volcengine")
+	return newSeedreamProvider(apiCfg, log, "Volcengine", seedreamProtocolArk)
 }
 
 // NewTokenplayerProvider creates a TokenPlayer provider using the same
 // Seedream-compatible Ark request protocol as Volcengine.
 func NewTokenplayerProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (*VolcengineProvider, error) {
-	return newSeedreamProvider(apiCfg, log, "TokenPlayer")
+	return newSeedreamProvider(apiCfg, log, "TokenPlayer", seedreamProtocolTokenplayer)
 }
 
-func newSeedreamProvider(apiCfg *config.ImageAPI, log *zerolog.Logger, name string) (*VolcengineProvider, error) {
+func newSeedreamProvider(apiCfg *config.ImageAPI, log *zerolog.Logger, name string, protocol seedreamProtocol) (*VolcengineProvider, error) {
 	mdl := apiCfg.Model
 	if mdl == "" {
 		mdl = DefaultVolcengineModel
@@ -216,6 +226,7 @@ func newSeedreamProvider(apiCfg *config.ImageAPI, log *zerolog.Logger, name stri
 		sizePixel:   sizePixel,
 		volcConfig:  apiCfg.Volcengine,
 		name:        name,
+		protocol:    protocol,
 		endpoint:    sanitizeImageProviderEndpoint(baseURL + volcengineImageRequestPath),
 		diagnostics: diagnostics,
 	}, nil
@@ -319,7 +330,7 @@ func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *
 		converted := p.convertSDKError(err)
 		var generateErr *GenerateError
 		if errors.As(converted, &generateErr) {
-			p.log.Error().
+			event := p.log.Error().
 				Str("provider", p.Name()).
 				Str("model", p.model).
 				Str("error_code", generateErr.Code).
@@ -329,8 +340,11 @@ func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *
 				Str("request_endpoint", generateErr.RequestEndpoint).
 				Str("response_content_type", generateErr.ResponseContentType).
 				Str("transport_phase", generateErr.TransportPhase).
-				Bool("retryable", generateErr.Retryable()).
-				Dur("elapsed", time.Since(start)).
+				Bool("retryable", generateErr.Retryable())
+			if hint := strings.TrimSpace(generateErr.HintMsg); hint != "" {
+				event = event.Str("hint", hint)
+			}
+			event.Dur("elapsed", time.Since(start)).
 				Msg("volcengine: image generation failed")
 		} else {
 			p.log.Error().
@@ -512,7 +526,7 @@ func (p *VolcengineProvider) convertSDKError(err error) (result error) {
 				Provider:          p.Name(),
 				Code:              "endpoint_protocol",
 				Message:           "图片服务返回了无法解析的非 JSON 响应",
-				HintMsg:           "请检查火山方舟 Base URL，应指向官方 Ark API（通常以 /api/v3 结尾），不要使用网页地址或不兼容的 OpenAI 网关",
+				HintMsg:           p.endpointProtocolHint(),
 				HTTPStatusCode:    reqErr.HTTPStatusCode,
 				ProviderRequestID: strings.TrimSpace(reqErr.RequestId),
 				Original:          err,
@@ -576,6 +590,17 @@ func (p *VolcengineProvider) applyRequestObservation(generateErr *GenerateError,
 	if generateErr.TransportPhase == "" {
 		generateErr.TransportPhase = observation.TransportPhase
 	}
+}
+
+// endpointProtocolHint 为 endpoint_protocol 失败给出按提供者区分的 Base URL 提示。
+// Seedream 协议把请求发到 <base_url>/images/generations，因此 Base URL 必须是
+// 图像 API 的根地址；指向网页站点或控制台会拿到 HTML 页面。
+func (p *VolcengineProvider) endpointProtocolHint() string {
+	hint := "请检查图片 Base URL：图片请求发往 <base_url>/images/generations，该地址必须返回 JSON；指向网页站点或控制台会返回 HTML 页面"
+	if p.protocol == seedreamProtocolTokenplayer {
+		return hint + "。TokenPlayer 的 Ark 兼容图片地址必须带 /api/v3 前缀，例如 https://tokenplayer.cn/doubao/api/v3；只配置 /doubao 会拿到网页 HTML"
+	}
+	return hint + "。火山方舟请使用官方 Ark API 地址，例如 https://ark.cn-beijing.volces.com/api/v3"
 }
 
 // parseVolcengineSize 解析 size 配置字段，返回 aspectRatio 和 sizeTier
