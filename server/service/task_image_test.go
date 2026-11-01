@@ -94,6 +94,7 @@ func TestGenerateTaskImageLogsSanitizedProviderDiagnostics(t *testing.T) {
 	f.service.logger = &logger
 	f.generator.err = &appimage.GenerateError{
 		Provider: "provider-name", Code: "server_error", Message: "provider secret text",
+		HintMsg:        "check the image base URL: <base_url>/images/generations must return JSON",
 		HTTPStatusCode: 503, ProviderRequestID: "upstream-request-42",
 		RequestMethod: "POST", RequestEndpoint: "https://images.example.test/api/v3/images/generations",
 		ResponseContentType: "application/json", TransportPhase: "http_response",
@@ -109,6 +110,7 @@ func TestGenerateTaskImageLogsSanitizedProviderDiagnostics(t *testing.T) {
 		`"http_status":503`, `"duration_ms":`, `"provider_request_id":"upstream-request-42"`,
 		`"request_method":"POST"`, `"request_endpoint":"https://images.example.test/api/v3/images/generations"`,
 		`"response_content_type":"application/json"`, `"transport_phase":"http_response"`,
+		`"hint":"check the image base URL: <base_url>/images/generations must return JSON"`,
 	} {
 		if !strings.Contains(logs.String(), want) {
 			t.Fatalf("log missing %q: %s", want, logs.String())
@@ -116,6 +118,23 @@ func TestGenerateTaskImageLogsSanitizedProviderDiagnostics(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "provider secret text") || strings.Contains(logs.String(), "draw a tea cover") {
 		t.Fatalf("provider log exposed raw error or prompt: %s", logs.String())
+	}
+}
+
+func TestGenerateTaskImageOmitsEmptyProviderHint(t *testing.T) {
+	f := newTaskImageFixture(t)
+	var logs bytes.Buffer
+	logger := zerolog.New(&logs)
+	f.service.logger = &logger
+	f.generator.err = &appimage.GenerateError{
+		Provider: "provider-name", Code: "rate_limit", Message: "slow down",
+		HTTPStatusCode: 429,
+	}
+	if _, err := f.service.Generate(context.Background(), f.request()); err == nil {
+		t.Fatal("expected provider failure")
+	}
+	if strings.Contains(logs.String(), `"hint"`) {
+		t.Fatalf("empty hint field logged: %s", logs.String())
 	}
 }
 

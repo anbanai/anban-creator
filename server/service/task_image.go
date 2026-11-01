@@ -260,7 +260,7 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 				ambiguousOperation = false
 			}
 			if s.logger != nil {
-				s.logger.Error().
+				event := s.logger.Error().
 					Str("correlation_id", correlationID).
 					Str("task_id", req.TaskID).
 					Str("execution_id", req.ExecutionID).
@@ -274,8 +274,11 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 					Str("request_endpoint", providerError.RequestEndpoint).
 					Str("response_content_type", providerError.ResponseContentType).
 					Str("transport_phase", providerError.TransportPhase).
-					Bool("retryable", providerError.Retryable()).
-					Msg("task image provider failed")
+					Bool("retryable", providerError.Retryable())
+				if hint := strings.TrimSpace(providerError.HintMsg); hint != "" {
+					event = event.Str("hint", hint)
+				}
+				event.Msg("task image provider failed")
 			}
 		} else if s.logger != nil {
 			s.logger.Error().
