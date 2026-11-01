@@ -3261,18 +3261,20 @@
     },
     {
       "id": "talking-head-montage",
-      "version": "1.2.0",
+      "version": "1.2.2",
       "kind": "plugin",
       "display_name": "口播 Montage 制作",
       "description": "以 OpenMontage hybrid 为主引擎，完成真人口播、生成视频素材、图片素材、图形动效、字幕与分章节 BGM 的本地制作与文件审核，并在流程最后一步生成封面。",
       "agent": {
         "name": "talking-head-montage",
         "skills": [
+          "talking-head-composition",
           "talking-head-sound-design",
           "content-tagging",
           "short-video-cover",
           "talking-head-visual-focus",
           "video-bgm-design",
+          "video-production-qc",
           "video-subtitle-design"
         ],
         "max_turns": 260
@@ -3291,7 +3293,7 @@
         "generated-video-inserts",
         "image-inserts",
         "motion-graphics",
-        "local-review-gate"
+        "automatic-review-loop"
       ],
       "artifacts": [
         {
@@ -3363,6 +3365,24 @@
         {
           "role": "visual_plan",
           "path": "output/visual-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "asset_ledger",
+          "path": "output/asset-ledger.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "composition_plan",
+          "path": "output/composition-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "composition_lint",
+          "path": "output/composition-lint.json",
           "mime_type": "application/json",
           "required": true
         },
@@ -3469,6 +3489,12 @@
           "required": true
         },
         {
+          "role": "sync_evidence",
+          "path": "output/sync-evidence.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
           "role": "cover_reference_input",
           "path": "output/input-manifest.md",
           "mime_type": "text/markdown",
@@ -3569,7 +3595,10 @@
             "output/generated-video-manifest.json",
             "output/generated-video-review.json",
             "output/asset-source-manifest.json",
+            "output/asset-ledger.json",
             "output/visual-plan.json",
+            "output/composition-plan.json",
+            "output/composition-lint.json",
             "output/motion-sample.mp4",
             "output/motion-review.json",
             "output/motion-source-manifest.json"
@@ -3671,7 +3700,7 @@
       "ui": {
         "renderer": "custom:talking-head-montage"
       },
-      "digest": "c1929841f9b855f366dc8b2e32c10ddefc66d23aeff763a6820340e324a8e1c1"
+      "digest": "5bdbc23ef4a54d3422c6698bfa25ff8d66923ff5f49c4bfd3ff6abe0a006127d"
     },
     {
       "id": "topic-radar",
@@ -5031,7 +5060,7 @@
     },
     {
       "id": "viral-ip-video-editor",
-      "version": "1.2.0",
+      "version": "1.2.2",
       "kind": "plugin",
       "display_name": "爆款 IP 视频剪辑",
       "description": "基于 Montage 运行时处理真人 IP 口播素材，完成留存导向的剪辑规划、制作指导和成片质量复核；字幕与 BGM 各自按独立方法论制作（BGM 可按章节换曲），封面在流程最后一步生成。",
@@ -5043,8 +5072,10 @@
           "montage",
           "portrait-cover-design",
           "short-video-cover",
+          "talking-head-composition",
           "talking-head-visual-focus",
           "video-bgm-design",
+          "video-production-qc",
           "video-subtitle-design",
           "viral-ip-editing",
           "wechat-video-account-review",
@@ -5152,6 +5183,24 @@
           "path": "output/edit_decision_list.json",
           "mime_type": "application/json",
           "required": false
+        },
+        {
+          "role": "asset_ledger",
+          "path": "output/asset-ledger.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "composition_plan",
+          "path": "output/composition-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "composition_lint",
+          "path": "output/composition-lint.json",
+          "mime_type": "application/json",
+          "required": true
         },
         {
           "role": "auto_editor_silence_cuts",
@@ -5362,10 +5411,16 @@
           "path": "output/quality-evidence.json",
           "mime_type": "application/json",
           "required": true
+        },
+        {
+          "role": "sync_evidence",
+          "path": "output/sync-evidence.json",
+          "mime_type": "application/json",
+          "required": true
         }
       ],
       "ui": {},
-      "digest": "bbc3b25f10c56a082794aab4618ff423997cdb4953bc1819a2c5376159379a49"
+      "digest": "f0dc8a715c05ba7e22f915018d4dc7d5b33c8359e96d14638e656f2fc1715afc"
     },
     {
       "id": "wechat-article",
