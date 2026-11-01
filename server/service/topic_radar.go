@@ -166,6 +166,7 @@ func (s *TopicRadarService) Run(ctx context.Context, p RunTopicDigestParams) (*m
 		InputSnapshot:  snapshot,
 		InputHash:      hash,
 	}
+	var conflicted *model.TopicDigest
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		locked, lockErr := tx.TopicSubscriptions().LockByID(ctx, subscription.ID)
 		if errors.Is(lockErr, gorm.ErrRecordNotFound) {
@@ -180,7 +181,26 @@ func (s *TopicRadarService) Run(ctx context.Context, p RunTopicDigestParams) (*m
 		if locked.DeletedAt != nil {
 			return ErrTopicSubscriptionNotFound
 		}
-		return tx.TopicDigests().CreateIfAbsent(ctx, digest)
+		created, createErr := tx.TopicDigests().CreateIfAbsent(ctx, digest)
+		if createErr != nil || created {
+			return createErr
+		}
+		// A silent MySQL duplicate may be the active-run guard or an idempotent
+		// occurrence replay. Resolve both inside the subscription lock instead of
+		// leaking ErrRecordNotFound from the follow-up lookup.
+		if active, findErr := tx.TopicDigests().FindActiveBySubscription(ctx, subscription.ID); findErr == nil {
+			conflicted = active
+			return nil
+		} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
+			return findErr
+		}
+		if existing, findErr := tx.TopicDigests().FindByOccurrence(ctx, occurrenceKey); findErr == nil {
+			conflicted = existing
+			return nil
+		} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
+			return findErr
+		}
+		return errors.New("topic digest conflict has no resolvable digest")
 	})
 	if err != nil {
 		if active, activeErr := s.repo.TopicDigests().FindActiveBySubscription(ctx, subscription.ID); activeErr == nil {
@@ -188,7 +208,15 @@ func (s *TopicRadarService) Run(ctx context.Context, p RunTopicDigestParams) (*m
 		}
 		return nil, err
 	}
+	if conflicted != nil {
+		return conflicted, nil
+	}
 	persisted, err := s.repo.TopicDigests().FindByOccurrence(ctx, occurrenceKey)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		if active, activeErr := s.repo.TopicDigests().FindActiveBySubscription(ctx, subscription.ID); activeErr == nil {
+			return active, nil
+		}
+	}
 	if err != nil {
 		return nil, err
 	}

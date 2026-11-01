@@ -16,6 +16,9 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/notification"
+	"github.com/anbanai/anban-creator/server/sdk/dingtalkbot"
+	"github.com/anbanai/anban-creator/server/sdk/feishubot"
+	"gorm.io/gorm"
 )
 
 func (s *TopicRadarService) SendTopicNotification(ctx context.Context, deliveryID string) error {
@@ -43,6 +46,9 @@ func (s *TopicRadarService) SendTopicNotification(ctx context.Context, deliveryI
 		return errors.New("notification delivery lease lost")
 	}
 	channel, err := s.repo.TopicNotificationChannels().FindByID(ctx, delivery.ChannelID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return s.failNotification(ctx, delivery, token, model.TopicNotificationInvalid, errors.New("notification channel no longer exists"))
+	}
 	if err != nil {
 		return s.failNotification(ctx, delivery, token, model.TopicNotificationFailed, err)
 	}
@@ -149,8 +155,20 @@ func (s *TopicRadarService) sendTopicNotificationText(ctx context.Context, chann
 	if err != nil {
 		return model.TopicNotificationInvalid, err
 	}
-	if strings.EqualFold(strings.TrimSpace(channel.Provider), model.TopicNotificationProviderWeCom) && len([]byte(text)) > 4096 {
-		return model.TopicNotificationInvalid, errors.New("wecom markdown exceeds 4096 UTF-8 bytes")
+	if strings.EqualFold(strings.TrimSpace(channel.Provider), model.TopicNotificationProviderWeCom) {
+		// Validate the rendered markdown, not the caller text: the provider
+		// envelope adds the title heading and a trailing newline.
+		var payload struct {
+			Markdown struct {
+				Content string `json:"content"`
+			} `json:"markdown"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return model.TopicNotificationInvalid, err
+		}
+		if len([]byte(payload.Markdown.Content)) > 4096 {
+			return model.TopicNotificationInvalid, errors.New("wecom markdown exceeds 4096 UTF-8 bytes")
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, channel.WebhookURL, bytes.NewReader(body))
 	if err != nil {
@@ -195,8 +213,16 @@ func (s *TopicRadarService) sendTopicNotificationText(ctx context.Context, chann
 			code = acknowledgement.LegacyCode
 		}
 	}
-	if code == nil || *code != 0 {
-		return model.TopicNotificationFailed, errors.New("notification provider rejected delivery")
+	if code == nil {
+		return model.TopicNotificationFailed, errors.New("notification provider returned no acknowledgement code")
+	}
+	if *code != 0 {
+		if topicNotificationProviderCodeRetryable(channel.Provider, *code) {
+			return model.TopicNotificationFailed, fmt.Errorf("notification provider rate limited delivery (code %d)", *code)
+		}
+		// The provider accepted the HTTP request but rejected the webhook
+		// configuration or payload; retrying the same request cannot succeed.
+		return model.TopicNotificationInvalid, errors.New("notification provider rejected delivery")
 	}
 	return model.TopicNotificationSent, nil
 }
@@ -208,4 +234,18 @@ func (s *TopicRadarService) TestNotificationChannel(ctx context.Context, userID,
 	}
 	_, err = s.sendTopicNotificationText(ctx, channel, "选题雷达通知测试：连接成功。正式分析完成后，选题会自动进入选题库。")
 	return err
+}
+
+// topicNotificationProviderCodeRetryable maps provider-level rate-limit codes
+// returned with HTTP 200 to the retryable delivery state.
+func topicNotificationProviderCodeRetryable(provider string, code int) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case model.TopicNotificationProviderFeishu:
+		return code == feishubot.CodeFrequencyLimit
+	case model.TopicNotificationProviderDingTalk:
+		return code == dingtalkbot.CodeFrequencyLimit
+	case model.TopicNotificationProviderWeCom:
+		return code == 45009 || code == 45033
+	}
+	return false
 }

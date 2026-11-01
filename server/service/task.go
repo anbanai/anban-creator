@@ -1333,6 +1333,10 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 		return repo.Tasks().Update(ctx, task)
 	}
 	freeProfileAdmission := manualAdmission != nil && manualAdmission.ProfileAnalysisExpectedVersion != nil && len(tasks) == 1 && tasks[0].Type == model.TaskTypeProfileAnalysis
+	// Topic Radar is an unbilled MVP task. It still uses server-owned admission
+	// for identity, binding, and enqueue ordering, but must not require a
+	// catalog SKU, billing account, or balance.
+	freeTopicAdmission := manualAdmission != nil && len(tasks) == 1 && (tasks[0].Type == model.TaskTypeTopicDigest || tasks[0].Type == model.TaskTypeTopicScript)
 	linkProfileTask := func(tx repository.Repository) error {
 		if !freeProfileAdmission {
 			return nil
@@ -1382,7 +1386,7 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 			return linkProfileTask(tx)
 		})
 	}
-	if freeProfileAdmission {
+	if freeProfileAdmission || freeTopicAdmission {
 		return s.repo.WithTx(ctx, func(tx repository.Repository) error {
 			if err := lockProjectAdmission(tx); err != nil {
 				return err

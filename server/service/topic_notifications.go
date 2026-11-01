@@ -55,7 +55,10 @@ func (s *TopicRadarService) QueueDigestNotifications(ctx context.Context, digest
 			continue
 		}
 		if err := validateTopicNotificationProvider(channel.Provider, channel.WebhookURL); err != nil {
-			return nil, err
+			// A legacy/manually edited channel must not block fan-out to the
+			// other valid channels; its configuration error stays visible in
+			// channel management and the test action.
+			continue
 		}
 		existing, findErr := s.repo.TopicNotificationDeliveries().FindByDigestChannel(ctx, digest.ID, channel.ID)
 		if findErr == nil {

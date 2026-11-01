@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -58,6 +59,29 @@ func TestFinalizeTopicDigestRejectsSuggestionWithoutResolvableSource(t *testing.
 	got, findErr := repo.TopicDigests().FindByID(ctx, digest.ID)
 	if findErr != nil {
 		t.Fatal(findErr)
+	}
+	if got.Status != model.TopicDigestStatusFailed {
+		t.Fatalf("status = %q, want failed", got.Status)
+	}
+}
+
+func TestFinalizeTopicDigestRejectsOverlongPersistedTitle(t *testing.T) {
+	repo := topicRadarTestRepository(t)
+	ctx := context.Background()
+	subscription := seedTopicRadarSubscription(t, repo)
+	service := NewTopicRadarService(repo, &topicRadarTestEnqueuer{}, nil)
+	digest, err := service.Run(ctx, RunTopicDigestParams{UserID: subscription.UserID, SubscriptionID: subscription.ID, RequestKey: "manual-overlong-title"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	freezeTestTopicRefs(t, repo, digest)
+	artifact := []byte(`{"schema_version":"1.0","generated_at":"2026-10-31T03:00:00Z","suggestions":[{"title":"` + strings.Repeat("长", 501) + `","introduction":"介绍","source_summary":"来源","source_refs":[{"type":"search","ref_id":"trend-1"}],"scores":{},"video_fit":"口播"}]}`)
+	if err := service.FinalizeDigest(ctx, digest.ID, topicDigestTestArtifact(t, repo, digest, artifact)); err == nil {
+		t.Fatal("expected overlong title rejection")
+	}
+	got, err := repo.TopicDigests().FindByID(ctx, digest.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if got.Status != model.TopicDigestStatusFailed {
 		t.Fatalf("status = %q, want failed", got.Status)

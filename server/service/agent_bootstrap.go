@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path"
 	"path/filepath"
 	"reflect"
@@ -508,6 +509,11 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, err
 	}
 	files = append(files, planningFiles...)
+	topicRadarFiles, err := s.buildTopicRadarFiles(execution, task)
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, topicRadarFiles...)
 	attachmentFiles, err := s.buildAttachmentFiles(ctx, execution.ID, task, attachments, credentialDeadline)
 	if err != nil {
 		return nil, err
@@ -865,6 +871,33 @@ func (s *AgentBootstrapService) runtimeEnv(task *model.Task) map[string]string {
 		return env
 	}
 	return s.montageEnv(task)
+}
+
+// buildTopicRadarFiles materializes the frozen Topic Radar task input the
+// Pack contract requires. The stored AgentInput intentionally leaves
+// execution_id empty at admission; the runtime binds it per execution.
+func (s *AgentBootstrapService) buildTopicRadarFiles(execution *model.TaskExecution, task *model.Task) ([]BootstrapFile, error) {
+	if execution == nil || task == nil {
+		return nil, nil
+	}
+	if task.Type != model.TaskTypeTopicDigest && task.Type != model.TaskTypeTopicScript {
+		return nil, nil
+	}
+	var input map[string]any
+	if stored := task.AgentInput.Data(); len(stored) > 0 {
+		input = maps.Clone(stored)
+	}
+	if input == nil {
+		return nil, errors.New("topic radar input is empty")
+	}
+	input["task_id"] = task.ID
+	input["execution_id"] = execution.ID
+	input["task_kind"] = task.TaskKind
+	body, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("marshal topic radar input: %w", err)
+	}
+	return []BootstrapFile{{Path: "input/topic-radar.json", Text: string(body), Mode: 0444}}, nil
 }
 
 func (s *AgentBootstrapService) buildMontageFiles(ctx context.Context, task *model.Task, credentialDeadline time.Time) ([]BootstrapFile, error) {

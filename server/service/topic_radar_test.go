@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql/driver"
 	"errors"
 	"testing"
 	"time"
@@ -204,5 +205,87 @@ func TestTopicRadarRetryCreatesNewRunAfterSuccess(t *testing.T) {
 	}
 	if got, err := repo.TopicDigests().ListBySubscription(ctx, subscription.ID, 10); err != nil || len(got) != 2 {
 		t.Fatalf("digest history = %d, err=%v", len(got), err)
+	}
+}
+
+func TestProcessTopicDigestFailsAdmissionAndReleasesActiveRun(t *testing.T) {
+	repo := topicRadarTestRepository(t)
+	ctx := context.Background()
+	subscription := seedTopicRadarSubscription(t, repo)
+	service := NewTopicRadarService(repo, nil, nil)
+	digest, err := service.Run(ctx, RunTopicDigestParams{UserID: subscription.UserID, SubscriptionID: subscription.ID, RequestKey: "admission-failure"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ProcessTopicDigest(ctx, digest.ID); err == nil {
+		t.Fatal("expected admission failure")
+	}
+	failed, err := repo.TopicDigests().FindByID(ctx, digest.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Status != model.TopicDigestStatusFailed || failed.ActiveKey != nil {
+		t.Fatalf("digest = status %q active=%v, want failed and released", failed.Status, failed.ActiveKey)
+	}
+	next, err := service.Run(ctx, RunTopicDigestParams{UserID: subscription.UserID, SubscriptionID: subscription.ID, RequestKey: "after-admission-failure"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.ID == digest.ID {
+		t.Fatal("failed digest still blocks the subscription")
+	}
+}
+
+func TestProcessTopicScriptFailsAdmissionWithoutTouchingDigest(t *testing.T) {
+	repo := topicRadarTestRepository(t)
+	ctx := context.Background()
+	subscription := seedTopicRadarSubscription(t, repo)
+	service := NewTopicRadarService(repo, nil, nil)
+	digest, err := service.Run(ctx, RunTopicDigestParams{UserID: subscription.UserID, SubscriptionID: subscription.ID, RequestKey: "script-admission-digest"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	freezeTestTopicRefs(t, repo, digest)
+	if err := service.FinalizeDigest(ctx, digest.ID, topicDigestTestArtifact(t, repo, digest, []byte(`{"schema_version":"1.0","suggestions":[{"title":"脚本选题","introduction":"介绍","source_summary":"来源","source_refs":[{"type":"search","ref_id":"trend-1"}],"scores":{},"video_fit":"口播"}]}`))); err != nil {
+		t.Fatal(err)
+	}
+	suggestions, err := repo.TopicSuggestions().ListByDigest(ctx, digest.ID)
+	if err != nil || len(suggestions) != 1 {
+		t.Fatalf("suggestions = %d, err=%v", len(suggestions), err)
+	}
+	job, err := service.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: subscription.UserID, SuggestionID: suggestions[0].ID, TargetPlatform: "douyin", DurationSeconds: 60, AspectRatio: "9:16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ProcessTopicScript(ctx, job.ID); err == nil {
+		t.Fatal("expected script admission failure")
+	}
+	failed, err := repo.TopicScriptJobs().FindByID(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Status != model.TopicScriptJobFailed {
+		t.Fatalf("script status = %q, want failed", failed.Status)
+	}
+	stored, err := repo.TopicDigests().FindByID(ctx, digest.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != model.TopicDigestStatusSucceeded {
+		t.Fatalf("digest status = %q, want unchanged success", stored.Status)
+	}
+}
+
+func TestTopicAdmissionErrorClassification(t *testing.T) {
+	if topicAdmissionErrorIsTransient(ErrTopicManagedRuntimeUnavailable) {
+		t.Fatal("runtime configuration errors must terminalize the durable row")
+	}
+	if topicAdmissionErrorIsTransient(errors.New("invalid frozen digest input")) {
+		t.Fatal("frozen input errors must terminalize the durable row")
+	}
+	for _, transient := range []error{context.DeadlineExceeded, context.Canceled, driver.ErrBadConn, gorm.ErrInvalidDB} {
+		if !topicAdmissionErrorIsTransient(transient) {
+			t.Fatalf("%v must stay retryable", transient)
+		}
 	}
 }

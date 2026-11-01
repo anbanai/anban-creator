@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/anbanai/anban-creator/server/agentpack"
 	serverconfig "github.com/anbanai/anban-creator/server/config"
@@ -106,5 +107,32 @@ func TestTopicRadarManagedTasksUsePackContractAndRetainOwnership(t *testing.T) {
 				t.Fatalf("redelivery replaced terminal owner %s with %s", task.ID, repeated.ID)
 			}
 		})
+	}
+}
+
+func TestTopicDigestAdmissionSkipsBillingCatalog(t *testing.T) {
+	ctx := context.Background()
+	svc, fixture, _ := newFixedTaskBillingFixture(t, 0, 0)
+	projectID := createTestProject(t, fixture.repo, billingWalletUserID, model.PlatformSeednote)
+	digest := &model.TopicDigest{
+		ID: "digest-free-admission", SubscriptionID: "subscription-free", UserID: billingWalletUserID, ProjectID: projectID,
+		Status: model.TopicDigestStatusQueued, DispatchStatus: model.TopicDigestDispatchPending,
+		OccurrenceKey: "manual:subscription-free:request-free", RequestKey: "request-free", PlannedAt: time.Now().UTC(),
+		InputSnapshot: []byte(`{}`), InputHash: "hash",
+	}
+	if err := fixture.repo.TopicDigests().Create(ctx, digest); err != nil {
+		t.Fatal(err)
+	}
+	radar := NewTopicRadarService(fixture.repo, &topicRadarTestEnqueuer{}, nil)
+	radar.SetTaskService(svc)
+	task, err := radar.EnsureTopicDigestManagedTask(ctx, digest.ID)
+	if err != nil {
+		t.Fatalf("topic admission must not require a billing SKU: %v", err)
+	}
+	if task.Type != model.TaskTypeTopicDigest {
+		t.Fatalf("task = %#v", task)
+	}
+	if account := fixture.account(t, billingWalletUserID); account.PaidCredits != 0 || account.DebtCredits != 0 {
+		t.Fatalf("account = %#v, want unchanged zero balance", account)
 	}
 }

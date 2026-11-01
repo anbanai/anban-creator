@@ -2,11 +2,14 @@ package service
 
 import (
 	"context"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"gorm.io/gorm"
 )
 
 // ReconcileTopicDigestEffects resumes durable fan-out after a successful digest,
@@ -107,6 +110,12 @@ func (s *TopicRadarService) ProcessTopicDigest(ctx context.Context, id string) e
 	}
 	task, err := s.EnsureTopicDigestManagedTask(ctx, id)
 	if err != nil {
+		// A permanent admission failure (profile or frozen-input validation)
+		// must release the active-run guard instead of wedging the subscription
+		// forever; infrastructure errors stay retryable.
+		if !topicAdmissionErrorIsTransient(err) {
+			return s.failDigest(ctx, digest, err)
+		}
 		return err
 	}
 	if task == nil {
@@ -141,6 +150,9 @@ func (s *TopicRadarService) ProcessTopicScript(ctx context.Context, id string) e
 	}
 	task, err := s.EnsureTopicScriptManagedTask(ctx, id)
 	if err != nil {
+		if !topicAdmissionErrorIsTransient(err) {
+			return s.failTopicScript(ctx, job, err)
+		}
 		return err
 	}
 	if task == nil {
@@ -187,4 +199,20 @@ func (s *TopicRadarService) processTopicManagedTask(ctx context.Context, task *m
 		return s.taskSvc.HandleExecutionFromPayload(ctx, task.ID, task.UserID)
 	}
 	return nil
+}
+
+// topicAdmissionErrorIsTransient keeps infrastructure failures retryable while
+// permanent admission rejections terminalize the durable digest or script.
+func topicAdmissionErrorIsTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if errors.Is(err, driver.ErrBadConn) || errors.Is(err, gorm.ErrInvalidDB) {
+		return true
+	}
+	var netErr *net.OpError
+	return errors.As(err, &netErr)
 }

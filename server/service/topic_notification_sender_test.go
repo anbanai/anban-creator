@@ -60,6 +60,11 @@ func TestSendTopicNotificationRendersSourceAndIntroduction(t *testing.T) {
 	if len(body) == 0 {
 		t.Fatal("expected request body")
 	}
+	for _, want := range []string{"选题", "为什么值得拍", "来源：热榜", "- 1"} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("body %s is missing %q", body, want)
+		}
+	}
 	got, _ := repo.TopicNotificationDeliveries().FindByID(ctx, delivery.ID)
 	if got.Status != model.TopicNotificationSent {
 		t.Fatalf("delivery = %#v", got)
@@ -150,5 +155,98 @@ func TestSendTopicNotificationBoundsResponseBody(t *testing.T) {
 	}
 	if tracking.read > topicNotificationMaxResponseBody+1 {
 		t.Fatalf("read %d bytes, want at most %d", tracking.read, topicNotificationMaxResponseBody+1)
+	}
+}
+
+func TestSendTopicNotificationRejectsWeComPayloadOverLimit(t *testing.T) {
+	requests := 0
+	_, _, radar := seedTopicNotificationDelivery(t, "https://1.1.1.1/hook")
+	radar.notificationClient = topicNotificationTestClient(topicNotificationRoundTripper(func(req *http.Request) (*http.Response, error) {
+		requests++
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"errcode":0}`)), Request: req}, nil
+	}))
+	channel := &model.TopicNotificationChannel{Provider: model.TopicNotificationProviderWeCom, WebhookURL: "https://1.1.1.1/hook", Enabled: true}
+	status, err := radar.sendTopicNotificationText(context.Background(), channel, strings.Repeat("x", 4090))
+	if err == nil || status != model.TopicNotificationInvalid {
+		t.Fatalf("status = %q, err = %v; want invalid before sending", status, err)
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want none", requests)
+	}
+}
+
+func TestSendTopicNotificationMarksProviderRejectionInvalid(t *testing.T) {
+	repo, delivery, radar := seedTopicNotificationDelivery(t, "https://1.1.1.1/hook")
+	radar.notificationClient = topicNotificationTestClient(topicNotificationRoundTripper(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"code":1}`)), Request: req}, nil
+	}))
+	if err := radar.SendTopicNotification(context.Background(), delivery.ID); err == nil {
+		t.Fatal("expected provider rejection")
+	}
+	got, err := repo.TopicNotificationDeliveries().FindByID(context.Background(), delivery.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.TopicNotificationInvalid || got.NextAttemptAt != nil {
+		t.Fatalf("delivery = status %q next=%v, want terminal invalid", got.Status, got.NextAttemptAt)
+	}
+}
+
+func TestSendTopicNotificationRetryClassification(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		status   int
+		ack      string
+		want     string
+	}{
+		{name: "feishu rate limit", provider: model.TopicNotificationProviderFeishu, status: http.StatusOK, ack: `{"code":11232}`, want: model.TopicNotificationFailed},
+		{name: "dingtalk rate limit", provider: model.TopicNotificationProviderDingTalk, status: http.StatusOK, ack: `{"errcode":310003}`, want: model.TopicNotificationFailed},
+		{name: "wecom rate limit", provider: model.TopicNotificationProviderWeCom, status: http.StatusOK, ack: `{"errcode":45009}`, want: model.TopicNotificationFailed},
+		{name: "feishu invalid config", provider: model.TopicNotificationProviderFeishu, status: http.StatusOK, ack: `{"code":19001}`, want: model.TopicNotificationInvalid},
+		{name: "wecom invalid config", provider: model.TopicNotificationProviderWeCom, status: http.StatusOK, ack: `{"errcode":93000}`, want: model.TopicNotificationInvalid},
+		{name: "missing ack code", provider: model.TopicNotificationProviderFeishu, status: http.StatusOK, ack: `{}`, want: model.TopicNotificationFailed},
+		{name: "http 429", provider: model.TopicNotificationProviderFeishu, status: http.StatusTooManyRequests, ack: `{}`, want: model.TopicNotificationFailed},
+		{name: "http 500", provider: model.TopicNotificationProviderFeishu, status: http.StatusInternalServerError, ack: `{}`, want: model.TopicNotificationFailed},
+		{name: "http 400", provider: model.TopicNotificationProviderFeishu, status: http.StatusBadRequest, ack: `{}`, want: model.TopicNotificationInvalid},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			radar := NewTopicRadarService(nil, nil, nil)
+			radar.notificationClient = topicNotificationTestClient(topicNotificationRoundTripper(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: tt.status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(tt.ack)), Request: req}, nil
+			}))
+			channel := &model.TopicNotificationChannel{Provider: tt.provider, WebhookURL: "https://1.1.1.1/hook", Enabled: true}
+			status, err := radar.sendTopicNotificationText(context.Background(), channel, "content")
+			if err == nil {
+				t.Fatal("expected delivery error")
+			}
+			if status != tt.want {
+				t.Fatalf("status = %q, want %q (error: %v)", status, tt.want, err)
+			}
+		})
+	}
+}
+
+func TestWeComRenderedPayloadBoundary(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		length int
+		want   string
+	}{
+		{name: "exact limit", length: 4079, want: model.TopicNotificationSent},
+		{name: "one byte over", length: 4080, want: model.TopicNotificationInvalid},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			radar := NewTopicRadarService(nil, nil, nil)
+			radar.notificationClient = topicNotificationTestClient(topicNotificationRoundTripper(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"errcode":0}`)), Request: req}, nil
+			}))
+			channel := &model.TopicNotificationChannel{Provider: model.TopicNotificationProviderWeCom, WebhookURL: "https://1.1.1.1/hook", Enabled: true}
+			status, err := radar.sendTopicNotificationText(context.Background(), channel, strings.Repeat("x", tt.length))
+			if status != tt.want {
+				t.Fatalf("status = %q, want %q (error: %v)", status, tt.want, err)
+			}
+		})
 	}
 }

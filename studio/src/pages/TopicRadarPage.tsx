@@ -14,7 +14,7 @@ import type { TopicDigest, TopicSuggestion } from '@/types/topic-radar'
 
 const scoreNames: Record<string, string> = {
   traffic_potential: '流量潜力', account_fit: '账号匹配', differentiation: '差异化', timeliness: '时效性',
-  monetization: '变现潜力', production_cost: '易制作程度', compliance_risk: '合规安全度', total: '综合评分',
+  monetization: '变现潜力', production_cost: '易制作程度', compliance_risk: '合规安全度', score_total: '综合评分',
 }
 const activeStatuses = new Set(['queued', 'preparing', 'dispatched', 'running', 'finalizing'])
 const statusNames: Record<string, string> = {

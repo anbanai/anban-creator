@@ -694,6 +694,13 @@ claude:
       feedback-analysis:
         requests: { cpu: "1", memory: "2Gi" }
         limits: { cpu: "2", memory: "4Gi" }
+      # 选题雷达的持久化 Task.Type 是 topic-digest / topic-script；topic-radar 只是 Agent Pack 与 runtime profile 身份。
+      topic-digest:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
+      topic-script:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
       content-research:
         requests: { cpu: "1", memory: "2Gi" }
         limits: { cpu: "2", memory: "4Gi" }

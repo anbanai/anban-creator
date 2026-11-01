@@ -74,6 +74,9 @@ func (s *TopicRadarService) finalizeOwnedTopicDigest(ctx context.Context, digest
 		if strings.TrimSpace(candidate.Title) == "" || strings.TrimSpace(candidate.Introduction) == "" || strings.TrimSpace(candidate.SourceSummary) == "" {
 			return s.failDigest(ctx, digest, fmt.Errorf("suggestion %d is missing title, introduction, or source summary", i))
 		}
+		if len([]rune(strings.TrimSpace(candidate.Title))) > 500 {
+			return s.failDigest(ctx, digest, fmt.Errorf("suggestion %d title exceeds 500 characters", i))
+		}
 		if len(candidate.SourceRefs) == 0 {
 			return s.failDigest(ctx, digest, fmt.Errorf("suggestion %d has no source references", i))
 		}
@@ -221,6 +224,16 @@ func (s *TopicRadarService) failDigest(ctx context.Context, digest *model.TopicD
 	return cause
 }
 
+// topicPoolSourceLabel bounds the provenance label to the TopicPool column so
+// a long agent-authored summary cannot fail adoption on strict MySQL.
+func topicPoolSourceLabel(summary string) string {
+	label := []rune(strings.TrimSpace(summary))
+	if len(label) > 120 {
+		label = label[:120]
+	}
+	return string(label)
+}
+
 func (s *TopicRadarService) AdoptSuggestion(ctx context.Context, adoptionID string) error {
 	adoption, err := s.repo.TopicSuggestionAdoptions().FindByID(ctx, adoptionID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -246,7 +259,7 @@ func (s *TopicRadarService) AdoptSuggestion(ctx context.Context, adoptionID stri
 		return err
 	}
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
-		topic := &model.TopicPool{UserID: adoption.UserID, ProjectID: adoption.ProjectID, Topic: suggestion.Title, SourceDigestID: &adoption.DigestID, SourceSuggestionID: &suggestion.ID, SourceLabel: suggestion.SourceSummary, Status: model.TopicStatusUnused}
+		topic := &model.TopicPool{UserID: adoption.UserID, ProjectID: adoption.ProjectID, Topic: suggestion.Title, SourceDigestID: &adoption.DigestID, SourceSuggestionID: &suggestion.ID, SourceLabel: topicPoolSourceLabel(suggestion.SourceSummary), Status: model.TopicStatusUnused}
 		if _, err := tx.TopicPools().AddWithSource(ctx, topic); err != nil {
 			return err
 		}
@@ -265,9 +278,10 @@ func (s *TopicRadarService) AdoptSuggestion(ctx context.Context, adoptionID stri
 	if err != nil {
 		adoption.Status = model.TopicAdoptionFailed
 		adoption.Error = err.Error()
-		if updateErr := s.repo.TopicSuggestionAdoptions().UpdateClaimed(ctx, adoption, token); updateErr != nil {
-			return errors.Join(err, updateErr)
-		}
+		updateErr := s.repo.TopicSuggestionAdoptions().UpdateClaimed(ctx, adoption, token)
+		suggestion.AdoptionStatus = model.TopicAdoptionFailed
+		suggestionErr := s.repo.TopicSuggestions().Update(ctx, suggestion)
+		return errors.Join(err, updateErr, suggestionErr)
 	}
-	return err
+	return nil
 }

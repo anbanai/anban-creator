@@ -7,7 +7,14 @@ import (
 	"github.com/anbanai/anban-creator/server/agentpack"
 )
 
-// Every task-admission operation declared by a managed Pack must have a
+// Topic Radar is an unbilled MVP task admitted through the free server-owned
+// path, so its Pack operations intentionally have no catalog SKU.
+var unbilledTaskOperations = map[string]bool{
+	"task.topic_digest": true,
+	"task.topic_script": true,
+}
+
+// Every billed task-admission operation declared by a managed Pack must have a
 // published price for all supported execution profiles; otherwise server-owned
 // task creation fails at runtime with ErrBillingProfileSKUNotFound. Packs may
 // also declare internal operations (for example feedback_analysis) that are
@@ -22,7 +29,7 @@ func TestEveryTaskAdmissionOperationHasProfilePriceSKU(t *testing.T) {
 	}
 	for _, pack := range agentpack.Default().Packs {
 		for taskKind, operation := range pack.BillingOperations {
-			if !strings.HasPrefix(operation, "task.") {
+			if !strings.HasPrefix(operation, "task.") || unbilledTaskOperations[operation] {
 				continue
 			}
 			for _, profile := range []string{"effective", "balanced", "quality"} {

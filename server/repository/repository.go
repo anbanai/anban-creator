@@ -533,7 +533,7 @@ type TopicDigestRepository interface {
 	MarkDispatch(context.Context, string, string, string) error
 	ListDispatchable(context.Context, int) ([]*model.TopicDigest, error)
 	Create(context.Context, *model.TopicDigest) error
-	CreateIfAbsent(context.Context, *model.TopicDigest) error
+	CreateIfAbsent(context.Context, *model.TopicDigest) (bool, error)
 	FindByID(context.Context, string) (*model.TopicDigest, error)
 	FindByOccurrence(context.Context, string) (*model.TopicDigest, error)
 	FindActiveBySubscription(context.Context, string) (*model.TopicDigest, error)

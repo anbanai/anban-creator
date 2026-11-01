@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -34,5 +35,10 @@ func TestQueueTopicDigestNotificationsSnapshotsSourcesAndDeduplicates(t *testing
 	}
 	if len(first[0].Payload) == 0 || first[0].PayloadVersion == "" {
 		t.Fatalf("delivery payload was not snapshotted: %#v", first[0])
+	}
+	for _, want := range []string{"通知选题", "解释", "飞书热榜", "hot-1"} {
+		if !strings.Contains(string(first[0].Payload), want) {
+			t.Fatalf("payload %s is missing %q", first[0].Payload, want)
+		}
 	}
 }

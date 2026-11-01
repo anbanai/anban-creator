@@ -147,8 +147,13 @@ func (r *topicDigestRepository) ListBySubscription(ctx context.Context, subscrip
 func (r *topicDigestRepository) Update(ctx context.Context, item *model.TopicDigest) error {
 	return r.db.WithContext(ctx).Save(item).Error
 }
-func (r *topicDigestRepository) CreateIfAbsent(ctx context.Context, item *model.TopicDigest) error {
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "occurrence_key"}}, DoNothing: true}).Create(item).Error
+func (r *topicDigestRepository) CreateIfAbsent(ctx context.Context, item *model.TopicDigest) (bool, error) {
+	// MySQL rewrites ON CONFLICT DO NOTHING into ON DUPLICATE KEY UPDATE id=id,
+	// which silently ignores any unique conflict (occurrence_key or active_key).
+	// Omit the conflict target so SQLite behaves the same way and report whether
+	// the row was inserted so callers can resolve the conflicting digest.
+	result := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(item)
+	return result.RowsAffected > 0, result.Error
 }
 
 func (r *topicSuggestionRepository) CreateBatch(ctx context.Context, items []*model.TopicSuggestion) error {
