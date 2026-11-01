@@ -2038,7 +2038,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "22d74da0bbf79a500fcd878382fb3213ab4154e463d883e377ec68eeb156ca94"
+      "digest": "800d343fb9744396f630e2b0be9568b42ed874a4e0e5fdafd482f1e89c0a7411"
     },
     {
       "id": "postmortem-review",
@@ -3257,21 +3257,23 @@
           "funnel_stage"
         ]
       },
-      "digest": "c43915ba2fb379ac67bd4bb0d7a80b2a27150c4285d252ec0059aa8ef4a252a9"
+      "digest": "57cfb0d52f44225f47a7db7f123aba0bf4b7ef3dd007998c7c1a42a537f143e5"
     },
     {
       "id": "talking-head-montage",
-      "version": "1.0.4",
+      "version": "1.2.0",
       "kind": "plugin",
       "display_name": "口播 Montage 制作",
-      "description": "以 OpenMontage hybrid 为主引擎，完成真人口播、生成视频素材、图片素材和图形动效的本地制作与文件审核。",
+      "description": "以 OpenMontage hybrid 为主引擎，完成真人口播、生成视频素材、图片素材、图形动效、字幕与分章节 BGM 的本地制作与文件审核，并在流程最后一步生成封面。",
       "agent": {
         "name": "talking-head-montage",
         "skills": [
           "talking-head-sound-design",
           "content-tagging",
           "short-video-cover",
-          "talking-head-visual-focus"
+          "talking-head-visual-focus",
+          "video-bgm-design",
+          "video-subtitle-design"
         ],
         "max_turns": 260
       },
@@ -3383,6 +3385,30 @@
           "required": true
         },
         {
+          "role": "captions",
+          "path": "output/captions.srt",
+          "mime_type": "text/plain",
+          "required": true
+        },
+        {
+          "role": "caption_plan",
+          "path": "output/caption-plan.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "caption_style",
+          "path": "output/caption-style.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "caption_qc",
+          "path": "output/caption-qc.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
           "role": "final_picture",
           "path": "output/final-picture.mp4",
           "mime_type": "video/mp4",
@@ -3403,6 +3429,18 @@
         {
           "role": "bgm_plan",
           "path": "output/bgm-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "bgm_plan_md",
+          "path": "output/bgm-plan.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "bgm_qc",
+          "path": "output/bgm-qc.json",
           "mime_type": "application/json",
           "required": true
         },
@@ -3458,13 +3496,19 @@
           "role": "cover_plan",
           "path": "output/cover-plan.md",
           "mime_type": "text/markdown",
-          "required": false
+          "required": true
         },
         {
           "role": "cover",
           "path": "output/cover.png",
           "mime_type": "image/png",
-          "required": false
+          "required": true
+        },
+        {
+          "role": "cover_quality",
+          "path": "output/cover-quality.json",
+          "mime_type": "application/json",
+          "required": true
         },
         {
           "role": "cover_reference_prompts",
@@ -3559,8 +3603,53 @@
           "mime_type": "application/json"
         },
         {
+          "role": "bgm_plan_md",
+          "path": "output/bgm-plan.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "bgm_qc",
+          "path": "output/bgm-qc.json",
+          "mime_type": "application/json"
+        },
+        {
           "role": "audio_source_manifest",
           "path": "output/audio-source-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "captions",
+          "path": "output/captions.srt",
+          "mime_type": "text/plain"
+        },
+        {
+          "role": "caption_plan",
+          "path": "output/caption-plan.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "caption_style",
+          "path": "output/caption-style.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "caption_qc",
+          "path": "output/caption-qc.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png"
+        },
+        {
+          "role": "cover_plan",
+          "path": "output/cover-plan.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "cover_quality",
+          "path": "output/cover-quality.json",
           "mime_type": "application/json"
         },
         {
@@ -3582,7 +3671,7 @@
       "ui": {
         "renderer": "custom:talking-head-montage"
       },
-      "digest": "7afea000d8ae076532e893b5795d300841370e5ba3da361008dd144057cf255e"
+      "digest": "c1929841f9b855f366dc8b2e32c10ddefc66d23aeff763a6820340e324a8e1c1"
     },
     {
       "id": "topic-radar",
@@ -4942,10 +5031,10 @@
     },
     {
       "id": "viral-ip-video-editor",
-      "version": "1.0.14",
+      "version": "1.2.0",
       "kind": "plugin",
       "display_name": "爆款 IP 视频剪辑",
-      "description": "基于 Montage 运行时处理真人 IP 口播素材，完成留存导向的剪辑规划、制作指导和成片质量复核。",
+      "description": "基于 Montage 运行时处理真人 IP 口播素材，完成留存导向的剪辑规划、制作指导和成片质量复核；字幕与 BGM 各自按独立方法论制作（BGM 可按章节换曲），封面在流程最后一步生成。",
       "agent": {
         "name": "viral-ip-video-editor",
         "skills": [
@@ -4955,6 +5044,8 @@
           "portrait-cover-design",
           "short-video-cover",
           "talking-head-visual-focus",
+          "video-bgm-design",
+          "video-subtitle-design",
           "viral-ip-editing",
           "wechat-video-account-review",
           "auto-editor"
@@ -5082,7 +5173,19 @@
         },
         {
           "role": "bgm_plan",
-          "path": "output/bgm_plan.json",
+          "path": "output/bgm-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "bgm_plan_md",
+          "path": "output/bgm-plan.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "bgm_qc",
+          "path": "output/bgm-qc.json",
           "mime_type": "application/json",
           "required": true
         },
@@ -5096,7 +5199,25 @@
           "role": "captions",
           "path": "output/captions.srt",
           "mime_type": "text/plain",
-          "required": false
+          "required": true
+        },
+        {
+          "role": "caption_plan",
+          "path": "output/caption-plan.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "caption_style",
+          "path": "output/caption-style.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "caption_qc",
+          "path": "output/caption-qc.json",
+          "mime_type": "application/json",
+          "required": true
         },
         {
           "role": "qc_report",
@@ -5126,7 +5247,7 @@
           "role": "cover",
           "path": "output/cover.png",
           "mime_type": "image/png",
-          "required": false
+          "required": true
         },
         {
           "role": "delivery_manifest",
@@ -5162,13 +5283,13 @@
           "role": "cover_plan",
           "path": "output/cover-plan.md",
           "mime_type": "text/markdown",
-          "required": false
+          "required": true
         },
         {
           "role": "cover_prompt",
           "path": "output/cover-prompt.md",
           "mime_type": "text/markdown",
-          "required": false
+          "required": true
         },
         {
           "role": "cover_reference_prompts",
@@ -5180,7 +5301,7 @@
           "role": "cover_review",
           "path": "output/cover-quality.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "cover_reference_analysis",
@@ -5244,7 +5365,7 @@
         }
       ],
       "ui": {},
-      "digest": "0961207eaa0dcab16584449b8f7801af82e57fb2313de7953cb5e49f5d3b5a96"
+      "digest": "bbc3b25f10c56a082794aab4618ff423997cdb4953bc1819a2c5376159379a49"
     },
     {
       "id": "wechat-article",
