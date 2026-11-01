@@ -3700,7 +3700,7 @@
       "ui": {
         "renderer": "custom:talking-head-montage"
       },
-      "digest": "5bdbc23ef4a54d3422c6698bfa25ff8d66923ff5f49c4bfd3ff6abe0a006127d"
+      "digest": "182edd94ad4d1d3983b8de9235535caa8eaec67c87f58afbf30a72e7b0727a7e"
     },
     {
       "id": "topic-radar",
@@ -5420,7 +5420,7 @@
         }
       ],
       "ui": {},
-      "digest": "f0dc8a715c05ba7e22f915018d4dc7d5b33c8359e96d14638e656f2fc1715afc"
+      "digest": "73db1eb48ed0d234d41e0d9cb36d341790ed54cbdbeb78c767c402875517915a"
     },
     {
       "id": "wechat-article",
