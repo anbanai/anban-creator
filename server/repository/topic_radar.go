@@ -154,9 +154,14 @@ func (r *topicDigestRepository) CreateIfAbsent(ctx context.Context, item *model.
 func (r *topicSuggestionRepository) CreateBatch(ctx context.Context, items []*model.TopicSuggestion) error {
 	return r.db.WithContext(ctx).Create(items).Error
 }
+func topicSuggestionListQuery(db *gorm.DB, digestID string, dest *[]*model.TopicSuggestion) *gorm.DB {
+	// RANK is a reserved keyword on MySQL, so let GORM quote the identifier.
+	return db.Where("digest_id = ?", digestID).Order(clause.OrderByColumn{Column: clause.Column{Name: "rank"}}).Find(dest)
+}
+
 func (r *topicSuggestionRepository) ListByDigest(ctx context.Context, digestID string) ([]*model.TopicSuggestion, error) {
 	var items []*model.TopicSuggestion
-	err := r.db.WithContext(ctx).Where("digest_id = ?", digestID).Order("rank ASC").Find(&items).Error
+	err := topicSuggestionListQuery(r.db.WithContext(ctx), digestID, &items).Error
 	return items, err
 }
 func (r *topicSuggestionRepository) FindByID(ctx context.Context, id string) (*model.TopicSuggestion, error) {
