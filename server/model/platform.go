@@ -99,7 +99,7 @@ var PlatformConfigs = map[string]*PlatformConfig{
 	},
 	PlatformEcommerce: {
 		ID:                   PlatformEcommerce,
-		Label:                "电商",
+		Label:                "电商设计",
 		BadgeVariant:         "warning",
 		SupportsPublishing:   false,
 		SupportsAutoFetch:    false,

@@ -35,13 +35,13 @@ import { referenceSelectionFromValue } from '@/lib/reference-image'
 import { ProjectChannelConfigDialog } from '@/components/projects/ProjectChannelConfigDialog'
 import { useAuth } from '@/contexts/AuthContext'
 import { CreationTypePicker } from '@/components/tasks/CreationTypePicker'
-import { profileLabAgents, projectAgentIDs, supportsProfileLab } from '@/lib/project-capabilities'
+import { normalizeProjectTypeSelection, primaryProjectPlatform, projectAgentIDs, projectCreationTypes, supportsProfileLab } from '@/lib/project-capabilities'
 import { getProjectCreationDefaults } from '@/lib/studio-ux'
 import { portraitSummary } from '@/lib/portrait-library'
 import { VideoEditProjectDefaultsPanel } from '@/components/video-edit/VideoEditProjectDefaultsPanel'
 import { TalkingHeadEditorProjectDefaultsPanel } from '@/components/talking-head-editor/TalkingHeadEditorProjectDefaultsPanel'
 
-const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'ecommerce', 'hypit'])
+const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'hypit'])
 
 function canViewPlatform(platform: ProjectPlatform | '', isAdmin: boolean) {
   return isAdmin || platform === '' || !adminOnlyPlatforms.has(platform)
@@ -80,22 +80,11 @@ function projectToForm(project: Project): ProjectFormValues {
   }
 }
 
-function primaryProjectPlatform(agentIDs: string[]): ProjectPlatform | '' {
-  if (agentIDs.includes('talking-head-editor')) return 'talking-head-editor'
-  if (agentIDs.includes('video-edit')) return 'video-edit'
-  if (agentIDs.some((id) => id === 'wechat-article' || id === 'wechat-picture')) return 'wechat'
-  if (agentIDs.includes('seednote')) return 'seednote'
-  if (agentIDs.includes('montage')) return 'montage'
-  if (agentIDs.includes('hypit')) return 'hypit'
-  if (agentIDs.includes('whiteboard-animation')) return 'whiteboard-animation'
-  return ''
-}
-
 function usesWechatPublishing(agentIDs: readonly string[]) {
   return agentIDs.some((id) => id === 'wechat-article' || id === 'wechat-picture')
 }
 
-const selectableProjectTypeIDs: Set<string> = new Set(profileLabAgents.map((agent) => agent.id))
+const selectableProjectTypeIDs: Set<string> = new Set(projectCreationTypes.map((agent) => agent.id))
 
 export default function ProjectsPage() {
   const { user } = useAuth()
@@ -563,15 +552,15 @@ export default function ProjectsPage() {
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <FormLabel>人设类型</FormLabel>
-                      <FormDescription className="mt-1">可多选。人设会只展示并支持已选择的创作类型。</FormDescription>
+                      <FormDescription className="mt-1">电商设计需单独配置；其他创作类型可多选。</FormDescription>
                     </div>
                     <span className="rounded-full bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground">{field.value?.length ?? 0} 种已选</span>
                   </div>
                   <FormControl>
                     <CreationTypePicker
-                      options={profileLabAgents.filter((agent) => canViewPlatform((agent.id === 'wechat-article' || agent.id === 'wechat-picture' ? 'wechat' : agent.id) as ProjectPlatform, isAdmin))}
+                      options={projectCreationTypes.filter((agent) => canViewPlatform((agent.id === 'wechat-article' || agent.id === 'wechat-picture' ? 'wechat' : agent.id) as ProjectPlatform, isAdmin))}
                       value={field.value ?? []}
-                      onChange={field.onChange}
+                      onChange={(next) => field.onChange(normalizeProjectTypeSelection(field.value ?? [], next))}
                       multiple
                     />
                   </FormControl>

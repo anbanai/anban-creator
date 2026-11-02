@@ -2,9 +2,9 @@
   "packs": [
     {
       "id": "ecommerce",
-      "version": "2.0.5",
+      "version": "2.0.6",
       "kind": "plugin",
-      "display_name": "电商素材",
+      "display_name": "电商设计",
       "description": "基于产品图片生成完整电商文案和视觉素材包。",
       "agent": {
         "name": "ecommerce",
@@ -159,7 +159,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "fdf9f245858f58297e6b3a1671b7f35277af71e3ff30105961e8ec4ae2629325"
+      "digest": "6e27c9d9a753a1155d43bc11976ddddccd13509c8f71b4a2a663dd918b3c9ef6"
     },
     {
       "id": "content-planning",

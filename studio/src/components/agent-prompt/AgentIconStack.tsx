@@ -16,7 +16,7 @@ const agentLabels: Record<string, string> = {
   wechat: '公众号',
   seednote: '种草笔记',
   moments: '朋友圈',
-  ecommerce: '电商出图',
+  ecommerce: '电商设计',
   'viral-analysis': '爆文拆解',
   'profile-analysis': '人设画像',
   'feedback-analysis': '反馈分析',
