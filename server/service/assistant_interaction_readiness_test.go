@@ -133,7 +133,10 @@ func TestCreationClaimFencesCompetingServerOperationsBeforeTaskCreation(t *testi
 	blocked := &blockingConfirmationTasks{TaskRepository: svc.repo.Tasks(), reached: make(chan struct{}), release: make(chan struct{})}
 	first := NewAssistantInteractionService(blockingConfirmationRepository{Repository: svc.repo, tasks: blocked}, nil, svc.clock)
 	first.SetTaskService(svc.taskSvc)
+	// Separate locks exercise durable admission while the runtime is still live.
+	first.runtimes = svc.runtimes
 	other := NewAssistantInteractionService(svc.repo, nil, svc.clock)
+	other.runtimes = svc.runtimes
 	other.SetTaskService(svc.taskSvc)
 	req := InteractionCommitRequest{DraftID: stage.DraftID, Revision: stage.Revision, IdempotencyKey: "claim"}
 	done := make(chan error, 1)
@@ -308,7 +311,9 @@ func TestCreationContinueIsDurableAndRejectsStaleOrClaimedDraft(t *testing.T) {
 	svc, _ := newAssistantInteractionServiceTest(t)
 	snapshot, _ := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "continue")
 	stage := stageReadinessPlan(t, svc, snapshot, "first", completeInteractionPlan)
+	// A browser refresh retains the process-local runtime.
 	restarted := NewAssistantInteractionService(svc.repo, assistantInteractionFailingFactory{}, svc.clock)
+	restarted.runtimes = svc.runtimes
 	request := InteractionContinueRequest{DraftID: stage.DraftID, Revision: stage.Revision}
 	for range 2 {
 		withdrawn, err := restarted.ContinueInteraction(context.Background(), "user-1", snapshot.ID, request)

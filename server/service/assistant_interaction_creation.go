@@ -57,6 +57,9 @@ func (s *AssistantInteractionService) ContinueInteraction(ctx context.Context, u
 	if err != nil {
 		return InteractionSnapshot{}, err
 	}
+	if err := s.endRestartedInteractionLocked(ctx, userID, interaction); err != nil {
+		return InteractionSnapshot{}, err
+	}
 	if err := s.repo.AssistantInteractions().TransitionCreationDraft(ctx, userID, interactionID, req.DraftID, req.Revision, nil, s.clock()); err != nil {
 		if errors.Is(err, repository.ErrInteractionDraftState) || errors.Is(err, gorm.ErrRecordNotFound) {
 			return InteractionSnapshot{}, s.stageDraftRevisionConflictError(ctx, userID, interaction, err)

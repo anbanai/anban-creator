@@ -276,7 +276,7 @@ func (s *AssistantInteractionService) CommitInteraction(ctx context.Context, use
 		return InteractionCommitResult{}, errors.Join(ErrInteractivePersistence, err)
 	}
 	if interaction.Lifecycle == model.AssistantInteractionAbandoned {
-		return InteractionCommitResult{}, NewInteractionError(InteractionErrorRestartRequired, 410, "当前对话已结束，已保留可恢复内容", "restore_draft", "restart")
+		return InteractionCommitResult{}, interactionRuntimeTerminalError(interaction.Lifecycle)
 	}
 	digest := commitPayloadDigest(req)
 	attemptID := "commit:" + req.IdempotencyKey
@@ -333,6 +333,9 @@ func (s *AssistantInteractionService) CommitInteraction(ctx context.Context, use
 			return replay, nil
 		}
 		return InteractionCommitResult{}, NewInteractionError(InteractionErrorCommitReconciliationRequired, 409, "创建结果需要核对，请查看任务状态", "view_task", "reconcile_commit")
+	}
+	if err := s.endRestartedInteractionLocked(ctx, userID, interaction); err != nil {
+		return InteractionCommitResult{}, err
 	}
 	// A receipt is the authority for a replay. Check it before the draft so
 	// cleanup at the shared 30-day retention boundary cannot turn an already

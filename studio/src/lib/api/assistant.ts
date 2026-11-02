@@ -221,13 +221,18 @@ export const assistantApi = {
     }
   },
 
-  workspaceAnswer: async (workspaceId: string, _modeId: AssistantModeID, callId: string, answers: Array<{ id: string; selected: string[]; custom?: string }>, forceNewAttempt = false) => {
-    const attemptKey = `${workspaceId}\u0000${callId}\u0000${JSON.stringify(answers)}`
+  workspaceAnswer: async (workspaceId: string, _modeId: AssistantModeID, callId: string, answers: Array<{ id: string; selected: string[]; custom?: string }>, generation: number | undefined, forceNewAttempt = false) => {
+    const snapshot = await assistantApi.getInteractionSnapshot(workspaceId)
+    if (generation !== snapshot.generation) {
+      throw Object.assign(new Error('问题已过期，请回答恢复后的新问题。'), {
+        response: { status: 409, data: { error_code: 'assistant_interaction_generation_changed', data: snapshot } },
+      })
+    }
+    const attemptKey = `${workspaceId}\u0000${generation}\u0000${callId}\u0000${JSON.stringify(answers)}`
     if (forceNewAttempt) pendingAnswerAttempts.delete(attemptKey)
     const attemptID = pendingAnswerAttempts.get(attemptKey) ?? crypto.randomUUID()
     pendingAnswerAttempts.set(attemptKey, attemptID)
-    const snapshot = await assistantApi.getInteractionSnapshot(workspaceId)
-    const result = await assistantApi.answerInteractionQuestion(workspaceId, callId, { generation: snapshot.generation, attempt_id: attemptID, answers })
+    const result = await assistantApi.answerInteractionQuestion(workspaceId, callId, { generation, attempt_id: attemptID, answers })
     if (pendingAnswerAttempts.get(attemptKey) === attemptID) pendingAnswerAttempts.delete(attemptKey)
     return result
   },
@@ -265,7 +270,7 @@ export const assistantApi = {
       ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),
     })),
   getInteractionSnapshot: (interactionId: string) =>
-    unwrap<AssistantInteractionSnapshot>(http.get(`/assistant/interactions/${encodeURIComponent(interactionId)}`)),
+    unwrap<AssistantInteractionSnapshot>(http.get(`/assistant/interactions/${encodeURIComponent(interactionId)}`, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
   sendInteractionMessage: (interactionId: string, payload: { generation: number; client_message_id: string; text: string; mode_id?: AssistantModeID; project_id?: string; content_id?: string }) =>
     unwrap<{ accepted: boolean }>(http.post(`/assistant/interactions/${encodeURIComponent(interactionId)}/messages`, payload, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
   answerInteractionQuestion: (interactionId: string, callId: string, payload: { generation: number; attempt_id: string; answers: Array<{ id: string; selected: string[]; custom?: string }> }) =>

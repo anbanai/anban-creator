@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestCommitInteractionUsesDurableDraftAfterRuntimeLoss(t *testing.T) {
+func TestCommitInteractionReceiptSurvivesServerRestart(t *testing.T) {
 	svc, snapshot := newCreationConfirmationTestService(t)
 	payload := json.RawMessage(completeInteractionPlan)
 	digest := sha256.Sum256(payload)
@@ -22,10 +22,8 @@ func TestCommitInteractionUsesDurableDraftAfterRuntimeLoss(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// No runtime or session is needed to reach the durable commit boundary.
-	restarted := NewAssistantInteractionService(svc.repo, nil, svc.clock)
-	restarted.SetTaskService(svc.taskSvc)
-	result, err := restarted.CommitInteraction(context.Background(), "user-1", snapshot.ID, InteractionCommitRequest{DraftID: stage.DraftID, Revision: stage.Revision, IdempotencyKey: "commit-1"})
+	// A commit accepted before restart remains replayable afterward.
+	result, err := svc.CommitInteraction(context.Background(), "user-1", snapshot.ID, InteractionCommitRequest{DraftID: stage.DraftID, Revision: stage.Revision, IdempotencyKey: "commit-1"})
 	if err != nil || result.Status != InteractionCommitCreated {
 		t.Fatalf("commit = %#v, %v", result, err)
 	}
@@ -36,7 +34,13 @@ func TestCommitInteractionUsesDurableDraftAfterRuntimeLoss(t *testing.T) {
 	if receipt.ExpiresAt.Sub(receipt.CreatedAt) != InteractionCommitReceiptRetention {
 		t.Fatalf("commit receipt expiry = %s, want %s", receipt.ExpiresAt, svc.clock().Add(InteractionCommitReceiptRetention).Format(time.RFC3339))
 	}
-	replay, replayErr := svc.CommitInteraction(context.Background(), "user-1", snapshot.ID, InteractionCommitRequest{DraftID: stage.DraftID, Revision: stage.Revision, IdempotencyKey: "commit-1"})
+	restarted := NewAssistantInteractionService(svc.repo, nil, svc.clock)
+	restarted.SetTaskService(svc.taskSvc)
+	recovered, err := restarted.Snapshot(context.Background(), "user-1", snapshot.ID)
+	if err != nil || recovered.CommitResult == nil || recovered.CommitResult.TaskID != result.TaskID {
+		t.Fatalf("lost commit after restart: %#v, %v", recovered, err)
+	}
+	replay, replayErr := restarted.CommitInteraction(context.Background(), "user-1", snapshot.ID, InteractionCommitRequest{DraftID: stage.DraftID, Revision: stage.Revision, IdempotencyKey: "commit-1"})
 	if replayErr != nil || replay.Status != InteractionCommitAlreadyCreated || replay.TaskID != result.TaskID {
 		t.Fatalf("replay = %#v, %v", replay, replayErr)
 	}
@@ -72,7 +76,7 @@ func TestCommitInteractionRejectsIdempotencyKeyThatCannotFitAttemptReceipt(t *te
 	}
 }
 
-func TestCommitInteractionProfileDraftSurvivesServerRestart(t *testing.T) {
+func TestCommitInteractionRejectsUnconfirmedProfileAfterServerRestart(t *testing.T) {
 	svc, _ := newAssistantInteractionServiceTest(t)
 	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeProfile}, "profile-restart")
 	if err != nil {
@@ -100,11 +104,8 @@ func TestCommitInteractionProfileDraftSurvivesServerRestart(t *testing.T) {
 
 	restarted := NewAssistantInteractionService(svc.repo, nil, svc.clock)
 	result, err := restarted.CommitInteraction(context.Background(), "user-1", snapshot.ID, InteractionCommitRequest{DraftID: stage.DraftID, Revision: stage.Revision, IdempotencyKey: "profile-restart-commit"})
-	if err != nil {
-		t.Fatalf("restart commit = %#v, %v", result, err)
-	}
-	if result.Status != InteractionCommitCreated {
-		t.Fatalf("restart commit status = %q", result.Status)
+	if err == nil || NormalizeInteractionError(err).Code != InteractionErrorRestartRequired {
+		t.Fatalf("restart commit = %#v, %v, want restart required", result, err)
 	}
 }
 

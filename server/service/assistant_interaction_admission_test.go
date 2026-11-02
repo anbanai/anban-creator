@@ -142,7 +142,10 @@ func TestCreationObservedClaimReleaseHasAuthoritativeOrdering(t *testing.T) {
 	blocked := &blockingConfirmationTasks{TaskRepository: svc.repo.Tasks(), reached: make(chan struct{}), release: make(chan struct{})}
 	first := NewAssistantInteractionService(blockingConfirmationRepository{Repository: svc.repo, tasks: blocked}, nil, svc.clock)
 	first.SetTaskService(svc.taskSvc)
+	// Separate locks exercise durable admission while the runtime is still live.
+	first.runtimes = svc.runtimes
 	other := NewAssistantInteractionService(svc.repo, nil, svc.clock)
+	other.runtimes = svc.runtimes
 	req := InteractionCommitRequest{DraftID: stage.DraftID, Revision: stage.Revision, IdempotencyKey: "invalid-observed", Options: json.RawMessage(`{"plan":{"image_ratio":"invalid"}}`)}
 	done := make(chan error, 1)
 	go func() {
