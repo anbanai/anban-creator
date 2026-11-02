@@ -496,7 +496,7 @@ export default function ProjectsPage() {
       {isError ? (
         <QueryErrorState onRetry={() => refetch()} />
       ) : isLoading ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="rounded-xl border border-border bg-card p-4 space-y-3">
               <div className="flex items-center gap-3">
@@ -522,7 +522,7 @@ export default function ProjectsPage() {
           action={!visibleProjects.length && statusFilter === 'active' && !searchFilter ? { label: '智能创建人设', onClick: openCreator } : { label: '清空筛选', onClick: () => { setSearchFilter(''); setStatusFilter('active') } }}
         />
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           {filteredProjects.map((project) => (
             <ProjectCard
               key={project.id}
