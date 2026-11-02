@@ -1312,7 +1312,7 @@
     },
     {
       "id": "creation-planner",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "kind": "managed",
       "display_name": "创作模式",
       "description": "通过持续对话澄清本次作品需求，并在用户确认后交给 Server 创建正式创作任务。",
@@ -1345,7 +1345,7 @@
         "interactive-creation-clarification"
       ],
       "ui": {},
-      "digest": "3fdb532f1cc5d0fd72a25de99c0ed469a387784b18471f1c2a07c429041f2b13"
+      "digest": "3a39e73a7c54848918767455aaf6f208d23ebf4ddb113ac7a8225e7880180a40"
     },
     {
       "id": "feedback-analysis",
@@ -2053,7 +2053,7 @@
     },
     {
       "id": "postmortem-review",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "kind": "managed",
       "display_name": "复盘模式",
       "description": "围绕已完成作品和只读分析证据进行交互式复盘，形成等待独立数据验证的画像改进候选。",
@@ -2086,7 +2086,7 @@
         "interactive-postmortem-review"
       ],
       "ui": {},
-      "digest": "320efb3e8e3f9666f02ca66e0ca4f1186e2e4b162070b51c802e01ceac8c7624"
+      "digest": "3c32e8b9e6a2edc099f9579f35fc84b7b23121a34d7f974cd664a0e47f1598f7"
     },
     {
       "id": "profile-analysis",
