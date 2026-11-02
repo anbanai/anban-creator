@@ -264,6 +264,7 @@ type InteractiveService struct {
 	idleTimeout       time.Duration
 	maxHistory        int
 	enabled           bool
+	startupPending    bool
 	agents            []InteractiveAgent
 	adminOnly         bool
 	maxSessions       int
@@ -385,6 +386,15 @@ func interactiveAgentsFromCatalog(available bool) []InteractiveAgent {
 	}
 	return agents
 }
+
+// SetStartupReady keeps session admission and the bootstrap hint consistent.
+func (s *InteractiveService) SetStartupReady(ready bool) {
+	s.mu.Lock()
+	s.enabled = ready
+	s.startupPending = !ready
+	s.mu.Unlock()
+}
+
 func (s *InteractiveService) SetEnabled(v bool)   { s.mu.Lock(); s.enabled = v; s.mu.Unlock() }
 func (s *InteractiveService) SetAdminOnly(v bool) { s.mu.Lock(); s.adminOnly = v; s.mu.Unlock() }
 

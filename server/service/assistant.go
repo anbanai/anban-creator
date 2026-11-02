@@ -701,9 +701,15 @@ func (s *InteractiveService) AssistantBootstrap(ctx context.Context, userID stri
 		}
 	}
 	if !s.Enabled() {
+		reason := "助手运行环境暂不可用，请稍后重试"
+		s.mu.RLock()
+		if s.startupPending {
+			reason = "助手运行环境尚未初始化完成，请稍后重试"
+		}
+		s.mu.RUnlock()
 		for i := range out.Modes {
 			out.Modes[i].Available = false
-			out.Modes[i].DisabledReason = "助手运行环境暂不可用，请稍后重试"
+			out.Modes[i].DisabledReason = reason
 		}
 	}
 	return out, nil

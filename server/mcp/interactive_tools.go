@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -127,7 +128,15 @@ func stageAssistantDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (
 		}
 		result, err := svcs.InteractionSvc.StageDraftForInteraction(ctx, identity.UserID, service.InteractionStageInput{InteractionID: interactionID, Generation: generation, AttemptID: attemptID, ModeID: modeID, Payload: payload, PayloadDigest: payloadDigest, Ready: ready})
 		if err != nil {
-			return errorResult(fmt.Sprintf("stage assistant draft: %v", err)), nil
+			var structured *service.InteractionError
+			if !errors.As(err, &structured) {
+				structured = &service.InteractionError{Code: service.InteractionErrorMessageNotAccepted, Status: 500, Message: "这次操作未完成，当前内容已保留，请重试", AvailableActions: []string{"retry_message"}}
+			}
+			// Runtime callers need diagnostics without snapshots or internal causes.
+			diagnostic := *structured
+			diagnostic.Snapshot = nil
+			encoded, _ := json.Marshal(diagnostic)
+			return errorResult(string(encoded)), nil
 		}
 		return textResult(result)
 	}

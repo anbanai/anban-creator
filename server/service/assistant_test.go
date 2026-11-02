@@ -1922,3 +1922,27 @@ func TestAssistantAdmittedTaskCannotConsumeChangedPlan(t *testing.T) {
 		t.Fatalf("silently committed plan B using task %s whose frozen prompt is A: %#v", task.ID, result)
 	}
 }
+
+func TestAssistantBootstrapReportsInitializationPending(t *testing.T) {
+	svc := newAssistantWorkspaceTestService(newAssistantTestRepo(t))
+	svc.SetStartupReady(false)
+	bootstrap, err := svc.AssistantBootstrap(context.Background(), "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range bootstrap.Modes {
+		if mode.Available || !strings.Contains(mode.DisabledReason, "初始化") {
+			t.Fatalf("startup mode = %#v", mode)
+		}
+	}
+	svc.SetStartupReady(true)
+	bootstrap, err = svc.AssistantBootstrap(context.Background(), "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range bootstrap.Modes {
+		if strings.Contains(mode.DisabledReason, "初始化") {
+			t.Fatalf("startup failure hint retained after recovery: %#v", mode)
+		}
+	}
+}
