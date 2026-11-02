@@ -75,7 +75,14 @@ func (c *openaiLLMClient) chatCompletionParams(systemPrompt, userPrompt string) 
 			Content: openai.ChatCompletionUserMessageParamContentUnion{OfString: openai.String(userPrompt)},
 		},
 	})
-	params := openai.ChatCompletionNewParams{Messages: messages, Model: shared.ChatModel(c.model)}
+	return c.applyThinkingPolicy(openai.ChatCompletionNewParams{Messages: messages, Model: shared.ChatModel(c.model)})
+}
+
+// applyThinkingPolicy pins Kimi thinking models to non-thinking responses for
+// every Server-internal call. Vision requests must share the text and video
+// policy: a thinking model can stay silent past the route timeout while the
+// request body is still valid.
+func (c *openaiLLMClient) applyThinkingPolicy(params openai.ChatCompletionNewParams) openai.ChatCompletionNewParams {
 	if isKimiThinkingModel(c.model) {
 		params.SetExtraFields(map[string]any{"thinking": map[string]string{"type": "disabled"}})
 	}
@@ -141,7 +148,8 @@ func (c *openaiLLMClient) CompleteWithImageResult(ctx context.Context, systemPro
 		},
 	})
 	var httpResponse *http.Response
-	resp, err := c.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{Messages: messages, Model: shared.ChatModel(c.model)}, option.WithResponseInto(&httpResponse))
+	params := c.applyThinkingPolicy(openai.ChatCompletionNewParams{Messages: messages, Model: shared.ChatModel(c.model)})
+	resp, err := c.client.Chat.Completions.New(ctx, params, option.WithResponseInto(&httpResponse))
 	if err != nil {
 		return nil, newImageUnderstandingProviderError(err, httpResponse)
 	}
@@ -233,10 +241,7 @@ func (c *openaiLLMClient) CompleteWithVideoURLResult(ctx context.Context, system
 			},
 		},
 	})
-	params := openai.ChatCompletionNewParams{Messages: messages, Model: shared.ChatModel(c.model)}
-	if isKimiThinkingModel(c.model) {
-		params.SetExtraFields(map[string]any{"thinking": map[string]string{"type": "disabled"}})
-	}
+	params := c.applyThinkingPolicy(openai.ChatCompletionNewParams{Messages: messages, Model: shared.ChatModel(c.model)})
 	resp, err := c.client.Chat.Completions.New(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("llm video completion: %w", err)
@@ -268,8 +273,12 @@ func chatCompletionUsage(usage openai.CompletionUsage) srvconfig.TokenUsage {
 }
 
 func isKimiThinkingModel(model string) bool {
-	switch model {
-	case "kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking", "kimi-k2-thinking-turbo",
+	name := strings.ToLower(strings.TrimSpace(model))
+	if index := strings.IndexByte(name, '['); index > 0 {
+		name = name[:index]
+	}
+	switch name {
+	case "kimi-k3", "kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking", "kimi-k2-thinking-turbo",
 		"kimi-k2-0905-preview", "kimi-k2-turbo-preview":
 		return true
 	default:

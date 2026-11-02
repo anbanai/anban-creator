@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -173,5 +174,87 @@ func TestImageUnderstandingUsesEarlierParentOrRouteDeadline(t *testing.T) {
 				t.Errorf("completion took %s; earlier deadline should terminate before 1s", elapsed)
 			}
 		})
+	}
+}
+
+func TestVisionRequestDisablesKimiThinking(t *testing.T) {
+	const successJSON = `{"id":"completion-1","model":"vision-response","choices":[{"index":0,"message":{"role":"assistant","content":"a blue cup"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`
+	for _, tt := range []struct {
+		name         string
+		model        string
+		wantThinking bool
+	}{
+		{name: "kimi k3 disables thinking", model: "kimi-k3", wantThinking: true},
+		{name: "kimi k2.6 disables thinking", model: "kimi-k2.6", wantThinking: true},
+		{name: "non-kimi model keeps provider defaults", model: "vision-route"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var request map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Errorf("decode vision request: %v", err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(successJSON))
+			}))
+			defer server.Close()
+
+			client := NewOpenAILLMClient(server.URL+"/v1", "fixture-api-key", tt.model, time.Second).(*openaiLLMClient)
+			if _, err := client.CompleteWithImageResult(context.Background(), "", "describe", "data:image/png;base64,eA=="); err != nil {
+				t.Fatal(err)
+			}
+			thinking, ok := request["thinking"].(map[string]any)
+			if tt.wantThinking {
+				if !ok || thinking["type"] != "disabled" {
+					t.Fatalf("vision thinking policy = %#v, want disabled", request["thinking"])
+				}
+				return
+			}
+			if ok {
+				t.Fatalf("non-Kimi model received thinking policy: %#v", request["thinking"])
+			}
+		})
+	}
+}
+
+func TestVideoRequestDisablesKimiThinking(t *testing.T) {
+	const successJSON = `{"id":"completion-1","model":"video-response","choices":[{"index":0,"message":{"role":"assistant","content":"a blue cup"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`
+	var request map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode video request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(successJSON))
+	}))
+	defer server.Close()
+
+	client := NewOpenAILLMClient(server.URL+"/v1", "fixture-api-key", "kimi-k3", time.Second).(*openaiLLMClient)
+	if _, err := client.CompleteWithVideoURLResult(context.Background(), "", "describe", "https://example.com/video.mp4"); err != nil {
+		t.Fatal(err)
+	}
+	thinking, ok := request["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "disabled" {
+		t.Fatalf("video thinking policy = %#v, want disabled", request["thinking"])
+	}
+}
+
+func TestKimiThinkingModelCoverage(t *testing.T) {
+	for _, tt := range []struct {
+		model string
+		want  bool
+	}{
+		{model: "kimi-k3", want: true},
+		{model: " kimi-k3[1m] ", want: true},
+		{model: "kimi-k2.5", want: true},
+		{model: "kimi-k2.6", want: true},
+		{model: "kimi-k2-thinking", want: true},
+		{model: "kimi-k3-code", want: false},
+		{model: "gpt-5", want: false},
+		{model: "", want: false},
+	} {
+		if got := isKimiThinkingModel(tt.model); got != tt.want {
+			t.Errorf("isKimiThinkingModel(%q) = %v, want %v", tt.model, got, tt.want)
+		}
 	}
 }
