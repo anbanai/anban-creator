@@ -10,6 +10,7 @@ import (
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"gorm.io/gorm"
 )
 
 var (
@@ -22,7 +23,7 @@ func (s *TaskService) FindReconcilableExecutions(ctx context.Context, before tim
 }
 
 func (s *TaskService) RecordExecutionInstance(ctx context.Context, executionID, instanceID string) error {
-	execution, _, err := s.currentExecution(ctx, executionID)
+	execution, _, err := s.reconcileCurrentExecution(ctx, executionID)
 	if err != nil {
 		return err
 	}
@@ -39,7 +40,7 @@ func (s *TaskService) RecordExecutionInstance(ctx context.Context, executionID, 
 }
 
 func (s *TaskService) ResumeExecutionDispatch(ctx context.Context, executionID string) error {
-	execution, task, err := s.currentExecution(ctx, executionID)
+	execution, task, err := s.reconcileCurrentExecution(ctx, executionID)
 	if err != nil {
 		return err
 	}
@@ -53,21 +54,64 @@ func (s *TaskService) ResumeExecutionDispatch(ctx context.Context, executionID s
 }
 
 func (s *TaskService) ResumeExecutionFinalization(ctx context.Context, executionID string) error {
-	execution, err := s.repo.TaskExecutions().FindByID(ctx, executionID)
+	execution, task, err := s.reconcileCurrentExecution(ctx, executionID)
 	if err != nil {
 		return err
 	}
 	if !isTerminalExecution(execution.Status) {
 		return nil
 	}
-	task, err := s.repo.Tasks().FindByID(ctx, execution.TaskID)
-	if err != nil {
-		return err
-	}
-	if task.CurrentExecutionID == nil || *task.CurrentExecutionID != execution.ID {
-		return ErrStaleTaskExecution
-	}
 	return s.finalizeTaskFromExecution(ctx, task, execution)
+}
+
+// reconcileCurrentExecution resolves the attempt the runtime reconciler is
+// about to act on. A superseded attempt is reported with the runtime-level
+// sentinel so the reconciler retires it instead of retrying forever.
+func (s *TaskService) reconcileCurrentExecution(ctx context.Context, executionID string) (*model.TaskExecution, *model.Task, error) {
+	execution, task, err := s.currentExecution(ctx, executionID)
+	if errors.Is(err, ErrStaleTaskExecution) {
+		return nil, nil, agent.ErrExecutionNotCurrent
+	}
+	return execution, task, err
+}
+
+// RetireSupersededExecution abandons a durable attempt that is no longer the
+// task's current execution. Terminal attempts keep their recorded outcome and
+// only stop finalizing; still-active attempts are terminalized as cancelled so
+// the reconciler's cleanup lease can remove their runtime. Task, billing, and
+// publication state are never touched.
+func (s *TaskService) RetireSupersededExecution(ctx context.Context, executionID string) (retired bool, err error) {
+	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		execution, findErr := tx.TaskExecutions().FindByIDForUpdate(ctx, strings.TrimSpace(executionID))
+		if errors.Is(findErr, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if findErr != nil {
+			return fmt.Errorf("load attempt to retire: %w", findErr)
+		}
+		task, taskErr := tx.Tasks().FindByIDForUpdate(ctx, execution.TaskID)
+		if taskErr != nil {
+			return fmt.Errorf("load task for attempt retirement: %w", taskErr)
+		}
+		if task.CurrentExecutionID != nil && *task.CurrentExecutionID == execution.ID {
+			return nil
+		}
+		if execution.FinalizationStatus == model.TaskExecutionFinalizationSuperseded {
+			return nil
+		}
+		if isTerminalExecution(execution.Status) {
+			won, updateErr := tx.TaskExecutions().RetireTerminalFinalization(ctx, execution.ID)
+			retired = won
+			return updateErr
+		}
+		won, updateErr := tx.TaskExecutions().CancelSupersededExecution(ctx, execution.ID)
+		retired = won
+		return updateErr
+	})
+	if err != nil {
+		return false, err
+	}
+	return retired, nil
 }
 
 func (s *TaskService) ClaimExecutionCleanup(ctx context.Context, executionID, token string, lease time.Duration) (bool, error) {
@@ -159,8 +203,7 @@ func (s *TaskService) ReleaseExecutionCleanup(ctx context.Context, executionID, 
 // ReconcileExecutionFailure makes the current attempt terminal. Runtime
 // failures never create another execution or invoke the provider again.
 func (s *TaskService) ReconcileExecutionFailure(ctx context.Context, executionID, status, reason string, diagnostics []byte) error {
-	_, _, err := s.currentExecution(ctx, executionID)
-	if err != nil {
+	if _, _, err := s.reconcileCurrentExecution(ctx, executionID); err != nil {
 		return err
 	}
 	return s.TerminalizeCurrentExecution(ctx, executionID, status, reason, diagnostics)

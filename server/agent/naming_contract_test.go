@@ -609,7 +609,46 @@ func readTextFile(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	return string(data)
+	body := string(data)
+	if strings.HasPrefix(filepath.Base(path), "Dockerfile") {
+		return normalizeDockerfileImageRefs(body)
+	}
+	return body
+}
+
+// normalizeDockerfileImageRefs strips a container-registry host and namespace
+// from FROM image references. Dockerfiles may pull the same pinned image from a
+// registry mirror; contract tests still verify the image name, tag, and stage.
+func normalizeDockerfileImageRefs(body string) string {
+	lines := strings.Split(body, "\n")
+	for index, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || !strings.EqualFold(fields[0], "FROM") {
+			continue
+		}
+		imageIndex := 1
+		for imageIndex < len(fields) && strings.HasPrefix(fields[imageIndex], "--") {
+			if fields[imageIndex] == "--platform" {
+				imageIndex += 2
+				continue
+			}
+			imageIndex++
+		}
+		if imageIndex >= len(fields) {
+			continue
+		}
+		image := fields[imageIndex]
+		registry, remainder, hasRegistry := strings.Cut(image, "/")
+		if !hasRegistry || remainder == "" {
+			continue
+		}
+		if !strings.ContainsAny(registry, ".:") && !strings.EqualFold(registry, "localhost") {
+			continue
+		}
+		fields[imageIndex] = remainder[strings.LastIndex(remainder, "/")+1:]
+		lines[index] = strings.Join(fields, " ")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func keys[V any](m map[string]V) []string {

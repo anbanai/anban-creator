@@ -57,6 +57,7 @@ const (
 	AgentIDArticle           = "wechat-article"
 	AgentIDSeednote          = "seednote"
 	AgentIDWechatPicture     = "wechat-picture"
+	AgentIDEcommerce         = "ecommerce"
 	AgentIDMontage           = "montage"
 	AgentIDHypit             = "hypit"
 	AgentIDFeedbackAnalysis  = "feedback-analysis"
@@ -177,7 +178,7 @@ func IsChannel(value string) bool {
 
 func IsAgentID(value string) bool {
 	switch value {
-	case AgentIDContentPlanning, AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDMontage, AgentIDHypit, AgentIDFeedbackAnalysis, AgentIDProfileAnalysis, AgentIDWhiteboard, AgentIDLocalLife, AgentIDVideoEdit, AgentIDTalkingHeadEditor, AgentIDTopicRadar:
+	case AgentIDContentPlanning, AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDEcommerce, AgentIDMontage, AgentIDHypit, AgentIDFeedbackAnalysis, AgentIDProfileAnalysis, AgentIDWhiteboard, AgentIDLocalLife, AgentIDVideoEdit, AgentIDTalkingHeadEditor, AgentIDTopicRadar:
 		return true
 	default:
 		return false
@@ -194,6 +195,8 @@ func AgentChannel(agentID string) (string, bool) {
 		return ChannelSeednote, true
 	case AgentIDWechatPicture:
 		return ChannelWechatPicture, true
+	case AgentIDEcommerce:
+		return ChannelEcommerce, true
 	case AgentIDMontage:
 		return ChannelMontage, true
 	case AgentIDHypit:
@@ -336,7 +339,7 @@ func IsProjectPlatform(value string) bool {
 // IsAdminOnlyProjectPlatform reports project types that are still in internal validation.
 func IsAdminOnlyProjectPlatform(value string) bool {
 	switch value {
-	case PlatformMoments, PlatformEcommerce, PlatformHypit:
+	case PlatformMoments, PlatformHypit:
 		return true
 	default:
 		return false

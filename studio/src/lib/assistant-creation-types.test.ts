@@ -13,6 +13,7 @@ describe('assistant creation capabilities', () => {
     expect(assistantCreationTypes({ platform: 'wechat', agent_ids: ['seednote', 'montage', 'video-edit'] }).map(type => type.value)).toEqual(['seednote', 'video', 'video-edit'])
     expect(assistantCreationTypes({ platform: 'montage', agent_ids: ['montage'] }).map(type => type.value)).toEqual(['video'])
     expect(assistantCreationTypes({ platform: 'hypit', agent_ids: ['hypit'] })).toEqual([])
+    expect(assistantCreationTypes({ platform: 'ecommerce', agent_ids: ['ecommerce'] })).toEqual([])
   })
 
   it('initializes a missing primary platform and retains compatible existing settings', () => {
@@ -20,5 +21,6 @@ describe('assistant creation capabilities', () => {
     expect(assistantPrimaryPlatform('seednote', ['wechat-article', 'seednote'])).toBe('seednote')
     expect(assistantPrimaryPlatform('wechat', ['montage'])).toBe('montage')
     expect(assistantPrimaryPlatform('hypit', ['hypit'])).toBeUndefined()
+    expect(assistantPrimaryPlatform('ecommerce', ['ecommerce'])).toBeUndefined()
   })
 })

@@ -449,8 +449,8 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 		t.Fatalf("list status = %d", resp.StatusCode)
 	}
 	items := decodeBody(t, resp)["data"].([]any)
-	if len(items) != 7 {
-		t.Fatalf("non-admin projects = %#v, want article, seednote, montage, local-life, whiteboard-animation, video-edit, and talking-head-editor", items)
+	if len(items) != 8 {
+		t.Fatalf("non-admin projects = %#v, want public platforms including ecommerce", items)
 	}
 	for _, item := range items {
 		platformValue := item.(map[string]any)["platform"]
@@ -463,7 +463,7 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 		}
 	}
 
-	for _, platform := range []string{model.PlatformMoments, model.PlatformEcommerce} {
+	for _, platform := range []string{model.PlatformMoments} {
 		t.Run("reject create "+platform, func(t *testing.T) {
 			resp := doProjectRequestAsNonAdmin(t, app, http.MethodPost, "/api/v1/projects", userID, map[string]any{
 				"platform": platform,
@@ -473,6 +473,32 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 				t.Fatalf("non-admin create status = %d, want 403; body=%#v", resp.StatusCode, decodeBody(t, resp))
 			}
 		})
+	}
+
+	resp = doProjectRequestAsNonAdmin(t, app, http.MethodPost, "/api/v1/projects", userID, map[string]any{
+		"platform":  model.PlatformEcommerce,
+		"name":      "Public ecommerce",
+		"agent_ids": []string{model.AgentIDEcommerce},
+	})
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("non-admin ecommerce create status = %d, want 200; body=%#v", resp.StatusCode, decodeBody(t, resp))
+	}
+	createdProject := decodeBody(t, resp)["data"].(map[string]any)["project"].(map[string]any)
+	resp.Body.Close()
+	if got := createdProject["agent_ids"].([]any); len(got) != 1 || got[0] != model.AgentIDEcommerce {
+		t.Fatalf("non-admin ecommerce create agent_ids = %#v, want [%q]", got, model.AgentIDEcommerce)
+	}
+
+	resp = doProjectRequestAsNonAdmin(t, app, http.MethodPut, "/api/v1/projects/"+createdProject["id"].(string), userID, map[string]any{
+		"agent_ids": []string{model.AgentIDEcommerce},
+	})
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("non-admin ecommerce update status = %d, want 200; body=%#v", resp.StatusCode, decodeBody(t, resp))
+	}
+	updatedProject := decodeBody(t, resp)["data"].(map[string]any)
+	resp.Body.Close()
+	if got := updatedProject["agent_ids"].([]any); len(got) != 1 || got[0] != model.AgentIDEcommerce {
+		t.Fatalf("non-admin ecommerce update agent_ids = %#v, want [%q]", got, model.AgentIDEcommerce)
 	}
 
 	resp = doProjectRequestAsNonAdmin(t, app, http.MethodGet, "/api/v1/projects/"+projectIDs[model.PlatformMontage], userID, nil)
@@ -493,8 +519,8 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 		t.Fatalf("non-admin platform configs status = %d, want 200", resp.StatusCode)
 	}
 	configs := decodeBody(t, resp)["data"].([]any)
-	if len(configs) != 7 {
-		t.Fatalf("non-admin platform configs = %#v, want article, seednote, montage, local-life, whiteboard-animation, video-edit, and talking-head-editor", configs)
+	if len(configs) != 8 {
+		t.Fatalf("non-admin platform configs = %#v, want public platforms including ecommerce", configs)
 	}
 	for _, item := range configs {
 		platform := item.(map[string]any)["id"].(string)

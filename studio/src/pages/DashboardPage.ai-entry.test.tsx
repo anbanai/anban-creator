@@ -127,7 +127,7 @@ const {
       { id: 'wechat', label: '公众号', badge_variant: 'success', supports_publishing: true, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '16:9', supported_image_ratios: ['16:9', '4:3', '3:4', '1:1'], fields: [] },
       { id: 'seednote', label: '种草笔记', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '3:4', supported_image_ratios: ['3:4', '1:1', '4:3'], fields: [] },
       { id: 'moments', label: '朋友圈', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '1:1', supported_image_ratios: ['1:1', '3:4'], fields: [] },
-      { id: 'ecommerce', label: '电商图', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '4:3', supported_image_ratios: ['4:3', '1:1', '3:4', '16:9'], fields: [] },
+      { id: 'ecommerce', label: '电商设计', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '4:3', supported_image_ratios: ['4:3', '1:1', '3:4', '16:9'], fields: [] },
       { id: 'montage', label: '智能剪辑', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '9:16', supported_image_ratios: ['9:16', '16:9', '1:1'], fields: [] },
     ] as const,
     imageCapabilities: {

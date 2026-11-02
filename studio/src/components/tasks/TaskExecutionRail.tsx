@@ -194,7 +194,7 @@ export function TaskExecutionRail({
   const expansionScope = `${taskId}:${lifecycle?.execution_id ?? ''}`
   const [expansion, setExpansion] = useState<{ scope: string; stages: Record<string, boolean> }>({ scope: expansionScope, stages: {} })
   const manualExpansion = expansion.scope === expansionScope ? expansion.stages : {}
-  const fileProps = { taskId, taskType }
+  const fileProps = { taskId, taskType, relatedFiles: files, articleImageDeliveryBlocked: taskType === 'wechat-article' && outcome?.visual?.status === 'partial' }
   const fileFallback = showFiles ? (
     <>
       {filesLoading && <p className="px-4 py-3 text-xs text-muted-foreground" role="status">正在加载产物…</p>}

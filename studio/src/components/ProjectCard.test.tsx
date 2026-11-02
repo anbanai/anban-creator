@@ -262,11 +262,21 @@ describe('ProjectCard', () => {
   })
 
   it('places the work list entry in the icon action row', () => {
-    render(<ProjectCard project={project()} />)
+    render(<ProjectCard project={project()} onEdit={vi.fn()} onChannelConfig={vi.fn()} onArchive={vi.fn()} />)
 
     const workList = screen.getByRole('link', { name: '查看作品：公众号人设' })
+    const actions = screen.getByLabelText('人设操作：公众号人设')
     expect(workList).toBeInTheDocument()
-    expect(workList.closest('[aria-label="人设操作：公众号人设"]')).toContainElement(workList)
+    expect(workList.querySelector('svg')).toHaveClass('lucide-gallery-horizontal-end')
+    expect(actions).toContainElement(workList)
+    expect(actions).toHaveClass('flex-nowrap', 'gap-0')
+    expect(actions).not.toHaveClass('flex-wrap')
+    const actionTargets = actions.querySelectorAll('a, button')
+    expect(actionTargets).toHaveLength(7)
+    for (const action of actionTargets) {
+      expect(action).toHaveClass('size-11', 'shrink-0')
+      expect(action).not.toHaveClass('shrink')
+    }
     expect(screen.queryByRole('button', { name: '查看反馈闭环' })).not.toBeInTheDocument()
   })
 })
