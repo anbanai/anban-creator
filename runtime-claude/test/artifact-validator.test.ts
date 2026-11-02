@@ -61,6 +61,26 @@ const adaptivePicturePack: AgentPack = {
   ],
 };
 
+const talkingHeadPack: AgentPack = {
+  ...pack,
+  id: "talking-head-editor",
+  agent: { name: "talking-head-editor", max_turns: 220 },
+  bindings: { task_types: ["talking_head_editor"] },
+  artifacts: [
+    { role: "final", path: "output/final.mp4", required: true },
+    { role: "transcript", path: "output/transcript.json", required: true },
+    { role: "plan", path: "output/visual-plan.json", required: true },
+  ],
+  artifact_stages: [
+    {
+      id: "motion_review",
+      trigger: "output/motion-sample.mp4",
+      required: ["output/transcript.json", "output/visual-plan.json", "output/motion-review.json"],
+    },
+    { id: "final_delivery", trigger: "output/final.mp4", terminal: true },
+  ],
+};
+
 async function workspace(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "anban-progress-artifacts-"));
   roots.push(root);
@@ -195,5 +215,30 @@ describe("artifact validation", () => {
     await writeFile(join(root, "output", "cover.png"), "cover image");
 
     expect(await validateFinalArtifacts(adaptivePicturePack, root)).toEqual({ ok: true });
+  });
+
+  test("uses the motion review artifact stage before final delivery", async () => {
+    const root = await workspace();
+    await writeFile(join(root, "output", "transcript.json"), "{}");
+    await writeFile(join(root, "output", "visual-plan.json"), "{}");
+    await writeFile(join(root, "output", "motion-sample.mp4"), "sample");
+
+    expect(await validateFinalArtifacts(talkingHeadPack, root)).toEqual({
+      ok: false,
+      reason: "missing_artifacts",
+      missing: ["output/motion-review.json"],
+    });
+
+    await writeFile(join(root, "output", "motion-review.json"), "{}");
+    expect(await validateFinalArtifacts(talkingHeadPack, root)).toEqual({ ok: true });
+  });
+
+  test("selects the terminal stage when final delivery exists", async () => {
+    const root = await workspace();
+    await writeFile(join(root, "output", "final.mp4"), "final");
+    await writeFile(join(root, "output", "transcript.json"), "{}");
+    await writeFile(join(root, "output", "visual-plan.json"), "{}");
+
+    expect(await validateFinalArtifacts(talkingHeadPack, root)).toEqual({ ok: true });
   });
 });

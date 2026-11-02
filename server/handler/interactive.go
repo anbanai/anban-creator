@@ -261,6 +261,7 @@ func interactiveError(c fiber.Ctx, err error) error {
 				Msg:              interactionErr.Message,
 				ErrorCode:        interactionErr.Code,
 				AvailableActions: interactionErr.AvailableActions,
+				BlockingIssues:   interactionErr.BlockingIssues,
 				Data:             interactionErr.Snapshot,
 			})
 		}

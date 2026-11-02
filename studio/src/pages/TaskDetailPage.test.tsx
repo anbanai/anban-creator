@@ -940,7 +940,7 @@ describe('TaskDetailPage', () => {
     expect(streamSignals.get('task-1')).toHaveProperty('aborted', true)
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '交付结果' })).toBeInTheDocument())
-    expect(screen.queryByRole('button', { name: '查看完整日志' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '查看完整日志' })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '执行动态' })).not.toBeInTheDocument()
   })
 

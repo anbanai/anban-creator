@@ -469,6 +469,26 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 				return fmt.Errorf("link feedback execution: %w", err)
 			}
 		}
+		if dispatchTask.Type == model.TaskTypeTopicDigest || dispatchTask.Type == model.TaskTypeTopicScript {
+			input := dispatchTask.AgentInput.Data()
+			snapshot, _ := input["snapshot"].(map[string]any)
+			ownerID, _ := snapshot["snapshot_id"].(string)
+			var bound bool
+			var bindErr error
+			if dispatchTask.Type == model.TaskTypeTopicDigest {
+				bound, bindErr = txRepo.TopicDigests().BindExecution(ctx, ownerID, dispatchTask.ID, execution.ID)
+			} else {
+				bound, bindErr = txRepo.TopicScriptJobs().BindExecution(ctx, ownerID, dispatchTask.ID, execution.ID)
+			}
+			if bindErr != nil { return fmt.Errorf("bind topic execution: %w", bindErr) }
+			if !bound { return fmt.Errorf("topic job %s is not owned by task %s", ownerID, dispatchTask.ID) }
+			input["task_id"], input["execution_id"], input["task_kind"] = dispatchTask.ID, execution.ID, dispatchTask.TaskKind
+			validated, err := validateAndCloneAgentInput(dispatchTask.Type, input)
+			if err != nil { return err }
+			dispatchTask.SetAgentInput(validated)
+			if err := txRepo.Tasks().Update(ctx, dispatchTask); err != nil { return err }
+			task.AgentInput = dispatchTask.AgentInput
+		}
 		if execution.Purpose == model.TaskExecutionPurposePublicationRecovery {
 			input := dispatchTask.AgentInput.Data()
 			delete(input, "publication_recovery")

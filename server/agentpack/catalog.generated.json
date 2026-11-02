@@ -2,9 +2,9 @@
   "packs": [
     {
       "id": "ecommerce",
-      "version": "2.0.5",
+      "version": "2.1.0",
       "kind": "plugin",
-      "display_name": "电商素材",
+      "display_name": "电商设计",
       "description": "基于产品图片生成完整电商文案和视觉素材包。",
       "agent": {
         "name": "ecommerce",
@@ -83,6 +83,12 @@
           "required": false
         },
         {
+          "role": "quality_gate",
+          "path": "output/quality-gate.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
           "role": "manifest",
           "path": "output/manifest.json",
           "mime_type": "application/json",
@@ -111,6 +117,11 @@
         {
           "role": "copywriting",
           "path": "output/copywriting.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "quality_gate",
+          "path": "output/quality-gate.md",
           "mime_type": "text/markdown"
         },
         {
@@ -159,7 +170,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "fdf9f245858f58297e6b3a1671b7f35277af71e3ff30105961e8ec4ae2629325"
+      "digest": "1743bf1c32e79dfa7f969c874fbdc6961842c4693a0a0fbf0ed988ce518d6696"
     },
     {
       "id": "content-planning",
@@ -1301,7 +1312,7 @@
     },
     {
       "id": "creation-planner",
-      "version": "1.0.2",
+      "version": "1.0.4",
       "kind": "managed",
       "display_name": "创作模式",
       "description": "通过持续对话澄清本次作品需求，并在用户确认后交给 Server 创建正式创作任务。",
@@ -1334,7 +1345,7 @@
         "interactive-creation-clarification"
       ],
       "ui": {},
-      "digest": "b25a3fd3c5e11a35cc4a6c4d8e28e85963a466646d9668fd75f76b7481f35c5f"
+      "digest": "d294e9227bba2ed2212a998ae0067a9aee7905d3ca20c6eb8dde862505a59bcc"
     },
     {
       "id": "feedback-analysis",
@@ -2038,11 +2049,11 @@
           "funnel_stage"
         ]
       },
-      "digest": "03a99a4959e2ab969c7e847e59523fca67c09fc5821b79538394443b3c16d75f"
+      "digest": "800d343fb9744396f630e2b0be9568b42ed874a4e0e5fdafd482f1e89c0a7411"
     },
     {
       "id": "postmortem-review",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "kind": "managed",
       "display_name": "复盘模式",
       "description": "围绕已完成作品和只读分析证据进行交互式复盘，形成等待独立数据验证的画像改进候选。",
@@ -2075,7 +2086,7 @@
         "interactive-postmortem-review"
       ],
       "ui": {},
-      "digest": "320efb3e8e3f9666f02ca66e0ca4f1186e2e4b162070b51c802e01ceac8c7624"
+      "digest": "b5bada558611fab13cacb14af2ffd0c7be36c0f8fde52dbdc31f6f863d033ac6"
     },
     {
       "id": "profile-analysis",
@@ -2911,12 +2922,12 @@
           "funnel_stage"
         ]
       },
-      "digest": "47611b95b9b86d52be625a22ed3351afe470c32738a943bf5d0521c3d47c8906"
+      "digest": "a92520f39ef3e2573261ee60cced4e2f20b8d199ce677985ee7954b90a3b54bf"
     },
     {
       "id": "talking-head-editor",
       "channel": "talking-head-editor",
-      "version": "2.0.2",
+      "version": "2.0.7",
       "kind": "managed",
       "display_name": "口播精剪",
       "description": "按固定口播工作流自动完成静音粗剪、语义精剪、动效素材包装和音效 BGM 收尾，并保留可复核的剪辑证据。",
@@ -2925,7 +2936,10 @@
         "skills": [
           "auto-editor",
           "video-use",
-          "erduo-broll-loop-engineering"
+          "erduo-broll-loop-engineering",
+          "talking-head-sound-design",
+          "content-tagging",
+          "short-video-cover"
         ],
         "max_turns": 220
       },
@@ -2959,6 +2973,12 @@
           "path": "output/final.mp4",
           "mime_type": "video/mp4",
           "required": true
+        },
+        {
+          "role": "final_picture",
+          "path": "output/final-picture.mp4",
+          "mime_type": "video/mp4",
+          "required": false
         },
         {
           "role": "edit_decision_list",
@@ -3012,31 +3032,31 @@
           "role": "motion_sample",
           "path": "output/motion-sample.mp4",
           "mime_type": "video/mp4",
-          "required": false
+          "required": true
         },
         {
           "role": "motion_review",
           "path": "output/motion-review.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "motion_source_manifest",
           "path": "output/motion-source-manifest.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "rough_cut",
           "path": "output/rough-cut.mp4",
           "mime_type": "video/mp4",
-          "required": false
+          "required": true
         },
         {
           "role": "semantic_cut",
           "path": "output/semantic-cut.mp4",
           "mime_type": "video/mp4",
-          "required": false
+          "required": true
         },
         {
           "role": "subtitles",
@@ -3048,13 +3068,67 @@
           "role": "delivery_manifest",
           "path": "output/delivery-manifest.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "quality_evidence",
           "path": "output/quality-evidence.json",
           "mime_type": "application/json",
           "required": true
+        },
+        {
+          "role": "cover_reference_input",
+          "path": "output/input-manifest.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_reference_image",
+          "path": "output/reference-cover.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "cover_reference_compressed_image",
+          "path": "output/reference-cover-compressed.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "cover_reference_analysis",
+          "path": "output/reference-analysis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_plan",
+          "path": "output/cover-plan.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "cover_reference_prompts",
+          "path": "output/cover-prompts.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_review",
+          "path": "output/cover-review.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_candidate",
+          "path": "output/cover_v2.png",
+          "mime_type": "image/png",
+          "required": false
         },
         {
           "role": "failure_state",
@@ -3073,6 +3147,28 @@
           "path": "output/progress-state.json",
           "mime_type": "application/json",
           "required": false
+        }
+      ],
+      "artifact_stages": [
+        {
+          "id": "motion_review",
+          "trigger": "output/motion-sample.mp4",
+          "required": [
+            "output/rough-cut.mp4",
+            "output/transcript.json",
+            "output/edit-decision-list.json",
+            "output/edit-strategy.md",
+            "output/semantic-cut.mp4",
+            "output/motion-sample.mp4",
+            "output/visual-plan.json",
+            "output/motion-review.json",
+            "output/motion-source-manifest.json"
+          ]
+        },
+        {
+          "id": "final_delivery",
+          "trigger": "output/final.mp4",
+          "terminal": true
         }
       ],
       "delivery": [
@@ -3172,7 +3268,1700 @@
           "funnel_stage"
         ]
       },
-      "digest": "0c50bbcbdf802e829f7d48b6a0fea70484573f83d528254917647580d9649556"
+      "digest": "57cfb0d52f44225f47a7db7f123aba0bf4b7ef3dd007998c7c1a42a537f143e5"
+    },
+    {
+      "id": "talking-head-montage",
+      "version": "1.3.0",
+      "kind": "plugin",
+      "display_name": "口播 Montage 制作",
+      "description": "以 OpenMontage hybrid 为主引擎，完成真人口播、生成视频素材、图片素材、图形动效、字幕与分章节 BGM 的本地制作与文件审核，并在流程最后一步生成封面。",
+      "agent": {
+        "name": "talking-head-montage",
+        "skills": [
+          "talking-head-composition",
+          "talking-head-sound-design",
+          "content-tagging",
+          "short-video-cover",
+          "talking-head-visual-focus",
+          "talking-head-explainer",
+          "video-bgm-design",
+          "video-production-qc",
+          "video-subtitle-design"
+        ],
+        "max_turns": 260
+      },
+      "interaction": {},
+      "bindings": {},
+      "runtime": {
+        "profile": "talking-head-montage",
+        "adapter": "openmontage"
+      },
+      "surfaces": [
+        "plugin"
+      ],
+      "features": [
+        "talking-head",
+        "explainable-knowledge-editing",
+        "semantic-master-variants",
+        "retention-experiments",
+        "independent-validation",
+        "generated-video-inserts",
+        "image-inserts",
+        "motion-graphics",
+        "automatic-review-loop"
+      ],
+      "artifacts": [
+        {
+          "role": "explainer_input_assessment",
+          "path": "output/explainer-input-assessment.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "explanation_plan",
+          "path": "output/explanation-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "platform_variant_plan",
+          "path": "output/platform-variant-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "retention_experiment_plan",
+          "path": "output/retention-experiment-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "independent_validation_plan",
+          "path": "output/independent-validation-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "independent_validation",
+          "path": "output/independent-validation.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "retention_results",
+          "path": "output/retention-results.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "rough_cut",
+          "path": "output/rough-cut.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "semantic_cut",
+          "path": "output/semantic-cut.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "transcript",
+          "path": "output/transcript.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "edit_decision_list",
+          "path": "output/edit-decision-list.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "edit_strategy",
+          "path": "output/edit-strategy.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "asset_requirements",
+          "path": "output/asset-requirements.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "visual_plan_draft",
+          "path": "output/visual-plan-draft.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "asset_source_policy",
+          "path": "output/asset-source-policy.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "generated_video_manifest",
+          "path": "output/generated-video-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "generated_video_review",
+          "path": "output/generated-video-review.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "asset_source_manifest",
+          "path": "output/asset-source-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "visual_plan",
+          "path": "output/visual-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "asset_ledger",
+          "path": "output/asset-ledger.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "composition_plan",
+          "path": "output/composition-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "composition_lint",
+          "path": "output/composition-lint.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "motion_sample",
+          "path": "output/motion-sample.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "motion_review",
+          "path": "output/motion-review.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "motion_source_manifest",
+          "path": "output/motion-source-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "captions",
+          "path": "output/captions.srt",
+          "mime_type": "text/plain",
+          "required": true
+        },
+        {
+          "role": "caption_plan",
+          "path": "output/caption-plan.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "caption_style",
+          "path": "output/caption-style.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "caption_qc",
+          "path": "output/caption-qc.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "final_picture",
+          "path": "output/final-picture.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "sfx_cues",
+          "path": "output/sfx-cues.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "bgm_plan",
+          "path": "output/bgm-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "bgm_plan_md",
+          "path": "output/bgm-plan.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "bgm_qc",
+          "path": "output/bgm-qc.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "audio_source_manifest",
+          "path": "output/audio-source-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "quality_evidence",
+          "path": "output/quality-evidence.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "sync_evidence",
+          "path": "output/sync-evidence.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "cover_reference_input",
+          "path": "output/input-manifest.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_reference_image",
+          "path": "output/reference-cover.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "cover_reference_compressed_image",
+          "path": "output/reference-cover-compressed.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "cover_reference_analysis",
+          "path": "output/reference-analysis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_plan",
+          "path": "output/cover-plan.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png",
+          "required": true
+        },
+        {
+          "role": "cover_quality",
+          "path": "output/cover-quality.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "cover_reference_prompts",
+          "path": "output/cover-prompts.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_review",
+          "path": "output/cover-review.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_candidate",
+          "path": "output/cover_v2.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "review_decision",
+          "path": "output/review-decision.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "failure_diagnosis",
+          "path": "output/failure-diagnosis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json",
+          "required": false
+        }
+      ],
+      "artifact_stages": [
+        {
+          "id": "motion_review",
+          "trigger": "output/motion-sample.mp4",
+          "required": [
+            "output/rough-cut.mp4",
+            "output/transcript.json",
+            "output/edit-decision-list.json",
+            "output/edit-strategy.md",
+            "output/semantic-cut.mp4",
+            "output/asset-requirements.json",
+            "output/visual-plan-draft.json",
+            "output/asset-source-policy.json",
+            "output/generated-video-manifest.json",
+            "output/generated-video-review.json",
+            "output/asset-source-manifest.json",
+            "output/asset-ledger.json",
+            "output/visual-plan.json",
+            "output/composition-plan.json",
+            "output/composition-lint.json",
+            "output/motion-sample.mp4",
+            "output/motion-review.json",
+            "output/motion-source-manifest.json"
+          ]
+        },
+        {
+          "id": "final_delivery",
+          "trigger": "output/final.mp4",
+          "terminal": true
+        }
+      ],
+      "delivery": [
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "final_picture",
+          "path": "output/final-picture.mp4",
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "sfx_cues",
+          "path": "output/sfx-cues.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "bgm_plan",
+          "path": "output/bgm-plan.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "bgm_plan_md",
+          "path": "output/bgm-plan.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "bgm_qc",
+          "path": "output/bgm-qc.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "audio_source_manifest",
+          "path": "output/audio-source-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "captions",
+          "path": "output/captions.srt",
+          "mime_type": "text/plain"
+        },
+        {
+          "role": "caption_plan",
+          "path": "output/caption-plan.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "caption_style",
+          "path": "output/caption-style.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "caption_qc",
+          "path": "output/caption-qc.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png"
+        },
+        {
+          "role": "cover_plan",
+          "path": "output/cover-plan.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "cover_quality",
+          "path": "output/cover-quality.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "quality_evidence",
+          "path": "output/quality-evidence.json",
+          "mime_type": "application/json"
+        }
+      ],
+      "ui": {
+        "renderer": "custom:talking-head-montage"
+      },
+      "digest": "dc3a168ccbb3b41083609a0378086a4a5b586740408d27ce7e69f068c87d768c"
+    },
+    {
+      "id": "topic-radar",
+      "channel": "topic-radar",
+      "version": "1.0.0",
+      "kind": "managed",
+      "display_name": "选题雷达",
+      "description": "从服务端冻结上下文生成带来源证据的选题摘要和短视频脚本，不直接访问外部平台或修改服务端状态。",
+      "agent": {
+        "name": "topic-radar",
+        "skills": [
+          "topic-radar"
+        ],
+        "max_turns": 80
+      },
+      "bindings": {
+        "task_kinds": [
+          "topic_digest",
+          "topic_script"
+        ]
+      },
+      "runtime": {
+        "profile": "topic-radar",
+        "adapter": "standard"
+      },
+      "surfaces": [
+        "plugin",
+        "task"
+      ],
+      "features": [
+        "topic-radar",
+        "frozen-context-artifacts"
+      ],
+      "billing_operations": {
+        "topic_digest": "task.topic_digest",
+        "topic_script": "task.topic_script"
+      },
+      "artifacts": [
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        }
+      ],
+      "artifacts_by_task_type": {
+        "topic_digest": [
+          {
+            "role": "topic_digest",
+            "path": "output/topic-digest.json",
+            "mime_type": "application/json",
+            "required": true
+          },
+          {
+            "role": "topic_evidence",
+            "path": "output/topic-evidence.json",
+            "mime_type": "application/json",
+            "required": false
+          },
+          {
+            "role": "failure_state",
+            "path": "output/failure-state.json",
+            "mime_type": "application/json",
+            "required": false
+          }
+        ],
+        "topic_script": [
+          {
+            "role": "topic_script",
+            "path": "output/topic-script.json",
+            "mime_type": "application/json",
+            "required": true
+          },
+          {
+            "role": "script_markdown",
+            "path": "output/topic-script.md",
+            "mime_type": "text/markdown",
+            "required": false
+          },
+          {
+            "role": "subtitles",
+            "path": "output/topic-script.srt",
+            "mime_type": "application/x-subrip",
+            "required": false
+          },
+          {
+            "role": "failure_state",
+            "path": "output/failure-state.json",
+            "mime_type": "application/json",
+            "required": false
+          }
+        ]
+      },
+      "delivery_by_task_type": {
+        "topic_digest": [
+          {
+            "role": "topic_digest",
+            "path": "output/topic-digest.json",
+            "mime_type": "application/json"
+          },
+          {
+            "role": "topic_evidence",
+            "path": "output/topic-evidence.json",
+            "mime_type": "application/json"
+          }
+        ],
+        "topic_script": [
+          {
+            "role": "topic_script",
+            "path": "output/topic-script.json",
+            "mime_type": "application/json"
+          },
+          {
+            "role": "script_markdown",
+            "path": "output/topic-script.md",
+            "mime_type": "text/markdown"
+          },
+          {
+            "role": "subtitles",
+            "path": "output/topic-script.srt",
+            "mime_type": "application/x-subrip"
+          }
+        ]
+      },
+      "schemas": {
+        "task_input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schema_version": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            },
+            "task_id": {
+              "type": "string"
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "task_kind": {
+              "type": "string",
+              "enum": [
+                "topic_digest",
+                "topic_script"
+              ]
+            },
+            "snapshot": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "snapshot_id": {
+                  "type": "string"
+                },
+                "snapshot_hash": {
+                  "type": "string"
+                },
+                "captured_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "project_id": {
+                  "type": "string"
+                },
+                "subscription_id": {
+                  "type": "string"
+                },
+                "digest_id": {
+                  "type": "string"
+                },
+                "suggestion_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "snapshot_id",
+                "snapshot_hash",
+                "captured_at"
+              ]
+            },
+            "target": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "platform": {
+                  "type": "string"
+                },
+                "duration_seconds": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "aspect_ratio": {
+                  "type": "string"
+                }
+              }
+            },
+            "candidates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "introduction": {
+                    "type": "string"
+                  },
+                  "source_summary": {
+                    "type": "string"
+                  },
+                  "source_refs": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "platform": {
+                          "type": "string"
+                        },
+                        "ref_id": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "rank": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "hot": {
+                          "type": "number"
+                        },
+                        "fetched_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "freshness": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ]
+                    }
+                  },
+                  "scores": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "video_fit": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "title",
+                  "introduction",
+                  "source_summary",
+                  "source_refs",
+                  "scores",
+                  "video_fit"
+                ]
+              }
+            },
+            "selected_topic": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "introduction": {
+                  "type": "string"
+                },
+                "source_summary": {
+                  "type": "string"
+                },
+                "source_refs": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "platform": {
+                        "type": "string"
+                      },
+                      "ref_id": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "rank": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "hot": {
+                        "type": "number"
+                      },
+                      "fetched_at": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "freshness": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ]
+                  }
+                },
+                "scores": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "video_fit": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title",
+                "introduction",
+                "source_summary",
+                "source_refs",
+                "scores",
+                "video_fit"
+              ]
+            },
+            "source_records": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "type": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "platform": {
+                    "type": "string"
+                  },
+                  "ref_id": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "rank": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "hot": {
+                    "type": "number"
+                  },
+                  "fetched_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "freshness": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type"
+                ]
+              }
+            },
+            "accepted_artifacts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "task_id": {
+                    "type": "string"
+                  },
+                  "execution_id": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "content_sha256": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "task_id",
+                  "execution_id",
+                  "path",
+                  "content_sha256"
+                ]
+              }
+            },
+            "frozen_context": {
+              "type": "object",
+              "description": "Complete Server-frozen subscription, project/profile, performance, sources and unavailable fields; never replace with live data.",
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "schema_version",
+            "task_id",
+            "execution_id",
+            "task_kind",
+            "snapshot",
+            "source_records"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schema_version": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            },
+            "generated_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "suggestions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "introduction": {
+                    "type": "string"
+                  },
+                  "source_summary": {
+                    "type": "string"
+                  },
+                  "source_refs": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "platform": {
+                          "type": "string"
+                        },
+                        "ref_id": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "rank": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "hot": {
+                          "type": "number"
+                        },
+                        "fetched_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "freshness": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ]
+                    }
+                  },
+                  "scores": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "traffic_potential": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "account_fit": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "differentiation": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "timeliness": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "monetization": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "production_cost": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "compliance_risk": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    }
+                  },
+                  "video_fit": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "title",
+                  "introduction",
+                  "source_summary",
+                  "source_refs",
+                  "scores",
+                  "video_fit"
+                ]
+              }
+            },
+            "title": {
+              "type": "string"
+            },
+            "hook": {
+              "type": "string"
+            },
+            "scenes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "duration_seconds": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "visual": {
+                    "type": "string"
+                  },
+                  "voiceover": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "on_screen_text": {
+                    "type": "string"
+                  },
+                  "source_refs": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "platform": {
+                          "type": "string"
+                        },
+                        "ref_id": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "rank": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "hot": {
+                          "type": "number"
+                        },
+                        "fetched_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "freshness": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "duration_seconds",
+                  "visual",
+                  "voiceover"
+                ]
+              }
+            },
+            "cta": {
+              "type": "string"
+            },
+            "task_id": {
+              "type": "string"
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "ready",
+                "warning",
+                "data_insufficient",
+                "blocked"
+              ]
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "topic-radar"
+              ]
+            },
+            "data_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "missing": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "quality_status": {
+              "type": "string",
+              "enum": [
+                "ready",
+                "warning",
+                "blocked"
+              ]
+            },
+            "target": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "platform": {
+                  "type": "string"
+                },
+                "duration_seconds": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "aspect_ratio": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "platform",
+                "duration_seconds",
+                "aspect_ratio"
+              ]
+            },
+            "source_refs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "type": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "platform": {
+                    "type": "string"
+                  },
+                  "ref_id": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "rank": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "hot": {
+                    "type": "number"
+                  },
+                  "fetched_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "freshness": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type"
+                ]
+              }
+            },
+            "evidence_paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "topic_digest",
+                "topic_script"
+              ]
+            }
+          },
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "schema_version": {
+                  "type": "string",
+                  "enum": [
+                    "1.0"
+                  ]
+                },
+                "generated_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "suggestions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "title": {
+                        "type": "string"
+                      },
+                      "introduction": {
+                        "type": "string"
+                      },
+                      "source_summary": {
+                        "type": "string"
+                      },
+                      "source_refs": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "type": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "platform": {
+                              "type": "string"
+                            },
+                            "ref_id": {
+                              "type": "string"
+                            },
+                            "title": {
+                              "type": "string"
+                            },
+                            "url": {
+                              "type": "string"
+                            },
+                            "rank": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "hot": {
+                              "type": "number"
+                            },
+                            "fetched_at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "freshness": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ]
+                        }
+                      },
+                      "scores": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "traffic_potential": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "account_fit": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "differentiation": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "timeliness": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "monetization": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "production_cost": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "compliance_risk": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        }
+                      },
+                      "video_fit": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "title",
+                      "introduction",
+                      "source_summary",
+                      "source_refs",
+                      "scores",
+                      "video_fit"
+                    ]
+                  }
+                },
+                "task_id": {
+                  "type": "string"
+                },
+                "execution_id": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "ready",
+                    "warning",
+                    "data_insufficient",
+                    "blocked"
+                  ]
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "topic-radar"
+                  ]
+                },
+                "data_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "missing": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "quality_status": {
+                  "type": "string",
+                  "enum": [
+                    "ready",
+                    "warning",
+                    "blocked"
+                  ]
+                },
+                "evidence_paths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "topic_digest"
+                  ]
+                }
+              },
+              "required": [
+                "schema_version",
+                "generated_at",
+                "suggestions",
+                "task_id",
+                "execution_id",
+                "kind",
+                "status",
+                "source",
+                "data_at",
+                "missing",
+                "quality_status"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "schema_version": {
+                  "type": "string",
+                  "enum": [
+                    "1.0"
+                  ]
+                },
+                "title": {
+                  "type": "string"
+                },
+                "hook": {
+                  "type": "string"
+                },
+                "scenes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "duration_seconds": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "visual": {
+                        "type": "string"
+                      },
+                      "voiceover": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "on_screen_text": {
+                        "type": "string"
+                      },
+                      "source_refs": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "type": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "platform": {
+                              "type": "string"
+                            },
+                            "ref_id": {
+                              "type": "string"
+                            },
+                            "title": {
+                              "type": "string"
+                            },
+                            "url": {
+                              "type": "string"
+                            },
+                            "rank": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "hot": {
+                              "type": "number"
+                            },
+                            "fetched_at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "freshness": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ]
+                        }
+                      }
+                    },
+                    "required": [
+                      "duration_seconds",
+                      "visual",
+                      "voiceover"
+                    ]
+                  }
+                },
+                "cta": {
+                  "type": "string"
+                },
+                "task_id": {
+                  "type": "string"
+                },
+                "execution_id": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "ready",
+                    "warning",
+                    "data_insufficient",
+                    "blocked"
+                  ]
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "topic-radar"
+                  ]
+                },
+                "data_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "missing": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "quality_status": {
+                  "type": "string",
+                  "enum": [
+                    "ready",
+                    "warning",
+                    "blocked"
+                  ]
+                },
+                "target": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "platform": {
+                      "type": "string"
+                    },
+                    "duration_seconds": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "aspect_ratio": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "platform",
+                    "duration_seconds",
+                    "aspect_ratio"
+                  ]
+                },
+                "source_refs": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "platform": {
+                        "type": "string"
+                      },
+                      "ref_id": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "rank": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "hot": {
+                        "type": "number"
+                      },
+                      "fetched_at": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "freshness": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ]
+                  }
+                },
+                "evidence_paths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "topic_script"
+                  ]
+                }
+              },
+              "required": [
+                "schema_version",
+                "title",
+                "hook",
+                "scenes",
+                "cta",
+                "task_id",
+                "execution_id",
+                "kind",
+                "status",
+                "source",
+                "data_at",
+                "missing",
+                "quality_status",
+                "target",
+                "source_refs"
+              ]
+            }
+          ],
+          "required": [
+            "task_id",
+            "execution_id",
+            "kind",
+            "status",
+            "source",
+            "data_at",
+            "missing",
+            "quality_status"
+          ]
+        }
+      },
+      "ui": {
+        "renderer": "custom:topic-radar"
+      },
+      "digest": "e6520fa554f6a48bce8f03b4ee4bac0cb2eaa1da5d12f0f74399addd15d909ce"
     },
     {
       "id": "video-edit",
@@ -3325,14 +5114,14 @@
           "funnel_stage"
         ]
       },
-      "digest": "a1f8face31ebef9fa6240db7f0da087947a8bfd46d67347e3165233f477444fc"
+      "digest": "be13cc6b4ab2e49ad1aeb55d40e415d97d31eebbe54bed5bdb70c1d733a32e58"
     },
     {
       "id": "viral-ip-video-editor",
-      "version": "1.0.11",
+      "version": "1.3.0",
       "kind": "plugin",
       "display_name": "爆款 IP 视频剪辑",
-      "description": "基于 Montage 运行时处理真人 IP 口播素材，完成留存导向的剪辑规划、制作指导和成片质量复核。",
+      "description": "基于 Montage 运行时处理真人 IP 口播素材，完成留存导向的剪辑规划、制作指导和成片质量复核；字幕与 BGM 各自按独立方法论制作（BGM 可按章节换曲），封面在流程最后一步生成。",
       "agent": {
         "name": "viral-ip-video-editor",
         "skills": [
@@ -3341,6 +5130,12 @@
           "montage",
           "portrait-cover-design",
           "short-video-cover",
+          "talking-head-composition",
+          "talking-head-visual-focus",
+          "talking-head-explainer",
+          "video-bgm-design",
+          "video-production-qc",
+          "video-subtitle-design",
           "viral-ip-editing",
           "wechat-video-account-review",
           "auto-editor"
@@ -3359,11 +5154,57 @@
       "features": [
         "viral-ip-video-editing",
         "retention-editing",
+        "explainable-knowledge-editing",
+        "semantic-master-variants",
+        "retention-experiments",
+        "independent-validation",
         "source-assets",
         "montage-runtime",
         "audio-silence-detection"
       ],
       "artifacts": [
+        {
+          "role": "explainer_input_assessment",
+          "path": "output/explainer-input-assessment.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "explanation_plan",
+          "path": "output/explanation-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "platform_variant_plan",
+          "path": "output/platform-variant-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "retention_experiment_plan",
+          "path": "output/retention-experiment-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "independent_validation_plan",
+          "path": "output/independent-validation-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "independent_validation",
+          "path": "output/independent-validation.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "retention_results",
+          "path": "output/retention-results.json",
+          "mime_type": "application/json",
+          "required": false
+        },
         {
           "role": "project_brief",
           "path": "output/project_brief.md",
@@ -3449,6 +5290,24 @@
           "required": false
         },
         {
+          "role": "asset_ledger",
+          "path": "output/asset-ledger.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "composition_plan",
+          "path": "output/composition-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "composition_lint",
+          "path": "output/composition-lint.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
           "role": "auto_editor_silence_cuts",
           "path": "output/auto-editor-silence-cuts.xml",
           "mime_type": "application/xml",
@@ -3468,15 +5327,51 @@
         },
         {
           "role": "bgm_plan",
-          "path": "output/bgm_plan.json",
+          "path": "output/bgm-plan.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
+        },
+        {
+          "role": "bgm_plan_md",
+          "path": "output/bgm-plan.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "bgm_qc",
+          "path": "output/bgm-qc.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "audio_source_manifest",
+          "path": "output/audio-source-manifest.json",
+          "mime_type": "application/json",
+          "required": true
         },
         {
           "role": "captions",
           "path": "output/captions.srt",
           "mime_type": "text/plain",
-          "required": false
+          "required": true
+        },
+        {
+          "role": "caption_plan",
+          "path": "output/caption-plan.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "caption_style",
+          "path": "output/caption-style.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "caption_qc",
+          "path": "output/caption-qc.json",
+          "mime_type": "application/json",
+          "required": true
         },
         {
           "role": "qc_report",
@@ -3488,13 +5383,13 @@
           "role": "content_tags",
           "path": "output/content-tags.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "final_video",
           "path": "output/final.mp4",
           "mime_type": "video/mp4",
-          "required": false
+          "required": true
         },
         {
           "role": "project_manifest",
@@ -3506,13 +5401,13 @@
           "role": "cover",
           "path": "output/cover.png",
           "mime_type": "image/png",
-          "required": false
+          "required": true
         },
         {
           "role": "delivery_manifest",
           "path": "output/delivery-manifest.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "content_reuse_brief",
@@ -3542,13 +5437,13 @@
           "role": "cover_plan",
           "path": "output/cover-plan.md",
           "mime_type": "text/markdown",
-          "required": false
+          "required": true
         },
         {
           "role": "cover_prompt",
           "path": "output/cover-prompt.md",
           "mime_type": "text/markdown",
-          "required": false
+          "required": true
         },
         {
           "role": "cover_reference_prompts",
@@ -3560,7 +5455,7 @@
           "role": "cover_review",
           "path": "output/cover-quality.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "cover_reference_analysis",
@@ -3609,10 +5504,28 @@
           "path": "output/failure-diagnosis.md",
           "mime_type": "text/markdown",
           "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "quality_evidence",
+          "path": "output/quality-evidence.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "sync_evidence",
+          "path": "output/sync-evidence.json",
+          "mime_type": "application/json",
+          "required": true
         }
       ],
       "ui": {},
-      "digest": "92da8fbdb275219d450faad239f9569a6b1e4c852992ab7988ce119cda33cbe5"
+      "digest": "abdb4e34f494ca4d42a94e517a6a16a2d7a0b6a032e61e7a159e0fe4c98df065"
     },
     {
       "id": "wechat-article",
@@ -3876,13 +5789,13 @@
           "funnel_stage"
         ]
       },
-      "digest": "b07c0df2117a04be89e2e651f889c86975fda11c0197f86be4f750137f2de09a"
+      "digest": "bffb52149e4f0df7ffc15e69403cda0bc806f8ccf9433e4758d47b603bc521bd"
     },
     {
       "id": "wechat-picture",
       "channel": "wechat-picture",
       "plan_task_kind": "content_generation",
-      "version": "1.0.8",
+      "version": "1.0.9",
       "kind": "managed",
       "display_name": "微信公众号贴图",
       "description": "研究选题、编排图片消息并生成公众号 newspic 草稿交付包。",
@@ -4054,7 +5967,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "5fc329a3d686007d964327ab3a17f82a915aec50df5b9e7e68f1f7a1e2c60184"
+      "digest": "673f5ecd2d7e66e3f240613f1da4464d96287712fa1f10bd052e08d745a12abc"
     },
     {
       "id": "whiteboard-animation",

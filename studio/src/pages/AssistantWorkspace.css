@@ -1,3 +1,19 @@
+:root:not(.dark) body:has(.assistant-home) {
+  --foreground: #5a5149;
+  --card-foreground: #5a5149;
+  --popover-foreground: #5a5149;
+  --secondary-foreground: #5a5149;
+  --accent-foreground: #49413a;
+  --muted-foreground: #756b62;
+  --sidebar-foreground: #5a5149;
+  --sidebar-accent-foreground: #49413a;
+  color: var(--foreground);
+}
+
+:root:not(.dark) .assistant-home-stage h1 {
+  color: #49413a;
+}
+
 .assistant-home-stage {
   padding-bottom: clamp(1.5rem, 4dvh, 2.5rem);
 }
@@ -28,13 +44,16 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .persona-card-actions {
+  .persona-card-actions,
+  .persona-current-actions {
     opacity: 0;
     pointer-events: none;
   }
 
   .assistant-workspace .group:hover > .persona-card-actions,
-  .assistant-workspace .group:focus-within > .persona-card-actions {
+  .assistant-workspace .group:focus-within > .persona-card-actions,
+  .assistant-home-stage:hover .persona-current-actions,
+  .assistant-home-stage:focus-within .persona-current-actions {
     opacity: 1;
     pointer-events: auto;
   }

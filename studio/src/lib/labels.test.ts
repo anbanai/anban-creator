@@ -123,6 +123,15 @@ describe('video platform labels', () => {
   })
 })
 
+describe('ecommerce platform labels', () => {
+  it('uses 电商设计 as the user-facing name', () => {
+    expect(taskTypeLabelCN.ecommerce).toBe('电商设计')
+    expect(contentTypeLabel.ecommerce).toBe('电商设计')
+    expect(platformLabels.ecommerce).toBe('电商设计')
+    expect(contentTypeOptions.find(option => option.value === 'ecommerce')?.label).toBe('电商设计')
+  })
+})
+
 describe('plan schedule summaries', () => {
   it.each([
     ['0 9 * * 1,3,5', '每周一、三、五 09:00'],

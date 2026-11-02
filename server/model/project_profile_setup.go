@@ -22,7 +22,7 @@ const (
 
 var projectAgentIDs = map[string]struct{}{
 	AgentIDArticle: {}, AgentIDWechatPicture: {}, AgentIDSeednote: {},
-	AgentIDMontage: {}, AgentIDHypit: {}, AgentIDWhiteboard: {}, AgentIDLocalLife: {}, AgentIDVideoEdit: {}, AgentIDTalkingHeadEditor: {},
+	AgentIDEcommerce: {}, AgentIDMontage: {}, AgentIDHypit: {}, AgentIDWhiteboard: {}, AgentIDLocalLife: {}, AgentIDVideoEdit: {}, AgentIDTalkingHeadEditor: {},
 }
 
 var profileAccountPlatforms = map[string]struct{}{
@@ -76,6 +76,8 @@ func DefaultProjectAgentIDs(platform string) []string {
 		return []string{AgentIDArticle}
 	case PlatformSeednote:
 		return []string{AgentIDSeednote}
+	case PlatformEcommerce:
+		return []string{AgentIDEcommerce}
 	case PlatformMontage:
 		return []string{AgentIDMontage}
 	case PlatformHypit:

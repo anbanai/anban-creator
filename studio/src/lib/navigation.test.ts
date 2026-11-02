@@ -23,6 +23,7 @@ describe('navigation IA', () => {
       '选题资产',
       '素材库',
       '热点雷达',
+      '选题雷达',
     ])
     expect(mvpNavItems[0]?.icon).toBe(Sparkles)
     expect(mvpNavItems.map((item) => item.to)).not.toContain('/timeline')
@@ -40,6 +41,7 @@ describe('navigation IA', () => {
       '/content-assets',
       '/media-assets',
       '/trends',
+      '/topic-radar',
     ])
     expect(workspaceNavItems.find((item) => item.to === '/timeline')?.adminOnly).toBe(true)
   })
@@ -66,6 +68,7 @@ describe('navigation IA', () => {
       '/content-assets',
       '/media-assets',
       '/trends',
+      '/topic-radar',
       '/templates',
       '/admin/billing',
     ])

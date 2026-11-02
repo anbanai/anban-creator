@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { portraitProgress, portraitStatus, portraitSummary } from '@/lib/portrait-library'
-import { Archive, Brain, Lightbulb, ListChecks, RotateCcw, Settings, SquarePen, ScanFace } from 'lucide-react'
+import { Archive, Brain, GalleryHorizontalEnd, Lightbulb, RotateCcw, Settings, SquarePen, ScanFace } from 'lucide-react'
 import type { Project, ProjectStats } from '@/types'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -11,6 +11,9 @@ import { ImageAnalysisBadge } from '@/components/image-analysis/ImageAnalysisBad
 import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
 import { StatusPill } from '@/components/workspace'
 import { supportsProfileLab } from '@/lib/project-capabilities'
+import { cn } from '@/lib/utils'
+
+const actionButtonClass = 'shrink-0'
 
 function profileStatusLabel(project: Project) {
   return project.profile?.initialization_status === 'ready' ? `画像已应用 · v${project.profile.version}` : portraitStatus(project.profile)
@@ -74,10 +77,10 @@ export function ProjectCard({ project, stats, onEdit, onChannelConfig, onUpdateP
             </div>
           </section>
         )}
-        <div className="mt-auto flex flex-wrap justify-end gap-1" aria-label={`人设操作：${project.name}`}>
+        <div className="mt-auto flex flex-nowrap justify-end gap-0" aria-label={`人设操作：${project.name}`}>
           {supportsProfileLab(project) && (
             <Tooltip>
-              <TooltipTrigger render={<Link to={`/portraits/${project.id}`} className={buttonVariants({ variant: 'ghost', size: 'icon-md' })} aria-label={`查看画像：${project.name}`} />}>
+              <TooltipTrigger render={<Link to={`/portraits/${project.id}`} className={cn(buttonVariants({ variant: 'ghost', size: 'icon-md' }), actionButtonClass)} aria-label={`查看画像：${project.name}`} />}>
                 <ScanFace />
               </TooltipTrigger>
               <TooltipContent>查看画像</TooltipContent>
@@ -85,7 +88,7 @@ export function ProjectCard({ project, stats, onEdit, onChannelConfig, onUpdateP
           )}
           {onEdit && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onEdit(project)} aria-label={`${editLabel}：${project.name}`} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" className={actionButtonClass} onClick={() => onEdit(project)} aria-label={`${editLabel}：${project.name}`} />}>
                 <SquarePen />
               </TooltipTrigger>
               <TooltipContent>编辑</TooltipContent>
@@ -93,27 +96,27 @@ export function ProjectCard({ project, stats, onEdit, onChannelConfig, onUpdateP
           )}
           {onChannelConfig && (project.platform === 'wechat' || project.agent_ids?.some((id) => id === 'wechat-article' || id === 'wechat-picture')) && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onChannelConfig(project)} aria-label={`平台设置：${project.name}`} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" className={actionButtonClass} onClick={() => onChannelConfig(project)} aria-label={`平台设置：${project.name}`} />}>
                 <Settings />
               </TooltipTrigger>
               <TooltipContent>平台设置</TooltipContent>
             </Tooltip>
           )}
           <Tooltip>
-            <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => setTopicPoolOpen(true)} aria-label={unusedTopics === undefined ? `选题资产：${project.name}` : `选题资产：${project.name}，待研究 ${unusedTopics} 个`} />}>
+            <TooltipTrigger render={<Button variant="ghost" size="icon-md" className={actionButtonClass} onClick={() => setTopicPoolOpen(true)} aria-label={unusedTopics === undefined ? `选题资产：${project.name}` : `选题资产：${project.name}，待研究 ${unusedTopics} 个`} />}>
               <Lightbulb />
             </TooltipTrigger>
             <TooltipContent>{unusedTopics === undefined ? '选题资产' : `选题资产：待研究 ${unusedTopics} 个`}</TooltipContent>
           </Tooltip>
           <Tooltip>
-            <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => setMemoryOpen(true)} aria-label={`人设记忆：${project.name}`} />}>
+            <TooltipTrigger render={<Button variant="ghost" size="icon-md" className={actionButtonClass} onClick={() => setMemoryOpen(true)} aria-label={`人设记忆：${project.name}`} />}>
               <Brain />
             </TooltipTrigger>
               <TooltipContent>人设记忆</TooltipContent>
           </Tooltip>
           {!isArchived && onArchive && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={archiving} onClick={() => onArchive(project.id)} aria-label={`归档人设：${project.name}`} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" className={actionButtonClass} disabled={archiving} onClick={() => onArchive(project.id)} aria-label={`归档人设：${project.name}`} />}>
                 <Archive />
               </TooltipTrigger>
               <TooltipContent>归档</TooltipContent>
@@ -121,15 +124,15 @@ export function ProjectCard({ project, stats, onEdit, onChannelConfig, onUpdateP
           )}
           {isArchived && onRestore && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={restoring} onClick={() => onRestore(project.id)} aria-label={`取消归档人设：${project.name}`} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" className={actionButtonClass} disabled={restoring} onClick={() => onRestore(project.id)} aria-label={`取消归档人设：${project.name}`} />}>
                 <RotateCcw />
               </TooltipTrigger>
               <TooltipContent>取消归档</TooltipContent>
             </Tooltip>
           )}
           <Tooltip>
-            <TooltipTrigger render={<Link to={`/tasks?project_id=${encodeURIComponent(project.id)}`} className={buttonVariants({ variant: 'ghost', size: 'icon-md' })} aria-label={`查看作品：${project.name}`} />}>
-              <ListChecks />
+            <TooltipTrigger render={<Link to={`/tasks?project_id=${encodeURIComponent(project.id)}`} className={cn(buttonVariants({ variant: 'ghost', size: 'icon-md' }), actionButtonClass)} aria-label={`查看作品：${project.name}`} />}>
+              <GalleryHorizontalEnd />
             </TooltipTrigger>
             <TooltipContent>查看作品</TooltipContent>
           </Tooltip>

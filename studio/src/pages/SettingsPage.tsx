@@ -23,6 +23,7 @@ import type { CreateAPIKeyResponse } from '@/types'
 import { tierLabels, tierDescriptions } from '@/lib/labels'
 import IlinkBindingSection from '@/components/settings/IlinkBindingSection'
 import PlatformSettingsSection from '@/components/settings/PlatformSettingsSection'
+import TopicNotificationSettings from '@/components/settings/TopicNotificationSettings'
 import { buildSettingsReadinessItems, type SettingsReadinessListItem } from '@/lib/studio-ux'
 
 export default function SettingsPage() {
@@ -133,6 +134,7 @@ export default function SettingsPage() {
       />
       {/* WeChat bot binding — task notifications and commands */}
       <IlinkBindingSection />
+      <TopicNotificationSettings />
 
       <SettingsGroupTitle
         id="platform-settings"

@@ -8,20 +8,22 @@ import (
 
 func TestInteractionContractUsesStableLifecycleValues(t *testing.T) {
 	if got := []string{
+		InteractionLifecyclePrepared,
 		InteractionLifecycleActive,
 		InteractionLifecycleReconnecting,
 		InteractionLifecycleNeedsConfirmation,
 		InteractionLifecycleCompleted,
 		InteractionLifecycleAbandoned,
-	}; strings.Join(got, ",") != "active,reconnecting,needs_confirmation,completed,abandoned" {
+	}; strings.Join(got, ",") != "prepared,active,reconnecting,needs_confirmation,completed,abandoned" {
 		t.Fatalf("lifecycle values = %v", got)
 	}
 	if got := []string{
+		InteractionRuntimeNotStarted,
 		InteractionRuntimeStarting,
 		InteractionRuntimeRunning,
 		InteractionRuntimeClosed,
 		InteractionRuntimeFailed,
-	}; strings.Join(got, ",") != "starting,running,closed,failed" {
+	}; strings.Join(got, ",") != "not_started,starting,running,closed,failed" {
 		t.Fatalf("runtime values = %v", got)
 	}
 	if got := []string{

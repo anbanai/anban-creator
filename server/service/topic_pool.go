@@ -76,10 +76,11 @@ func (s *TopicPoolService) Add(ctx context.Context, userID, projectID string, to
 		if t == "" {
 			continue
 		}
-		if _, exists := seen[t]; exists {
+		key := model.NormalizeTopicDedupeKey(t)
+		if _, exists := seen[key]; exists {
 			continue
 		}
-		seen[t] = struct{}{}
+		seen[key] = struct{}{}
 		if len([]rune(t)) > maxTopicLength {
 			return nil, fmt.Errorf("topic exceeds %d character limit: %.50q...", maxTopicLength, t)
 		}
@@ -87,35 +88,24 @@ func (s *TopicPoolService) Add(ctx context.Context, userID, projectID string, to
 			UserID:    userID,
 			ProjectID: projectID,
 			Topic:     t,
+			DedupeKey: model.NormalizeTopicDedupeKey(t),
 			Status:    model.TopicStatusUnused,
 		})
 	}
 	if len(items) == 0 {
 		return nil, fmt.Errorf("at least one non-empty topic is required")
 	}
-	titles := make([]string, 0, len(items))
-	for _, item := range items {
-		titles = append(titles, item.Topic)
-	}
-	existing, err := s.repo.TopicPools().FindTitlesByProject(ctx, projectID, titles)
-	if err != nil {
-		return nil, fmt.Errorf("find existing topics: %w", err)
-	}
-	for _, title := range existing {
-		delete(seen, title)
-	}
-	filtered := items[:0]
-	for _, item := range items {
-		if _, ok := seen[item.Topic]; ok {
-			filtered = append(filtered, item)
-		}
-	}
-	items = filtered
-	if len(items) == 0 {
-		return []*model.TopicPool{}, nil
-	}
+	added := make([]*model.TopicPool, 0, len(items))
 	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		for _, item := range items {
+			created, err := tx.TopicPools().AddWithSource(ctx, item)
+			if err != nil {
+				return fmt.Errorf("create topic: %w", err)
+			}
+			if !created {
+				continue
+			}
+			added = append(added, item)
 			asset, findErr := tx.ContentAssets().FindByTitle(ctx, userID, item.Topic)
 			if errors.Is(findErr, gorm.ErrRecordNotFound) {
 				asset = model.NewContentAsset(userID, item.Topic)
@@ -130,16 +120,16 @@ func (s *TopicPoolService) Add(ctx context.Context, userID, projectID string, to
 				}
 				continue
 			}
+			if err := tx.TopicPools().LinkContentAsset(ctx, item.ID, asset.ID); err != nil {
+				return fmt.Errorf("link content asset to topic: %w", err)
+			}
 			item.ContentAssetID = &asset.ID
-		}
-		if err := tx.TopicPools().CreateBatch(ctx, items); err != nil {
-			return fmt.Errorf("create topics: %w", err)
 		}
 		return nil
 	}); err != nil {
 		return nil, err
 	}
-	return items, nil
+	return added, nil
 }
 
 // List returns topics for a project with optional status filter and pagination.

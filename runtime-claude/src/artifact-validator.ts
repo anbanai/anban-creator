@@ -17,7 +17,19 @@ export async function validateRequiredArtifact(workspace: string, artifactPath: 
 
 export async function validateFinalArtifacts(pack: AgentPack, workspace: string): Promise<ArtifactValidationResult> {
   const artifacts = pack.artifacts ?? [];
-  return validateArtifacts(artifacts.filter((artifact) => artifact.required).map((artifact) => artifact.path), workspace);
+  const finalRequired = artifacts.filter((artifact) => artifact.required).map((artifact) => artifact.path);
+  const stages = pack.artifact_stages ?? [];
+  // A review gate is a legitimate managed stop. Select a terminal stage first
+  // so a completed delivery is never accepted against an earlier gate.
+  for (const terminal of [true, false]) {
+    for (const stage of stages) {
+      if (Boolean(stage.terminal) !== terminal) continue;
+      if (!await validateRequiredArtifactDeclaration(workspace, stage.trigger)) continue;
+      const required = stage.required?.length ? stage.required : finalRequired;
+      return validateArtifacts(required, workspace);
+    }
+  }
+  return validateArtifacts(finalRequired, workspace);
 }
 
 async function validateArtifacts(required: string[], workspace: string): Promise<ArtifactValidationResult> {

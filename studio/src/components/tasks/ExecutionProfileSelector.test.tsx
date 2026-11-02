@@ -38,15 +38,18 @@ describe('ExecutionProfileSelector', () => {
     const onChange = vi.fn()
     function Harness() {
       const [value, setValue] = useState<'effective' | 'balanced' | 'quality'>('effective')
-      return <ExecutionProfileSelector profiles={profiles} value={value} onChange={(next) => { setValue(next); onChange(next) }} />
+      return <ExecutionProfileSelector layout="horizontal" profiles={profiles} value={value} onChange={(next) => { setValue(next); onChange(next) }} />
     }
     render(<Harness />)
 
     fireEvent.click(screen.getByRole('button', { name: /^平衡型，/ }))
     expect(onChange).toHaveBeenCalledWith('balanced')
+    expect(screen.getByText('质量与速度平衡')).toBeInTheDocument()
+    expect(screen.queryByText('日常创作')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /^性价比，/ }))
     expect(onChange).toHaveBeenLastCalledWith('effective')
+    expect(screen.getByText('日常创作')).toBeInTheDocument()
   })
 
   it('supports a compact horizontal layout for composer popovers', () => {
@@ -60,11 +63,10 @@ describe('ExecutionProfileSelector', () => {
     )
 
     const group = screen.getByRole('group', { name: 'Agent 执行配置' })
-    expect(group).toHaveClass('grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]')
+    expect(group).toHaveClass('flex-wrap')
     expect(group).not.toHaveClass('grid-cols-1')
-    expect(screen.getByText('日常创作')).toHaveClass('max-sm:hidden')
-    expect(screen.getByText('需要企业版')).not.toHaveClass('max-sm:hidden')
-    expect(screen.getByText('性价比').parentElement).toHaveClass('sm:flex-row', 'sm:justify-between')
-    expect(screen.getByText('日常创作').parentElement).toHaveClass('sm:flex-row', 'sm:justify-between')
+    expect(screen.getByText('日常创作')).not.toHaveClass('truncate')
+    expect(screen.getByRole('button', { name: /极致效果/ })).toHaveAttribute('title', '需要企业版')
+    expect(screen.getByRole('button', { name: /^性价比，/ })).toHaveClass('h-8', 'data-[state=on]:bg-primary/8')
   })
 })

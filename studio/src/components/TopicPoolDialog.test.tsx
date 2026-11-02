@@ -44,6 +44,13 @@ describe('TopicPoolDialog — mutation feedback (no silent failure)', () => {
     vi.mocked(api.topicPool.reset).mockReset()
   })
 
+  it('shows automatic radar provenance and links to the original digest', async () => {
+    vi.mocked(api.topicPool.list).mockResolvedValue({ items: [{ id: 13, user_id: '1', project_id: mockProjects[0].id, topic: '自动推荐选题', status: 'unused', created_at: '', updated_at: '', source_digest_id: 'digest-1', source_label: '抖音热榜' }], total: 1 })
+    render(<TopicPoolDialog project={mockProjects[0]} open onOpenChange={vi.fn()} />)
+    expect(await screen.findByText('抖音热榜')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看雷达来源' })).toHaveAttribute('href', `/topic-radar?project_id=${mockProjects[0].id}&digest_id=digest-1`)
+  })
+
   it('surfaces a toast with the server message when adding topics fails', async () => {
     // Server rejects with a { msg } body — the common real-world failure shape.
     vi.mocked(api.topicPool.create).mockRejectedValueOnce({

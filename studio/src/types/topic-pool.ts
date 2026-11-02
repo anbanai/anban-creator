@@ -6,6 +6,9 @@ export interface TopicPool {
   project_id: string
   topic: string
   status: TopicPoolStatus
+  source_digest_id?: string
+  source_suggestion_id?: string
+  source_label?: string
   task_id?: string
   used_at?: string
   created_at: string

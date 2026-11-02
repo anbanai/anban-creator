@@ -275,7 +275,7 @@ export const mockAgentPackCatalog: AgentPackCatalog = {
   packs: [
     managedPack('wechat-article', '微信公众号文章', { projectPlatforms: ['wechat'], taskTypes: ['wechat-article'], surfaces: ['plugin', 'task', 'plan'] }),
     managedPack('wechat-picture', '公众号贴图', { taskTypes: ['wechat-picture'], surfaces: ['plugin', 'task', 'plan'] }),
-    managedPack('ecommerce', '电商素材', { projectPlatforms: ['ecommerce'], taskTypes: ['ecommerce'] }),
+    managedPack('ecommerce', '电商设计', { projectPlatforms: ['ecommerce'], taskTypes: ['ecommerce'] }),
     managedPack('moments', '朋友圈素材包', { projectPlatforms: ['moments'], taskTypes: ['moments'] }),
     managedPack('montage', '视频生成', { projectPlatforms: ['montage'], taskTypes: ['montage'] }),
     managedPack('hypit', '视频复刻', { projectPlatforms: ['hypit'], taskTypes: ['hypit'] }),

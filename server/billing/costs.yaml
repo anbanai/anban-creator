@@ -202,6 +202,16 @@ models:
     operator_evidence: "pricing-snapshot:volcengine-ark:seedream-output-pixel-prices:2026-07-13"
     effective_at: "2026-07-13T00:00:00+08:00"
 
+  tokenplayer/doubao-seedream-5-0-pro-260628:
+    pricing_type: "output_pixel_tier"
+    currency: "CNY"
+    tiers:
+      - max_pixels: 2360000
+        price: "0.30"
+      - price: "0.60"
+    operator_evidence: "operator-confirmed:tokenplayer:doubao-seedream-5-0-pro-260628=volcengine_ark/doubao-seedream-5-0-pro-260628"
+    effective_at: "2026-07-13T00:00:00+08:00"
+
   wangcai_openai/gpt-image-2-t:
     pricing_type: "openai_image_usage"
     currency: "USD"

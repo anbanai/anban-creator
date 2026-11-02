@@ -97,6 +97,7 @@ type AnalyzeTaskImageResult struct {
 type TaskImageOperationsConfig struct {
 	UnderstandingProvider string
 	UnderstandingModel    string
+	UnderstandingTimeout  time.Duration
 	PublicBaseURL         string
 }
 
@@ -606,12 +607,18 @@ func (s *TaskImageOperationsService) Analyze(ctx context.Context, req AnalyzeTas
 		if s.logger != nil {
 			event := s.logger.Error().Str("task_id", req.TaskID).Str("execution_id", req.ExecutionID).
 				Str("provider", s.config.UnderstandingProvider).Str("model", s.config.UnderstandingModel).
+				Str("operation_id", providerRequestID).
+				Int("image_data_url_bytes", len(imageSource)).
+				Int64("timeout_ms", s.config.UnderstandingTimeout.Milliseconds()).
 				Int64("duration_ms", time.Since(started).Milliseconds())
 			var providerErr *imageUnderstandingProviderError
 			if errors.As(err, &providerErr) {
 				event.Str("error_code", providerErr.Code).Int("http_status", providerErr.StatusCode).
 					Str("content_type", providerErr.ContentType).Str("endpoint", providerErr.Endpoint).
-					Str("provider_request_id", providerErr.RequestID)
+					Str("provider_request_id", providerErr.RequestID).
+					Str("timeout_source", providerErr.TimeoutSource).
+					Bool("request_written", providerErr.RequestWritten).
+					Int64("request_write_ms", providerErr.RequestWriteMS)
 			}
 			event.Msg("image understanding provider call failed")
 		}

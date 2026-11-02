@@ -66,7 +66,10 @@ export function TaskFileDownloads({ taskId, files }: { taskId: string; files: Ta
   )
 }
 
-export function TaskStageFiles({ files, taskId, taskType }: { files: TaskFile[]; taskId: string; taskType?: string }) {
+// `relatedFiles` is the complete task file set. The galleries below split
+// images and documents for layout, but the article copy action must resolve
+// every inline `<img>` against all delivered files, not just this group.
+export function TaskStageFiles({ files, relatedFiles = files, taskId, taskType, articleImageDeliveryBlocked }: { files: TaskFile[]; relatedFiles?: TaskFile[]; taskId: string; taskType?: string; articleImageDeliveryBlocked?: boolean }) {
   const groups = [
     { label: '交付成果', files: files.filter((file) => file.state === 'delivered' && file.is_deliverable) },
     { label: '阶段产物', files: files.filter((file) => file.state === 'delivered' && !file.is_deliverable) },
@@ -79,11 +82,11 @@ export function TaskStageFiles({ files, taskId, taskType }: { files: TaskFile[];
         {taskType === 'ecommerce' ? <EcommerceFilesGallery files={group.files} taskId={taskId} compact /> : <>
           {group.files.some((file) => file.mime_type?.startsWith('image/')) && (
             <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
-              <FilePreviewGallery files={group.files.filter((file) => file.mime_type?.startsWith('image/'))} taskId={taskId} taskType={taskType} compact inlineItemClassName="shrink-0 snap-start" />
+              <FilePreviewGallery files={group.files.filter((file) => file.mime_type?.startsWith('image/'))} relatedFiles={relatedFiles} taskId={taskId} taskType={taskType} articleImageDeliveryBlocked={articleImageDeliveryBlocked} compact inlineItemClassName="shrink-0 snap-start" />
             </div>
           )}
           {group.files.some((file) => !file.mime_type?.startsWith('image/')) && <div className="overflow-hidden rounded-lg border border-border/70 bg-card divide-y divide-border/60">
-            <FilePreviewGallery files={group.files.filter((file) => !file.mime_type?.startsWith('image/'))} taskId={taskId} taskType={taskType} compact />
+            <FilePreviewGallery files={group.files.filter((file) => !file.mime_type?.startsWith('image/'))} relatedFiles={relatedFiles} taskId={taskId} taskType={taskType} articleImageDeliveryBlocked={articleImageDeliveryBlocked} compact />
           </div>}
         </>}
       </section>

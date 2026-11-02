@@ -10,6 +10,7 @@ import {
   PlugZap,
   BarChart3,
   Flame,
+  Radar,
   UserRound,
   ImageIcon,
 } from 'lucide-react'
@@ -34,6 +35,7 @@ export const mvpNavItems: NavItem[] = [
   { to: '/content-assets', label: '选题资产', icon: Sparkles },
   { to: '/media-assets', label: '素材库', icon: ImageIcon },
   { to: '/trends', label: '热点雷达', icon: Flame },
+  { to: '/topic-radar', label: '选题雷达', icon: Radar },
 ]
 
 export const workspaceNavItems: NavItem[] = [

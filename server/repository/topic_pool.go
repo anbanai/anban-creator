@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -25,6 +26,50 @@ func (r *topicPoolRepository) Create(ctx context.Context, topic *model.TopicPool
 
 func (r *topicPoolRepository) CreateBatch(ctx context.Context, topics []*model.TopicPool) error {
 	return r.db.WithContext(ctx).Create(topics).Error
+}
+
+// AddWithSource resolves the canonical topic before dependent records are created.
+// The bool reports whether this call inserted the topic; duplicates populate topic
+// with the existing row, including its original provenance and asset association.
+func (r *topicPoolRepository) AddWithSource(ctx context.Context, topic *model.TopicPool) (bool, error) {
+	if topic == nil {
+		return false, errors.New("topic is required")
+	}
+	topic.Topic = strings.TrimSpace(topic.Topic)
+	if topic.DedupeKey == "" {
+		topic.DedupeKey = model.NormalizeTopicDedupeKey(topic.Topic)
+	}
+	result := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "project_id"}, {Name: "dedupe_key"}},
+		DoNothing: true,
+	}).Create(topic)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected == 1 && topic.ID != 0 {
+		return true, nil
+	}
+	var canonical model.TopicPool
+	// Use a current read even when a MySQL transaction's earlier snapshot predates
+	// the concurrent winning insertion. Never filter by the attempted insert ID.
+	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("project_id = ? AND dedupe_key = ?", topic.ProjectID, topic.DedupeKey).First(&canonical).Error; err != nil {
+		return false, err
+	}
+	*topic = canonical
+	return false, nil
+}
+
+func (r *topicPoolRepository) LinkContentAsset(ctx context.Context, id uint, assetID string) error {
+	result := r.db.WithContext(ctx).Model(&model.TopicPool{}).
+		Where("id = ? AND content_asset_id IS NULL", id).UpdateColumn("content_asset_id", assetID)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (r *topicPoolRepository) FindByID(ctx context.Context, id uint) (*model.TopicPool, error) {
@@ -51,6 +96,18 @@ func (r *topicPoolRepository) FindByProject(ctx context.Context, projectID, stat
 		return nil, 0, err
 	}
 	return topics, total, nil
+}
+
+// ListHistoryByProject scopes ownership before pagination so another user's
+// project rows cannot displace the subscription owner's frozen evidence.
+func (r *topicPoolRepository) ListHistoryByProject(ctx context.Context, userID, projectID string, limit int) ([]*model.TopicPool, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	var topics []*model.TopicPool
+	err := r.db.WithContext(ctx).Where("user_id = ? AND project_id = ?", userID, projectID).
+		Order("created_at DESC, id DESC").Limit(limit).Find(&topics).Error
+	return topics, err
 }
 
 func (r *topicPoolRepository) FindTitlesByProject(ctx context.Context, projectID string, titles []string) ([]string, error) {

@@ -517,7 +517,7 @@ export function TaskFormDialog({
                         : imageCapabilityUnavailable
                           ? { message: '当前图像能力不可用，请重新选择。', href: '' }
                           : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
-                            ? { message: '电商出图需要先上传产品图。', href: '' }
+                            ? { message: '电商设计需要先上传产品图。', href: '' }
                             : null
 
   const projectControl = (
@@ -548,9 +548,7 @@ export function TaskFormDialog({
         onChange: (value) => setFormValue('execution_profile', value),
         loading: executionProfilesQuery.isLoading,
         disabled: executionProfilesQuery.isError,
-        catalog: billingCatalog,
         taskType: watchedType,
-        priceUnit: 'task',
       }}
       image={usesImageSettings ? {
         ratios: businessImageRatios,

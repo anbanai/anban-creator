@@ -35,13 +35,13 @@ import { referenceSelectionFromValue } from '@/lib/reference-image'
 import { ProjectChannelConfigDialog } from '@/components/projects/ProjectChannelConfigDialog'
 import { useAuth } from '@/contexts/AuthContext'
 import { CreationTypePicker } from '@/components/tasks/CreationTypePicker'
-import { profileLabAgents, projectAgentIDs, supportsProfileLab } from '@/lib/project-capabilities'
+import { normalizeProjectTypeSelection, primaryProjectPlatform, projectAgentIDs, projectCreationTypes, supportsProfileLab } from '@/lib/project-capabilities'
 import { getProjectCreationDefaults } from '@/lib/studio-ux'
 import { portraitSummary } from '@/lib/portrait-library'
 import { VideoEditProjectDefaultsPanel } from '@/components/video-edit/VideoEditProjectDefaultsPanel'
 import { TalkingHeadEditorProjectDefaultsPanel } from '@/components/talking-head-editor/TalkingHeadEditorProjectDefaultsPanel'
 
-const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'ecommerce', 'hypit'])
+const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'hypit'])
 
 function canViewPlatform(platform: ProjectPlatform | '', isAdmin: boolean) {
   return isAdmin || platform === '' || !adminOnlyPlatforms.has(platform)
@@ -80,22 +80,11 @@ function projectToForm(project: Project): ProjectFormValues {
   }
 }
 
-function primaryProjectPlatform(agentIDs: string[]): ProjectPlatform | '' {
-  if (agentIDs.includes('talking-head-editor')) return 'talking-head-editor'
-  if (agentIDs.includes('video-edit')) return 'video-edit'
-  if (agentIDs.some((id) => id === 'wechat-article' || id === 'wechat-picture')) return 'wechat'
-  if (agentIDs.includes('seednote')) return 'seednote'
-  if (agentIDs.includes('montage')) return 'montage'
-  if (agentIDs.includes('hypit')) return 'hypit'
-  if (agentIDs.includes('whiteboard-animation')) return 'whiteboard-animation'
-  return ''
-}
-
 function usesWechatPublishing(agentIDs: readonly string[]) {
   return agentIDs.some((id) => id === 'wechat-article' || id === 'wechat-picture')
 }
 
-const selectableProjectTypeIDs: Set<string> = new Set(profileLabAgents.map((agent) => agent.id))
+const selectableProjectTypeIDs: Set<string> = new Set(projectCreationTypes.map((agent) => agent.id))
 
 export default function ProjectsPage() {
   const { user } = useAuth()
@@ -244,7 +233,7 @@ export default function ProjectsPage() {
       const project = visibleProjects.find((item) => item.id === projectID)
       if (project) {
         setChannelProject(project)
-        toast.success('公众号已绑定，可保存到草稿箱')
+        toast.success('公众号已绑定，可选择交付方式')
       } else {
         toast.error('授权已完成，但未找到对应的人设')
       }
@@ -496,7 +485,7 @@ export default function ProjectsPage() {
       {isError ? (
         <QueryErrorState onRetry={() => refetch()} />
       ) : isLoading ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="rounded-xl border border-border bg-card p-4 space-y-3">
               <div className="flex items-center gap-3">
@@ -522,7 +511,7 @@ export default function ProjectsPage() {
           action={!visibleProjects.length && statusFilter === 'active' && !searchFilter ? { label: '智能创建人设', onClick: openCreator } : { label: '清空筛选', onClick: () => { setSearchFilter(''); setStatusFilter('active') } }}
         />
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           {filteredProjects.map((project) => (
             <ProjectCard
               key={project.id}
@@ -563,15 +552,15 @@ export default function ProjectsPage() {
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <FormLabel>人设类型</FormLabel>
-                      <FormDescription className="mt-1">可多选。人设会只展示并支持已选择的创作类型。</FormDescription>
+                      <FormDescription className="mt-1">电商设计需单独配置；其他创作类型可多选。</FormDescription>
                     </div>
                     <span className="rounded-full bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground">{field.value?.length ?? 0} 种已选</span>
                   </div>
                   <FormControl>
                     <CreationTypePicker
-                      options={profileLabAgents.filter((agent) => canViewPlatform((agent.id === 'wechat-article' || agent.id === 'wechat-picture' ? 'wechat' : agent.id) as ProjectPlatform, isAdmin))}
+                      options={projectCreationTypes.filter((agent) => canViewPlatform((agent.id === 'wechat-article' || agent.id === 'wechat-picture' ? 'wechat' : agent.id) as ProjectPlatform, isAdmin))}
                       value={field.value ?? []}
-                      onChange={field.onChange}
+                      onChange={(next) => field.onChange(normalizeProjectTypeSelection(field.value ?? [], next))}
                       multiple
                     />
                   </FormControl>
@@ -598,7 +587,7 @@ export default function ProjectsPage() {
                       </span>
                       <div className="min-w-0">
                         <h3 id="wechat-publishing-title" className="text-sm font-medium">公众号扫码绑定</h3>
-                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">文章与贴图共用一个公众号。创作结果可保存到草稿箱，正式发布需在任务详情确认。</p>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">文章与贴图共用一个公众号。创作结果支持手动复制、发布到草稿箱或正式发布。</p>
                       </div>
                     </div>
                     <span className="shrink-0 text-xs font-medium text-muted-foreground">创建后自动配置</span>

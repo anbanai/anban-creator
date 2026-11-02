@@ -147,6 +147,13 @@ export interface AgentPackArtifact {
   required: boolean;
 }
 
+export interface AgentPackArtifactStage {
+  id: string;
+  trigger: string;
+  required?: string[];
+  terminal?: boolean;
+}
+
 export interface AgentPack {
   id: string;
   version: string;
@@ -157,6 +164,7 @@ export interface AgentPack {
   runtime: { profile?: string; adapter?: string };
   artifacts?: AgentPackArtifact[];
   artifacts_by_task_type?: Record<string, AgentPackArtifact[]>;
+  artifact_stages?: AgentPackArtifactStage[];
 }
 
 export interface ResolvedBootstrapResponse extends BootstrapResponse {
@@ -582,7 +590,7 @@ export function preflightBootstrapFiles(files: BootstrapFile[], taskType?: strin
     const fileLimit = taskType === "hypit" ? hypitLimit : videoEditAsset ? MAX_VIDEO_EDIT_FILE_BYTES : MAX_BOOTSTRAP_FILE_BYTES;
     if (taskType === "hypit" && remote && (relative === ".anban-creator/project.zip" || relative.startsWith("project/assets/")) && (!file.content_sha256 || file.expected_size === undefined)) throw new Error("Hypit input requires hash and expected size");
     if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > fileLimit || (file.expected_size !== undefined && (!Number.isInteger(file.expected_size) || file.expected_size < 0 || file.expected_size > maxBytes))) throw new Error(`bootstrap file ${relative} has invalid size limits`);
-    if (!Number.isInteger(file.mode) || ![0o600, 0o644].includes(file.mode)) throw new Error(`unsafe bootstrap file mode ${file.mode}`);
+    if (!Number.isInteger(file.mode) || ![0o444, 0o600, 0o644].includes(file.mode)) throw new Error(`unsafe bootstrap file mode ${file.mode}`);
     if (inline && Buffer.byteLength(file.text ?? "") > maxBytes) throw new Error(`bootstrap file ${relative} exceeds size limit`);
     if (taskType === "video-edit") {
       const knownSize = file.expected_size ?? (inline ? Buffer.byteLength(file.text ?? "") : 0);

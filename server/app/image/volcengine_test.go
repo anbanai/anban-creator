@@ -1,19 +1,25 @@
 package image
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/app/config"
 	"github.com/rs/zerolog"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime"
+	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 )
 
 func TestParseVolcengineSize(t *testing.T) {
@@ -348,5 +354,281 @@ func TestVolcengineGenerate_ContentSafetyBlocked(t *testing.T) {
 	}
 	if genErr.Code != "safety_blocked" {
 		t.Errorf("expected code=safety_blocked, got %q", genErr.Code)
+	}
+}
+
+func TestVolcengineConvertSDKError_ClassifiesHTMLResponseAtHTTP200(t *testing.T) {
+	p := &VolcengineProvider{name: "Volcengine", endpoint: "https://ark.example.test/api/v3/images/generations"}
+	err := &model.RequestError{
+		HTTPStatusCode: http.StatusOK,
+		RequestId:      "request-html-200",
+		Err:            errors.New("invalid character '<' looking for beginning of value"),
+	}
+
+	converted := p.convertSDKError(err)
+	genErr, ok := converted.(*GenerateError)
+	if !ok {
+		t.Fatalf("converted error = %T, want *GenerateError", converted)
+	}
+	if genErr.Code != "endpoint_protocol" || genErr.Retryable() {
+		t.Fatalf("error = %#v, want non-retryable endpoint_protocol", genErr)
+	}
+	if genErr.HTTPStatusCode != http.StatusOK || genErr.ProviderRequestID != "request-html-200" {
+		t.Fatalf("diagnostics = %#v", genErr)
+	}
+	if genErr.RequestMethod != http.MethodPost || genErr.RequestEndpoint != "https://ark.example.test/api/v3/images/generations" {
+		t.Fatalf("request diagnostics = %#v", genErr)
+	}
+	if genErr.TransportPhase != "protocol" {
+		t.Fatalf("transport phase = %q, want protocol", genErr.TransportPhase)
+	}
+	if genErr.Message == "" || genErr.HintMsg == "" {
+		t.Fatalf("error lacks safe operator guidance: %#v", genErr)
+	}
+}
+
+func TestVolcengineEndpointProtocolHintIsProviderAware(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		protocol seedreamProtocol
+		want     []string
+		notWant  string
+	}{
+		{name: "TokenPlayer", protocol: seedreamProtocolTokenplayer, want: []string{"<base_url>/images/generations", "tokenplayer.cn/doubao/api/v3"}, notWant: "ark.cn-beijing.volces.com"},
+		{name: "Volcengine", protocol: seedreamProtocolArk, want: []string{"<base_url>/images/generations", "ark.cn-beijing.volces.com/api/v3"}, notWant: "tokenplayer.cn"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &VolcengineProvider{protocol: tc.protocol}
+			hint := p.endpointProtocolHint()
+			for _, want := range tc.want {
+				if !strings.Contains(hint, want) {
+					t.Fatalf("hint %q missing %q", hint, want)
+				}
+			}
+			if strings.Contains(hint, tc.notWant) {
+				t.Fatalf("hint %q references another provider's %q", hint, tc.notWant)
+			}
+		})
+	}
+}
+
+func TestVolcengineConvertSDKErrorUsesProviderAwareEndpointProtocolHint(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		protocol seedreamProtocol
+		want     string
+		notWant  string
+	}{
+		{name: "TokenPlayer", protocol: seedreamProtocolTokenplayer, want: "tokenplayer.cn/doubao/api/v3", notWant: "ark.cn-beijing.volces.com"},
+		{name: "Volcengine", protocol: seedreamProtocolArk, want: "ark.cn-beijing.volces.com/api/v3", notWant: "tokenplayer.cn"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &VolcengineProvider{protocol: tc.protocol, endpoint: "https://images.example.test/images/generations"}
+			converted := p.convertSDKError(&model.RequestError{
+				HTTPStatusCode: http.StatusOK,
+				RequestId:      "html-200",
+				Err:            errors.New("invalid character '<' looking for beginning of value"),
+			})
+			genErr, ok := converted.(*GenerateError)
+			if !ok || genErr.Code != "endpoint_protocol" {
+				t.Fatalf("converted error = %#v, want endpoint_protocol", converted)
+			}
+			if !strings.Contains(genErr.HintMsg, tc.want) || strings.Contains(genErr.HintMsg, tc.notWant) {
+				t.Fatalf("hint = %q, want %q and not %q", genErr.HintMsg, tc.want, tc.notWant)
+			}
+		})
+	}
+}
+
+func TestVolcengineGenerate_LogsStructuredProtocolFailureWithoutRawBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("<html>gateway error</html>"))
+	}))
+	defer srv.Close()
+
+	var logs bytes.Buffer
+	logger := zerolog.New(&logs)
+	p := makeVolcengineProvider(t, srv.URL, nil)
+	p.log = &logger
+	_, err := p.Generate(context.Background(), "a cat", nil)
+	genErr, ok := err.(*GenerateError)
+	if !ok || genErr.Code != "endpoint_protocol" {
+		t.Fatalf("error = %#v, want endpoint_protocol GenerateError", err)
+	}
+	if strings.Contains(logs.String(), "invalid character") || strings.Contains(logs.String(), "gateway error") {
+		t.Fatalf("log exposed raw provider response: %s", logs.String())
+	}
+	for _, field := range []string{"endpoint_protocol", "http_status", "provider_request_id", "retryable"} {
+		if !strings.Contains(logs.String(), field) {
+			t.Fatalf("structured log missing %q: %s", field, logs.String())
+		}
+	}
+	for _, field := range []string{"request_method", "request_endpoint", "response_content_type", "transport_phase", "<base_url>/images/generations"} {
+		if !strings.Contains(logs.String(), field) {
+			t.Fatalf("structured log missing %q: %s", field, logs.String())
+		}
+	}
+}
+
+func TestNewVolcengineProviderCapturesResponseRequestDiagnostics(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("<html>gateway error</html>"))
+	}))
+	defer srv.Close()
+
+	nopLog := zerolog.Nop()
+	p, err := NewVolcengineProvider(&config.ImageAPI{Key: "test-key", BaseURL: srv.URL, Model: "seedream-test"}, &nopLog)
+	if err != nil {
+		t.Fatalf("NewVolcengineProvider() error = %v", err)
+	}
+	_, err = p.Generate(context.Background(), "a cat", nil)
+	genErr, ok := err.(*GenerateError)
+	if !ok {
+		t.Fatalf("error = %T, want *GenerateError", err)
+	}
+	if genErr.RequestMethod != http.MethodPost || genErr.RequestEndpoint != srv.URL+"/images/generations" || genErr.ResponseContentType != "text/html; charset=utf-8" || genErr.TransportPhase != "protocol" {
+		t.Fatalf("request diagnostics = %#v", genErr)
+	}
+}
+
+func TestVolcengineConvertSDKError_ClassifiesTransportFailureWithConcreteRequest(t *testing.T) {
+	p := &VolcengineProvider{name: "TokenPlayer", endpoint: "https://token.example.test/api/v3/images/generations"}
+	err := &model.RequestError{
+		HTTPStatusCode: http.StatusInternalServerError,
+		RequestId:      "sdk-request-network",
+		Err: &requestTransportError{
+			observation: requestObservation{
+				Method:         http.MethodPost,
+				Endpoint:       "https://token.example.test/api/v3/images/generations",
+				TransportPhase: "dns",
+			},
+			cause: errors.New("dial tcp: lookup token.example.test: no such host"),
+		},
+	}
+
+	converted := p.convertSDKError(err)
+	genErr, ok := converted.(*GenerateError)
+	if !ok {
+		t.Fatalf("converted error = %T, want *GenerateError", converted)
+	}
+	if genErr.Code != "network_error" || !genErr.Retryable() {
+		t.Fatalf("error = %#v, want retryable network_error", genErr)
+	}
+	if genErr.Provider != "TokenPlayer" || genErr.RequestMethod != http.MethodPost || genErr.RequestEndpoint != "https://token.example.test/api/v3/images/generations" || genErr.TransportPhase != "dns" {
+		t.Fatalf("request diagnostics = %#v", genErr)
+	}
+	if genErr.HTTPStatusCode != 0 {
+		t.Fatalf("transport failure status = %d, want 0 because SDK 500 is a sentinel", genErr.HTTPStatusCode)
+	}
+}
+
+func TestVolcengineConvertSDKError_APIErrorIncludesConcreteRequest(t *testing.T) {
+	p := &VolcengineProvider{name: "TokenPlayer", endpoint: "https://token.example.test/api/v3/images/generations"}
+	converted := p.convertSDKError(&model.APIError{HTTPStatusCode: http.StatusUnauthorized, RequestId: "upstream-request-401", Message: "unauthorized"})
+	genErr, ok := converted.(*GenerateError)
+	if !ok {
+		t.Fatalf("converted error = %T, want *GenerateError", converted)
+	}
+	if genErr.RequestMethod != http.MethodPost || genErr.RequestEndpoint != "https://token.example.test/api/v3/images/generations" {
+		t.Fatalf("request diagnostics = %#v", genErr)
+	}
+}
+
+func TestSanitizeImageProviderEndpointRemovesCredentialsAndQuery(t *testing.T) {
+	got := sanitizeImageProviderEndpoint("https://user:secret@example.test/api/v3?key=do-not-log#fragment")
+	if got != "https://example.test/api/v3" {
+		t.Fatalf("sanitized endpoint = %q", got)
+	}
+}
+
+func TestDiagnosticRoundTripperOnlyCachesCorrelatableHTTPErrorObservations(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		echoRequestID    bool
+		wantCachedRecord bool
+	}{
+		{name: "provider echoes client request id", echoRequestID: true, wantCachedRecord: true},
+		{name: "provider omits client request id", echoRequestID: false, wantCachedRecord: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.echoRequestID {
+					w.Header().Set(model.ClientRequestHeader, r.Header.Get(model.ClientRequestHeader))
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
+			}))
+			defer srv.Close()
+
+			diagnostics := &imageProviderDiagnostics{}
+			transport := &diagnosticRoundTripper{base: http.DefaultTransport, diagnostics: diagnostics}
+			req, err := http.NewRequest(http.MethodPost, srv.URL+"/images/generations", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set(model.ClientRequestHeader, "client-request-1")
+			resp, err := transport.RoundTrip(req)
+			if err != nil {
+				t.Fatalf("RoundTrip() error = %v", err)
+			}
+			_ = resp.Body.Close()
+
+			_, cached := diagnostics.observations.Load("client-request-1")
+			if cached != tc.wantCachedRecord {
+				t.Fatalf("cached request observation = %v, want %v", cached, tc.wantCachedRecord)
+			}
+		})
+	}
+}
+
+func TestGenerateErrorIncludesSafeRequestDiagnostics(t *testing.T) {
+	err := &GenerateError{
+		Provider:          "TokenPlayer",
+		Code:              "network_error",
+		Message:           "网络请求失败，请检查网络连接",
+		HintMsg:           "确认网络连接、API 地址和请求路径正确",
+		RequestMethod:     http.MethodPost,
+		RequestEndpoint:   "https://user:secret@token.example.test/api/v3/images/generations?key=secret",
+		HTTPStatusCode:    http.StatusInternalServerError,
+		ProviderRequestID: "sdk-request-1",
+		TransportPhase:    "dns",
+	}
+	message := err.Error()
+	for _, want := range []string{"POST", "https://token.example.test/api/v3/images/generations", "HTTP 500", "dns", "sdk-request-1"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("error = %q, missing %q", message, want)
+		}
+	}
+	for _, secret := range []string{"user:secret", "?key=secret"} {
+		if strings.Contains(message, secret) {
+			t.Fatalf("error leaked %q: %s", secret, message)
+		}
+	}
+}
+
+func TestClassifyImageTransportPhase(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "dns", err: &net.DNSError{Err: "no such host", Name: "images.example.test"}, want: "dns"},
+		{name: "connect", err: &net.OpError{Op: "dial", Err: errors.New("connection refused")}, want: "connect"},
+		{name: "tls", err: &net.OpError{Op: "dial", Err: &tls.CertificateVerificationError{Err: errors.New("x509: unknown authority")}}, want: "tls"},
+		{name: "timeout", err: context.DeadlineExceeded, want: "timeout"},
+		{name: "canceled", err: context.Canceled, want: "canceled"},
+		{name: "unknown", err: errors.New("unexpected transport failure"), want: "unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyImageTransportPhase(tt.err); got != tt.want {
+				t.Fatalf("classifyImageTransportPhase(%v) = %q, want %q", tt.err, got, tt.want)
+			}
+		})
 	}
 }

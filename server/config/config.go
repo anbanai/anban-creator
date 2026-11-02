@@ -1201,7 +1201,7 @@ func (c ClaudeConfig) Validate() error {
 			errs = append(errs, path+".envs: "+err.Error())
 		}
 	}
-	requiredRuntimeProfiles := []string{"wechat-article", "wechat-picture", model.PlatformSeednote, model.PlatformMontage, model.PlatformVideoEdit, "viral-ip-video-editor", "moments", "ecommerce", model.PlatformWhiteboardAnimation, "profile-analysis", "feedback-analysis"}
+	requiredRuntimeProfiles := []string{"wechat-article", "wechat-picture", model.PlatformSeednote, model.PlatformMontage, model.PlatformVideoEdit, "viral-ip-video-editor", "moments", "ecommerce", model.PlatformWhiteboardAnimation, "profile-analysis", "feedback-analysis", model.AgentIDTopicRadar}
 	for _, profile := range requiredRuntimeProfiles {
 		image, ok := c.RuntimeImages[profile]
 		if !ok {
@@ -1213,7 +1213,7 @@ func (c ClaudeConfig) Validate() error {
 		}
 	}
 	for profile := range c.RuntimeImages {
-		if profile != "wechat-article" && profile != "wechat-picture" && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != model.PlatformVideoEdit && profile != model.PlatformTalkingHeadEditor && profile != "viral-ip-video-editor" && profile != "moments" && profile != "ecommerce" && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != model.PlatformLocalLife && profile != "profile-analysis" && profile != "feedback-analysis" && profile != "content-planning" {
+		if profile != "wechat-article" && profile != "wechat-picture" && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != model.PlatformVideoEdit && profile != model.PlatformTalkingHeadEditor && profile != "viral-ip-video-editor" && profile != "moments" && profile != "ecommerce" && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != model.PlatformLocalLife && profile != "profile-analysis" && profile != "feedback-analysis" && profile != "content-planning" && profile != model.AgentIDTopicRadar {
 			errs = append(errs, fmt.Sprintf("claude.runtime_images contains unsupported profile %q", profile))
 		}
 	}
@@ -1750,6 +1750,9 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.Claude.RuntimeImages["feedback-analysis"]) == "" {
 		c.Claude.RuntimeImages["feedback-analysis"] = "creator-agent-feedback-analysis:latest"
 	}
+	if strings.TrimSpace(c.Claude.RuntimeImages[model.AgentIDTopicRadar]) == "" {
+		c.Claude.RuntimeImages[model.AgentIDTopicRadar] = "creator-agent-topic-radar:latest"
+	}
 	if strings.TrimSpace(c.Claude.RuntimeImages[model.PlatformWhiteboardAnimation]) == "" {
 		c.Claude.RuntimeImages[model.PlatformWhiteboardAnimation] = "creator-agent-whiteboard-animation:latest"
 	}
@@ -2090,7 +2093,7 @@ func validateImageCapabilityBaseURL(raw string) error {
 
 func supportsSemanticTaskAspectRatioProvider(provider string) bool {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "openai", "wangcai_openai", "volcengine", "volcengine_ark", "volc", "seedream":
+	case "openai", "wangcai_openai", "volcengine", "volcengine_ark", "volc", "seedream", "tokenplayer":
 		return true
 	default:
 		return false
@@ -2512,9 +2515,17 @@ func (c *Config) Validate() error {
 		errs = append(errs, err.Error())
 	}
 
+	if c.ModelRoutes.ImageUnderstanding.Model != "" || c.ModelRoutes.ImageUnderstanding.Provider != "" {
+		if c.ModelRoutes.ImageUnderstanding.Timeout <= 0 {
+			errs = append(errs, "model_routes.image_understanding.timeout must be positive")
+		}
+	}
 	if c.ModelRoutes.VideoUnderstanding.Model != "" || c.ModelRoutes.VideoUnderstanding.Provider != "" {
 		if !c.ModelRoutes.VideoUnderstanding.RequireNativeVideo {
 			errs = append(errs, "model_routes.video_understanding.require_native_video must be true")
+		}
+		if c.ModelRoutes.VideoUnderstanding.Timeout <= 0 {
+			errs = append(errs, "model_routes.video_understanding.timeout must be positive")
 		}
 	}
 
@@ -2559,11 +2570,12 @@ func (c *Config) Validate() error {
 			errs = append(errs, name+".timeout must be positive")
 			continue
 		}
-		minimumOperationTimeout := route.Timeout + c.ModelRoutes.ImageUnderstanding.Timeout
-		if c.MCP.ToolTimeouts.GenerateImage <= minimumOperationTimeout {
+		// generate_image owns only the provider generation attempt; analyze_image
+		// is a separate MCP tool with its own image-understanding route budget.
+		if c.MCP.ToolTimeouts.GenerateImage <= route.Timeout {
 			errs = append(errs, fmt.Sprintf(
-				"mcp.tool_timeouts.generate_image (%s) must be greater than %s.timeout (%s) plus model_routes.image_understanding.timeout (%s)",
-				c.MCP.ToolTimeouts.GenerateImage, name, route.Timeout, c.ModelRoutes.ImageUnderstanding.Timeout))
+				"mcp.tool_timeouts.generate_image (%s) must be greater than %s.timeout (%s); raise mcp.tool_timeouts.generate_image or lower the generation route timeout",
+				c.MCP.ToolTimeouts.GenerateImage, name, route.Timeout))
 		}
 	}
 

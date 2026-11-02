@@ -154,7 +154,7 @@ func taskTypeLabel(t string) string {
 	case model.PlatformMoments:
 		return "朋友圈"
 	case model.PlatformEcommerce:
-		return "电商图"
+		return "电商设计"
 	case "poster":
 		return "海报"
 	default:

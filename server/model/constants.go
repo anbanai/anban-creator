@@ -57,6 +57,7 @@ const (
 	AgentIDArticle           = "wechat-article"
 	AgentIDSeednote          = "seednote"
 	AgentIDWechatPicture     = "wechat-picture"
+	AgentIDEcommerce         = "ecommerce"
 	AgentIDMontage           = "montage"
 	AgentIDHypit             = "hypit"
 	AgentIDFeedbackAnalysis  = "feedback-analysis"
@@ -66,6 +67,7 @@ const (
 	AgentIDLocalLife         = "local-life"
 	AgentIDVideoEdit         = "video-edit"
 	AgentIDTalkingHeadEditor = "talking-head-editor"
+	AgentIDTopicRadar        = "topic-radar"
 )
 
 // Channel constants. Keep these values provider-neutral; labels belong to the
@@ -85,6 +87,7 @@ const (
 	ChannelLocalLife         = "local-life"
 	ChannelVideoEdit         = "video-edit"
 	ChannelTalkingHeadEditor = "talking-head-editor"
+	ChannelTopicRadar        = "topic-radar"
 )
 
 // Task kinds are workflow identities within one Agent/channel.
@@ -127,6 +130,10 @@ func TaskKindForTaskType(taskType string) string {
 		return TaskKindContentValidation
 	case TaskTypeContentScript:
 		return TaskKindContentScript
+	case TaskTypeTopicDigest:
+		return TaskKindTopicDigest
+	case TaskTypeTopicScript:
+		return TaskKindTopicScript
 	default:
 		return taskType
 	}
@@ -151,6 +158,10 @@ func TaskTypeForTaskKind(taskKind string) string {
 		return PlatformVideoEdit
 	case TaskKindTalkingHeadEditor:
 		return PlatformTalkingHeadEditor
+	case TaskKindTopicDigest:
+		return TaskTypeTopicDigest
+	case TaskKindTopicScript:
+		return TaskTypeTopicScript
 	default:
 		return taskKind
 	}
@@ -158,7 +169,7 @@ func TaskTypeForTaskKind(taskKind string) string {
 
 func IsChannel(value string) bool {
 	switch value {
-	case ChannelContentPlanning, ChannelArticle, ChannelSeednote, ChannelWechatPicture, ChannelHypit, ChannelMoments, ChannelEcommerce, ChannelMontage, ChannelFeedbackAnalysis, ChannelProfileAnalysis, ChannelWhiteboard, ChannelLocalLife, ChannelVideoEdit, ChannelTalkingHeadEditor:
+	case ChannelContentPlanning, ChannelArticle, ChannelSeednote, ChannelWechatPicture, ChannelHypit, ChannelMoments, ChannelEcommerce, ChannelMontage, ChannelFeedbackAnalysis, ChannelProfileAnalysis, ChannelWhiteboard, ChannelLocalLife, ChannelVideoEdit, ChannelTalkingHeadEditor, ChannelTopicRadar:
 		return true
 	default:
 		return false
@@ -167,7 +178,7 @@ func IsChannel(value string) bool {
 
 func IsAgentID(value string) bool {
 	switch value {
-	case AgentIDContentPlanning, AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDMontage, AgentIDHypit, AgentIDFeedbackAnalysis, AgentIDProfileAnalysis, AgentIDWhiteboard, AgentIDLocalLife, AgentIDVideoEdit, AgentIDTalkingHeadEditor:
+	case AgentIDContentPlanning, AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDEcommerce, AgentIDMontage, AgentIDHypit, AgentIDFeedbackAnalysis, AgentIDProfileAnalysis, AgentIDWhiteboard, AgentIDLocalLife, AgentIDVideoEdit, AgentIDTalkingHeadEditor, AgentIDTopicRadar:
 		return true
 	default:
 		return false
@@ -184,6 +195,8 @@ func AgentChannel(agentID string) (string, bool) {
 		return ChannelSeednote, true
 	case AgentIDWechatPicture:
 		return ChannelWechatPicture, true
+	case AgentIDEcommerce:
+		return ChannelEcommerce, true
 	case AgentIDMontage:
 		return ChannelMontage, true
 	case AgentIDHypit:
@@ -198,6 +211,8 @@ func AgentChannel(agentID string) (string, bool) {
 		return ChannelVideoEdit, true
 	case AgentIDTalkingHeadEditor:
 		return ChannelTalkingHeadEditor, true
+	case AgentIDTopicRadar:
+		return ChannelTopicRadar, true
 	default:
 		return "", false
 	}
@@ -261,7 +276,7 @@ func DefaultImageRatioForChannel(channel string) string {
 func IsTaskKind(value string) bool {
 	switch value {
 	case TaskKindContentResearch, TaskKindContentValidation, TaskKindContentScript, TaskKindContentGeneration, TaskKindViralAnalysis, TaskKindProfileAnalysis,
-		TaskKindFeedbackAnalysis, TaskKindVideoEdit, TaskKindTalkingHeadEditor, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit, PlatformLocalLife,
+		TaskKindFeedbackAnalysis, TaskKindVideoEdit, TaskKindTalkingHeadEditor, TaskKindTopicDigest, TaskKindTopicScript, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit, PlatformLocalLife,
 		TaskTypeWechatArticle, TaskTypeWechatPicture:
 		return true
 	default:
@@ -324,7 +339,7 @@ func IsProjectPlatform(value string) bool {
 // IsAdminOnlyProjectPlatform reports project types that are still in internal validation.
 func IsAdminOnlyProjectPlatform(value string) bool {
 	switch value {
-	case PlatformMoments, PlatformEcommerce, PlatformHypit:
+	case PlatformMoments, PlatformHypit:
 		return true
 	default:
 		return false

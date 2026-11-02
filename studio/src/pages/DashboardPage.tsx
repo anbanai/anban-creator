@@ -9,6 +9,7 @@ import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attac
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import QueryErrorState from '@/components/QueryErrorState'
+import { TopicRadarSummary } from '@/components/topic-radar/TopicRadarSummary'
 import { TaskComposerParameters } from '@/components/tasks/TaskComposerParameters'
 import { SeednoteTemplateGallery } from '@/components/templates/SeednoteTemplateGallery'
 import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
@@ -341,6 +342,8 @@ export default function DashboardPage() {
           <p className="mt-3 text-sm leading-6 text-muted-foreground">围绕人设定位开始创作，并在作品交付后查看表现与复盘线索。</p>
         </div>
 
+        <TopicRadarSummary projectId={selectedProjectId} />
+
         <div ref={composerRef} className="mx-auto w-full max-w-3xl">
           <AgentPromptInput
             value={{ prompt, attachments }}
@@ -381,7 +384,6 @@ export default function DashboardPage() {
                     onChange: setExecutionProfile,
                     loading: profilesQuery.isLoading || billingCatalogQuery.isLoading,
                     disabled: profilesQuery.isError || billingCatalogQuery.isError,
-                    catalog: billingCatalogQuery.data,
                     taskType: selectedProject?.platform,
                   }}
                   image={usesImageSettings ? {

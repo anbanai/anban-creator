@@ -156,6 +156,8 @@ spec:
               value: "${profile_analysis_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS
               value: "${feedback_analysis_agent_image_repo}"
+            - name: ANBAN_AGENT_IMAGE_TOPIC_RADAR
+              value: "${topic_radar_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION
               value: "${whiteboard_animation_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_HYPIT

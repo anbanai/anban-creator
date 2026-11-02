@@ -17,6 +17,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// readTextFile normalizes registry prefixes before these assertions.
+const dockerRuntimeImageMirror = ""
+
 func TestDockerfileFromInstructionsIgnoreSubstringDecoys(t *testing.T) {
 	body := `FROM node:24-bookworm-slim AS builder
 RUN printf '%s\n' 'FROM node:24-bookworm-slim'
@@ -344,7 +347,7 @@ func TestAgentDockerfilesSeparateArticleAndSeednoteDependencies(t *testing.T) {
 	article := readTextFile(t, articlePath)
 	seednote := readTextFile(t, seednotePath)
 	for _, want := range []string{
-		"FROM node:24.22.0-bookworm-slim",
+		"FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim",
 		"apt-get install -y --no-install-recommends ca-certificates curl git jq tini",
 		"COPY runtime-claude/package.json runtime-claude/package-lock.json ./",
 		"npm prune --omit=dev",
@@ -411,8 +414,8 @@ func TestMontageRuntimeImageContract(t *testing.T) {
 	path := filepath.Join(root, "deploy/docker/Dockerfile.agent-montage")
 	body := readTextFile(t, path)
 	wantFrom := []string{
-		"FROM node:24.22.0-bookworm-slim AS builder",
-		"FROM node:24.22.0-bookworm-slim",
+		"FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim AS builder",
+		"FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim",
 	}
 	if got := dockerfileFromInstructions(body); !reflect.DeepEqual(got, wantFrom) {
 		t.Fatalf("%s FROM instructions mismatch\nwant: %v\n got: %v", path, wantFrom, got)
@@ -428,10 +431,14 @@ func TestMontageRuntimeImageContract(t *testing.T) {
 		"libnss3 libdbus-1-3 libatk1.0-0 libgbm-dev libasound2",
 		"libxrandr2 libxkbcommon-dev libxfixes3 libxcomposite1 libxdamage1",
 		"libatk-bridge2.0-0 libpango-1.0-0 libcairo2 libcups2",
-		"python3 python3-venv tini",
+		"make python3 python3-venv tini",
 		"git fetch --depth 1 origin \"$OPENMONTAGE_REF\"",
 		"test \"$(git rev-parse HEAD)\" = \"$OPENMONTAGE_REF\"",
 		"requirements.txt",
+		"make setup VENV_DIR=\"$OPENMONTAGE_VENV\"",
+		"test ! -e .venv",
+		"rm -f .env",
+		"cp /tmp/package-lock.patched.json remotion-composer/package-lock.json",
 		"remotion-composer/package-lock.json",
 		"npm ci",
 		"./node_modules/.bin/remotion browser ensure",
@@ -471,7 +478,7 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		t.Fatal("server Dockerfile must not require node-pty's macOS-only spawn-helper in the Alpine/Linux image")
 	}
 	for _, want := range []string{
-		"FROM node:24.22.0-alpine3.24",
+		"FROM " + dockerRuntimeImageMirror + "node:24.22.0-alpine3.24",
 		"apk add --no-cache ca-certificates docker-cli ffmpeg tzdata",
 		"WORKDIR /build/server",
 		"COPY server/go.mod server/go.sum ./",
@@ -482,7 +489,7 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"COPY --from=builder /build/server/billing/products.yaml /app/conf/billing/products.yaml",
 		"COPY --from=builder /build/server/billing/costs.yaml /app/conf/billing/costs.yaml",
 		"COPY --from=builder /build/server/billing/promotions.yaml /app/conf/billing/promotions.yaml",
-		"FROM node:24.22.0-alpine3.24",
+		"FROM " + dockerRuntimeImageMirror + "node:24.22.0-alpine3.24",
 		"USER 1000:1000",
 		"/app/data/project-memory/projects",
 		"chown -R 1000:1000 /app/data",
@@ -551,7 +558,7 @@ func TestServerComposeInjectsBillingAdminKeyAndDocumentsIt(t *testing.T) {
 func TestArticleAgentRuntimeInstallsPackagesAsRoot(t *testing.T) {
 	path := filepath.Join(repositoryRoot(t), "deploy/docker/Dockerfile.agent-wechat-article")
 	body := readTextFile(t, path)
-	from := strings.Index(body, "FROM node:24.22.0-bookworm-slim")
+	from := strings.Index(body, "FROM "+dockerRuntimeImageMirror+"node:24.22.0-bookworm-slim")
 	if from < 0 {
 		t.Fatalf("%s missing Article runtime", path)
 	}
@@ -830,35 +837,35 @@ func TestDockerBuildInputsUseDeclaredImageTags(t *testing.T) {
 	}{
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-wechat-article"),
-			from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"},
+			from: []string{"FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim AS builder", "FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-wechat-picture"),
-			from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"},
+			from: []string{"FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim AS builder", "FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-moments"),
-			from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"},
+			from: []string{"FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim AS builder", "FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-ecommerce"),
-			from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"},
+			from: []string{"FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim AS builder", "FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-seednote"),
-			from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"},
+			from: []string{"FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim AS builder", "FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-montage"),
-			from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"},
+			from: []string{"FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim AS builder", "FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.server"),
-			from: []string{"FROM golang:alpine AS builder", "FROM node:24.22.0-alpine3.24"},
+			from: []string{"FROM " + dockerRuntimeImageMirror + "golang:alpine AS builder", "FROM " + dockerRuntimeImageMirror + "node:24.22.0-alpine3.24"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.runtime-dsh"),
-			from: []string{"FROM node:24.22.0-alpine3.24 AS builder", "FROM node:24.22.0-alpine3.24"},
+			from: []string{"FROM " + dockerRuntimeImageMirror + "node:24.22.0-alpine3.24 AS builder", "FROM " + dockerRuntimeImageMirror + "node:24.22.0-alpine3.24"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.studio"),
@@ -922,6 +929,7 @@ func TestCatalogDigestIsCheckedAtRuntimeAndRecordedForRelease(t *testing.T) {
 	for _, name := range []string{
 		"Dockerfile.agent-ecommerce",
 		"Dockerfile.agent-feedback-analysis",
+		"Dockerfile.agent-topic-radar",
 		"Dockerfile.agent-hypit",
 		"Dockerfile.agent-moments",
 		"Dockerfile.agent-montage",
@@ -1039,6 +1047,7 @@ func TestDockerfileInventoryIsCentralized(t *testing.T) {
 		"deploy/docker/Dockerfile.agent-profile-analysis",
 		"deploy/docker/Dockerfile.agent-seednote",
 		"deploy/docker/Dockerfile.agent-talking-head-editor",
+		"deploy/docker/Dockerfile.agent-topic-radar",
 		"deploy/docker/Dockerfile.agent-video-edit",
 		"deploy/docker/Dockerfile.agent-viral-ip-video-editor",
 		"deploy/docker/Dockerfile.agent-wechat-article",
@@ -1083,20 +1092,40 @@ func TestTalkingHeadEditorDockerfileValidatesErduoMotionContract(t *testing.T) {
 	root := repositoryRoot(t)
 	dockerfile := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.agent-talking-head-editor"))
 	for _, want := range []string{
-		"/opt/video-use-venv/bin/pip install --no-cache-dir auto-editor==28.1.0",
+		"FROM " + dockerRuntimeImageMirror + "node:24.22.0-trixie-slim",
+		"ARG AUTO_EDITOR_VERSION=29.3.1",
+		"ARG HYPERFRAMES_VERSION=0.8.214",
+		"/opt/video-use-venv/bin/pip install --no-cache-dir \"auto-editor==${AUTO_EDITOR_VERSION}\"",
+		"test \"$(uname -m)\" = x86_64",
+		"auto-editor-linux-x86_64",
+		"Path(auto_editor.__file__).parent / \"bin\" / \"auto-editor\"",
+		"chmod 0755 \"$auto_editor_binary\"",
+		"curl --fail --location --retry 5 --retry-all-errors",
 		"importlib.metadata as m; print(m.version(\"auto-editor\"))",
 		"/opt/video-use-venv/bin/auto-editor --version",
+		"npm install --global --omit=dev \"hyperframes@${HYPERFRAMES_VERSION}\"",
+		"test \"$(hyperframes --version)\" = \"$HYPERFRAMES_VERSION\"",
 		"for helper in transcribe.py transcribe_batch.py pack_transcripts.py timeline_view.py grade.py render.py",
 		"/opt/video-use/helpers/$helper\" --help",
 		"43cfc566833548093455c9d4a46bd69913b7e552",
 		"/anbanai/skills/erduo-broll-loop-engineering/SKILL.md",
-		"HyperFrames/Remotion",
-		"Shotcraft",
-		"parallel agents",
+		"HyperFrames lint",
 		"aesthetic review",
+		"/anbanai/skills/talking-head-sound-design/SKILL.md",
+		"/anbanai/skills/talking-head-sound-design/assets/sfx/manifest.json",
+		"sound_pass.py --help",
 	} {
 		if !strings.Contains(dockerfile, want) {
 			t.Fatalf("talking-head-editor Dockerfile missing runtime contract %q", want)
+		}
+	}
+	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
+	for _, want := range []string{
+		"docker build --platform linux/amd64 -f deploy/docker/Dockerfile.agent-talking-head-editor",
+		"--build-arg AUTO_EDITOR_VERSION=\"$(AUTO_EDITOR_VERSION)\"",
+	} {
+		if !strings.Contains(makefile, want) {
+			t.Fatalf("talking-head-editor Makefile contract missing %q", want)
 		}
 	}
 }
@@ -1109,6 +1138,10 @@ func TestViralIPVideoEditorRuntimeProfileIsPackagedAndRegistered(t *testing.T) {
 			"auto-editor==${AUTO_EDITOR_VERSION}",
 			"/bin/auto-editor\" --version",
 			"ARG OPENMONTAGE_REF=c8066452325cb57c8fc1ba8c2a71b6e8842e6b65",
+			"make python3 python3-venv tini",
+			"make setup VENV_DIR=\"$OPENMONTAGE_VENV\"",
+			"test ! -e .venv",
+			"rm -f .env",
 			"COPY harness/ /anbanai/",
 			"ANBAN_MONTAGE_TEMPLATE_PATH=/opt/montage-template",
 		},
@@ -1285,6 +1318,8 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"docker-montage-agent-image:",
 		"docker-profile-analysis-agent-image:",
 		"docker-feedback-analysis-agent-image:",
+		"docker-topic-radar-agent-image:",
+		"docker build -f deploy/docker/Dockerfile.agent-topic-radar -t $(TOPIC_RADAR_AGENT_IMAGE) .",
 		"docker-sidecar-ilink-image:",
 		"docker-studio-image:",
 		"docker-moments-agent-image:",
@@ -1303,7 +1338,7 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-ilink",
 		"docker build -f deploy/docker/Dockerfile.studio -t $(STUDIO_IMAGE) .",
 		"docker-image:",
-		"docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-talking-head-editor-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image",
+		"docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-talking-head-editor-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-topic-radar-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image",
 		"docker-dsh-runtime-image:",
 		"docker-wechat-article-agent-image",
 		"make docker-server-image",
@@ -1445,35 +1480,36 @@ func TestDockerRuntimeContract(t *testing.T) {
 			t.Fatal("docker-compose.yml has no server service")
 		}
 		for name, want := range map[string]string{
-			"ANBAN_AGENT_EXECUTOR":                   "docker",
-			"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":       "creator-agent-wechat-article:latest",
-			"ANBAN_AGENT_IMAGE_SEEDNOTE":             "creator-agent-seednote:latest",
-			"ANBAN_AGENT_IMAGE_MONTAGE":              "creator-agent-montage:latest",
+			"ANBAN_AGENT_EXECUTOR":                    "docker",
+			"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":        "creator-agent-wechat-article:latest",
+			"ANBAN_AGENT_IMAGE_SEEDNOTE":              "creator-agent-seednote:latest",
+			"ANBAN_AGENT_IMAGE_MONTAGE":               "creator-agent-montage:latest",
 			"ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR": "${ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR:-creator-agent-viral-ip-video-editor:latest}",
-			"ANBAN_AGENT_IMAGE_VIDEO_EDIT":           "${ANBAN_AGENT_IMAGE_VIDEO_EDIT:-creator-agent-video-edit:latest}",
-			"ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR":  "${ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR:-creator-agent-talking-head-editor:latest}",
-			"VIDEO_EDIT_ELEVENLABS_API_KEY":          "${VIDEO_EDIT_ELEVENLABS_API_KEY:-}",
-			"VIDEO_USE_API_KEY":                      "${VIDEO_USE_API_KEY:-}",
-			"ANBAN_AGENT_IMAGE_MOMENTS":              "creator-agent-moments:latest",
-			"ANBAN_AGENT_IMAGE_ECOMMERCE":            "creator-agent-ecommerce:latest",
-			"ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS":     "${ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS:-creator-agent-profile-analysis:latest}",
-			"ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS":    "${ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS:-creator-agent-feedback-analysis:latest}",
-			"ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION": "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}",
-			"ANBAN_AGENT_IMAGE_HYPIT":                "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}",
-			"ANBAN_AGENT_DOCKER_NETWORK":             "creator-runtime-network",
-			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET":     "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET:?ANBAN_AGENT_EXECUTION_TOKEN_SECRET is required}",
-			"ANBAN_BILLING_ADMIN_API_KEY":            "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}",
-			"ANBAN_JWT_SECRET_KEY":                   "${ANBAN_JWT_SECRET_KEY:?ANBAN_JWT_SECRET_KEY is required}",
-			"ANBAN_OSS_ENDPOINT":                     "${ANBAN_OSS_ENDPOINT:?ANBAN_OSS_ENDPOINT is required}",
-			"ANBAN_OSS_ACCESS_KEY_ID":                "${ANBAN_OSS_ACCESS_KEY_ID:?ANBAN_OSS_ACCESS_KEY_ID is required}",
-			"ANBAN_OSS_ACCESS_KEY_SECRET":            "${ANBAN_OSS_ACCESS_KEY_SECRET:?ANBAN_OSS_ACCESS_KEY_SECRET is required}",
-			"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL":      "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-}",
-			"ANBAN_DEEPSEEK_API_KEY":                 "${ANBAN_DEEPSEEK_API_KEY:?ANBAN_DEEPSEEK_API_KEY is required}",
-			"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":      "${ANBAN_MOONSHOT_ANTHROPIC_BASE_URL:-https://api.moonshot.cn/anthropic}",
-			"ANBAN_MOONSHOT_API_KEY":                 "${ANBAN_MOONSHOT_API_KEY:?ANBAN_MOONSHOT_API_KEY is required}",
-			"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":         "${ANBAN_ZHIPU_ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}",
-			"ANBAN_ZHIPU_API_KEY":                    "${ANBAN_ZHIPU_API_KEY:?ANBAN_ZHIPU_API_KEY is required}",
-			"MOONSHOT_API_KEY":                       "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}",
+			"ANBAN_AGENT_IMAGE_VIDEO_EDIT":            "${ANBAN_AGENT_IMAGE_VIDEO_EDIT:-creator-agent-video-edit:latest}",
+			"ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR":   "${ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR:-creator-agent-talking-head-editor:latest}",
+			"VIDEO_EDIT_ELEVENLABS_API_KEY":           "${VIDEO_EDIT_ELEVENLABS_API_KEY:-}",
+			"VIDEO_USE_API_KEY":                       "${VIDEO_USE_API_KEY:-}",
+			"ANBAN_AGENT_IMAGE_MOMENTS":               "creator-agent-moments:latest",
+			"ANBAN_AGENT_IMAGE_ECOMMERCE":             "creator-agent-ecommerce:latest",
+			"ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS":      "${ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS:-creator-agent-profile-analysis:latest}",
+			"ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS":     "${ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS:-creator-agent-feedback-analysis:latest}",
+			"ANBAN_AGENT_IMAGE_TOPIC_RADAR":           "${ANBAN_AGENT_IMAGE_TOPIC_RADAR:-creator-agent-topic-radar:latest}",
+			"ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION":  "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}",
+			"ANBAN_AGENT_IMAGE_HYPIT":                 "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}",
+			"ANBAN_AGENT_DOCKER_NETWORK":              "creator-runtime-network",
+			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET":      "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET:?ANBAN_AGENT_EXECUTION_TOKEN_SECRET is required}",
+			"ANBAN_BILLING_ADMIN_API_KEY":             "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}",
+			"ANBAN_JWT_SECRET_KEY":                    "${ANBAN_JWT_SECRET_KEY:?ANBAN_JWT_SECRET_KEY is required}",
+			"ANBAN_OSS_ENDPOINT":                      "${ANBAN_OSS_ENDPOINT:?ANBAN_OSS_ENDPOINT is required}",
+			"ANBAN_OSS_ACCESS_KEY_ID":                 "${ANBAN_OSS_ACCESS_KEY_ID:?ANBAN_OSS_ACCESS_KEY_ID is required}",
+			"ANBAN_OSS_ACCESS_KEY_SECRET":             "${ANBAN_OSS_ACCESS_KEY_SECRET:?ANBAN_OSS_ACCESS_KEY_SECRET is required}",
+			"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL":       "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-}",
+			"ANBAN_DEEPSEEK_API_KEY":                  "${ANBAN_DEEPSEEK_API_KEY:?ANBAN_DEEPSEEK_API_KEY is required}",
+			"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":       "${ANBAN_MOONSHOT_ANTHROPIC_BASE_URL:-https://api.moonshot.cn/anthropic}",
+			"ANBAN_MOONSHOT_API_KEY":                  "${ANBAN_MOONSHOT_API_KEY:?ANBAN_MOONSHOT_API_KEY is required}",
+			"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":          "${ANBAN_ZHIPU_ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}",
+			"ANBAN_ZHIPU_API_KEY":                     "${ANBAN_ZHIPU_API_KEY:?ANBAN_ZHIPU_API_KEY is required}",
+			"MOONSHOT_API_KEY":                        "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}",
 		} {
 			if got := server.Environment[name]; got != want {
 				t.Errorf("server environment %s = %q, want %q", name, got, want)
@@ -1577,6 +1613,7 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"VIDEO_EDIT_ELEVENLABS_API_KEY":       "test-video-edit-scribe-key",
 			"ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS":  "creator-agent-profile-analysis:latest",
 			"ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS": "creator-agent-feedback-analysis:latest",
+			"ANBAN_AGENT_IMAGE_TOPIC_RADAR":       "creator-agent-topic-radar:latest",
 			"ANBAN_JWT_SECRET_KEY":                "0123456789abcdef0123456789abcdef",
 			"ANBAN_OSS_ENDPOINT":                  "oss-cn-test.aliyuncs.com",
 			"ANBAN_OSS_ACCESS_KEY_ID":             "test-access-key-id",

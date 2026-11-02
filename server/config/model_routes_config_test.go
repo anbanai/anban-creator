@@ -136,3 +136,60 @@ func fakePluginDir(t *testing.T, dir string) string {
 	}
 	return pluginDir
 }
+
+func TestSemanticModelConfigRequiresUnderstandingTimeouts(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "image understanding",
+			body: `
+model_routes:
+  image_understanding:
+    provider: moonshot
+    model: kimi-k2.7-code-highspeed
+`,
+			want: "model_routes.image_understanding.timeout must be positive",
+		},
+		{
+			name: "video understanding",
+			body: `
+model_routes:
+  video_understanding:
+    provider: moonshot
+    model: kimi-k2.7-code-highspeed
+    require_native_video: true
+`,
+			want: "model_routes.video_understanding.timeout must be positive",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			pluginDir := fakePluginDir(t, dir)
+			cfgPath := filepath.Join(dir, "config.yaml")
+			body := []byte(`
+server: {}
+database:
+  dsn: "user:pass@tcp(localhost:3306)/creator"
+jwt:
+  secret_key: test-secret
+model_providers:
+  moonshot:
+    protocol: "openai_compatible"
+    base_url: "https://api.example.com/v1"
+    api_key: "sk-test"
+claude:
+  plugin_dir: "` + pluginDir + `"
+` + tt.body)
+			if err := os.WriteFile(cfgPath, body, 0o644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			_, err := NewConfig(cfgPath)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}

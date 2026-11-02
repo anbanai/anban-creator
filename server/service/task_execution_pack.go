@@ -233,7 +233,7 @@ func hasCompleteAgentPackIdentity(execution *model.TaskExecution) bool {
 
 func isContentTaskKind(taskKind string) bool {
 	switch strings.TrimSpace(taskKind) {
-	case model.TaskKindContentResearch, model.TaskKindContentValidation, model.TaskKindContentScript, model.TaskKindViralAnalysis, model.TaskKindProfileAnalysis, model.TaskKindFeedbackAnalysis:
+	case model.TaskKindContentResearch, model.TaskKindContentValidation, model.TaskKindContentScript, model.TaskKindViralAnalysis, model.TaskKindProfileAnalysis, model.TaskKindFeedbackAnalysis, model.TaskKindTopicDigest, model.TaskKindTopicScript:
 		return false
 	default:
 		return strings.TrimSpace(taskKind) != ""

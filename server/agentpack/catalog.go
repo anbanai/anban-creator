@@ -35,6 +35,7 @@ var supportedChannels = map[string]struct{}{
 	"video-edit":           {},
 	"talking-head-editor":  {},
 	"local-life":           {},
+	"topic-radar":          {},
 }
 
 func isSupportedChannel(channel string) bool {
@@ -223,7 +224,7 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 			if len(manifest.BillingOperations) > 0 {
 				return fmt.Errorf("interactive Pack must not declare billing operations")
 			}
-			if len(manifest.Artifacts) > 0 || len(manifest.ArtifactsByTaskType) > 0 || len(manifest.Delivery) > 0 || len(manifest.DeliveryByTaskType) > 0 || len(manifest.DataDeliveries) > 0 {
+			if len(manifest.Artifacts) > 0 || len(manifest.ArtifactsByTaskType) > 0 || len(manifest.ArtifactStages) > 0 || len(manifest.Delivery) > 0 || len(manifest.DeliveryByTaskType) > 0 || len(manifest.DataDeliveries) > 0 {
 				return fmt.Errorf("interactive Pack must not declare task artifacts or delivery")
 			}
 			if hasSurface(manifest.Surfaces, "task") || hasSurface(manifest.Surfaces, "plan") {
@@ -335,6 +336,9 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 	if err := validateArtifactContract(manifest.Artifacts); err != nil {
 		return err
 	}
+	if err := validateArtifactStages(manifest.ArtifactStages, manifest.Artifacts); err != nil {
+		return err
+	}
 	if manifest.Kind == KindManaged && !interactive {
 		for taskKind, artifacts := range manifest.ArtifactsByTaskType {
 			if !taskKinds[taskKind] {
@@ -439,7 +443,7 @@ func requiresContentTagging(manifest *Manifest) bool {
 	}
 	for _, taskKind := range manifest.Bindings.TaskKinds {
 		switch strings.TrimSpace(taskKind) {
-		case "profile_analysis", "feedback_analysis", "viral_analysis", "content_research", "content_validation", "content_script":
+		case "profile_analysis", "feedback_analysis", "viral_analysis", "content_research", "content_validation", "content_script", "topic_digest", "topic_script":
 			continue
 		default:
 			// Any ordinary product/task binding is a content Pack unless it is
@@ -492,6 +496,57 @@ func validateArtifactContract(artifacts []ArtifactSpec) error {
 			return fmt.Errorf("duplicate artifact path %q", artifactPath)
 		}
 		paths[artifactPath] = struct{}{}
+	}
+	return nil
+}
+
+func validateArtifactStages(stages []ArtifactStageSpec, artifacts []ArtifactSpec) error {
+	if len(stages) == 0 {
+		return nil
+	}
+	declared := make(map[string]struct{}, len(artifacts))
+	for _, artifact := range artifacts {
+		declared[strings.TrimSpace(strings.ReplaceAll(artifact.Path, "\\", "/"))] = struct{}{}
+	}
+	ids := make(map[string]struct{}, len(stages))
+	triggers := make(map[string]struct{}, len(stages))
+	hasTerminal := false
+	for _, stage := range stages {
+		id := strings.TrimSpace(stage.ID)
+		if id == "" {
+			return fmt.Errorf("artifact stage id must not be empty")
+		}
+		if _, exists := ids[id]; exists {
+			return fmt.Errorf("duplicate artifact stage id %q", id)
+		}
+		ids[id] = struct{}{}
+		trigger := strings.TrimSpace(strings.ReplaceAll(stage.Trigger, "\\", "/"))
+		if err := validateOutputArtifactPath(trigger); err != nil {
+			return fmt.Errorf("artifact stage %q trigger: %w", id, err)
+		}
+		if _, exists := triggers[trigger]; exists {
+			return fmt.Errorf("duplicate artifact stage trigger %q", trigger)
+		}
+		triggers[trigger] = struct{}{}
+		if _, exists := declared[trigger]; !exists {
+			return fmt.Errorf("artifact stage %q trigger %q is not declared in artifacts", id, trigger)
+		}
+		if !stage.Terminal && len(stage.Required) == 0 {
+			return fmt.Errorf("non-terminal artifact stage %q requires at least one artifact", id)
+		}
+		for _, required := range stage.Required {
+			path := strings.TrimSpace(strings.ReplaceAll(required, "\\", "/"))
+			if err := validateOutputArtifactPath(path); err != nil {
+				return fmt.Errorf("artifact stage %q required path %q: %w", id, required, err)
+			}
+			if _, exists := declared[path]; !exists {
+				return fmt.Errorf("artifact stage %q required path %q is not declared in artifacts", id, path)
+			}
+		}
+		hasTerminal = hasTerminal || stage.Terminal
+	}
+	if !hasTerminal {
+		return fmt.Errorf("artifact stages require a terminal stage")
 	}
 	return nil
 }

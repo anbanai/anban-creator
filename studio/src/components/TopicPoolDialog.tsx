@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
@@ -131,6 +132,10 @@ export function TopicPoolDialog({ project, open, onOpenChange }: TopicPoolDialog
                 >
                   <div className="flex-1 space-y-1">
                     <p className="text-sm">{topic.topic}</p>
+                    {topic.source_digest_id && <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span>{topic.source_label || '选题雷达自动入库'}</span>
+                      <Link className="text-primary hover:underline" to={`/topic-radar?project_id=${encodeURIComponent(project.id)}&digest_id=${encodeURIComponent(topic.source_digest_id)}`} onClick={() => onOpenChange(false)}>查看雷达来源</Link>
+                    </div>}
                     <div className="flex items-center gap-2">
                       <Badge variant={topic.status === 'unused' ? 'default' : 'secondary'} className="text-[10px]">
                         {topic.status === 'unused' ? '未使用' : '已使用'}

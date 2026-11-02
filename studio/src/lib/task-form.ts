@@ -268,17 +268,19 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
     target_platform: ecommerce?.target_platform ?? '',
     selling_points: ecommerce?.selling_points ?? '',
     language: ecommerce?.language ?? '',
-    hypit_input: task.hypit_input ? cloneValue(initialHypitInput(task.prompt, task.hypit_input)) : undefined,
-    montage_input: task.montage_input
+    hypit_input: task.type === 'hypit' && task.hypit_input
+      ? cloneValue(initialHypitInput(task.prompt, task.hypit_input))
+      : undefined,
+    montage_input: task.type === 'montage' && task.montage_input
       ? cloneValue(initialMontageInput(task.prompt, task.montage_input))
       : undefined,
-    local_life_input: task.local_life_input
+    local_life_input: task.type === 'local-life' && task.local_life_input
       ? cloneValue(initialLocalLifeInput(task.prompt, task.local_life_input))
       : undefined,
-    video_edit_input: task.video_edit_input
+    video_edit_input: task.type === 'video-edit' && task.video_edit_input
       ? cloneValue({ ...task.video_edit_input, brief: task.video_edit_input.brief || task.prompt })
       : undefined,
-    talking_head_editor_input: task.talking_head_editor_input
+    talking_head_editor_input: task.type === 'talking-head-editor' && task.talking_head_editor_input
       ? cloneValue({ ...task.talking_head_editor_input, brief: task.talking_head_editor_input.brief || task.prompt })
       : undefined,
   }

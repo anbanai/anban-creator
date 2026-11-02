@@ -2,9 +2,15 @@ package image
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/app/config"
@@ -16,11 +22,137 @@ import (
 // VolcengineProvider 火山方舟 Seedream 图片生成服务提供者
 // 使用官方 arkruntime SDK，支持类型安全的请求体和高级选项
 type VolcengineProvider struct {
-	client     *arkruntime.Client
-	model      string
-	log        *zerolog.Logger
-	sizePixel  string // 像素格式 "WIDTHxHEIGHT"，如 "1728x2304"
-	volcConfig *config.VolcengineConfig
+	client      *arkruntime.Client
+	model       string
+	log         *zerolog.Logger
+	sizePixel   string // 像素格式 "WIDTHxHEIGHT"，如 "1728x2304"
+	volcConfig  *config.VolcengineConfig
+	name        string
+	protocol    seedreamProtocol
+	endpoint    string
+	diagnostics *imageProviderDiagnostics
+}
+
+// seedreamProtocol 区分使用 Seedream 协议的上游接入方式。
+// 它只影响面向运维的错误提示，不改变请求协议。
+type seedreamProtocol int
+
+const (
+	seedreamProtocolArk seedreamProtocol = iota
+	seedreamProtocolTokenplayer
+)
+
+const volcengineImageRequestPath = "/images/generations"
+
+type requestObservation struct {
+	Method              string
+	Endpoint            string
+	HTTPStatusCode      int
+	ResponseContentType string
+	TransportPhase      string
+}
+
+type imageProviderDiagnostics struct {
+	observations sync.Map
+}
+
+type requestTransportError struct {
+	observation requestObservation
+	cause       error
+}
+
+func (e *requestTransportError) Error() string { return "image provider transport request failed" }
+func (e *requestTransportError) Unwrap() error { return e.cause }
+
+type diagnosticRoundTripper struct {
+	base        http.RoundTripper
+	diagnostics *imageProviderDiagnostics
+}
+
+func (t *diagnosticRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	requestID := strings.TrimSpace(req.Header.Get(model.ClientRequestHeader))
+	observation := requestObservation{
+		Method:   req.Method,
+		Endpoint: sanitizeImageProviderEndpoint(req.URL.String()),
+	}
+	resp, err := base.RoundTrip(req)
+	if err != nil {
+		observation.TransportPhase = classifyImageTransportPhase(err)
+		if requestID != "" && t.diagnostics != nil {
+			t.diagnostics.observations.Store(requestID, observation)
+		}
+		return nil, &requestTransportError{observation: observation, cause: err}
+	}
+	observation.HTTPStatusCode = resp.StatusCode
+	observation.ResponseContentType = strings.TrimSpace(resp.Header.Get("Content-Type"))
+	if resp.StatusCode >= http.StatusMultipleChoices {
+		observation.TransportPhase = "http_response"
+	} else if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices && !isJSONContentType(observation.ResponseContentType) {
+		observation.TransportPhase = "protocol"
+	}
+	responseRequestID := strings.TrimSpace(resp.Header.Get(model.ClientRequestHeader))
+	correlatable := observation.TransportPhase == "protocol" || responseRequestID == requestID
+	if requestID != "" && t.diagnostics != nil && observation.TransportPhase != "" && correlatable {
+		t.diagnostics.observations.Store(requestID, observation)
+	}
+	return resp, nil
+}
+
+func isJSONContentType(contentType string) bool {
+	contentType = strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
+	return contentType == "application/json" || strings.HasSuffix(contentType, "+json")
+}
+
+func sanitizeImageProviderEndpoint(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "<invalid-endpoint>"
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.Fragment = ""
+	u.Path = strings.TrimRight(u.Path, "/")
+	return u.String()
+}
+
+func classifyImageTransportPhase(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "timeout"
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return "dns"
+	}
+	var tlsErr *tls.CertificateVerificationError
+	if errors.As(err, &tlsErr) || strings.Contains(strings.ToLower(err.Error()), "tls") || strings.Contains(strings.ToLower(err.Error()), "x509") {
+		return "tls"
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		switch strings.ToLower(opErr.Op) {
+		case "dial":
+			return "connect"
+		case "read":
+			return "read"
+		case "write":
+			return "write"
+		}
+	}
+	return "unknown"
 }
 
 // volcenginePixelMap 将 aspect_ratio:sizeTier 映射到像素格式
@@ -48,6 +180,16 @@ func volcenginePixelSize(aspectRatio, sizeTier string) string {
 
 // NewVolcengineProvider 创建火山方舟 Seedream Provider
 func NewVolcengineProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (*VolcengineProvider, error) {
+	return newSeedreamProvider(apiCfg, log, "Volcengine", seedreamProtocolArk)
+}
+
+// NewTokenplayerProvider creates a TokenPlayer provider using the same
+// Seedream-compatible Ark request protocol as Volcengine.
+func NewTokenplayerProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (*VolcengineProvider, error) {
+	return newSeedreamProvider(apiCfg, log, "TokenPlayer", seedreamProtocolTokenplayer)
+}
+
+func newSeedreamProvider(apiCfg *config.ImageAPI, log *zerolog.Logger, name string, protocol seedreamProtocol) (*VolcengineProvider, error) {
 	mdl := apiCfg.Model
 	if mdl == "" {
 		mdl = DefaultVolcengineModel
@@ -57,11 +199,20 @@ func NewVolcengineProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (*Volce
 	if apiCfg.TimeoutSec > 0 {
 		timeout = time.Duration(apiCfg.TimeoutSec) * time.Second
 	}
+	baseURL := strings.TrimRight(apiCfg.BaseURL, "/")
+	if baseURL == "" {
+		baseURL = DefaultVolcengineBaseURL
+	}
+	diagnostics := &imageProviderDiagnostics{}
 	opts := []arkruntime.ConfigOption{
 		arkruntime.WithTimeout(timeout),
+		arkruntime.WithHTTPClient(&http.Client{
+			Timeout:   timeout,
+			Transport: &diagnosticRoundTripper{base: http.DefaultTransport, diagnostics: diagnostics},
+		}),
 	}
 	if apiCfg.BaseURL != "" {
-		opts = append(opts, arkruntime.WithBaseUrl(apiCfg.BaseURL))
+		opts = append(opts, arkruntime.WithBaseUrl(baseURL))
 	}
 	client := arkruntime.NewClientWithApiKey(apiCfg.Key, opts...)
 
@@ -69,16 +220,23 @@ func NewVolcengineProvider(apiCfg *config.ImageAPI, log *zerolog.Logger) (*Volce
 	sizePixel := volcenginePixelSize(aspectRatio, sizeTier)
 
 	return &VolcengineProvider{
-		client:     client,
-		log:        log,
-		model:      mdl,
-		sizePixel:  sizePixel,
-		volcConfig: apiCfg.Volcengine,
+		client:      client,
+		log:         log,
+		model:       mdl,
+		sizePixel:   sizePixel,
+		volcConfig:  apiCfg.Volcengine,
+		name:        name,
+		protocol:    protocol,
+		endpoint:    sanitizeImageProviderEndpoint(baseURL + volcengineImageRequestPath),
+		diagnostics: diagnostics,
 	}, nil
 }
 
 // Name 返回提供者名称
 func (p *VolcengineProvider) Name() string {
+	if p.name != "" {
+		return p.name
+	}
 	return "Volcengine"
 }
 
@@ -169,8 +327,34 @@ func (p *VolcengineProvider) Generate(ctx context.Context, prompt string, opts *
 
 	resp, err := p.client.GenerateImages(ctx, req)
 	if err != nil {
-		p.log.Error().Err(err).Str("model", p.model).Dur("elapsed", time.Since(start)).Msg("volcengine: image generation failed")
-		return nil, p.convertSDKError(err)
+		converted := p.convertSDKError(err)
+		var generateErr *GenerateError
+		if errors.As(converted, &generateErr) {
+			event := p.log.Error().
+				Str("provider", p.Name()).
+				Str("model", p.model).
+				Str("error_code", generateErr.Code).
+				Int("http_status", generateErr.HTTPStatusCode).
+				Str("provider_request_id", generateErr.ProviderRequestID).
+				Str("request_method", generateErr.RequestMethod).
+				Str("request_endpoint", generateErr.RequestEndpoint).
+				Str("response_content_type", generateErr.ResponseContentType).
+				Str("transport_phase", generateErr.TransportPhase).
+				Bool("retryable", generateErr.Retryable())
+			if hint := strings.TrimSpace(generateErr.HintMsg); hint != "" {
+				event = event.Str("hint", hint)
+			}
+			event.Dur("elapsed", time.Since(start)).
+				Msg("volcengine: image generation failed")
+		} else {
+			p.log.Error().
+				Str("provider", p.Name()).
+				Str("model", p.model).
+				Str("error_code", "image_generation_error").
+				Dur("elapsed", time.Since(start)).
+				Msg("volcengine: image generation failed")
+		}
+		return nil, converted
 	}
 
 	if len(resp.Data) == 0 || resp.Data[0].Url == nil || *resp.Data[0].Url == "" {
@@ -236,9 +420,24 @@ func (p *VolcengineProvider) buildReferenceImageInput(opts *GenerateOptions) (an
 }
 
 // convertSDKError 将 SDK 错误转换为 GenerateError
-func (p *VolcengineProvider) convertSDKError(err error) error {
+func (p *VolcengineProvider) convertSDKError(err error) (result error) {
 	var apiErr *model.APIError
 	if errors.As(err, &apiErr) {
+		observation := p.takeRequestObservation(apiErr.RequestId)
+		if observation.Method == "" {
+			observation.Method = http.MethodPost
+		}
+		if observation.Endpoint == "" {
+			observation.Endpoint = p.endpoint
+		}
+		defer func() {
+			var generateErr *GenerateError
+			if errors.As(result, &generateErr) {
+				generateErr.HTTPStatusCode = apiErr.HTTPStatusCode
+				generateErr.ProviderRequestID = strings.TrimSpace(apiErr.RequestId)
+				p.applyRequestObservation(generateErr, observation)
+			}
+		}()
 		switch apiErr.HTTPStatusCode {
 		case 401:
 			return &GenerateError{
@@ -301,21 +500,107 @@ func (p *VolcengineProvider) convertSDKError(err error) error {
 
 	var reqErr *model.RequestError
 	if errors.As(err, &reqErr) {
-		return &GenerateError{
-			Provider: p.Name(),
-			Code:     "network_error",
-			Message:  "网络请求失败，请检查网络连接",
-			HintMsg:  "确认网络连接正常，API 地址正确",
-			Original: err,
+		observation := p.takeRequestObservation(reqErr.RequestId)
+		var transportErr *requestTransportError
+		if errors.As(err, &transportErr) {
+			observation = transportErr.observation
 		}
+		if observation.Method == "" {
+			observation.Method = http.MethodPost
+		}
+		if observation.Endpoint == "" {
+			observation.Endpoint = p.endpoint
+		}
+		if observation.HTTPStatusCode == 0 && transportErr == nil {
+			observation.HTTPStatusCode = reqErr.HTTPStatusCode
+		}
+		if observation.TransportPhase == "" {
+			if reqErr.HTTPStatusCode >= http.StatusOK && reqErr.HTTPStatusCode < http.StatusMultipleChoices {
+				observation.TransportPhase = "protocol"
+			} else if transportErr == nil {
+				observation.TransportPhase = "http_response"
+			}
+		}
+		if reqErr.HTTPStatusCode >= http.StatusOK && reqErr.HTTPStatusCode < http.StatusMultipleChoices {
+			generateErr := &GenerateError{
+				Provider:          p.Name(),
+				Code:              "endpoint_protocol",
+				Message:           "图片服务返回了无法解析的非 JSON 响应",
+				HintMsg:           p.endpointProtocolHint(),
+				HTTPStatusCode:    reqErr.HTTPStatusCode,
+				ProviderRequestID: strings.TrimSpace(reqErr.RequestId),
+				Original:          err,
+			}
+			p.applyRequestObservation(generateErr, observation)
+			return generateErr
+		}
+		statusCode := reqErr.HTTPStatusCode
+		if transportErr != nil {
+			// The SDK uses HTTP 500 as a sentinel for RoundTripper failures;
+			// it is not an upstream response status.
+			statusCode = 0
+		}
+		generateErr := &GenerateError{
+			Provider:          p.Name(),
+			Code:              "network_error",
+			Message:           "网络请求失败，请检查网络连接",
+			HintMsg:           "确认网络连接正常，API 地址正确",
+			HTTPStatusCode:    statusCode,
+			ProviderRequestID: strings.TrimSpace(reqErr.RequestId),
+			Original:          err,
+		}
+		p.applyRequestObservation(generateErr, observation)
+		return generateErr
 	}
 
-	return &GenerateError{
+	generateErr := &GenerateError{
 		Provider: p.Name(),
 		Code:     "unknown",
 		Message:  err.Error(),
 		Original: err,
 	}
+	p.applyRequestObservation(generateErr, requestObservation{Method: http.MethodPost, Endpoint: p.endpoint})
+	return generateErr
+}
+
+func (p *VolcengineProvider) takeRequestObservation(requestID string) requestObservation {
+	if p.diagnostics != nil && strings.TrimSpace(requestID) != "" {
+		if value, ok := p.diagnostics.observations.LoadAndDelete(requestID); ok {
+			if observation, ok := value.(requestObservation); ok {
+				return observation
+			}
+		}
+	}
+	return requestObservation{}
+}
+
+func (p *VolcengineProvider) applyRequestObservation(generateErr *GenerateError, observation requestObservation) {
+	if generateErr == nil {
+		return
+	}
+	if generateErr.RequestMethod == "" {
+		generateErr.RequestMethod = observation.Method
+	}
+	if generateErr.RequestEndpoint == "" {
+		generateErr.RequestEndpoint = observation.Endpoint
+	}
+	if generateErr.ResponseContentType == "" {
+		generateErr.ResponseContentType = observation.ResponseContentType
+	}
+	if generateErr.TransportPhase == "" {
+		generateErr.TransportPhase = observation.TransportPhase
+	}
+}
+
+// endpointProtocolHint 为 endpoint_protocol 失败给出按提供者区分的 Base URL 提示。
+// Seedream 协议把请求发到 <base_url>/images/generations，因此 Base URL 必须是
+// 图像 API 的根地址；指向网页站点或控制台会拿到 HTML 页面。
+func (p *VolcengineProvider) endpointProtocolHint() string {
+	hint := "请检查图片 Base URL：图片请求发往 <base_url>/images/generations，该地址必须返回 JSON；指向网页站点或控制台会返回 HTML 页面"
+	if p.protocol == seedreamProtocolTokenplayer {
+		return hint + "。TokenPlayer 的 Ark 兼容图片地址必须带 /api/v3 前缀，例如 https://tokenplayer.cn/doubao/api/v3；只配置 /doubao 会拿到网页 HTML"
+	}
+	return hint + "。火山方舟请使用官方 Ark API 地址，例如 https://ark.cn-beijing.volces.com/api/v3"
 }
 
 // parseVolcengineSize 解析 size 配置字段，返回 aspectRatio 和 sizeTier

@@ -805,6 +805,21 @@ describe("managed progress hooks", () => {
     },
   );
 
+  test("allows a valid recoverable failure to terminate any managed Pack", async () => {
+    const root = await progressWorkspace();
+    try {
+      await writeFile(join(root, "output/failure-state.json"), JSON.stringify({
+        version: "1.0", status: "recoverable_failure", stage: "image_generation",
+        error_code: "image_provider_unavailable", message: "provider temporarily unavailable",
+        resume_from: "image_generation",
+      }));
+      const stop = optionHooks(runner.buildQueryOptions(validBootstrap(), root)).Stop![0]!.hooks[0]!;
+      expect(await stop(stopHookInput(), undefined, hookOptions)).toEqual({});
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("creates isolated lifecycle event state for each query options instance", async () => {
     const root = await progressWorkspace(true);
     const stageProgress = mock(async (_event: StageProgressEvent) => {});
