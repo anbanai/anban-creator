@@ -17,7 +17,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const dockerRuntimeImageMirror = "crpi-671lgv9lrdyll4t9.cn-chengdu.personal.cr.aliyuncs.com/bx_anbanai/"
+// readTextFile normalizes registry prefixes before these assertions.
+const dockerRuntimeImageMirror = ""
 
 func TestDockerfileFromInstructionsIgnoreSubstringDecoys(t *testing.T) {
 	body := `FROM node:24-bookworm-slim AS builder

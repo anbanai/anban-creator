@@ -926,44 +926,59 @@ func TestAssistantInteractionRuntimeEventsPersistMetadataOnly(t *testing.T) {
 	}
 }
 
-func TestAssistantInteractionReplacesStaleBindingAfterServerRestart(t *testing.T) {
-	svc, _ := newAssistantInteractionServiceTest(t)
-	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: "creation", AgentID: "project-creator", Intent: "create"}, "attempt-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// A fresh service instance has the durable binding but none of the old
-	// process-local runtime handles. It must fence that binding and create the
-	// next generation before accepting work.
-	restartedFactory := &assistantInteractionTestFactory{}
-	restarted := NewAssistantInteractionService(svc.repo, restartedFactory, svc.clock)
-	binding, err := restarted.EnsureRuntime(context.Background(), "user-1", snapshot.ID, snapshot.Generation)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if binding.Generation != snapshot.Generation+1 || binding.LogicalSessionID == "" {
-		t.Fatalf("restarted binding = %#v, want generation %d with a new session", binding, snapshot.Generation+1)
+func TestAssistantInteractionEndsAfterServerRestart(t *testing.T) {
+	for _, entry := range []string{"snapshot", "expired_snapshot", "ensure", "resume", "prepare", "replay", "message", "answer", "continue"} {
+		t.Run(entry, func(t *testing.T) {
+			ctx := context.Background()
+			svc, _ := newAssistantInteractionServiceTest(t)
+			input := AssistantInteractionInput{ModeID: AssistantModeCreation}
+			original, err := svc.CreateOrResume(ctx, "user-1", input, "create")
+			if err != nil {
+				t.Fatal(err)
+			}
+			factory := &assistantInteractionModeFactory{}
+			restarted := NewAssistantInteractionService(svc.repo, factory, svc.clock)
+			if entry == "expired_snapshot" {
+				restarted.clock = func() time.Time { return svc.clock().Add(25 * time.Hour) }
+			}
+			switch entry {
+			case "snapshot", "expired_snapshot":
+				_, err = restarted.Snapshot(ctx, "user-1", original.ID)
+			case "continue":
+				_, err = restarted.ContinueInteraction(ctx, "user-1", original.ID, InteractionContinueRequest{DraftID: "old-draft", Revision: 1})
+			case "ensure":
+				_, err = restarted.EnsureRuntime(ctx, "user-1", original.ID, original.Generation)
+			case "resume", "prepare":
+				input.ResumeInteractionID = original.ID
+				input.PrepareOnly = entry == "prepare"
+				_, err = restarted.CreateOrResume(ctx, "user-1", input, "resume")
+			case "replay":
+				_, err = restarted.CreateOrResume(ctx, "user-1", input, "create")
+			case "message":
+				err = restarted.SendMessage(ctx, "user-1", original.ID, InteractionMessageInput{Generation: original.Generation, ClientMessageID: "msg", Text: "继续"})
+			case "answer":
+				err = restarted.AnswerQuestion(ctx, "user-1", original.ID, InteractionAnswerInput{Generation: original.Generation, AttemptID: "answer", CallID: "old-question", Answers: []InteractiveAnswer{{ID: "q", Selected: []string{"旧回答"}}}})
+			}
+			if err != nil && NormalizeInteractionError(err).Code != InteractionErrorRestartRequired {
+				t.Fatal(err)
+			}
+			for i := 0; i < 2; i++ {
+				snapshot, err := restarted.Snapshot(ctx, "user-1", original.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if snapshot.Lifecycle != model.AssistantInteractionAbandoned || snapshot.RuntimeStatus != model.AssistantInteractionRuntimeClosed || len(snapshot.AvailableActions) != 1 || snapshot.AvailableActions[0] != "restart" {
+					t.Fatalf("old session still usable: %#v", snapshot)
+				}
+			}
+			if factory.starts != 0 {
+				t.Fatalf("started %d replacement runtimes", factory.starts)
+			}
+		})
 	}
 }
 
-func TestAssistantInteractionSnapshotRecoversAfterServerRestart(t *testing.T) {
-	svc, _ := newAssistantInteractionServiceTest(t)
-	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: "creation", AgentID: "project-creator", Intent: "create"}, "attempt-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	restarted := NewAssistantInteractionService(svc.repo, &assistantInteractionTestFactory{}, svc.clock)
-	recovered, err := restarted.Snapshot(context.Background(), "user-1", snapshot.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if recovered.Generation != snapshot.Generation+1 {
-		t.Fatalf("recovered snapshot generation = %d, want %d", recovered.Generation, snapshot.Generation+1)
-	}
-}
-
-func TestAssistantInteractionSnapshotKeepsReadyDraftWhenRuntimeReplacementFails(t *testing.T) {
+func TestAssistantInteractionSnapshotEndsReadyDraftAfterServerRestart(t *testing.T) {
 	svc, _ := newAssistantInteractionServiceTest(t)
 	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "ready-draft")
 	if err != nil {
@@ -983,8 +998,7 @@ func TestAssistantInteractionSnapshotKeepsReadyDraftWhenRuntimeReplacementFails(
 		t.Fatal(err)
 	}
 
-	// The durable draft must remain readable even if the old runtime is gone
-	// and the replacement cannot start. Confirmation no longer depends on it.
+	// An unconfirmed draft cannot keep an old conversation alive after restart.
 	createdAt := svc.clock()
 	svc.clock = func() time.Time { return createdAt.Add(25 * time.Hour) }
 	restarted := NewAssistantInteractionService(svc.repo, assistantInteractionFailingFactory{}, svc.clock)
@@ -992,8 +1006,8 @@ func TestAssistantInteractionSnapshotKeepsReadyDraftWhenRuntimeReplacementFails(
 	if err != nil {
 		t.Fatalf("snapshot with failed runtime replacement = %v", err)
 	}
-	if recovered.Lifecycle != model.AssistantInteractionNeedsConfirmation || len(recovered.Drafts) != 1 || !recovered.Drafts[0].Ready {
-		t.Fatalf("recovered snapshot = %#v, want ready durable draft", recovered)
+	if recovered.Lifecycle != model.AssistantInteractionAbandoned || len(recovered.Drafts) != 1 || recovered.Drafts[0].Ready {
+		t.Fatalf("recovered snapshot = %#v, want ended conversation with a non-confirmable draft", recovered)
 	}
 }
 

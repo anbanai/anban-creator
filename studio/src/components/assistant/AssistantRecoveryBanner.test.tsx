@@ -18,3 +18,14 @@ it('offers reconciliation without an unsupported restart', () => {
   expect(screen.getByRole('button', { name: '核对结果' })).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: '重新开始' })).not.toBeInTheDocument()
 })
+
+it('offers only a homepage restart for an ended conversation', () => {
+  const state = assistantInteractionReducer(initialAssistantInteractionState, { type: 'snapshot', snapshot: {
+    interaction_id: 'old', mode_id: 'creation', lifecycle: 'abandoned', generation: 1,
+    runtime_status: 'closed', expires_at: '', last_activity_at: '', available_actions: ['restart'], drafts: [],
+  } })
+  render(<AssistantRecoveryBanner state={state} onRestoreDraft={vi.fn()} onRestart={vi.fn()} />)
+  expect(screen.getByText('当前对话已结束，请重新开始')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '重新开始' })).toBeEnabled()
+  expect(screen.queryByRole('button', { name: '恢复计划' })).not.toBeInTheDocument()
+})

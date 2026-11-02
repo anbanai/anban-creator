@@ -5,9 +5,9 @@ import { Streamdown } from 'streamdown'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 import type { AssistantInteractionDraftReceipt, AssistantInteractionSnapshot, AssistantModeID, AssistantWorkspace as AssistantWorkspaceState, AssistantProject } from '@/lib/api/assistant'
-import type { InteractiveDraft } from '@/lib/api/interactive'
+import { AssistantInteractionStreamError, type InteractiveDraft } from '@/lib/api/interactive'
 import { useAuth } from '@/contexts/AuthContext'
-import { InteractiveStreamError, streamAssistantWorkspace, type InteractiveStreamEvent } from '@/lib/interactive-events'
+import { streamAssistantWorkspace, type InteractiveStreamEvent } from '@/lib/interactive-events'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover'
@@ -228,7 +228,7 @@ function assistantInteractionErrorMessage(errorCode: string | undefined, fallbac
   switch (errorCode) {
     case 'assistant_interaction_generation_changed': return '对话状态已更新，正在恢复最新内容。'
     case 'assistant_interaction_reconnecting': return '正在恢复连接，请稍候。'
-    case 'assistant_interaction_restart_required': return '连接已结束，当前计划和输入已保留，请恢复后继续。'
+    case 'assistant_interaction_restart_required': return '当前对话已结束，请重新开始。'
     case 'assistant_command_outcome_unknown': return '上一条操作的结果无法确认，重新提交可能重复执行。'
     case 'assistant_message_not_accepted': return '刚才的消息未送出，内容已保留，请重试。'
     case 'assistant_draft_saved_retryable': return '计划已保留，但暂存未完成，请重试暂存。'
@@ -337,6 +337,7 @@ export default function AssistantWorkspace() {
   const [uncertainRetry, setUncertainRetry] = useState<UncertainRetry | undefined>(persisted?.uncertainRetry)
   const [error, setError] = useState<string | null>(null)
   const [interactionState, dispatchInteraction] = useReducer(assistantInteractionReducer, initialAssistantInteractionState)
+  const profileCompleted = workspace?.mode_id === 'profile' && interactionState.status === 'completed'
   const [, setInteractionSnapshot] = useState<AssistantInteractionSnapshot | null>(null)
   const [interactionSnapshotReady, setInteractionSnapshotReady] = useState(false)
   const [streamRevision, setStreamRevision] = useState(0)
@@ -528,7 +529,8 @@ export default function AssistantWorkspace() {
           : undefined
     : undefined
   const staleProjectSelection = conversationPhase !== 'active' && Boolean(projectId) && !selectedProject
-  const composerBlocked = staleProjectSelection || modePrerequisiteBlocked || Boolean(missingContextInstruction) || Boolean(activeMode && !activeMode.available)
+  const conversationEnded = workspace?.lifecycle === 'abandoned' || interactionState.status === 'restart_required' && !interactionState.availableActions.includes('restore_draft') && interactionState.errorCode !== 'assistant_commit_reconciliation_required'
+  const composerBlocked = conversationEnded || staleProjectSelection || modePrerequisiteBlocked || Boolean(missingContextInstruction) || Boolean(activeMode && !activeMode.available)
   const composerPlaceholder = modePrerequisiteBlocked
     ? mode === 'creation' ? '先完成新人设创建后即可输入消息' : '先完成当前模式所需条件后即可输入消息'
     : missingContextInstruction ?? modePlaceholder(mode)
@@ -568,6 +570,7 @@ export default function AssistantWorkspace() {
     const { request, key } = prepareRequestRef.current
     const promise = api.assistant.createWorkspace(request, key).then((preparedWorkspace) => {
       if (workspaceResetVersion.current !== resetVersion) return preparedWorkspace
+      workspaceHandedOff.current = false
       connectionReady(preparedWorkspace.id)
       setWorkspace(preparedWorkspace)
       setInteractionSnapshot(preparedWorkspace.interaction_snapshot ?? null)
@@ -602,10 +605,11 @@ export default function AssistantWorkspace() {
       batches.map((batch) => !batch.answers && !batch.closed ? { ...batch, closed: 'expired' as const } : batch),
     ])))
     setInteractionSnapshotReady(false)
-    setError('连接已结束，当前计划和输入已保留，请恢复后继续。')
+    streamAbort.current?.abort()
+    setError(null)
     const preserved = preservedComposer ?? lastSubmittedMessage.current
     if (preserved) setComposer((current) => current || preserved)
-    dispatchInteraction({ type: 'error', code: 'assistant_interaction_restart_required' })
+    dispatchInteraction({ type: 'error', code: 'assistant_interaction_restart_required', availableActions: ['restart'] })
   }
 
   const refreshInteractionSnapshot = async () => {
@@ -639,34 +643,57 @@ export default function AssistantWorkspace() {
     }
   }
 
-  const restartInteraction = async () => {
-    const currentWorkspace = workspace
-    streamAbort.current?.abort()
-    preparePromiseRef.current = null
-    prepareAttemptedRef.current = false
-    prepareRequestRef.current = null
-    if (currentWorkspace) {
-      try {
-        await api.assistant.closeWorkspace(currentWorkspace.id)
-      } catch {
-        // A missing or already-ended interaction is already safe to restart.
-      }
-    }
+  const resetInteraction = () => {
     workspaceResetVersion.current += 1
-    setInteractionSnapshotReady(false)
+    streamAbort.current?.abort()
+    sseReadyRef.current?.resolve()
+    sseReadyRef.current = null
+    preparePromiseRef.current = null
+    prepareAttemptedRef.current = true
+    prepareRequestRef.current = null
+    initialSnapshotRequired.current = false
+    // Clear persisted state before navigation; cleanup must not hold the user
+    // on a dead conversation when the old Server cannot answer DELETE.
+    workspaceHandedOff.current = true
+    sessionStorage.removeItem(WORKSPACE_STORAGE_KEY)
     setWorkspace(null)
     setInteractionSnapshot(null)
+    setInteractionSnapshotReady(false)
     setConversationPhase('setup')
     lastEventIds.current = {}
+    lastSubmittedMessage.current = ''
     setMessagesByMode({})
     setQuestionsByMode({})
     setDraftByMode({})
+    setCommitIdempotencyKeys({})
+    setAttachments([])
+    setContentId('')
+    setNewProfile(false)
+    setPendingMode(null)
+    setSwitching(false)
     setComposer('')
     setError(null)
+    setResponding(false)
+    setSending(false)
     dispatchInteraction({ type: 'restart' })
     uncertainRetryRef.current = null
     setUncertainRetry(undefined)
+    navigate('/', { replace: true, state: null })
   }
+
+  const restartInteraction = () => {
+    const currentWorkspace = workspace
+    resetInteraction()
+    if (currentWorkspace) void api.assistant.closeWorkspace(currentWorkspace.id).catch(() => undefined)
+  }
+
+  useEffect(() => {
+    if (!profileCompleted) return
+    // Saving a profile already completes the Server-owned interaction.
+    resetInteraction()
+    setProjectId(workspace?.project_id ?? '')
+    setMode('creation')
+  }, [profileCompleted, workspace?.project_id, navigate])
 
   useEffect(() => {
     if (!bootstrap || routeState.modeId || persisted?.workspace?.mode_id || workspace || newProfile || projectId || completeProjects.length === 0) return
@@ -724,7 +751,7 @@ export default function AssistantWorkspace() {
   }, [conversationPhase, mode, projectId, selectableProjects])
 
   useEffect(() => {
-    if (!workspace || !token || !interactionSnapshotReady) return
+    if (!workspace || !token || !interactionSnapshotReady || profileCompleted || workspace.lifecycle === 'abandoned' || workspace.lifecycle === 'completed') return
     streamAbort.current?.abort()
     const controller = new AbortController()
     streamAbort.current = controller
@@ -740,6 +767,7 @@ export default function AssistantWorkspace() {
       onGenerationChanged: (generation) => {
         dispatchInteraction({ type: 'generation_changed', generation })
         void api.assistant.getInteractionSnapshot(workspace.id).then((snapshot) => {
+          if (controller.signal.aborted) return
           setInteractionSnapshot(snapshot)
           setInteractionSnapshotReady(true)
           setWorkspace((current) => current ? { ...current, generation: snapshot.generation, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, runtime_status: snapshot.runtime_status, lifecycle: snapshot.lifecycle } : current)
@@ -751,6 +779,7 @@ export default function AssistantWorkspace() {
     void (async () => {
       try {
         for await (const event of stream) {
+          if (controller.signal.aborted) return
           if (event.id) lastEventIds.current[workspace.id] = event.id
           const data = parseEventData(event)
           if (event.event === 'session.expired' || event.event === 'expired') {
@@ -805,7 +834,7 @@ export default function AssistantWorkspace() {
               setQuestionsByMode((current) => {
                 const batches = current[eventMode] ?? []
                 const existing = batches.find((item) => item.callId === callId)
-                return { ...current, [eventMode]: [...batches.filter((item) => item.callId !== callId), { ...existing, callId, questions, generation: existing?.generation ?? workspace.generation, order: existing?.order ?? order }] }
+                return { ...current, [eventMode]: [...batches.filter((item) => item.callId !== callId), { ...existing, callId, questions, generation: typeof data.generation === 'number' ? data.generation : existing?.generation ?? workspace.generation, order: existing?.order ?? order }] }
               })
             }
           } else if (event.event === 'tool.result' && data.ok === false) {
@@ -827,7 +856,7 @@ export default function AssistantWorkspace() {
         if (!controller.signal.aborted) {
           ready.resolve()
           setResponding(false)
-          if (streamError instanceof InteractiveStreamError && (streamError.status === 404 || streamError.status === 410)) {
+          if (streamError instanceof AssistantInteractionStreamError && (streamError.status === 404 || streamError.status === 410)) {
             resetExpiredWorkspace(lastSubmittedMessage.current || undefined)
           } else {
             dispatchInteraction({ type: 'error', code: 'assistant_interaction_reconnecting' })
@@ -841,7 +870,7 @@ export default function AssistantWorkspace() {
       ready.resolve()
       if (sseReadyRef.current === ready) sseReadyRef.current = null
     }
-  }, [interactionSnapshotReady, streamRevision, token, workspace?.id, workspace?.generation])
+  }, [interactionSnapshotReady, profileCompleted, streamRevision, token, workspace?.id, workspace?.generation, workspace?.lifecycle === 'abandoned' || workspace?.lifecycle === 'completed'])
 
   const sendMessage = async (override?: string, options?: { forceNewAttempt?: boolean }) => {
     const text = (override ?? composer).trim()
@@ -1042,7 +1071,8 @@ export default function AssistantWorkspace() {
   }
 
   const submitAnswers = async (batch: QuestionBatch, answer: DshQuestionAnswer, forceNewAttempt = false) => {
-    if (!workspace) throw new Error('连接已结束，请重新开始。')
+    if (!workspace || conversationEnded) throw new Error('连接已结束，请重新开始。')
+    const resetVersion = workspaceResetVersion.current
     if (answerInFlight.current) throw new Error('正在提交回答，请稍候。')
     answerInFlight.current = true
     setQuestionsByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).map((item) => item.callId === batch.callId ? { ...item, draftAnswers: answer.answers } : item) }))
@@ -1055,8 +1085,10 @@ export default function AssistantWorkspace() {
       if (selectedMedia.some((asset) => asset.status !== 'available')) {
         throw new Error('候选素材已不可用，请重新选择或上传素材。')
       }
-      if (forceNewAttempt) await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers, true)
-      else await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers)
+      if (workspaceResetVersion.current !== resetVersion) return
+      if (forceNewAttempt) await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers, batch.generation, true)
+      else await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers, batch.generation)
+      if (workspaceResetVersion.current !== resetVersion) return
       uncertainRetryRef.current = null
       setUncertainRetry(undefined)
       dispatchInteraction({ type: 'clear_error' })
@@ -1072,6 +1104,7 @@ export default function AssistantWorkspace() {
       }
       setQuestionsByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).map((item) => item.callId === batch.callId ? { ...item, answers: answer.answers } : item) }))
     } catch (answerError) {
+      if (workspaceResetVersion.current !== resetVersion) return
       const recoveredSnapshot = assistantInteractionSnapshotFromError(answerError)
       if (recoveredSnapshot) applyInteractionSnapshot(recoveredSnapshot)
       const errorCode = assistantWorkspaceErrorCode(answerError)
@@ -1079,8 +1112,10 @@ export default function AssistantWorkspace() {
         uncertainRetryRef.current = () => { void submitAnswers(batch, answer, true).catch(() => undefined) }
         setUncertainRetry({ kind: 'answer', mode, callId: batch.callId, answers: answer.answers })
       }
-      if (errorCode?.startsWith('assistant_')) dispatchInteraction({ type: 'error', code: errorCode })
-      if (isStaleAssistantWorkspaceError(answerError)) {
+      if (errorCode?.startsWith('assistant_') && !(errorCode === 'assistant_interaction_generation_changed' && recoveredSnapshot)) dispatchInteraction({ type: 'error', code: errorCode })
+      if (errorCode === 'assistant_interaction_generation_changed' && recoveredSnapshot) {
+        setError(null)
+      } else if (isStaleAssistantWorkspaceError(answerError)) {
         resetExpiredWorkspace()
       } else if (errorCode === 'assistant_workspace_busy') {
         setError('助手仍在处理上一条消息，请稍后提交回答。')
@@ -1530,12 +1565,12 @@ export default function AssistantWorkspace() {
             {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && (
               <VideoEditReviewResults query={reviewVideoQuery} />
             )}
-            <Conversation messages={activeMessages} questions={activeQuestions} responding={responding} disabled={draftPending || interactionState.status === 'command_uncertain'} userAvatarURL={personaImageURL(selectedProject)} onAnswer={submitAnswers} />
+            <Conversation messages={activeMessages} questions={activeQuestions} responding={responding} disabled={conversationEnded || draftPending || interactionState.status === 'command_uncertain'} userAvatarURL={personaImageURL(selectedProject)} onAnswer={submitAnswers} />
             {activeReviewSelectors}
-            {activeDraft && confirmationDraft && <DraftConfirmationCard attemptIssues={mode === 'creation' ? interactionState.blockingIssues : undefined} mode={mode} draft={confirmationDraft} committing={committing} confirmable={mode !== 'creation' || creationCanConfirm} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => void continueDraft()} />}
+            {!conversationEnded && activeDraft && confirmationDraft && <DraftConfirmationCard attemptIssues={mode === 'creation' ? interactionState.blockingIssues : undefined} mode={mode} draft={confirmationDraft} committing={committing} confirmable={mode !== 'creation' || creationCanConfirm} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => void continueDraft()} />}
             {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
           </div>
-          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} /> : undefined} trailingTools={<>{composerMode}{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={conversationEnded || sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={conversationEnded || sending || switching || committing || draftPending || pendingQuestions.length > 0} /> : undefined} trailingTools={<>{composerMode}{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       )}
       </main>
