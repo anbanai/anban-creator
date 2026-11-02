@@ -67,7 +67,7 @@ func (s *TopicRadarService) RecoverTopicRadarDispatches(ctx context.Context, lim
 		return err
 	}
 	for _, d := range digests {
-		if e := s.ProcessTopicDigest(ctx, d.ID); e != nil && first == nil {
+		if e := topicRadarRecoveryError(s.ProcessTopicDigest(ctx, d.ID)); e != nil && first == nil {
 			first = e
 		}
 	}
@@ -76,9 +76,16 @@ func (s *TopicRadarService) RecoverTopicRadarDispatches(ctx context.Context, lim
 		return err
 	}
 	for _, j := range scripts {
-		if e := s.ProcessTopicScript(ctx, j.ID); e != nil && first == nil {
+		if e := topicRadarRecoveryError(s.ProcessTopicScript(ctx, j.ID)); e != nil && first == nil {
 			first = e
 		}
 	}
 	return first
+}
+
+func topicRadarRecoveryError(err error) error {
+	if errors.Is(err, ErrDispatchInProgress) {
+		return nil
+	}
+	return err
 }

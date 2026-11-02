@@ -64,6 +64,14 @@ const validResponse = (): BootstrapResponse => {
 };
 
 describe("validateBootstrapResponse", () => {
+  test("accepts read-only bootstrap files emitted by the Server", () => {
+    expect(() => preflightBootstrapFiles([{
+      path: "input/topic-radar.json",
+      text: "{}",
+      mode: 0o444,
+    }], "topic-digest")).not.toThrow();
+  });
+
   test("accepts bounded video-edit assets and rejects aggregate input above 1 GiB", () => {
     const makeAsset = (index: number) => ({
       path: `.anban-creator/video-edit-assets/${index}.mp4`,
