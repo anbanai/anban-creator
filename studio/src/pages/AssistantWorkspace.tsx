@@ -330,6 +330,7 @@ export default function AssistantWorkspace() {
   const [uncertainRetry, setUncertainRetry] = useState<UncertainRetry | undefined>(persisted?.uncertainRetry)
   const [error, setError] = useState<string | null>(null)
   const [interactionState, dispatchInteraction] = useReducer(assistantInteractionReducer, initialAssistantInteractionState)
+  const profileCompleted = workspace?.mode_id === 'profile' && interactionState.status === 'completed'
   const [, setInteractionSnapshot] = useState<AssistantInteractionSnapshot | null>(null)
   const [interactionSnapshotReady, setInteractionSnapshotReady] = useState(false)
   const [sending, setSending] = useState(false)
@@ -551,6 +552,26 @@ export default function AssistantWorkspace() {
     }
   }
 
+  const resetInteraction = () => {
+    streamAbort.current?.abort()
+    workspaceResetVersion.current += 1
+    setInteractionSnapshotReady(false)
+    setWorkspace(null)
+    setInteractionSnapshot(null)
+    setConversationPhase('setup')
+    setLastEventIds({})
+    setMessagesByMode({})
+    setQuestionsByMode({})
+    setDraftByMode({})
+    setResponding(false)
+    setPendingMode(null)
+    setComposer('')
+    setError(null)
+    dispatchInteraction({ type: 'restart' })
+    uncertainRetryRef.current = null
+    setUncertainRetry(undefined)
+  }
+
   const restartInteraction = async () => {
     const currentWorkspace = workspace
     streamAbort.current?.abort()
@@ -561,21 +582,19 @@ export default function AssistantWorkspace() {
         // A missing or already-ended interaction is already safe to restart.
       }
     }
-    workspaceResetVersion.current += 1
-    setInteractionSnapshotReady(false)
-    setWorkspace(null)
-    setInteractionSnapshot(null)
-    setConversationPhase('setup')
-    setLastEventIds({})
-    setMessagesByMode({})
-    setQuestionsByMode({})
-    setDraftByMode({})
-    setComposer('')
-    setError(null)
-    dispatchInteraction({ type: 'restart' })
-    uncertainRetryRef.current = null
-    setUncertainRetry(undefined)
+    resetInteraction()
   }
+
+  useEffect(() => {
+    if (!profileCompleted) return
+    // Saving a profile already completes the Server-owned interaction.
+    resetInteraction()
+    setProjectId(workspace?.project_id ?? '')
+    setContentId('')
+    setNewProfile(false)
+    setMode('creation')
+    navigate('/', { replace: true, state: null })
+  }, [profileCompleted, workspace?.project_id, navigate])
 
   useEffect(() => {
     if (!bootstrap || routeState.modeId || persisted?.workspace?.mode_id || workspace || newProfile || projectId || completeProjects.length === 0) return
@@ -633,7 +652,7 @@ export default function AssistantWorkspace() {
   }, [conversationPhase, mode, projectId, selectableProjects])
 
   useEffect(() => {
-    if (!workspace || !token || !interactionSnapshotReady) return
+    if (!workspace || !token || !interactionSnapshotReady || profileCompleted) return
     streamAbort.current?.abort()
     const controller = new AbortController()
     streamAbort.current = controller
@@ -725,7 +744,7 @@ export default function AssistantWorkspace() {
       }
     })()
     return () => controller.abort()
-  }, [interactionSnapshotReady, mode, token, workspace])
+  }, [interactionSnapshotReady, mode, token, workspace, profileCompleted])
 
   const sendMessage = async (override?: string, options?: { forceNewAttempt?: boolean }) => {
     const text = (override ?? composer).trim()
