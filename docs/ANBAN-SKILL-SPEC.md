@@ -50,7 +50,7 @@ harness/
 
 约束：
 
-- Skill 目录使用小写 kebab-case，入口文件必须精确命名为 `SKILL.md`。
+- 自建 Skill 目录使用小写 kebab-case，入口文件必须精确命名为 `SKILL.md`；只读上游 submodule 例外见下。
 - `name` 最长 64 个字符，只能使用小写字母、数字和连字符；不能以连字符开头或结尾，也不能连续使用连字符；不得包含 XML 标签或 `anthropic` / `claude` 保留词。
 - Skill 目录内不新增 `README.md`；说明内容放在 `SKILL.md` 或 `references/`，仓库级分发说明放在 `harness/` 外部文档。
 - `SKILL.md` 是流程目录，不是领域百科；细节放在 `references/`，只保留一层引用。
@@ -58,7 +58,7 @@ harness/
 - Pack YAML 是产物路径和交付角色的权威来源；Skill 不得声明与 Pack 冲突的必需产物。
 - `harness/` 变更必须同步更新 Claude 和 Codex 两份插件清单，并按仓库规则递增版本号。
 - 上游第三方 Skill 可保留其许可证和必要文件，但新增 Anban Skill 遵循本规范。
-- `skills/humanizer` 是固定 Git revision 的 vendored third-party Skill。不得修改其 `SKILL.md`、README、许可证或上游目录结构；只校验入口、许可证、上游版本、revision 和调用边界。不得把它纳入本地 README 禁止项或重构规则，业务约束放在拥有它的 Agent/Skill 中。
+- `skills/humanizer`、`skills/seedance2-skill`、`skills/GPT-Image2-Skill`、`skills/motion-graphics` 和 `skills/ecommerce-visual-copywriting-skill` 是固定 Git revision 的只读上游 submodule，与自建 Skill 同级分发。不得修改其 `SKILL.md`、README、许可证、目录名或上游目录结构，因此它们的目录命名、内部 `skills/` 层级和文件内容不受本节的 kebab-case、单层引用和体量约束；只校验入口、许可证、上游版本、revision 和调用边界。仓库 lint 与契约测试必须按上游目录清单跳过它们，业务约束放在拥有它们的 Agent/Skill 中。
 
 ### 工作流分层
 

@@ -135,24 +135,13 @@
 
 .assistant-dialogue-layout {
   display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 1rem;
 }
 
 .assistant-chat-panel {
-  min-height: 28rem;
-  height: 70dvh;
-  flex-shrink: 0;
-}
-
-.assistant-conversation-sidebar {
-  flex-shrink: 0;
-}
-
-.assistant-confirmation-card {
-  max-height: 36rem;
+  min-height: 0;
+  flex: 1;
 }
 
 .assistant-chat-composer [data-slot="agent-prompt-surface"] {
@@ -163,24 +152,16 @@
   box-shadow: none;
 }
 
+.assistant-chat-composer[data-awaiting-confirmation="true"] [data-slot="agent-prompt-surface"] {
+  min-height: 0;
+}
+
+.assistant-chat-composer[data-awaiting-confirmation="true"] textarea {
+  min-height: 2.5rem;
+}
+
 @container assistant (min-width: 900px) {
   .assistant-dialogue-layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 20rem;
-    overflow: hidden;
     padding: 1.5rem;
-  }
-
-  .assistant-chat-panel {
-    min-height: 0;
-    height: auto;
-  }
-
-  .assistant-conversation-sidebar {
-    min-height: 0;
-  }
-
-  .assistant-confirmation-card {
-    max-height: none;
   }
 }

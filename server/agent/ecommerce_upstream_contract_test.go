@@ -10,7 +10,7 @@ import (
 	"github.com/anbanai/anban-creator/server/agentpack"
 )
 
-const ecommerceUpstreamPath = "third_party/ecommerce-visual-copywriting-skill"
+const ecommerceUpstreamPath = "skills/ecommerce-visual-copywriting-skill"
 
 func TestEcommerceUpstreamSubmoduleIsPinnedReadOnly(t *testing.T) {
 	root := repoRoot(t)
@@ -237,7 +237,7 @@ func TestEcommerceRuntimeProvidesPythonForUpstreamScripts(t *testing.T) {
 		"apt-get -o Acquire::Retries=5",
 		"ln -sf /usr/bin/python3 /usr/local/bin/python",
 		"COPY harness/ /anbanai/",
-		"test -f /anbanai/third_party/ecommerce-visual-copywriting-skill/SKILL.md",
+		"test -f /anbanai/skills/ecommerce-visual-copywriting-skill/SKILL.md",
 		"ENV CLAUDE_PLUGIN_ROOT=/anbanai",
 	} {
 		if !strings.Contains(body, want) {

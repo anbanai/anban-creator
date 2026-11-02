@@ -37,7 +37,7 @@ func TestManagedAgentsOwnDynamicLifecycleReporting(t *testing.T) {
 				wantVersion = "1.0.0"
 			}
 			if pack.ID == "wechat-article" || pack.ID == "article" {
-					wantVersion = "2.0.17"
+				wantVersion = "2.0.17"
 			}
 			if pack.ID == "wechat-picture" {
 				wantVersion = "1.0.9"
@@ -142,6 +142,9 @@ func TestSkillsDoNotOwnTaskLifecycle(t *testing.T) {
 			return err
 		}
 		if entry.IsDir() || entry.Name() != "SKILL.md" {
+			return nil
+		}
+		if isUpstreamSkillFile(path) {
 			return nil
 		}
 		body := readRepoFile(t, path)
