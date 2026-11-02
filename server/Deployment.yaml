@@ -234,6 +234,18 @@ spec:
                 secretKeyRef:
                   name: anban-billing-admin-api-key
                   key: api-key
+            - name: ANBAN_REDFOX_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anban-agent-profile-providers
+                  key: redfox-api-key
+                  optional: true
+            - name: ANBAN_REDFOX_AGENT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anban-agent-profile-providers
+                  key: redfox-agent-api-key
+                  optional: true
             - name: ANBAN_AGENT_IMAGE_PULL_SECRET
               value: "${imagePullSecret}"
           # Optional so existing installations can deploy with onboarding disabled.

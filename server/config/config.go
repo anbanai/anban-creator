@@ -400,8 +400,17 @@ func joinConfigErrors(errs []string) error {
 }
 
 type TrendsConfig struct {
-	TTL     time.Duration `yaml:"ttl"`
-	Timeout time.Duration `yaml:"timeout"`
+	Provider string             `yaml:"provider"`
+	TTL      time.Duration      `yaml:"ttl"`
+	Timeout  time.Duration      `yaml:"timeout"`
+	RedFox   TrendsRedFoxConfig `yaml:"redfox"`
+}
+
+type TrendsRedFoxConfig struct {
+	Endpoint    string        `yaml:"endpoint"`
+	APIKey      string        `yaml:"api_key" json:"-"`
+	AgentAPIKey string        `yaml:"agent_api_key" json:"-"`
+	Timeout     time.Duration `yaml:"timeout"`
 }
 
 // SearchConfig controls Server-owned search capabilities. Credentials are
@@ -1650,6 +1659,12 @@ func (c *Config) applyDefaults() {
 	applyRateLimitTierDefaults(&c.RateLimit.SendCode, 5, 10*time.Minute)
 	applyRateLimitTierDefaults(&c.RateLimit.Agent, 300, time.Minute)
 	applyRateLimitTierDefaults(&c.RateLimit.Admin, 10, time.Minute)
+	if strings.TrimSpace(c.Trends.Provider) == "" {
+		c.Trends.Provider = "default"
+	}
+	if c.Trends.RedFox.Endpoint == "" {
+		c.Trends.RedFox.Endpoint = "https://redfox.hk/story/api/hotKeyword/list"
+	}
 	if strings.TrimSpace(c.ArticleResources.LifecycleMode) == "" {
 		c.ArticleResources.LifecycleMode = "legacy"
 	}
@@ -1824,6 +1839,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Trends.Timeout == 0 {
 		c.Trends.Timeout = 8 * time.Second
+	}
+	if c.Trends.RedFox.Timeout == 0 {
+		c.Trends.RedFox.Timeout = c.Trends.Timeout
 	}
 	if c.JWT.AccessExpiry == "" {
 		c.JWT.AccessExpiry = "24h"
@@ -2396,6 +2414,29 @@ func (c *Config) Validate() error {
 	}
 	if c.Trends.Timeout <= 0 {
 		errs = append(errs, "trends.timeout must be positive")
+	}
+	trendsProvider := strings.ToLower(strings.TrimSpace(c.Trends.Provider))
+	if trendsProvider == "" {
+		trendsProvider = "default"
+	}
+	if trendsProvider != "default" && trendsProvider != "redfox" {
+		errs = append(errs, fmt.Sprintf("trends.provider %q is unsupported", c.Trends.Provider))
+	}
+	if trendsProvider == "redfox" {
+		endpoint := strings.TrimSpace(c.Trends.RedFox.Endpoint)
+		parsed, err := url.Parse(endpoint)
+		if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			errs = append(errs, "trends.redfox.endpoint must be an absolute HTTPS URL without credentials, query, or fragment")
+		}
+		apiKey := strings.TrimSpace(c.Trends.RedFox.APIKey)
+		if apiKey == "" {
+			errs = append(errs, "trends.redfox.api_key is required when trends.provider is redfox")
+		} else if strings.ContainsAny(apiKey, "\r\n") || len(apiKey) > 4096 {
+			errs = append(errs, "trends.redfox.api_key contains invalid characters or is too long")
+		}
+		if c.Trends.RedFox.Timeout <= 0 {
+			errs = append(errs, "trends.redfox.timeout must be positive when trends.provider is redfox")
+		}
 	}
 	// Capability-level configuration is the current contract. Keep validation
 	// independent per capability so a disabled Fetch or Images route never

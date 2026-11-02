@@ -39,13 +39,28 @@ type PlanningIdentity struct {
 	Missing       []string `json:"missing"`
 }
 type PlanningSource struct {
-	InternalReference *PlanningAnalyticsRef `json:"internal_reference,omitempty"`
-	ID                string                `json:"id"`
-	OperationID       string                `json:"operation_id"`
-	URL               string                `json:"url"`
-	PublishedAt       string                `json:"published_at"`
-	FetchedAt         string                `json:"fetched_at"`
-	Facts             []string              `json:"facts"`
+	InternalReference *PlanningAnalyticsRef   `json:"internal_reference,omitempty"`
+	ID                string                  `json:"id"`
+	OperationID       string                  `json:"operation_id"`
+	URL               string                  `json:"url"`
+	PublishedAt       string                  `json:"published_at"`
+	FetchedAt         string                  `json:"fetched_at"`
+	Facts             []string                `json:"facts"`
+	RedFoxEvidence    *PlanningRedFoxEvidence `json:"redfox_evidence,omitempty"`
+}
+
+// PlanningRedFoxEvidence preserves the provider metadata required by the
+// Agent research contract without allowing credentials or provider-specific
+// response blobs into the Server-owned planning artifact.
+type PlanningRedFoxEvidence struct {
+	SchemaVersion  string         `json:"schema_version"`
+	DataSource     string         `json:"data_source"`
+	Query          map[string]any `json:"query"`
+	FetchedAt      string         `json:"fetched_at"`
+	Freshness      string         `json:"freshness"`
+	SourceURL      string         `json:"source_url"`
+	MissingFields  []string       `json:"missing_fields"`
+	FallbackReason string         `json:"fallback_reason"`
 }
 type PlanningResearchEvidence struct {
 	PlanningIdentity

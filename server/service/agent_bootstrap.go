@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/url"
 	"path"
 	"path/filepath"
 	"reflect"
@@ -96,6 +97,8 @@ type AgentBootstrapConfig struct {
 	MontageEnv              map[string]string
 	VideoEdit               srvconfig.VideoEditConfig
 	TalkingHeadEditor       srvconfig.TalkingHeadEditorConfig
+	RedFoxAgentAPIKey       string
+	RedFoxAgentEndpoint     string
 	Registry                *AgentProfileRegistry
 	ProjectMemory           ProjectMemoryReader
 }
@@ -870,7 +873,34 @@ func (s *AgentBootstrapService) runtimeEnv(task *model.Task) map[string]string {
 		}
 		return env
 	}
-	return s.montageEnv(task)
+	env := s.montageEnv(task)
+	if task != nil && isRedFoxResearchTask(task.Type) && strings.TrimSpace(s.cfg.RedFoxAgentAPIKey) != "" {
+		if env == nil {
+			env = make(map[string]string)
+		}
+		env["REDFOX_API_KEY"] = strings.TrimSpace(s.cfg.RedFoxAgentAPIKey)
+		if baseURL := redFoxBaseURL(s.cfg.RedFoxAgentEndpoint); baseURL != "" {
+			env["REDFOX_API_BASE_URL"] = baseURL
+		}
+	}
+	return env
+}
+
+func redFoxBaseURL(endpoint string) string {
+	parsed, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
+}
+
+func isRedFoxResearchTask(taskType string) bool {
+	switch taskType {
+	case model.TaskTypeWechatArticle, model.PlatformSeednote, model.TaskTypeViralAnalysis, model.TaskTypeContentResearch:
+		return true
+	default:
+		return false
+	}
 }
 
 // buildTopicRadarFiles materializes the frozen Topic Radar task input the

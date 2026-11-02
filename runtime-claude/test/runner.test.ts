@@ -116,15 +116,30 @@ describe("validateManagedInit", () => {
     expect(() => validateManagedInit({ type: "system", subtype: "init", mcp_servers: [{ name: "anban", status: "connected" }], plugins: [{ name: "anban", path: "/anbanai" }], tools: ["mcp__anban__finalize_task_title", "mcp__anban__list_project_titles"], skills: [] }, "wechat-article")).toThrow("anban:humanizer");
   });
 
+  test("requires the RedFox MCP for research task types", () => {
+    const message = {
+      type: "system" as const,
+      subtype: "init" as const,
+      mcp_servers: [{ name: "anban", status: "connected" as const }, { name: "redfox", status: "connected" as const }],
+      plugins: [{ name: "anban", path: "/anbanai" }],
+      tools: ["mcp__anban__finalize_task_title", "mcp__anban__list_project_titles", "mcp__redfox__redfox_research"],
+      skills: ["anban:humanizer", "anban:redfox-research", "anban:portrait-cover-design"],
+    };
+    expect(() => validateManagedInit(message, "wechat-article")).not.toThrow();
+    expect(() => validateManagedInit({ ...message, mcp_servers: [message.mcp_servers[0]] }, "wechat-article")).toThrow("redfox");
+    expect(() => validateManagedInit({ ...message, tools: message.tools.filter((tool) => tool !== "mcp__redfox__redfox_research") }, "wechat-article")).toThrow("redfox_research");
+  });
+
   test("requires the article title persistence capability", () => {
     const message = {
       type: "system" as const,
       subtype: "init" as const,
-      mcp_servers: [{ name: "anban", status: "connected" as const }],
+      mcp_servers: [{ name: "anban", status: "connected" as const }, { name: "redfox", status: "connected" as const }],
       plugins: [{ name: "anban", path: "/anbanai" }],
       tools: ["mcp__anban__finalize_task_title", "mcp__anban__list_project_titles"],
-      skills: ["anban:humanizer", "anban:portrait-cover-design"],
+      skills: ["anban:humanizer", "anban:redfox-research", "anban:portrait-cover-design"],
     };
+    message.tools.push("mcp__redfox__redfox_research");
     expect(() => validateManagedInit(message, "wechat-article")).not.toThrow();
     expect(() => validateManagedInit({ ...message, tools: ["mcp__anban__list_project_titles"] }, "wechat-article")).toThrow("finalize_task_title");
     expect(() => validateManagedInit({ ...message, tools: ["mcp__anban__finalize_task_title"] }, "wechat-article")).toThrow("list_project_titles");
@@ -134,7 +149,7 @@ describe("validateManagedInit", () => {
     const message = {
       type: "system" as const,
       subtype: "init" as const,
-      mcp_servers: [{ name: "anban", status: "connected" as const }],
+      mcp_servers: [{ name: "anban", status: "connected" as const }, { name: "redfox", status: "connected" as const }],
       plugins: [{ name: "anban", path: "/anbanai" }],
       tools: [
         "mcp__anban__analyze_image",
@@ -144,9 +159,11 @@ describe("validateManagedInit", () => {
         "mcp__anban__get_project_profile",
         "mcp__anban__list_project_titles",
         "mcp__anban__submit_agent_feedback",
+        "mcp__redfox__redfox_research",
       ],
       skills: [
         "anban:seednote-research",
+        "anban:redfox-research",
         "anban:seednote-viral-analysis",
         "anban:seednote-writing",
         "anban:seednote-visual-design",
@@ -163,6 +180,7 @@ describe("validateManagedInit", () => {
     expect(() => validateManagedInit(message, "seednote")).toThrow("anban:seednote-research");
     message.skills = [
       "anban:seednote-research",
+      "anban:redfox-research",
       "anban:seednote-viral-analysis",
       "anban:seednote-writing",
       "anban:seednote-visual-design",
@@ -174,15 +192,17 @@ describe("validateManagedInit", () => {
     const message = {
       type: "system" as const,
       subtype: "init" as const,
-      mcp_servers: [{ name: "anban", status: "connected" as const }],
+      mcp_servers: [{ name: "anban", status: "connected" as const }, { name: "redfox", status: "connected" as const }],
       plugins: [{ name: "anban", path: "/anbanai" }],
       tools: [
         "mcp__anban__get_project_profile",
         "mcp__anban__list_project_titles",
         "mcp__anban__submit_agent_feedback",
+        "mcp__redfox__redfox_research",
       ],
       skills: [
         "anban:seednote-research",
+        "anban:redfox-research",
         "anban:seednote-viral-analysis",
       ],
     };
@@ -210,7 +230,7 @@ describe("validateManagedInit", () => {
 
   test("does not implicitly require legacy progress for other managed task types", () => {
     const taskTypes = [
-      { taskType: "wechat-article", tools: ["finalize_task_title", "list_project_titles"], skills: ["anban:humanizer", "anban:portrait-cover-design"] },
+      { taskType: "wechat-article", tools: ["finalize_task_title", "list_project_titles"], skills: ["anban:humanizer", "anban:redfox-research", "anban:portrait-cover-design"] },
       { taskType: "ecommerce", tools: ["get_project_profile"], skills: ["anban:humanizer"] },
       { taskType: "moments", tools: ["get_project_profile"], skills: [] },
     ];
@@ -218,9 +238,9 @@ describe("validateManagedInit", () => {
       expect(() => validateManagedInit({
         type: "system",
         subtype: "init",
-        mcp_servers: [{ name: "anban", status: "connected" }],
+        mcp_servers: fixture.taskType === "wechat-article" ? [{ name: "anban", status: "connected" }, { name: "redfox", status: "connected" }] : [{ name: "anban", status: "connected" }],
         plugins: [{ name: "anban", path: "/anbanai" }],
-        tools: fixture.tools.map((tool) => `mcp__anban__${tool}`),
+        tools: [...fixture.tools.map((tool) => `mcp__anban__${tool}`), ...(fixture.taskType === "wechat-article" ? ["mcp__redfox__redfox_research"] : [])],
         skills: fixture.skills,
       }, fixture.taskType)).not.toThrow();
     }
@@ -287,10 +307,10 @@ describe("validateManagedInit", () => {
     const message = {
       type: "system" as const,
       subtype: "init" as const,
-      mcp_servers: [{ name: "anban", status: "connected" as const }],
+      mcp_servers: taskType === "wechat-article" || taskType === "seednote" ? [{ name: "anban", status: "connected" as const }, { name: "redfox", status: "connected" as const }] : [{ name: "anban", status: "connected" as const }],
       plugins: [{ name: "anban", path: "/anbanai" }],
-      tools: ["analyze_image", "claim_topic", "finalize_task_title", "generate_image", "get_project_profile", "list_project_titles", "submit_agent_feedback"].map((tool) => `mcp__anban__${tool}`),
-      skills: ["anban:humanizer", "anban:seednote-research", "anban:seednote-viral-analysis", "anban:seednote-writing", "anban:seednote-visual-design", "anban:portrait-cover-design"],
+      tools: ["analyze_image", "claim_topic", "finalize_task_title", "generate_image", "get_project_profile", "list_project_titles", "submit_agent_feedback"].map((tool) => `mcp__anban__${tool}`).concat(taskType === "wechat-article" || taskType === "seednote" ? ["mcp__redfox__redfox_research"] : []),
+      skills: ["anban:humanizer", "anban:seednote-research", "anban:redfox-research", "anban:seednote-viral-analysis", "anban:seednote-writing", "anban:seednote-visual-design", "anban:portrait-cover-design"],
     };
     expect(() => validateManagedInit(message, taskType)).not.toThrow();
     expect(() => validateManagedInit({
@@ -366,15 +386,16 @@ describe("buildQueryOptions", () => {
     }
 
     const articleWorker = article.agents?.["managed-readonly-worker"];
-    expect(articleWorker?.tools).toEqual(["Read", "Glob", "Grep", "mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends"]);
-    expect(articleWorker?.skills).toEqual(["article-research", "trending-topics", "seo-optimization"]);
+    expect(articleWorker?.tools).toEqual(["Read", "Glob", "Grep", "mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends", "mcp__redfox__redfox_research"]);
+    expect(articleWorker?.skills).toEqual(["article-research", "trending-topics", "redfox-research", "seo-optimization"]);
     for (const options of [seednote, viral]) {
       const worker = options.agents?.["managed-readonly-worker"];
       expect(worker?.tools).toEqual([
         "Read", "Glob", "Grep",
         "mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends",
+        "mcp__redfox__redfox_research",
       ]);
-      expect(worker?.skills).toEqual(["seednote-research", "trending-topics", "seednote-viral-analysis"]);
+      expect(worker?.skills).toEqual(["seednote-research", "trending-topics", "redfox-research", "seednote-viral-analysis"]);
     }
 
     const ineligible = runner.buildQueryOptions({ ...validBootstrap(), task_type: "montage" }, "/workspace");
@@ -1138,6 +1159,40 @@ describe("buildExecutionEnvironment", () => {
     expect(environment.ELEVENLABS_API_KEY).toBe("server-managed-key");
     expect(environment).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(environment.PATH).toBe("/usr/bin");
+  });
+
+  test("injects RedFox only for research task types", () => {
+    const article = buildExecutionEnvironment(
+      { REDFOX_API_KEY: "host-key", REDFOX_API_BASE_URL: "https://attacker.invalid" },
+      {
+        task_type: "wechat-article",
+        task_id: "task-1",
+        execution_id: "execution-1",
+        project_id: "project-1",
+        env: { REDFOX_API_KEY: "server-managed-redfox", REDFOX_API_BASE_URL: "https://redfox.example" },
+        execution_profile: { envs: { ANTHROPIC_MODEL: "runtime-model" } },
+      },
+      "https://server.example.com",
+      "execution-jwt",
+    );
+    expect(article.REDFOX_API_KEY).toBe("server-managed-redfox");
+    expect(article.REDFOX_API_BASE_URL).toBe("https://redfox.example");
+
+    const montage = buildExecutionEnvironment(
+      {},
+      {
+        task_type: "montage",
+        task_id: "task-1",
+        execution_id: "execution-1",
+        project_id: "project-1",
+        env: { REDFOX_API_KEY: "should-not-be-injected" },
+        execution_profile: { envs: { ANTHROPIC_MODEL: "runtime-model" } },
+      },
+      "https://server.example.com",
+      "execution-jwt",
+    );
+    expect(montage).not.toHaveProperty("REDFOX_API_KEY");
+    expect(montage).not.toHaveProperty("REDFOX_API_BASE_URL");
   });
 
   test("removes pinned SDK credential, provider routing, and model inputs inherited from the host", () => {
