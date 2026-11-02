@@ -1363,6 +1363,56 @@ describe('AssistantWorkspace', () => {
     expect(await screen.findByText('人设已在其他窗口更新，输入已保留，请刷新后核对再继续。')).toBeInTheDocument()
     expect(screen.getByRole('region', { name: '保存人设' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保存人设' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '当前人设' })).not.toBeInTheDocument()
+  })
+
+  it.each(['new', 'existing'] as const)('returns home after saving a %s persona and does not restore the completed conversation', async (kind) => {
+    const persona = activePersona('project-new', '新画像')
+    if (kind === 'existing') mocks.projectsList.mockResolvedValue([persona])
+    const view = renderPage({ modeId: 'profile', ...(kind === 'existing' ? { projectId: persona.id } : {}) })
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '更新人设的表达风格' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await screen.findByRole('button', { name: '保存人设' })
+    mocks.projectsList.mockResolvedValue([persona])
+    fireEvent.click(screen.getByRole('button', { name: '保存人设' }))
+
+    expect(await screen.findByRole('region', { name: '当前人设' })).toHaveTextContent('新画像')
+    expect(screen.getByRole('status', { name: '当前模式' })).toHaveTextContent('创作模式')
+    expect(screen.queryByText('更新人设的表达风格')).not.toBeInTheDocument()
+    expect(screen.queryByText('已创建任务')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '查看任务' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '保存人设' })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('')
+    expect(mocks.closeWorkspace).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('anban:assistant-workspace')).toBeNull()
+    view.unmount()
+
+    renderPage()
+    expect(await screen.findByRole('heading', { name: '新画像' })).toBeInTheDocument()
+    expect(screen.queryByText('更新人设的表达风格')).not.toBeInTheDocument()
+    expect(mocks.getInteractionSnapshot).not.toHaveBeenCalled()
+  })
+
+  it('returns home when a refreshed profile conversation was already saved', async () => {
+    mocks.projectsList.mockResolvedValue([activePersona('project-new', '新画像')])
+    sessionStorage.setItem('anban:assistant-workspace', JSON.stringify({
+      workspace: { id: 'workspace-1', mode_id: 'profile', project_id: 'project-new', runtime_status: 'running', expires_at: '' },
+      mode: 'profile', projectId: 'project-new',
+      messagesByMode: { profile: [{ id: 'message-1', role: 'user', text: '已保存的旧对话', order: 1 }] },
+    }))
+    mocks.getInteractionSnapshot.mockResolvedValueOnce({
+      interaction_id: 'workspace-1', mode_id: 'profile', project_id: 'project-new', lifecycle: 'completed', generation: 1,
+      runtime_status: 'running', expires_at: '', last_activity_at: '', available_actions: [],
+      drafts: [{ draft_id: 'draft-1', mode_id: 'profile', revision: 1, payload: {}, payload_digest: 'digest-1', ready: true, confirmation_state: 'consumed' }],
+      commit_result: { status: 'created', result: { mode_id: 'profile', status: 'committed', project: { id: 'project-new' } } },
+    })
+    renderPage()
+
+    expect(await screen.findByRole('region', { name: '当前人设' })).toHaveTextContent('新画像')
+    expect(screen.getByRole('status', { name: '当前模式' })).toHaveTextContent('创作模式')
+    expect(screen.queryByText('已保存的旧对话')).not.toBeInTheDocument()
+    expect(screen.queryByText('已创建任务')).not.toBeInTheDocument()
+    expect(mocks.workspaceCommit).not.toHaveBeenCalled()
   })
 
   it('restores a deferred message when the runtime reports an asynchronous send failure', async () => {
