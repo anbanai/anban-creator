@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { portraitProgress, portraitStatus, portraitSummary } from '@/lib/portrait-library'
-import { Archive, Brain, Lightbulb, ListChecks, RotateCcw, Settings, SquarePen, ScanFace } from 'lucide-react'
+import { Archive, Brain, GalleryHorizontalEnd, Lightbulb, RotateCcw, Settings, SquarePen, ScanFace } from 'lucide-react'
 import type { Project, ProjectStats } from '@/types'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -74,7 +74,7 @@ export function ProjectCard({ project, stats, onEdit, onChannelConfig, onUpdateP
             </div>
           </section>
         )}
-        <div className="mt-auto flex flex-wrap justify-end gap-1" aria-label={`人设操作：${project.name}`}>
+        <div className="mt-auto flex flex-nowrap justify-end gap-0" aria-label={`人设操作：${project.name}`}>
           {supportsProfileLab(project) && (
             <Tooltip>
               <TooltipTrigger render={<Link to={`/portraits/${project.id}`} className={buttonVariants({ variant: 'ghost', size: 'icon-md' })} aria-label={`查看画像：${project.name}`} />}>
@@ -129,7 +129,7 @@ export function ProjectCard({ project, stats, onEdit, onChannelConfig, onUpdateP
           )}
           <Tooltip>
             <TooltipTrigger render={<Link to={`/tasks?project_id=${encodeURIComponent(project.id)}`} className={buttonVariants({ variant: 'ghost', size: 'icon-md' })} aria-label={`查看作品：${project.name}`} />}>
-              <ListChecks />
+              <GalleryHorizontalEnd />
             </TooltipTrigger>
             <TooltipContent>查看作品</TooltipContent>
           </Tooltip>

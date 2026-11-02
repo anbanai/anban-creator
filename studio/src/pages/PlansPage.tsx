@@ -8,7 +8,7 @@ import {
   Inbox,
   ChevronLeft,
   ChevronRight,
-  ListTodo,
+  GalleryHorizontalEnd,
   Pause,
   SquarePen,
   Play,
@@ -471,7 +471,7 @@ export default function PlansPage() {
                 <TooltipTrigger
                   render={<Link to={`/tasks?plan_id=${encodeURIComponent(plan.id)}`} aria-label={`查看作品：${planLabel}`} className={buttonVariants({ variant: 'ghost', size: 'icon-md' })} />}
                 >
-                  <ListTodo className="size-4" />
+                  <GalleryHorizontalEnd className="size-4" />
                 </TooltipTrigger>
                 <TooltipContent>查看作品</TooltipContent>
               </Tooltip>

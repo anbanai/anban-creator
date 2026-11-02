@@ -265,8 +265,12 @@ describe('ProjectCard', () => {
     render(<ProjectCard project={project()} />)
 
     const workList = screen.getByRole('link', { name: '查看作品：公众号人设' })
+    const actions = screen.getByLabelText('人设操作：公众号人设')
     expect(workList).toBeInTheDocument()
-    expect(workList.closest('[aria-label="人设操作：公众号人设"]')).toContainElement(workList)
+    expect(workList.querySelector('svg')).toHaveClass('lucide-gallery-horizontal-end')
+    expect(actions).toContainElement(workList)
+    expect(actions).toHaveClass('flex-nowrap', 'gap-0')
+    expect(actions).not.toHaveClass('flex-wrap')
     expect(screen.queryByRole('button', { name: '查看反馈闭环' })).not.toBeInTheDocument()
   })
 })
