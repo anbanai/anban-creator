@@ -453,17 +453,19 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!).workspace.lifecycle).toBe('active'))
   })
 
-  it('clears the prepared persona when starting a new profile without reopening SSE', async () => {
+  it('resolves a separate interaction without a persona when starting a new profile', async () => {
     bootstrapFivePersonas()
+    mocks.createWorkspace.mockImplementation(async (request) => preparedWorkspace({ ...request, id: request.project_id ? 'workspace-1' : 'new-profile-workspace' }))
     renderPage()
     await waitFor(() => expect(mocks.streamCalls).toHaveBeenCalledTimes(1))
     fireEvent.click(screen.getByRole('button', { name: '创建新人设' }))
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '建立新人设' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'profile', '建立新人设', false, { mode_id: 'profile', project_id: '', content_id: '' }))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('new-profile-workspace', 'profile', '建立新人设', false, { mode_id: 'profile', project_id: '', content_id: '' }))
     expect(mocks.closeWorkspace).not.toHaveBeenCalled()
     expect(mocks.switchWorkspaceMode).not.toHaveBeenCalled()
-    expect(mocks.streamCalls).toHaveBeenCalledTimes(1)
+    expect(mocks.streamCalls).toHaveBeenCalledTimes(2)
+    expect(mocks.createWorkspace).toHaveBeenLastCalledWith({ mode_id: 'profile', prepare_only: true }, expect.any(String))
     await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!).workspace.project_id).toBe(''))
   })
 
@@ -479,7 +481,8 @@ describe('AssistantWorkspace', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '复盘第二篇' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'review', '复盘第二篇', false, { mode_id: 'review', project_id: 'draft-ready', content_id: 'work-2' }))
-    expect(mocks.createWorkspace).toHaveBeenCalledTimes(1)
+    expect(mocks.createWorkspace).toHaveBeenCalledTimes(2)
+    expect(mocks.createWorkspace).toHaveBeenLastCalledWith({ mode_id: 'review', project_id: 'draft-ready', content_id: 'work-2', prepare_only: true }, expect.any(String))
     expect(mocks.streamCalls).toHaveBeenCalledTimes(1)
   })
 
@@ -495,6 +498,89 @@ describe('AssistantWorkspace', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1) })
     expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'profile', '网络恢复后继续', false, expect.any(Object))
     expect(mocks.createWorkspace).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['profile', 'creation'] as const)('resolves the selected persona scope before starting a %s conversation', async (mode) => {
+    bootstrapFivePersonas()
+    mocks.createWorkspace.mockImplementation(async (request) => preparedWorkspace({ ...request, id: `workspace-${request.project_id}` }))
+    mocks.workspaceMessage.mockImplementation(async (id, _mode, _text, _force, context) => {
+      if (id !== `workspace-${context.project_id}`) throw Object.assign(new Error('active scope conflict'), { response: { status: 503 } })
+    })
+    renderPage()
+    await waitFor(() => expect(mocks.streamCalls).toHaveBeenCalledWith('workspace-draft-ready', expect.any(Object)))
+    fireEvent.click(screen.getByRole('button', { name: mode === 'profile' ? '调整人设：空画像' : '选择人设：空画像' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-draft-empty', mode, expect.stringContaining('开始创作'), false, { mode_id: mode, project_id: 'draft-empty', content_id: '' }))
+    expect(mocks.workspaceMessage).toHaveBeenCalledTimes(1)
+    expect(mocks.closeWorkspace).not.toHaveBeenCalled()
+    expect(await screen.findByRole('region', { name: '对话' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '首页人设选择' })).not.toBeInTheDocument()
+  })
+
+  it('keeps a failed first message visible after recovering a still prepared interaction', async () => {
+    bootstrapFivePersonas()
+    mocks.streamEventsEnabled = false
+    mocks.createWorkspace.mockImplementation(async (request) => preparedWorkspace({ ...request, id: `workspace-${request.project_id}` }))
+    mocks.getInteractionSnapshot.mockResolvedValue(preparedWorkspace({ id: 'workspace-draft-empty', mode_id: 'creation', project_id: 'draft-empty' }).interaction_snapshot)
+    mocks.workspaceMessage.mockRejectedValueOnce(Object.assign(new Error('Service Unavailable'), { response: { status: 503 } }))
+    renderPage()
+    await waitFor(() => expect(mocks.streamCalls).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: '选择人设：空画像' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    await waitFor(() => expect(mocks.getInteractionSnapshot).toHaveBeenCalledTimes(1))
+    expect(await screen.findByRole('alert')).toHaveTextContent('消息尚未发送，输入已保留，请重试。')
+    expect(screen.getByRole('region', { name: '对话' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('开始创作')
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
+    expect(mocks.workspaceMessage).toHaveBeenCalledTimes(1)
+    expect(mocks.getInteractionSnapshot).toHaveBeenCalledWith('workspace-draft-empty')
+    expect(screen.getByRole('region', { name: '人设信息' })).toHaveTextContent('空画像')
+  })
+
+  it('resumes the selected persona active interaction instead of changing another scope', async () => {
+    bootstrapFivePersonas()
+    const target = preparedWorkspace({ id: 'existing-target', mode_id: 'creation', project_id: 'draft-empty' })
+    mocks.createWorkspace
+      .mockResolvedValueOnce(preparedWorkspace({ mode_id: 'creation', project_id: 'draft-ready' }))
+      .mockResolvedValueOnce({ ...target, lifecycle: 'active', interaction_snapshot: { ...target.interaction_snapshot!, lifecycle: 'active' } })
+    mocks.streamEventsEnabled = false
+    renderPage()
+    await waitFor(() => expect(mocks.streamCalls).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: '选择人设：空画像' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '继续创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('existing-target', 'creation', expect.stringContaining('继续创作')))
+    expect(mocks.workspaceMessage).toHaveBeenCalledTimes(1)
+    expect(mocks.switchWorkspaceMode).not.toHaveBeenCalled()
+    expect(mocks.streamCalls).toHaveBeenLastCalledWith('existing-target', expect.any(Object))
+    expect(screen.getByRole('region', { name: '人设信息' })).toHaveTextContent('空画像')
+  })
+
+  it('restores a selected persona pending plan without submitting the new message', async () => {
+    bootstrapFivePersonas()
+    const target = preparedWorkspace({ id: 'existing-target', mode_id: 'creation', project_id: 'draft-empty' })
+    mocks.createWorkspace
+      .mockResolvedValueOnce(preparedWorkspace({ mode_id: 'creation', project_id: 'draft-ready' }))
+      .mockResolvedValueOnce({ ...target, lifecycle: 'needs_confirmation', interaction_snapshot: {
+        ...target.interaction_snapshot!, lifecycle: 'needs_confirmation', available_actions: ['confirm_draft', 'continue_editing'],
+        drafts: [{ ...creationDraftIdentity, mode_id: 'creation', payload: { plan: { goal: '已有的创作方案' } }, ready: true }],
+      } })
+    mocks.streamEventsEnabled = false
+    renderPage()
+    await waitFor(() => expect(mocks.streamCalls).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: '调整人设：空画像' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '新的想法' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(await screen.findByRole('button', { name: '开始创作' })).toBeInTheDocument()
+    expect(screen.getByRole('status', { name: '当前模式' })).toHaveTextContent('创作模式')
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('新的想法')
+    expect(mocks.workspaceMessage).not.toHaveBeenCalled()
   })
 
   it('recovers a timed-out message through snapshot and event replay without resending', async () => {
@@ -548,7 +634,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('开始创作'))
-    fireEvent.click(screen.getByRole('button', { name: '选择人设：空画像' }))
+    expect(screen.queryByRole('region', { name: '首页人设选择' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('已保存草稿'))
