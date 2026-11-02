@@ -1,4 +1,4 @@
-FROM node:24.22.0-bookworm-slim AS builder
+FROM crpi-671lgv9lrdyll4t9.cn-chengdu.personal.cr.aliyuncs.com/bx_anbanai/node:24.22.0-bookworm-slim AS builder
 
 WORKDIR /app/runtime-claude
 COPY runtime-claude/package.json runtime-claude/package-lock.json ./
@@ -8,7 +8,7 @@ RUN npm run build && \
     grep -Fq 'X-Anban-Agent-Pack-Catalog-Digest' dist/bootstrap.js && \
     npm prune --omit=dev && test -d node_modules/@anthropic-ai/claude-agent-sdk
 
-FROM node:24.22.0-bookworm-slim
+FROM crpi-671lgv9lrdyll4t9.cn-chengdu.personal.cr.aliyuncs.com/bx_anbanai/node:24.22.0-bookworm-slim
 
 ARG HYPIT_REPO=https://github.com/hypit-ai/hypit.git
 ARG HYPIT_REF=dc2b7a8f31b1ef1443a79ca448548d69e3ceb6a0
