@@ -38,7 +38,7 @@ SERVER_CONFIG := server/config.yaml
 DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null || stat -L -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)
 
 .PHONY: all clean distclean test help lint fmt vet deps ci coverage \
-        server-build server-run server-dev server-test git-sync-setup humanizer-update creative-references-check creative-references-update \
+        server-build server-run server-dev server-test git-sync-setup humanizer-update creative-references-check creative-references-update ecommerce-upstream-check ecommerce-upstream-update \
         agent-pack-new agent-pack-generate agent-pack-check \
         runtime-claude-install runtime-claude-test runtime-claude-build \
         runtime-dsh-install runtime-dsh-test runtime-dsh-build \
@@ -104,6 +104,14 @@ creative-references-check:
 # Advance official creative-reference submodules and review their upstream diff.
 creative-references-update:
 	@scripts/update-creative-references.sh
+
+# Validate the bundled ecommerce upstream submodule and native plugin metadata.
+ecommerce-upstream-check:
+	@cd harness && make ecommerce-upstream-check
+
+# Advance the bundled ecommerce upstream submodule and review its upstream diff.
+ecommerce-upstream-update:
+	@scripts/update-ecommerce-upstream.sh
 
 # Scaffold, generate, and verify the canonical Agent Pack catalog. Pass
 # scaffold flags through ARGS, for example:
@@ -272,8 +280,10 @@ docker-talking-head-editor-agent-image: docker-agent-build-check
 docker-moments-agent-image: docker-agent-build-check
 	@docker build -f deploy/docker/Dockerfile.agent-moments -t $(MOMENTS_AGENT_IMAGE) .
 
-# Build the Ecommerce Agent image.
+# Build the Ecommerce Agent image. The image reads the pinned ecommerce upstream
+# submodule at runtime, so initialize the canonical plugin tree first.
 docker-ecommerce-agent-image: docker-agent-build-check
+	@git submodule update --init --recursive -- harness
 	@docker build -f deploy/docker/Dockerfile.agent-ecommerce -t $(ECOMMERCE_AGENT_IMAGE) .
 
 # Build the minimal dedicated Profile Analysis Agent runtime.
@@ -389,6 +399,8 @@ help:
 	@echo "  make lint          - Lint code (requires golangci-lint)"
 	@echo "  make deps          - Download and tidy dependencies"
 	@echo "  make humanizer-update - Pull upstream Humanizer and sync all plugin copies"
+	@echo "  make ecommerce-upstream-check - Validate the pinned ecommerce upstream submodule"
+	@echo "  make ecommerce-upstream-update - Advance the pinned ecommerce upstream submodule"
 	@echo "  make agent-pack-new ARGS=... - Scaffold a canonical Agent Pack"
 	@echo "  make agent-pack-generate - Generate native Agents and Server Catalog"
 	@echo "  make agent-pack-check - Fail when generated Agent Pack assets drift"

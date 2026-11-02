@@ -2,7 +2,7 @@
   "packs": [
     {
       "id": "ecommerce",
-      "version": "2.0.6",
+      "version": "2.1.0",
       "kind": "plugin",
       "display_name": "电商设计",
       "description": "基于产品图片生成完整电商文案和视觉素材包。",
@@ -83,6 +83,12 @@
           "required": false
         },
         {
+          "role": "quality_gate",
+          "path": "output/quality-gate.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
           "role": "manifest",
           "path": "output/manifest.json",
           "mime_type": "application/json",
@@ -111,6 +117,11 @@
         {
           "role": "copywriting",
           "path": "output/copywriting.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "quality_gate",
+          "path": "output/quality-gate.md",
           "mime_type": "text/markdown"
         },
         {
@@ -159,7 +170,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "6e27c9d9a753a1155d43bc11976ddddccd13509c8f71b4a2a663dd918b3c9ef6"
+      "digest": "3d67a890972d69a997ebb3a7ccdfdd176653ce9c35cc5a0b7dcec7acc6a89151"
     },
     {
       "id": "content-planning",
