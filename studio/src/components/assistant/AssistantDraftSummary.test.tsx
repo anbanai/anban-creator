@@ -3,6 +3,29 @@ import { describe, expect, it } from 'vitest'
 import { AssistantDraftSummary } from './AssistantDraftSummary'
 
 describe('AssistantDraftSummary', () => {
+  it.each(['direct', 'payload'] as const)('shows the six profile dimensions and limits from a %s draft', (shape) => {
+    const payload = {
+      project: { name: '春茶笔记', platform: 'wechat', instructions: '只分享亲自尝试过的泡茶方法' },
+      profile: { dimensions: {
+        identity: { content: { positioning: '记录真实喝茶体验' } },
+        style: { content: { tone: '亲切自然' } },
+        audience: { content: { target_audience: '刚开始接触茶的新手' } },
+        platforms: { content: { description: '以公众号长文为主' } },
+        preferences: { content: { constraints: ['避免夸大健康功效'] } },
+        memory: { content: { notes: ['每周分享一款茶'] } },
+      }, analysis_limits: ['受众画像尚待实际数据验证'], follow_up_questions: ['后续是否增加短视频？'] },
+    }
+    render(<AssistantDraftSummary mode="profile" draft={shape === 'direct'
+      ? { revision: 1, ...payload }
+      : { revision: 1, project: { name: '过时名称' }, payload }} />)
+
+    for (const text of ['春茶笔记', '公众号', '只分享亲自尝试过的泡茶方法', '记录真实喝茶体验', '亲切自然', '刚开始接触茶的新手', '以公众号长文为主', '避免夸大健康功效', '每周分享一款茶', '受众画像尚待实际数据验证', '后续是否增加短视频？']) {
+      expect(screen.getByText(text)).toBeVisible()
+    }
+    expect(screen.queryByText('过时名称')).not.toBeInTheDocument()
+    expect(screen.queryByText('dimensions')).not.toBeInTheDocument()
+  })
+
   it('shows the authoritative creation plan with readable labels and a structured outline', () => {
     render(<AssistantDraftSummary mode="creation" draft={{
       revision: 1,

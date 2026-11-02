@@ -310,6 +310,11 @@ export default function AssistantWorkspace() {
   const routeState = (location.state ?? {}) as RouteState
   const routeHasContext = Boolean(routeState.modeId || routeState.projectId || routeState.contentId || routeState.checkpointId || routeState.initialMessage)
   const persisted = readPersistedWorkspace()
+  const startsNewWorkspace = routeHasContext && (!persisted?.workspace
+    || Boolean(routeState.initialMessage || routeState.checkpointId)
+    || Boolean(routeState.modeId && routeState.modeId !== persisted.workspace.mode_id)
+    || Boolean(routeState.projectId && routeState.projectId !== persisted.workspace.project_id)
+    || Boolean(routeState.contentId && routeState.contentId !== persisted.workspace.content_id))
   const bootstrapQuery = useQuery({ queryKey: ['assistant-bootstrap'], queryFn: api.assistant.bootstrap, staleTime: 30_000 })
   const queryClient = useQueryClient()
   const bootstrap = bootstrapQuery.data
@@ -319,7 +324,7 @@ export default function AssistantWorkspace() {
   const [composer, setComposer] = useState(routeState.initialMessage ?? persisted?.composer ?? '')
   const [attachments, setAttachments] = useState<PromptAttachment[]>([])
   const [executionProfile, setExecutionProfile] = useState<AgentExecutionProfileID | ''>('')
-  const [creationType, setCreationType] = useState(routeHasContext ? '' : persisted?.creationType ?? '')
+  const [creationType, setCreationType] = useState(startsNewWorkspace ? '' : persisted?.creationType ?? '')
   const [imageRatio, setImageRatio] = useState<ImageRatio>('auto')
   const [imageCapabilityKey, setImageCapabilityKey] = useState('')
   const [videoEditAssets, setVideoEditAssets] = useState<InputAttachment[]>([])
@@ -328,9 +333,9 @@ export default function AssistantWorkspace() {
   const [videoEditDefaults, setVideoEditDefaults] = useState<VideoEditDefaults>({})
   const [videoEditUploading, setVideoEditUploading] = useState(false)
   const [videoEditUploadFailed, setVideoEditUploadFailed] = useState(false)
-  const [workspace, setWorkspace] = useState<AssistantWorkspaceState | null>(() => routeHasContext ? null : persisted?.workspace ?? null)
+  const [workspace, setWorkspace] = useState<AssistantWorkspaceState | null>(() => startsNewWorkspace ? null : persisted?.workspace ?? null)
   const [newProfile, setNewProfile] = useState(false)
-  const [conversationPhase, setConversationPhase] = useState<'setup' | 'prepared' | 'active'>(() => routeHasContext ? 'setup' : persisted?.workspace?.lifecycle === 'prepared' ? 'prepared' : persisted?.workspace ? 'active' : 'setup')
+  const [conversationPhase, setConversationPhase] = useState<'setup' | 'prepared' | 'active'>(() => startsNewWorkspace ? 'setup' : persisted?.workspace?.lifecycle === 'prepared' ? 'prepared' : persisted?.workspace ? 'active' : 'setup')
   const [messagesByMode, setMessagesByMode] = useState<Record<string, Message[]>>(persisted?.messagesByMode ?? {})
   const [questionsByMode, setQuestionsByMode] = useState<Record<string, QuestionBatch[]>>(persisted?.questionsByMode ?? {})
   const [draftByMode, setDraftByMode] = useState<Record<string, Draft | null>>(persisted?.draftByMode ?? {})
@@ -365,7 +370,7 @@ export default function AssistantWorkspace() {
   const imageRatioContextKey = useRef<string | null>(null)
   const conversationOrder = useRef<Record<string, number>>({})
   const uncertainRetryRef = useRef<(() => void) | null>(null)
-  const initialSnapshotRequired = useRef(Boolean(!routeHasContext && persisted?.workspace))
+  const initialSnapshotRequired = useRef(Boolean(!startsNewWorkspace && persisted?.workspace))
 
   useEffect(() => {
     const generation = workspace?.generation
@@ -393,6 +398,16 @@ export default function AssistantWorkspace() {
     void api.assistant.getInteractionSnapshot(workspace.id).then((snapshot) => {
       if (cancelled) return
       initialSnapshotRequired.current = false
+      if (routeHasContext && (snapshot.lifecycle === 'completed' || snapshot.lifecycle === 'abandoned')) {
+        setWorkspace(null)
+        setConversationPhase('setup')
+        setMessagesByMode({})
+        setQuestionsByMode({})
+        setDraftByMode({})
+        setUncertainRetry(undefined)
+        dispatchInteraction({ type: 'restart' })
+        return
+      }
       setInteractionSnapshot(snapshot)
       setInteractionSnapshotReady(true)
       setWorkspace((current) => current ? { ...current, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, generation: snapshot.generation, runtime_status: snapshot.runtime_status, lifecycle: snapshot.lifecycle, expires_at: snapshot.expires_at } : current)
@@ -840,9 +855,14 @@ export default function AssistantWorkspace() {
           } else if (event.event === 'tool.result' && data.ok === false) {
             const callId = stringValue(data.call_id)
             if (callId) setQuestionsByMode((current) => ({ ...current, [eventMode]: (current[eventMode] ?? []).map((batch) => batch.callId === callId && !batch.answers ? { ...batch, closed: 'failed' } : batch) }))
+          } else if (event.event === 'question.answered') {
+            const callId = stringValue(data.call_id)
+            const answers = Array.isArray(data.answers) ? data.answers as DshQuestionAnswer['answers'] : undefined
+            if (callId && answers) setQuestionsByMode((current) => ({ ...current, [eventMode]: (current[eventMode] ?? []).map((item) => item.callId === callId ? { ...item, answers } : item) }))
           } else if (event.event === 'draft.ready') {
+            // Durable events contain metadata only; the snapshot owns their full payload.
             const stagedDraft = recordValue(data.draft) ?? recordValue(data.value)
-              ?? (data.ready === true || data.confirmation_token ? data : undefined)
+              ?? (data.durable !== true && (data.ready === true || data.confirmation_token) ? data : undefined)
             if (stagedDraft) {
               activateConversation()
               setDraftByMode((current) => ({ ...current, [eventMode]: stagedDraft }))
@@ -1573,33 +1593,32 @@ export default function AssistantWorkspace() {
           <Composer fadeAbove={false} value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || composerBlocked} /> : undefined} trailingTools={<>{composerMode}{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       ) : (
-        <div className="assistant-dialogue-layout assistant-scroll mx-auto min-h-0 w-full max-w-[1440px] min-w-0 flex-1">
+        <div className="assistant-dialogue-layout mx-auto min-h-0 w-full max-w-5xl min-w-0 flex-1">
         <section aria-label="对话" className="assistant-chat-panel flex min-w-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-          <header className="flex shrink-0 items-center gap-3 border-b border-border px-5 py-4">
-            <span className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary"><Bot className="size-5" /></span>
-            <div><h1 className="text-sm font-semibold">{modeLabel(mode)}对话</h1><p className="mt-0.5 text-xs text-muted-foreground">{mode === 'profile' ? '聊一聊你的定位、风格与创作方向' : mode === 'creation' ? '一起完善想法，准备好后开始创作' : '回顾作品表现，整理下一步建议'}</p></div>
+          <header role="region" aria-label="人设信息" className="shrink-0 border-b border-border/70 px-5 py-3 sm:px-7 sm:py-4">
+            <h1 className="sr-only">{modeLabel(mode)}对话</h1>
+            <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+              <div className="min-w-0 flex-1">{composerContextBar}</div>
+              <div className="flex shrink-0 items-center gap-3">
+                {selectedProject && <AgentIconStack agentIds={personaAgentIDs(selectedProject)} maxVisible={3} compact emptyLabel="还未选择创作类型" />}
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2.5 py-1 text-xs text-muted-foreground"><ModeIcon className="size-3.5" />{modeLabel(mode)}模式</span>
+              </div>
+            </div>
+            <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{selectedProject?.description || (selectedProject ? platformIntroduction(selectedProject.platform) : '通过对话，一起明确你的定位、表达风格和目标读者。')}</p>
+            {activeReviewSelectors}
           </header>
-          <div data-testid="assistant-conversation" className="assistant-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 md:px-5" aria-live="polite">
+          <div data-testid="assistant-conversation" className="assistant-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-7 sm:py-7" aria-live="polite">
             {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && (
               <VideoEditReviewResults query={reviewVideoQuery} />
             )}
-            <Conversation messages={activeMessages} questions={activeQuestions} responding={responding} disabled={conversationEnded || draftPending || interactionState.status === 'command_uncertain'} userAvatarURL={personaImageURL(selectedProject)} onAnswer={submitAnswers} />
+            <Conversation autoScroll={!draftPending} messages={activeMessages} questions={activeQuestions} responding={responding} disabled={conversationEnded || draftPending || interactionState.status === 'command_uncertain'} userAvatarURL={personaImageURL(selectedProject)} onAnswer={submitAnswers} />
+            {!conversationEnded && activeDraft && confirmationDraft && <DraftConfirmationCard attemptIssues={mode === 'creation' ? interactionState.blockingIssues : undefined} mode={mode} draft={confirmationDraft} committing={committing} confirmable={mode !== 'creation' || creationCanConfirm} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => void continueDraft()} />}
             {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
           </div>
-          <div className="assistant-chat-composer shrink-0 border-t border-border px-3 pb-3">
+          <div data-awaiting-confirmation={draftPending} className="assistant-chat-composer shrink-0 border-t border-border px-3 pb-3">
           <Composer fadeAbove={false} value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={conversationEnded || sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={conversationEnded || sending || switching || committing || draftPending || pendingQuestions.length > 0} /> : undefined} trailingTools={<>{composerMode}{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
           </div>
         </section>
-        <aside aria-label="人设与操作" className="assistant-conversation-sidebar flex min-w-0 flex-col gap-4">
-          <section aria-label="人设信息" className="shrink-0 rounded-2xl border border-border bg-card p-5">
-            <h2 className="text-sm font-semibold">人设信息</h2>
-            {composerContextBar}
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">{selectedProject?.description || (selectedProject ? platformIntroduction(selectedProject.platform) : '通过对话，一起明确你的定位、表达风格和目标读者。')}</p>
-            {selectedProject && <div className="mt-3"><AgentIconStack agentIds={personaAgentIDs(selectedProject)} maxVisible={3} compact emptyLabel="还未选择创作类型" /></div>}
-            {activeReviewSelectors}
-          </section>
-          {!conversationEnded && activeDraft && confirmationDraft && <DraftConfirmationCard attemptIssues={mode === 'creation' ? interactionState.blockingIssues : undefined} mode={mode} draft={confirmationDraft} committing={committing} confirmable={mode !== 'creation' || creationCanConfirm} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => void continueDraft()} />}
-        </aside>
         </div>
       )}
       </main>
@@ -1723,25 +1742,35 @@ function PersonaRail({ projects, selectedProjectId, disabled, onSelect, onCreate
 }
 
 function DraftConfirmationCard({ mode, draft, attemptIssues, committing, confirmable, disabled, onCommit, onContinue }: { mode: AssistantModeID; draft: Draft; attemptIssues?: AssistantInteractionDraftReceipt['blocking_issues']; committing: boolean; confirmable: boolean; disabled: boolean; onCommit: () => void; onContinue: () => void }) {
+  const cardRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [mode, draft.draft_id, draft.revision])
   const isCreation = mode === 'creation'
   const issues = attemptIssues ?? draft.blocking_issues
   const isProfile = mode === 'profile'
   const title = isCreation ? confirmable ? '确认创作' : '创作草稿' : isProfile ? '保存人设' : '确认复盘结论'
   const buttonLabel = isCreation ? '开始创作' : isProfile ? '保存人设' : '保存复盘结论'
   const continueLabel = isCreation ? '继续讨论' : '继续深入访谈'
-  return <section role="region" aria-label={title} className="assistant-confirmation-card flex min-h-0 flex-col overflow-hidden rounded-2xl border border-primary/30 bg-primary/[0.04]">
-    <div className="shrink-0 border-b border-border/70 p-5">
-    <div className="flex items-center gap-2 text-sm font-medium"><Check className="size-4 text-emerald-600" />{title}</div>
-    {(!isCreation || confirmable) && <p className="mt-2 text-xs leading-5 text-muted-foreground">{isCreation ? '确认后会按这份计划创建作品，也可以继续讨论细节。' : isProfile ? '确认后保存当前人设，也可以继续补充访谈内容。' : '确认后保存当前结构化结果。'}</p>}
-    </div>
-    <div className="assistant-scroll min-h-0 overflow-y-auto overscroll-contain px-5 pb-5">
-      {isCreation || mode === 'review' ? <AssistantDraftSummary draft={draft as unknown as InteractiveDraft} mode={mode} compact /> : <ProfileDraftSummary draft={draft} />}
+  return <section ref={cardRef} role="region" aria-label={title} className="assistant-confirmation-card mx-auto mt-7 w-full scroll-mt-4 overflow-hidden rounded-2xl border border-border/80 bg-card shadow-sm">
+    <header className="flex items-center justify-between gap-3 border-b border-border/60 px-5 py-4 sm:px-6">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Check className="size-4" /></span>
+        <h2 className="text-sm font-semibold tracking-tight">{isCreation ? '创作计划总结' : isProfile ? '人设总结' : '复盘总结'}</h2>
+      </div>
+      <span className="shrink-0 rounded-full bg-primary/5 px-2.5 py-1 text-[11px] font-medium text-primary">{confirmable ? '待确认' : '待完善'}</span>
+    </header>
+    <div className="p-5 sm:p-6">
+      <AssistantDraftSummary draft={draft as unknown as InteractiveDraft} mode={mode} compact />
       {isCreation && Array.isArray(issues) && <ul className="mt-3 space-y-1 text-sm text-amber-700">{(issues as NonNullable<AssistantInteractionDraftReceipt['blocking_issues']>).map((issue) => <li key={`${issue.code}:${issue.field}`}>{issue.message}</li>)}</ul>}
     </div>
-    <div className="grid shrink-0 gap-2 border-t border-border/70 bg-card p-4">
-      {confirmable && <Button size="sm" disabled={committing || disabled} onClick={onCommit}>{committing ? <Loader2 className="size-4 animate-spin" /> : buttonLabel}</Button>}
-      {isCreation && confirmable || isProfile ? <Button type="button" variant="outline" size="sm" disabled={committing} onClick={onContinue}>{continueLabel}</Button> : null}
-    </div>
+    <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 bg-muted/20 px-5 py-4 sm:px-6">
+      <p className="text-xs leading-5 text-muted-foreground">{isCreation ? confirmable ? '确认后将按这份计划创建作品。' : '补充必要信息后，即可开始创作。' : isProfile ? '确认后将保存为当前人设。' : '确认后将保存本次复盘结论。'}</p>
+      <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+        {isCreation && confirmable || isProfile ? <Button type="button" variant="ghost" size="sm" disabled={committing} onClick={onContinue}>{continueLabel}</Button> : null}
+        {confirmable && <Button size="sm" className="min-w-24" disabled={committing || disabled} onClick={onCommit}>{committing ? <Loader2 className="size-4 animate-spin" /> : buttonLabel}</Button>}
+      </div>
+    </footer>
   </section>
 }
 
@@ -1760,13 +1789,6 @@ function withCreationConfirmationSettings(draft: Draft, settings: Record<string,
     ...draft,
     payload: { ...sourcePayload, plan: nextPlan },
   }
-}
-
-function ProfileDraftSummary({ draft }: { draft: Draft }) {
-  const project = draft.project && typeof draft.project === 'object' && !Array.isArray(draft.project) ? draft.project as Record<string, unknown> : undefined
-  const profile = draft.profile && typeof draft.profile === 'object' && !Array.isArray(draft.profile) ? draft.profile as Record<string, unknown> : undefined
-  const values = [stringValue(project?.name), stringValue(project?.platform), stringValue(profile?.identity), stringValue(profile?.positioning)].filter(Boolean)
-  return values.length ? <p className="mt-4 text-sm leading-6 text-muted-foreground">{values.join(' · ')}</p> : null
 }
 
 function WorkspaceSelectors({ mode, projects, projectId, contentId, works, disabled = false, onProject, onContent, onMore, hasMore }: { mode: AssistantModeID; projects: AssistantProject[]; projectId: string; contentId: string; works: AssistantProject['works']; disabled?: boolean; onProject: (value: string) => void; onContent: (value: string) => void; onMore: () => void; hasMore: boolean }) {
@@ -1867,19 +1889,31 @@ function Composer({ value, attachments, attachmentController, attachmentsEnabled
   </div>
 }
 
-function Conversation({ messages, questions, responding, disabled, userAvatarURL, onAnswer }: { messages: Message[]; questions: QuestionBatch[]; responding: boolean; disabled: boolean; userAvatarURL?: string; onAnswer: (batch: QuestionBatch, answer: DshQuestionAnswer) => Promise<void> }) {
+function Conversation({ messages, questions, responding, disabled, autoScroll, userAvatarURL, onAnswer }: { autoScroll: boolean; messages: Message[]; questions: QuestionBatch[]; responding: boolean; disabled: boolean; userAvatarURL?: string; onAnswer: (batch: QuestionBatch, answer: DshQuestionAnswer) => Promise<void> }) {
   const endRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [messages.length, questions.length, responding])
+    if (autoScroll) endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [autoScroll, messages.length, questions.length, responding])
 
   if (messages.length === 0 && questions.length === 0) return <div className="flex min-h-[18rem] items-center justify-center text-sm text-muted-foreground">输入你的需求后开始</div>
   const entries = [
     ...messages.map((message) => ({ kind: 'message' as const, order: message.order, message })),
-    ...questions.filter((batch) => !batch.answers).map((batch) => ({ kind: 'question' as const, order: batch.order, batch })),
+    ...questions.map((batch) => ({ kind: 'question' as const, order: batch.order, batch })),
   ].sort((left, right) => left.order - right.order)
   return <div className="min-w-0 space-y-5">{entries.map((entry) => entry.kind === 'message'
     ? <div key={entry.message.id} className={`flex min-w-0 gap-3 ${entry.message.role === 'user' ? 'justify-end' : ''}`}><div className={`flex min-w-0 max-w-[min(900px,100%)] gap-3 ${entry.message.role === 'user' ? 'flex-row-reverse' : ''}`}><div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{entry.message.role === 'user' ? userAvatarURL ? <SignedImage src={userAvatarURL} alt="当前人设头像" className="size-7 rounded-full object-cover" fallbackIcon={<UserRound className="size-3.5" />} fallbackClassName="bg-primary text-primary-foreground" /> : <UserRound className="size-3.5" /> : <Bot className="size-3.5" />}</div><div className={`min-w-0 max-w-full rounded-2xl px-4 py-3 text-sm leading-6 ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'} [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto`}><Streamdown>{entry.message.text}</Streamdown></div></div></div>
-    : <DshQuestionComposer key={entry.batch.callId} questions={entry.batch.questions} submitted={Boolean(entry.batch.answers)} answers={entry.batch.answers ?? entry.batch.draftAnswers} closed={entry.batch.closed} disabled={disabled} onSubmit={(answer) => onAnswer(entry.batch, answer)} />)}{responding && <div role="status" className="flex items-center gap-2 px-10 text-sm text-muted-foreground"><Bot className="size-4" /><Loader2 className="size-4 animate-spin" />AI 正在处理…</div>}<div ref={endRef} aria-hidden="true" className="h-px" /></div>
+    : entry.batch.answers
+      ? <section key={entry.batch.callId} aria-label="历史问答" className="mx-auto w-full max-w-[760px] space-y-4 rounded-lg border border-border bg-card p-4 sm:p-5">
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Check className="size-3.5" />已回答</p>
+        {entry.batch.questions.map((question) => {
+          const answer = entry.batch.answers?.find((item) => item.id === question.id)
+          const text = [...(answer?.selected ?? []), ...(answer?.custom ? [answer.custom] : [])].join('、')
+          return <div key={question.id} className="space-y-2 text-sm leading-6">
+            <h2 className="font-semibold">{question.question}</h2>
+            <div className="whitespace-pre-wrap break-words text-muted-foreground">{text || '已跳过'}</div>
+          </div>
+        })}
+      </section>
+      : <DshQuestionComposer key={entry.batch.callId} questions={entry.batch.questions} answers={entry.batch.draftAnswers} closed={entry.batch.closed} disabled={disabled} onSubmit={(answer) => onAnswer(entry.batch, answer)} />)}{responding && <div role="status" className="flex items-center gap-2 px-10 text-sm text-muted-foreground"><Bot className="size-4" /><Loader2 className="size-4 animate-spin" />AI 正在处理…</div>}<div ref={endRef} aria-hidden="true" className="h-px" /></div>
 }
