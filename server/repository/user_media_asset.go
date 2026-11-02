@@ -29,6 +29,7 @@ type UserMediaAssetRepository interface {
 	MarkRemoved(context.Context, string, string, time.Time) error
 	List(context.Context, UserMediaAssetListFilter) ([]*model.UserMediaAsset, int64, error)
 	ListReadyCandidates(context.Context, string, string, string, string, int) ([]*model.UserMediaAsset, error)
+	FindActiveByStorageKeysForUser(context.Context, string, []string, string) ([]*model.UserMediaAsset, error)
 }
 
 type userMediaAssetRepository struct{ db *gorm.DB }
@@ -163,6 +164,21 @@ func (r *userMediaAssetRepository) ListReadyCandidates(ctx context.Context, user
 		}
 	}
 	return append(preferred, fallback...), nil
+}
+
+func (r *userMediaAssetRepository) FindActiveByStorageKeysForUser(ctx context.Context, userID string, storageKeys []string, mediaType string) ([]*model.UserMediaAsset, error) {
+	if len(storageKeys) == 0 {
+		return nil, nil
+	}
+	q := r.db.WithContext(ctx).Model(&model.UserMediaAsset{}).Joins("JOIN assets ON assets.id = user_media_assets.asset_id").Where("user_media_assets.user_id = ? AND user_media_assets.removed_at IS NULL AND user_media_assets.status = ? AND assets.user_id = ? AND assets.purpose = ? AND assets.storage_key IN ?", userID, model.UserMediaAssetStatusAvailable, userID, "media_library", storageKeys)
+	if strings.TrimSpace(mediaType) != "" {
+		q = q.Where("user_media_assets.media_type = ?", mediaType)
+	}
+	var rows []*model.UserMediaAsset
+	if err := q.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 // withUserMediaSearch keeps the immutable asset table as the source of truth

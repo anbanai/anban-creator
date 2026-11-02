@@ -137,6 +137,9 @@ func main() {
 		if err := requireAssistantInteractionSchema(mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database schema is not ready for homepage assistant interactions")
 		}
+		if err := requireUserMediaSemanticSchema(mysqlDB); err != nil {
+			log.Fatal().Err(err).Msg("database schema is not ready for OSS media semantic search")
+		}
 		if err := service.AssertExecutableIdentityReadiness(context.Background(), mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database executable identity is not ready")
 		}
@@ -406,6 +409,7 @@ func main() {
 	var posterSvc *service.PosterService
 	var referenceAssetSvc *service.ReferenceAssetService
 	var imageAnalysisSvc *service.ImageAnalysisService
+	var mediaSemanticSearch storage.MediaSemanticSearch
 	var userMediaLibrarySvc *service.UserMediaLibraryService
 	var asynqClient *scheduler.AsynqClient
 	var analyticsRebuildManager *service.AnalyticsRebuildManager
@@ -552,6 +556,15 @@ func main() {
 			Provider:      cfg.ImageUnderstanding.ProviderKey,
 			Model:         cfg.ImageUnderstanding.Model,
 		}, log)
+		if cfg.Storage.AIContentAwareness.Enabled && cfg.Storage.Provider == "oss" {
+			semantic, semanticErr := storage.NewOSSMetaQueryProvider(cfg.Storage, log)
+			if semanticErr != nil {
+				log.Fatal().Err(semanticErr).Msg("initialize OSS AI content awareness")
+			}
+			mediaSemanticSearch = semantic
+			imageAnalysisSvc.SetMediaSemanticSearch(semantic)
+			log.Info().Str("bucket", cfg.Storage.BucketName).Str("region", cfg.Storage.Region).Bool("video_enabled", cfg.Storage.AIContentAwareness.VideoEnabled).Msg("OSS AI content awareness initialized")
+		}
 		projectSvc.SetImageAnalysisService(imageAnalysisSvc)
 		templateSvc.SetImageAnalysisService(imageAnalysisSvc)
 	}
@@ -564,6 +577,8 @@ func main() {
 	}
 	if repo != nil && store != nil && imageAnalysisSvc != nil {
 		userMediaLibrarySvc = service.NewUserMediaLibraryService(repo, store, imageAnalysisSvc)
+		userMediaLibrarySvc.SetSemanticSearch(mediaSemanticSearch)
+		userMediaLibrarySvc.SetLogger(log)
 	}
 	var aiEntrySvc *service.AIEntryService
 	if repo != nil && taskSvc != nil {
@@ -1533,6 +1548,21 @@ func requireAssistantInteractionSchema(db *gorm.DB) error {
 		!db.Migrator().HasColumn(legacyMigration, "MigrationKey") ||
 		!db.Migrator().HasColumn(legacyMigration, "MigratedAt") {
 		return fmt.Errorf("existing database requires server/migrations/20261026_assistant_interactions.sql before startup (homepage_interaction_cutover schema is incomplete)")
+	}
+	return nil
+}
+
+// requireUserMediaSemanticSchema prevents an existing media-library database
+// from serving rows that cannot persist the OSS content-awareness result.
+// Fresh databases still receive these columns through model.AutoMigrate.
+func requireUserMediaSemanticSchema(db *gorm.DB) error {
+	if db == nil || !db.Migrator().HasTable(&model.UserMediaAsset{}) {
+		return nil
+	}
+	for _, column := range []string{"Summary", "AnalysisProvider", "IndexedAt"} {
+		if !db.Migrator().HasColumn(&model.UserMediaAsset{}, column) {
+			return fmt.Errorf("existing database requires server/migrations/20261102_user_media_oss_semantic.sql before startup (missing user_media_assets.%s)", column)
+		}
 	}
 	return nil
 }

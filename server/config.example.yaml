@@ -103,6 +103,13 @@ storage:
   sts_endpoint: "${ANBAN_OSS_STS_ENDPOINT}"
   direct_upload_expires_seconds: 900
   local_data_dir: "./data/files"
+  # Requires OSS Bucket 数据索引-向量检索 and video content awareness.
+  # The bucket role must include AliyunMetaQueryDefaultRole.
+  ai_content_awareness:
+    enabled: false
+    video_enabled: false
+    query_timeout: 10s
+    max_results: 20
 
 mcp:
   api_key: "${ANBAN_MCP_API_KEY}"
