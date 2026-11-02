@@ -79,6 +79,8 @@ type reconcileTestService struct {
 	cleanupResolutions map[string]*model.TaskExecution
 	cleanupResolveErr  error
 	resolvedCleanup    []string
+	stale              map[string]bool
+	retired            []string
 }
 
 func (s *reconcileTestService) FindReconcilableExecutions(context.Context, time.Time, int) ([]*model.TaskExecution, error) {
@@ -87,6 +89,9 @@ func (s *reconcileTestService) FindReconcilableExecutions(context.Context, time.
 func (s *reconcileTestService) RecordExecutionInstance(_ context.Context, id, uid string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.stale[id] {
+		return ErrExecutionNotCurrent
+	}
 	if s.instances == nil {
 		s.instances = map[string]string{}
 	}
@@ -96,6 +101,9 @@ func (s *reconcileTestService) RecordExecutionInstance(_ context.Context, id, ui
 func (s *reconcileTestService) ResumeExecutionDispatch(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.stale[id] {
+		return ErrExecutionNotCurrent
+	}
 	s.dispatched = append(s.dispatched, id)
 	return nil
 }
@@ -159,12 +167,24 @@ func (s *reconcileTestService) ReleaseExecutionCleanup(_ context.Context, id, to
 func (s *reconcileTestService) ResumeExecutionFinalization(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.stale[id] {
+		return ErrExecutionNotCurrent
+	}
 	s.resumed = append(s.resumed, id)
 	return nil
+}
+func (s *reconcileTestService) RetireSupersededExecution(_ context.Context, id string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.retired = append(s.retired, id)
+	return true, nil
 }
 func (s *reconcileTestService) ReconcileExecutionFailure(_ context.Context, id, status, reason string, diagnostics []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.stale[id] {
+		return ErrExecutionNotCurrent
+	}
 	if id == s.failID {
 		return errors.New("injected")
 	}
@@ -698,5 +718,90 @@ func TestCleanupDiagnosticNeverCopiesProviderSecrets(t *testing.T) {
 		if strings.Contains(diagnostic, "secret") || strings.Contains(diagnostic, "private") || strings.Contains(diagnostic, "https") {
 			t.Fatalf("unsafe diagnostic %q", diagnostic)
 		}
+	}
+}
+
+func TestRuntimeReconcilerRetiresSupersededTerminalAttempt(t *testing.T) {
+	execution := &model.TaskExecution{
+		ID: "stale-terminal", TaskID: "task-1", Status: model.TaskExecutionFailed,
+		FinalizationStatus: model.TaskExecutionFinalizationTerminal, CleanupStatus: model.TaskExecutionCleanupPending,
+	}
+	service := &reconcileTestService{executions: []*model.TaskExecution{execution}, stale: map[string]bool{execution.ID: true}}
+	dispatcher := &reconcileTestDispatcher{states: map[string]*RuntimeExecutionState{}, errs: map[string]error{}}
+	var logs bytes.Buffer
+	reconciler := NewRuntimeReconciler(dispatcher, service, RuntimeReconcilerConfig{}, zerolog.New(&logs))
+	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	service.mu.Lock()
+	retired := append([]string(nil), service.retired...)
+	resumed := append([]string(nil), service.resumed...)
+	cleanup := service.cleanup[execution.ID]
+	service.mu.Unlock()
+	if len(retired) != 1 || retired[0] != execution.ID {
+		t.Fatalf("retired = %v, want [%s]", retired, execution.ID)
+	}
+	if len(resumed) != 0 {
+		t.Fatalf("superseded terminal attempt was finalized: %v", resumed)
+	}
+	if cleanup != "done" {
+		t.Fatalf("cleanup = %q, want done", cleanup)
+	}
+	if strings.Contains(logs.String(), "runtime execution reconciliation item failed") {
+		t.Fatalf("superseded attempt logged a reconciliation failure: %s", logs.String())
+	}
+	if !strings.Contains(logs.String(), `"message":"retired superseded runtime execution"`) {
+		t.Fatalf("log = %q, want a retirement record", logs.String())
+	}
+}
+
+func TestRuntimeReconcilerRetiresSupersededActiveAttempt(t *testing.T) {
+	execution := &model.TaskExecution{ID: "stale-active", TaskID: "task-2", Status: model.TaskExecutionRunning, Started: true}
+	service := &reconcileTestService{executions: []*model.TaskExecution{execution}, stale: map[string]bool{execution.ID: true}}
+	dispatcher := &reconcileTestDispatcher{
+		states: map[string]*RuntimeExecutionState{execution.ID: {Phase: RuntimePhaseRunning, InstanceID: "pod-1"}},
+		errs:   map[string]error{},
+	}
+	reconciler := NewRuntimeReconciler(dispatcher, service, RuntimeReconcilerConfig{}, zerolog.Nop())
+	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	service.mu.Lock()
+	retired := append([]string(nil), service.retired...)
+	failures := append([]reconcileFailure(nil), service.failures...)
+	instance := service.instances[execution.ID]
+	service.mu.Unlock()
+	if len(retired) != 1 || retired[0] != execution.ID {
+		t.Fatalf("retired = %v, want [%s]", retired, execution.ID)
+	}
+	if len(failures) != 0 {
+		t.Fatalf("superseded active attempt was failed: %v", failures)
+	}
+	if instance != "" {
+		t.Fatalf("superseded attempt recorded runtime instance %q", instance)
+	}
+}
+
+func TestRuntimeReconcilerSkipsFinalizationForRetiredAttempt(t *testing.T) {
+	execution := &model.TaskExecution{
+		ID: "already-retired", TaskID: "task-3", Status: model.TaskExecutionCancelled,
+		FinalizationStatus: model.TaskExecutionFinalizationSuperseded, CleanupStatus: model.TaskExecutionCleanupPending,
+	}
+	service := &reconcileTestService{executions: []*model.TaskExecution{execution}}
+	dispatcher := &reconcileTestDispatcher{states: map[string]*RuntimeExecutionState{}, errs: map[string]error{}}
+	reconciler := NewRuntimeReconciler(dispatcher, service, RuntimeReconcilerConfig{}, zerolog.Nop())
+	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	service.mu.Lock()
+	resumed := len(service.resumed)
+	retired := len(service.retired)
+	cleanup := service.cleanup[execution.ID]
+	service.mu.Unlock()
+	if resumed != 0 || retired != 0 {
+		t.Fatalf("retired attempt resumed=%d retired=%d, want no finalization work", resumed, retired)
+	}
+	if cleanup != "done" {
+		t.Fatalf("cleanup = %q, want done", cleanup)
 	}
 }
