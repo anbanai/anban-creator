@@ -1,4 +1,4 @@
-FROM golang:alpine AS builder
+FROM crpi-671lgv9lrdyll4t9.cn-chengdu.personal.cr.aliyuncs.com/bx_anbanai/golang:alpine AS builder
 
 WORKDIR /build/server
 
@@ -10,7 +10,7 @@ COPY server ./
 RUN set -eux; \
     CGO_ENABLED=0 go build -ldflags="-s -w" -o /anban-creator-server .
 
-FROM node:24.22.0-alpine3.24
+FROM crpi-671lgv9lrdyll4t9.cn-chengdu.personal.cr.aliyuncs.com/bx_anbanai/node:24.22.0-alpine3.24
 
 
 RUN set -eux; \

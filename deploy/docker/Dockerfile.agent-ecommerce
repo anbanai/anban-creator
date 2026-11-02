@@ -4,7 +4,7 @@
 # ecommerce upstream scripts; it still has no provider CLI or media toolchain.
 # Each profile keeps its own image identity and Dockerfile so packs never
 # inherit another pack's runtime.
-FROM node:24.22.0-bookworm-slim AS builder
+FROM crpi-671lgv9lrdyll4t9.cn-chengdu.personal.cr.aliyuncs.com/bx_anbanai/node:24.22.0-bookworm-slim AS builder
 
 WORKDIR /app/runtime-claude
 COPY runtime-claude/package.json runtime-claude/package-lock.json ./
@@ -18,7 +18,7 @@ RUN npm run build && \
     npm prune --omit=dev && \
     test -d node_modules/@anthropic-ai/claude-agent-sdk
 
-FROM node:24.22.0-bookworm-slim
+FROM crpi-671lgv9lrdyll4t9.cn-chengdu.personal.cr.aliyuncs.com/bx_anbanai/node:24.22.0-bookworm-slim
 
 USER root
 # python3 runs the pinned upstream copy-length and final-copy scanners
