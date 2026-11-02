@@ -124,10 +124,11 @@ type ArtifactSpec struct {
 // runtime selects a matching terminal stage before a matching review stage.
 // Terminal stages may omit required paths to reuse the Pack-wide contract.
 type ArtifactStageSpec struct {
-	ID       string   `yaml:"id" json:"id"`
-	Trigger  string   `yaml:"trigger" json:"trigger"`
-	Required []string `yaml:"required,omitempty" json:"required,omitempty"`
-	Terminal bool     `yaml:"terminal,omitempty" json:"terminal,omitempty"`
+	ID              string   `yaml:"id" json:"id"`
+	Trigger         string   `yaml:"trigger" json:"trigger"`
+	Required        []string `yaml:"required,omitempty" json:"required,omitempty"`
+	Terminal        bool     `yaml:"terminal,omitempty" json:"terminal,omitempty"`
+	RequiredOnFinal bool     `yaml:"required_on_final,omitempty" json:"required_on_final,omitempty"`
 }
 
 // DeliverySpec declares a file that should be presented and downloadable as
