@@ -258,3 +258,40 @@ func TestKimiThinkingModelCoverage(t *testing.T) {
 		}
 	}
 }
+
+func TestVisionTimeoutDiagnostics(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+	}))
+	defer server.Close()
+	defer close(release)
+
+	run := func(t *testing.T, ctx context.Context, timeout time.Duration) *imageUnderstandingProviderError {
+		t.Helper()
+		client := NewOpenAILLMClient(server.URL+"/v1", "fixture-api-key", "vision-route", timeout).(*openaiLLMClient)
+		client.client.Chat.Completions.Options = append(client.client.Chat.Completions.Options, option.WithMaxRetries(0))
+		_, err := client.CompleteWithImageResult(ctx, "", "describe", "data:image/png;base64,eA==")
+		var providerErr *imageUnderstandingProviderError
+		if !errors.As(err, &providerErr) {
+			t.Fatalf("error = %v, want image understanding provider error", err)
+		}
+		return providerErr
+	}
+
+	t.Run("route timeout", func(t *testing.T) {
+		providerErr := run(t, context.Background(), 500*time.Millisecond)
+		if providerErr.Code != "provider_timeout" || providerErr.TimeoutSource != "route_timeout" || !providerErr.RequestWritten {
+			t.Fatalf("timeout diagnostics = %#v", providerErr)
+		}
+	})
+
+	t.Run("caller deadline", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		providerErr := run(t, ctx, 5*time.Second)
+		if providerErr.Code != "provider_timeout" || providerErr.TimeoutSource != "caller_deadline" || !providerErr.RequestWritten {
+			t.Fatalf("timeout diagnostics = %#v", providerErr)
+		}
+	})
+}

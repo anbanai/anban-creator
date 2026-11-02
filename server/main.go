@@ -982,6 +982,7 @@ func main() {
 			TaskImageOperationsSvc: service.NewTaskImageOperationsService(taskSvc, imageSvc, imageUnderstandingClient, fixedBilling.Cost, service.TaskImageOperationsConfig{
 				UnderstandingProvider: cfg.ImageUnderstanding.ProviderKey,
 				UnderstandingModel:    cfg.ImageUnderstanding.Model,
+				UnderstandingTimeout:  cfg.ImageUnderstanding.Timeout,
 				PublicBaseURL:         cfg.Server.PublicBaseURL,
 			}, log),
 			TaskVideoOperationsSvc: service.NewTaskVideoOperationsService(repo, store, videoUnderstandingClient, fixedBilling.Cost, service.TaskVideoOperationsConfig{

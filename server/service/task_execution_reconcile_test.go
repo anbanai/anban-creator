@@ -51,9 +51,11 @@ func TestReconcileServiceReportsSupersededActiveAttempt(t *testing.T) {
 	supersedeAttempt(t, repo, task, 2)
 
 	for name, call := range map[string]func() error{
-		"record instance":   func() error { return svc.RecordExecutionInstance(ctx, execution.ID, "pod-1") },
-		"resume dispatch":   func() error { return svc.ResumeExecutionDispatch(ctx, execution.ID) },
-		"reconcile failure": func() error { return svc.ReconcileExecutionFailure(ctx, execution.ID, model.TaskExecutionFailed, "runtime_missing", nil) },
+		"record instance": func() error { return svc.RecordExecutionInstance(ctx, execution.ID, "pod-1") },
+		"resume dispatch": func() error { return svc.ResumeExecutionDispatch(ctx, execution.ID) },
+		"reconcile failure": func() error {
+			return svc.ReconcileExecutionFailure(ctx, execution.ID, model.TaskExecutionFailed, "runtime_missing", nil)
+		},
 	} {
 		if err := call(); !errors.Is(err, agent.ErrExecutionNotCurrent) {
 			t.Fatalf("%s error = %v, want %v", name, err, agent.ErrExecutionNotCurrent)
