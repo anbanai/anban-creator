@@ -19,7 +19,7 @@ describe('LoginPage field guidance', () => {
     window.history.pushState({}, '', '/login?invite=abc123')
     render(<LoginPage />)
 
-    expect(screen.getAllByText('✦ Anban Studio')).toHaveLength(2)
+    expect(screen.getAllByRole('img', { name: 'Anban AI' })).toHaveLength(2)
 
     expect(screen.getByText('来自邀请链接，登录时无需输入。')).toBeInTheDocument()
 

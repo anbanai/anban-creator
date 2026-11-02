@@ -72,8 +72,8 @@ describe('Sidebar', () => {
   it('renders only the approved MVP navigation for regular users', () => {
     renderSidebar()
 
-    expect(screen.getByText('Anban Studio')).toBeInTheDocument()
-    expect(screen.getByText('内容智能创作系统')).toBeInTheDocument()
+    expect(screen.getByText('Anban AI')).toBeInTheDocument()
+    expect(screen.getByText('内容智能运营系统')).toBeInTheDocument()
 
     const navigation = within(screen.getByRole('navigation', { name: '主导航' }))
     expect(navigation.getAllByRole('link').map((link) => link.textContent)).toEqual([
@@ -88,6 +88,7 @@ describe('Sidebar', () => {
       '选题资产',
       '素材库',
       '热点雷达',
+      '选题雷达',
     ])
     expect(navigation.queryByText('创作')).not.toBeInTheDocument()
     expect(navigation.queryByText('自动化')).not.toBeInTheDocument()

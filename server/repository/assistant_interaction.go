@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -15,6 +16,8 @@ import (
 var ErrInteractionAttemptConflict = errors.New("assistant interaction attempt payload conflict")
 var ErrInteractionGenerationChanged = errors.New("assistant interaction generation changed")
 var ErrInteractionTerminal = errors.New("assistant interaction is terminal")
+var ErrInteractionDraftState = errors.New("assistant interaction draft state changed")
+var ErrInteractionCommitClaimed = errors.New("assistant interaction commit claimed")
 
 type AssistantInteractionRepository interface {
 	Create(context.Context, *model.AssistantInteraction) error
@@ -27,7 +30,7 @@ type AssistantInteractionRepository interface {
 	UpdateMode(context.Context, string, string, time.Time) error
 	UpdateContext(context.Context, string, string, string, string, time.Time) error
 	UpdateProject(context.Context, string, string, time.Time) error
-	CompareAndSwapGeneration(context.Context, string, int64, int64, time.Time) (bool, error)
+	CompareAndSwapGeneration(context.Context, string, int64, int64, time.Time, time.Time) (bool, error)
 	CreateRuntimeBinding(context.Context, *model.AssistantInteractionRuntime) error
 	FindCurrentRuntime(context.Context, string, int64) (*model.AssistantInteractionRuntime, error)
 	CloseRuntime(context.Context, string, time.Time) error
@@ -36,11 +39,14 @@ type AssistantInteractionRepository interface {
 	CreateDraftAttemptEventAtGeneration(context.Context, *model.AssistantInteractionDraft, *model.AssistantInteractionAttempt, *model.AssistantInteractionEvent, int64) (*model.AssistantInteractionDraft, *model.AssistantInteractionEvent, bool, error)
 	FindDraftForUser(context.Context, string, string) (*model.AssistantInteractionDraft, error)
 	FindLatestDraft(context.Context, string, string, string) (*model.AssistantInteractionDraft, error)
+	ReadCreationState(context.Context, string, string) (*model.AssistantInteraction, []*model.AssistantInteractionDraft, *model.AssistantInteractionAttempt, error)
 	ListDrafts(context.Context, string, string) ([]*model.AssistantInteractionDraft, error)
 	ExpireDrafts(context.Context, time.Time) (int64, error)
 	UpdateDraftState(context.Context, string, string, time.Time) error
+	TransitionCreationDraft(context.Context, string, string, string, int64, *model.AssistantInteractionAttempt, time.Time) error
+	FinishCreationCommit(context.Context, string, string, string, json.RawMessage, string, bool, time.Time) error
 	CreateEvent(context.Context, *model.AssistantInteractionEvent) error
-	AppendEvent(context.Context, string, int64, *model.AssistantInteractionEvent) (bool, error)
+	AppendEvent(context.Context, string, int64, string, *model.AssistantInteractionEvent) (bool, error)
 	NextEventSequence(context.Context, string) (uint64, error)
 	ListEventsAfter(context.Context, string, int64, uint64, int) ([]*model.AssistantInteractionEvent, error)
 	CreateAttempt(context.Context, *model.AssistantInteractionAttempt) error
@@ -180,8 +186,8 @@ func (r *assistantInteractionRepository) UpdateProject(ctx context.Context, id, 
 	}
 	return r.db.WithContext(ctx).Model(&model.AssistantInteraction{}).Where("id = ?", id).Updates(updates).Error
 }
-func (r *assistantInteractionRepository) CompareAndSwapGeneration(ctx context.Context, id string, expected, next int64, at time.Time) (bool, error) {
-	result := r.db.WithContext(ctx).Model(&model.AssistantInteraction{}).Where("id = ? AND generation = ? AND closed_at IS NULL", id, expected).Updates(map[string]any{"generation": next, "last_activity_at": at, "updated_at": at})
+func (r *assistantInteractionRepository) CompareAndSwapGeneration(ctx context.Context, id string, expected, next int64, at, expiresAt time.Time) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&model.AssistantInteraction{}).Where("id = ? AND generation = ? AND closed_at IS NULL", id, expected).Updates(map[string]any{"generation": next, "expires_at": expiresAt, "last_activity_at": at, "updated_at": at})
 	return result.RowsAffected == 1, result.Error
 }
 func (r *assistantInteractionRepository) CreateRuntimeBinding(ctx context.Context, value *model.AssistantInteractionRuntime) error {
@@ -237,6 +243,24 @@ func (r *assistantInteractionRepository) createDraftIfAttemptNew(ctx context.Con
 			_ = tx.Rollback()
 			return nil, nil, false, ErrInteractionTerminal
 		}
+		if draft.ModeID == "creation" {
+			var count int64
+			if err := tx.Model(&model.AssistantInteractionDraft{}).Where("interaction_id = ? AND mode_id = ? AND confirmation_state IN ?", draft.InteractionID, draft.ModeID, []string{model.AssistantInteractionDraftConfirmed, model.AssistantInteractionDraftConsumed}).Count(&count).Error; err != nil {
+				_ = tx.Rollback()
+				return nil, nil, false, err
+			}
+			if count > 0 {
+				_ = tx.Rollback()
+				return nil, nil, false, ErrInteractionCommitClaimed
+			}
+			if blocked, err := creationCommitBlocked(tx, draft.InteractionID); err != nil {
+				_ = tx.Rollback()
+				return nil, nil, false, err
+			} else if blocked {
+				_ = tx.Rollback()
+				return nil, nil, false, ErrInteractionCommitClaimed
+			}
+		}
 	}
 	var existing model.AssistantInteractionAttempt
 	err := tx.Where("interaction_id = ? AND attempt_id = ?", attempt.InteractionID, attempt.AttemptID).First(&existing).Error
@@ -249,6 +273,17 @@ func (r *assistantInteractionRepository) createDraftIfAttemptNew(ctx context.Con
 		if decodeErr := json.Unmarshal(existing.Result, &result); decodeErr != nil {
 			_ = tx.Rollback()
 			return nil, nil, false, decodeErr
+		}
+		var requested assistantInteractionDraftReceipt
+		if len(attempt.Result) > 0 {
+			if err := json.Unmarshal(attempt.Result, &requested); err != nil {
+				_ = tx.Rollback()
+				return nil, nil, false, err
+			}
+		}
+		if result.ModeID != draft.ModeID || (result.RequestedReady != nil && requested.RequestedReady != nil && *result.RequestedReady != *requested.RequestedReady) {
+			_ = tx.Rollback()
+			return nil, nil, false, ErrInteractionAttemptConflict
 		}
 		_ = tx.Rollback()
 		return &model.AssistantInteractionDraft{ID: result.DraftID, Revision: result.Revision, Ready: result.Ready, ConfirmationState: result.ConfirmationState}, nil, false, nil
@@ -268,6 +303,20 @@ func (r *assistantInteractionRepository) createDraftIfAttemptNew(ctx context.Con
 	if err := tx.Create(draft).Error; err != nil {
 		_ = tx.Rollback()
 		return nil, nil, false, err
+	}
+	if draft.ModeID == "creation" {
+		if err := tx.Model(&model.AssistantInteractionDraft{}).Where("interaction_id = ? AND mode_id = ? AND id <> ? AND confirmation_state = ?", draft.InteractionID, draft.ModeID, draft.ID, model.AssistantInteractionDraftPending).Updates(map[string]any{"confirmation_state": model.AssistantInteractionDraftSuperseded, "updated_at": draft.UpdatedAt}).Error; err != nil {
+			_ = tx.Rollback()
+			return nil, nil, false, err
+		}
+		lifecycle := model.AssistantInteractionActive
+		if draft.Ready {
+			lifecycle = model.AssistantInteractionNeedsConfirmation
+		}
+		if err := tx.Model(&model.AssistantInteraction{}).Where("id = ?", draft.InteractionID).Updates(map[string]any{"lifecycle": lifecycle, "updated_at": draft.UpdatedAt, "last_activity_at": draft.UpdatedAt}).Error; err != nil {
+			_ = tx.Rollback()
+			return nil, nil, false, err
+		}
 	}
 	if event != nil {
 		var interaction model.AssistantInteraction
@@ -297,7 +346,16 @@ func (r *assistantInteractionRepository) createDraftIfAttemptNew(ctx context.Con
 	// Attempts are replay receipts, not a second draft store. Keep only the
 	// identifiers needed to return an idempotent stage result; the full payload
 	// remains in assistant_interaction_drafts where the user-owned draft lives.
-	encoded, err := json.Marshal(assistantInteractionDraftReceipt{DraftID: draft.ID, Revision: draft.Revision, ModeID: draft.ModeID, Ready: draft.Ready, ConfirmationState: draft.ConfirmationState})
+	receipt := assistantInteractionDraftReceipt{DraftID: draft.ID, Revision: draft.Revision, ModeID: draft.ModeID, Ready: draft.Ready, ConfirmationState: draft.ConfirmationState}
+	if len(attempt.Result) > 0 {
+		var request assistantInteractionDraftReceipt
+		if err := json.Unmarshal(attempt.Result, &request); err != nil {
+			_ = tx.Rollback()
+			return nil, nil, false, err
+		}
+		receipt.RequestedReady = request.RequestedReady
+	}
+	encoded, err := json.Marshal(receipt)
 	if err != nil {
 		_ = tx.Rollback()
 		return nil, nil, false, err
@@ -319,6 +377,7 @@ type assistantInteractionDraftReceipt struct {
 	ModeID            string `json:"mode_id"`
 	Ready             bool   `json:"ready"`
 	ConfirmationState string `json:"confirmation_state"`
+	RequestedReady    *bool  `json:"requested_ready,omitempty"`
 }
 
 func (r *assistantInteractionRepository) FindDraftForUser(ctx context.Context, userID, id string) (*model.AssistantInteractionDraft, error) {
@@ -345,6 +404,32 @@ func (r *assistantInteractionRepository) ListDrafts(ctx context.Context, userID,
 		Order("assistant_interaction_drafts.mode_id ASC, assistant_interaction_drafts.revision DESC").Find(&values).Error
 	return values, err
 }
+
+// ReadCreationState uses the same row fence as stage/claim/release. The sequence,
+// drafts and receipt must describe one committed state, never a mixed read.
+func (r *assistantInteractionRepository) ReadCreationState(ctx context.Context, userID, interactionID string) (*model.AssistantInteraction, []*model.AssistantInteractionDraft, *model.AssistantInteractionAttempt, error) {
+	var interaction model.AssistantInteraction
+	var drafts []*model.AssistantInteractionDraft
+	var receipt *model.AssistantInteractionAttempt
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND user_id = ?", interactionID, userID).First(&interaction).Error; err != nil {
+			return err
+		}
+		repo := &assistantInteractionRepository{db: tx}
+		var err error
+		drafts, err = repo.ListDrafts(ctx, userID, interactionID)
+		if err != nil {
+			return err
+		}
+		receipt, err = repo.FindLatestCommitAttempt(ctx, interactionID)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	})
+	return &interaction, drafts, receipt, err
+}
+
 func (r *assistantInteractionRepository) ExpireDrafts(ctx context.Context, before time.Time) (int64, error) {
 	result := r.db.WithContext(ctx).Where("expires_at <= ?", before).Delete(&model.AssistantInteractionDraft{})
 	return result.RowsAffected, result.Error
@@ -352,15 +437,117 @@ func (r *assistantInteractionRepository) ExpireDrafts(ctx context.Context, befor
 func (r *assistantInteractionRepository) UpdateDraftState(ctx context.Context, id, state string, at time.Time) error {
 	return r.db.WithContext(ctx).Model(&model.AssistantInteractionDraft{}).Where("id = ?", id).Updates(map[string]any{"confirmation_state": state, "updated_at": at}).Error
 }
+
+// The interaction row is the shared database fence for stage, withdrawal and
+// commit admission. A confirmed draft remains claimed across process loss.
+func (r *assistantInteractionRepository) TransitionCreationDraft(ctx context.Context, userID, interactionID, draftID string, revision int64, attempt *model.AssistantInteractionAttempt, at time.Time) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var interaction model.AssistantInteraction
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND user_id = ?", interactionID, userID).First(&interaction).Error; err != nil {
+			return err
+		}
+		if interaction.Lifecycle == model.AssistantInteractionCompleted || interaction.Lifecycle == model.AssistantInteractionAbandoned {
+			return ErrInteractionDraftState
+		}
+		if blocked, err := creationCommitBlocked(tx, interactionID); err != nil {
+			return err
+		} else if blocked {
+			return ErrInteractionDraftState
+		}
+		var latest model.AssistantInteractionDraft
+		if err := tx.Where("interaction_id = ? AND mode_id = ?", interactionID, "creation").Order("revision DESC").First(&latest).Error; err != nil {
+			return err
+		}
+		if latest.ID != draftID || latest.Revision != revision {
+			return ErrInteractionDraftState
+		}
+		if attempt == nil && latest.ConfirmationState == model.AssistantInteractionDraftSuperseded {
+			return nil
+		}
+		if latest.ConfirmationState != model.AssistantInteractionDraftPending {
+			return ErrInteractionDraftState
+		}
+		state, lifecycle := model.AssistantInteractionDraftSuperseded, model.AssistantInteractionActive
+		if attempt != nil {
+			if !latest.Ready || !latest.ExpiresAt.After(at) {
+				return ErrInteractionDraftState
+			}
+			state, lifecycle = model.AssistantInteractionDraftConfirmed, model.AssistantInteractionNeedsConfirmation
+			if err := tx.Create(attempt).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Model(&model.AssistantInteractionDraft{}).Where("id = ?", draftID).Updates(map[string]any{"confirmation_state": state, "updated_at": at}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.AssistantInteraction{}).Where("id = ?", interactionID).Updates(map[string]any{"lifecycle": lifecycle, "updated_at": at, "last_activity_at": at}).Error; err != nil {
+			return err
+		}
+		return appendCreationStateEvent(tx, &interaction, draftID, at)
+	})
+}
+
+func creationCommitBlocked(tx *gorm.DB, interactionID string) (bool, error) {
+	var count int64
+	err := tx.Model(&model.AssistantInteractionAttempt{}).Where("interaction_id = ? AND operation = ?", interactionID, "commit").Where("(length(result) > 0 OR error_code = ? OR (status = ? AND error_code = ''))", "assistant_commit_reconciliation_required", model.AssistantInteractionAttemptPending).Count(&count).Error
+	return count > 0, err
+}
+
+func (r *assistantInteractionRepository) FinishCreationCommit(ctx context.Context, interactionID, draftID, attemptID string, result json.RawMessage, errorCode string, knownFailure bool, at time.Time) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var interaction model.AssistantInteraction
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", interactionID).First(&interaction).Error; err != nil {
+			return err
+		}
+		status, state := model.AssistantInteractionAttemptPending, model.AssistantInteractionDraftConfirmed
+		if len(result) > 0 {
+			status, state = model.AssistantInteractionAttemptCompleted, model.AssistantInteractionDraftConsumed
+		}
+		if knownFailure {
+			status, state = model.AssistantInteractionAttemptFailed, model.AssistantInteractionDraftPending
+		}
+		if knownFailure {
+			if err := tx.Where("interaction_id = ? AND attempt_id = ? AND status = ?", interactionID, attemptID, model.AssistantInteractionAttemptPending).Delete(&model.AssistantInteractionAttempt{}).Error; err != nil {
+				return err
+			}
+		} else if err := tx.Model(&model.AssistantInteractionAttempt{}).Where("interaction_id = ? AND attempt_id = ?", interactionID, attemptID).Updates(map[string]any{"status": status, "result": result, "error_code": errorCode}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.AssistantInteractionDraft{}).Where("id = ? AND confirmation_state = ?", draftID, model.AssistantInteractionDraftConfirmed).Updates(map[string]any{"confirmation_state": state, "updated_at": at}).Error; err != nil {
+			return err
+		}
+		if err := appendCreationStateEvent(tx, &interaction, draftID, at); err != nil {
+			return err
+		}
+		if len(result) > 0 {
+			return tx.Model(&model.AssistantInteraction{}).Where("id = ?", interactionID).Updates(map[string]any{"lifecycle": model.AssistantInteractionCompleted, "active_scope": nil, "updated_at": at, "last_activity_at": at}).Error
+		}
+		return nil
+	})
+}
+
+// Allocate state ordering and its metadata-only event together. The stream cursor
+// remains contiguous; the service hydrates these events from authoritative drafts.
+func appendCreationStateEvent(tx *gorm.DB, interaction *model.AssistantInteraction, draftID string, at time.Time) error {
+	if err := tx.Model(&model.AssistantInteraction{}).Where("id = ?", interaction.ID).UpdateColumn("command_sequence", gorm.Expr("command_sequence + 1")).Error; err != nil {
+		return err
+	}
+	data, err := json.Marshal(map[string]any{"durable": true, "mode_id": "creation", "draft_id": draftID})
+	if err != nil {
+		return err
+	}
+	return tx.Create(&model.AssistantInteractionEvent{ID: uuid.NewString(), InteractionID: interaction.ID, Generation: interaction.Generation, Sequence: interaction.CommandSequence + 1, Type: "draft.ready", Data: data, CreatedAt: at}).Error
+}
+
 func (r *assistantInteractionRepository) CreateEvent(ctx context.Context, value *model.AssistantInteractionEvent) error {
 	return r.db.WithContext(ctx).Create(value).Error
 }
 
-// AppendEvent fences the generation check, sequence allocation, and insert in
+// AppendEvent fences the generation/project check, sequence allocation, and insert in
 // one transaction. A late runtime event therefore cannot slip between a
 // generation read and the replacement CAS, and concurrent writers cannot
 // allocate the same sequence number.
-func (r *assistantInteractionRepository) AppendEvent(ctx context.Context, interactionID string, generation int64, value *model.AssistantInteractionEvent) (bool, error) {
+func (r *assistantInteractionRepository) AppendEvent(ctx context.Context, interactionID string, generation int64, expectedProjectID string, value *model.AssistantInteractionEvent) (bool, error) {
 	if value == nil || strings.TrimSpace(interactionID) == "" || generation < 1 {
 		return false, errors.New("assistant interaction event identity is required")
 	}
@@ -376,7 +563,7 @@ func (r *assistantInteractionRepository) AppendEvent(ctx context.Context, intera
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", interactionID).First(&interaction).Error; err != nil {
 		return rollback(err)
 	}
-	if interaction.Generation != generation {
+	if interaction.Generation != generation || interaction.ProjectID != expectedProjectID {
 		return rollback(nil)
 	}
 	if interaction.Lifecycle == model.AssistantInteractionCompleted || interaction.Lifecycle == model.AssistantInteractionAbandoned {
@@ -464,6 +651,7 @@ func (r *assistantInteractionRepository) FindLatestCommitAttempt(ctx context.Con
 	var value model.AssistantInteractionAttempt
 	if err := r.db.WithContext(ctx).
 		Where("interaction_id = ? AND operation = ?", interactionID, "commit").
+		Order("CASE WHEN length(result) > 0 THEN 0 WHEN error_code = 'assistant_commit_reconciliation_required' OR (status = 'pending' AND error_code = '') THEN 1 ELSE 2 END").
 		Order("created_at DESC").First(&value).Error; err != nil {
 		return nil, err
 	}

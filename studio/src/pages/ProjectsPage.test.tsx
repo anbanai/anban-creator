@@ -599,7 +599,7 @@ describe('ProjectsPage', () => {
     render(<ProjectsPage />)
 
     expect(await screen.findByRole('dialog', { name: '公众号设置' })).toBeInTheDocument()
-    expect(successMock).toHaveBeenCalledWith('公众号已绑定，可保存到草稿箱')
+    expect(successMock).toHaveBeenCalledWith('公众号已绑定，可选择交付方式')
     await waitFor(() => expect(window.location.search).toBe(''))
     expect(errorMock).not.toHaveBeenCalled()
   })

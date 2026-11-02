@@ -1,4 +1,7 @@
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { Separator } from '@/components/ui/separator'
+import { Check } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import type { ImageRatio } from '@/lib/schemas'
 import type { ImageCapabilityOption } from '@/types/imageCapability'
 
@@ -24,6 +27,8 @@ export function ImageGenerationSettings({
   disabled = false,
   ratioLabel = '图片比例',
 }: ImageGenerationSettingsProps) {
+  const selectedCapability = capabilities.find((option) => option.key === capabilityKey)
+
   return (
     <>
       <section className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-2">
@@ -48,39 +53,42 @@ export function ImageGenerationSettings({
         </ToggleGroup>
       </section>
 
-      <section className="flex flex-col gap-2">
+      <Separator />
+
+      <section className="flex flex-col gap-1">
         <h3 className="font-medium">图像能力</h3>
-        <ToggleGroup
-          aria-label="图像能力"
-          value={capabilityKey ? [capabilityKey] : []}
-          onValueChange={(next) => {
-            const selected = next[0]
-            if (selected) onCapabilityChange(selected)
-          }}
-          variant="outline"
-          disabled={disabled}
-          className="grid w-full grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] items-stretch gap-2"
-        >
-          {capabilities.map((option) => {
-            const available = option.enabled === true && option.price_available === true
-            return (
-              <ToggleGroupItem
-                key={option.key}
-                value={option.key}
-                disabled={!available}
-                className="h-auto min-h-14 w-full min-w-0 flex-col items-start justify-center gap-0.5 whitespace-normal px-2.5 py-2 text-left"
-              >
-                <span className="font-medium">{option.display_name}</span>
-                {option.description ? <span className="text-xs text-muted-foreground">{option.description}</span> : null}
-                <span className="text-xs text-muted-foreground">
-                  {available && typeof option.price_credits === 'number'
-                    ? `每张 ${option.price_credits.toLocaleString()} 积分`
-                    : '价格暂不可用'}
-                </span>
-              </ToggleGroupItem>
-            )
-          })}
-        </ToggleGroup>
+        <div className="flex min-w-0 flex-col gap-1.5">
+          {selectedCapability?.description ? (
+            <p aria-live="polite" className="min-h-5 text-xs leading-5 text-muted-foreground">{selectedCapability.description}</p>
+          ) : null}
+          <ToggleGroup
+            aria-label="图像能力"
+            value={capabilityKey ? [capabilityKey] : []}
+            onValueChange={(next) => {
+              const selected = next[0]
+              if (selected) onCapabilityChange(selected)
+            }}
+            variant="default"
+            disabled={disabled}
+            className="flex w-full flex-wrap justify-start gap-1"
+          >
+            {capabilities.map((option) => {
+              const available = option.enabled === true && option.price_available === true
+              return (
+                <ToggleGroupItem
+                  key={option.key}
+                  value={option.key}
+                  disabled={!available}
+                  title={option.description}
+                  className="h-8 gap-1.5 px-2 text-xs aria-pressed:bg-primary/8 aria-pressed:text-primary data-[state=on]:bg-primary/8 data-[state=on]:text-primary"
+                >
+                  <Check aria-hidden="true" className={cn('size-3', capabilityKey !== option.key && 'invisible')} />
+                  <span>{option.display_name}</span>
+                </ToggleGroupItem>
+              )
+            })}
+          </ToggleGroup>
+        </div>
       </section>
     </>
   )

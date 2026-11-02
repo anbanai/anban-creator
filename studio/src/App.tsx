@@ -18,6 +18,7 @@ import { lazyWithRecovery } from '@/lib/lazy-with-recovery'
 
 // Lazy-loaded pages
 const LoginPage = lazyWithRecovery(() => import('@/pages/LoginPage'))
+const LandingPage = lazyWithRecovery(() => import('@/pages/LandingPage'))
 const RegisterPage = lazyWithRecovery(() => import('@/pages/RegisterPage'))
 const DashboardPage = lazyWithRecovery(() => import('@/pages/DashboardPage'))
 const AssistantWorkspace = lazyWithRecovery(() => import('@/pages/AssistantWorkspace'))
@@ -40,6 +41,8 @@ const UserMediaLibraryPage = lazyWithRecovery(() => import('@/pages/UserMediaLib
 const ContentAutopilotSettingsPage = lazyWithRecovery(() => import('@/pages/ContentAutopilotSettingsPage'))
 const ContentAnalyticsPage = lazyWithRecovery(() => import('@/pages/ContentAnalyticsPage'))
 const TrendsPage = lazyWithRecovery(() => import('@/pages/TrendsPage'))
+const TopicRadarPage = lazyWithRecovery(() => import('@/pages/TopicRadarPage'))
+const TopicPoolPage = lazyWithRecovery(() => import('@/pages/TopicPoolPage'))
 const PublicSharePage = lazyWithRecovery(() => import('@/pages/PublicSharePage'))
 
 function ChatRedirect() {
@@ -102,6 +105,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const location = useLocation()
 
   if (!isAuthenticated) {
+    if (location.pathname === '/') {
+      return <LazyPage component={LandingPage} />
+    }
     return <Navigate to="/login" state={{ from: location }} replace />
   }
 
@@ -210,6 +216,8 @@ function AppRoutes() {
           <Route path="media-assets" element={<LazyPage component={UserMediaLibraryPage} />} />
           <Route path="content-assets/settings" element={<LazyPage component={ContentAutopilotSettingsPage} />} />
           <Route path="trends" element={<LazyPage component={TrendsPage} />} />
+          <Route path="topic-radar" element={<LazyPage component={TopicRadarPage} />} />
+          <Route path="topic-pool" element={<LazyPage component={TopicPoolPage} />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

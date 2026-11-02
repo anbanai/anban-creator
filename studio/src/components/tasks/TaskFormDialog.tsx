@@ -548,9 +548,7 @@ export function TaskFormDialog({
         onChange: (value) => setFormValue('execution_profile', value),
         loading: executionProfilesQuery.isLoading,
         disabled: executionProfilesQuery.isError,
-        catalog: billingCatalog,
         taskType: watchedType,
-        priceUnit: 'task',
       }}
       image={usesImageSettings ? {
         ratios: businessImageRatios,

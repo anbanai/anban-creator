@@ -55,6 +55,13 @@ type Repository interface {
 	ViralAnalyses() ViralAnalysisRepository
 	PosterTasks() PosterTaskRepository
 	TopicPools() TopicPoolRepository
+	TopicSubscriptions() TopicSubscriptionRepository
+	TopicDigests() TopicDigestRepository
+	TopicSuggestions() TopicSuggestionRepository
+	TopicSuggestionAdoptions() TopicSuggestionAdoptionRepository
+	TopicScriptJobs() TopicScriptJobRepository
+	TopicNotificationChannels() TopicNotificationChannelRepository
+	TopicNotificationDeliveries() TopicNotificationDeliveryRepository
 	ContentAssets() ContentAssetRepository
 	TrendSnapshots() TrendSnapshotRepository
 	AgentFeedbacks() AgentFeedbackRepository
@@ -494,8 +501,11 @@ type ChannelsMetricSnapshotRepository interface {
 type TopicPoolRepository interface {
 	Create(ctx context.Context, topic *model.TopicPool) error
 	CreateBatch(ctx context.Context, topics []*model.TopicPool) error
+	AddWithSource(ctx context.Context, topic *model.TopicPool) (bool, error)
+	LinkContentAsset(ctx context.Context, id uint, assetID string) error
 	FindByID(ctx context.Context, id uint) (*model.TopicPool, error)
 	FindByProject(ctx context.Context, projectID, status string, offset, limit int) ([]*model.TopicPool, int64, error)
+	ListHistoryByProject(ctx context.Context, userID, projectID string, limit int) ([]*model.TopicPool, error)
 	FindTitlesByProject(ctx context.Context, projectID string, titles []string) ([]string, error)
 	ClaimOne(ctx context.Context, userID, projectID string) (*model.TopicPool, error)
 	ClaimWithTask(ctx context.Context, userID, projectID, taskID string) (*model.TopicPool, error)
@@ -503,6 +513,85 @@ type TopicPoolRepository interface {
 	ResetStatus(ctx context.Context, id uint) error
 	ResetByTask(ctx context.Context, taskID string) error
 	Delete(ctx context.Context, id uint) error
+}
+
+type TopicSubscriptionRepository interface {
+	Patch(context.Context, *model.TopicSubscription, ...string) error
+	AdvanceSchedule(context.Context, *model.TopicSubscription, time.Time) error
+	Create(context.Context, *model.TopicSubscription) error
+	FindByID(context.Context, string) (*model.TopicSubscription, error)
+	LockByID(context.Context, string) (*model.TopicSubscription, error)
+	ListByProject(context.Context, string, string) ([]*model.TopicSubscription, error)
+	FindDue(context.Context, time.Time, int) ([]*model.TopicSubscription, error)
+	Delete(context.Context, string, string, string) error
+	Update(context.Context, *model.TopicSubscription) error
+}
+
+type TopicDigestRepository interface {
+	ListPendingEffects(context.Context, int) ([]*model.TopicDigest, error)
+	MarkEffectsQueued(context.Context, string, time.Time) error
+	MarkDispatch(context.Context, string, string, string) error
+	ListDispatchable(context.Context, int) ([]*model.TopicDigest, error)
+	Create(context.Context, *model.TopicDigest) error
+	CreateIfAbsent(context.Context, *model.TopicDigest) (bool, error)
+	FindByID(context.Context, string) (*model.TopicDigest, error)
+	FindByOccurrence(context.Context, string) (*model.TopicDigest, error)
+	FindActiveBySubscription(context.Context, string) (*model.TopicDigest, error)
+	ListBySubscription(context.Context, string, int) ([]*model.TopicDigest, error)
+	Update(context.Context, *model.TopicDigest) error
+	UpdateIfNonterminal(context.Context, *model.TopicDigest) (bool, error)
+	ClaimTask(context.Context, string, *model.Task) (bool, error)
+	BindExecution(context.Context, string, string, string) (bool, error)
+}
+
+type TopicSuggestionRepository interface {
+	CreateBatch(context.Context, []*model.TopicSuggestion) error
+	ListByDigest(context.Context, string) ([]*model.TopicSuggestion, error)
+	FindByID(context.Context, string) (*model.TopicSuggestion, error)
+	Update(context.Context, *model.TopicSuggestion) error
+}
+
+type TopicSuggestionAdoptionRepository interface {
+	ListByDigest(context.Context, string) ([]*model.TopicSuggestionAdoption, error)
+	CreateBatch(context.Context, []*model.TopicSuggestionAdoption) error
+	FindByID(context.Context, string) (*model.TopicSuggestionAdoption, error)
+	FindBySuggestion(context.Context, string) (*model.TopicSuggestionAdoption, error)
+	Claim(context.Context, string, string, time.Time) (bool, error)
+	Update(context.Context, *model.TopicSuggestionAdoption) error
+	UpdateClaimed(context.Context, *model.TopicSuggestionAdoption, string) error
+	ListRecoverable(context.Context, time.Time, int) ([]*model.TopicSuggestionAdoption, error)
+}
+
+type TopicScriptJobRepository interface {
+	ListByDigest(context.Context, string) ([]*model.TopicScriptJob, error)
+	RetryFailed(context.Context, *model.TopicScriptJob) (bool, error)
+	ListDispatchable(context.Context, int) ([]*model.TopicScriptJob, error)
+	Create(context.Context, *model.TopicScriptJob) error
+	FindByID(context.Context, string) (*model.TopicScriptJob, error)
+	FindByFingerprint(context.Context, string) (*model.TopicScriptJob, error)
+	Update(context.Context, *model.TopicScriptJob) error
+	UpdateIfNonterminal(context.Context, *model.TopicScriptJob) (bool, error)
+	ClaimTask(context.Context, string, *model.Task) (bool, error)
+	BindExecution(context.Context, string, string, string) (bool, error)
+}
+
+type TopicNotificationChannelRepository interface {
+	Create(context.Context, *model.TopicNotificationChannel) error
+	FindByID(context.Context, string) (*model.TopicNotificationChannel, error)
+	ListByProject(context.Context, string, string) ([]*model.TopicNotificationChannel, error)
+	Update(context.Context, *model.TopicNotificationChannel) error
+	Delete(context.Context, string) error
+}
+
+type TopicNotificationDeliveryRepository interface {
+	ListByDigest(context.Context, string) ([]*model.TopicNotificationDelivery, error)
+	CreateBatch(context.Context, []*model.TopicNotificationDelivery) error
+	FindByDigestChannel(context.Context, string, string) (*model.TopicNotificationDelivery, error)
+	FindByID(context.Context, string) (*model.TopicNotificationDelivery, error)
+	Claim(context.Context, string, string, time.Time) (bool, error)
+	UpdateClaimed(context.Context, *model.TopicNotificationDelivery, string) error
+	Update(context.Context, *model.TopicNotificationDelivery) error
+	ListRecoverable(context.Context, time.Time, int) ([]*model.TopicNotificationDelivery, error)
 }
 
 type ContentAssetListFilter struct {
@@ -629,6 +718,7 @@ type ContentMetadataRepository interface {
 }
 
 type SearchOperationRepository interface {
+	ListRecentByProject(context.Context, string, string, int) ([]*model.SearchOperation, error)
 	ListSucceeded(ctx context.Context, userID, projectID, taskID, executionID string) ([]*model.SearchOperation, error)
 	FindByFingerprint(ctx context.Context, fingerprint string) (*model.SearchOperation, error)
 	Claim(ctx context.Context, candidate *model.SearchOperation, now time.Time, lease time.Duration) (*model.SearchOperation, bool, error)
@@ -643,59 +733,66 @@ type SearchOperationRepository interface {
 // -----------------------------------------------------------------------------
 
 type repository struct {
-	db                        *gorm.DB
-	users                     UserRepository
-	sessions                  SessionRepository
-	plans                     PlanRepository
-	planEntries               PlanEntryRepository
-	tasks                     TaskRepository
-	taskExecutions            TaskExecutionRepository
-	files                     TaskFileRepository
-	taskShares                TaskShareRepository
-	uploadSessions            UploadSessionRepository
-	assets                    AssetRepository
-	userMediaAssets           UserMediaAssetRepository
-	imageAnalyses             ImageAnalysisRepository
-	projects                  ProjectRepository
-	projectProfileRevisions   ProjectProfileRevisionRepository
-	projectProfileStates      ProjectProfileStateRepository
-	assistantCheckpoints      AssistantCheckpointRepository
-	assistantSessions         AssistantSessionRepository
-	assistantWorkspaces       AssistantWorkspaceRepository
-	assistantInteractions     AssistantInteractionRepository
-	interactiveCommitReceipts InteractiveCommitReceiptRepository
-	projectChannelConfigs     ProjectChannelConfigRepository
-	apiKeys                   APIKeyRepository
-	feedbacks                 FeedbackRepository
-	taskFeedbacks             TaskFeedbackRepository
-	seednoteTrackings         SeednoteTrackingRepository
-	seednoteMetricSnapshots   SeednoteMetricSnapshotRepository
-	seednoteImports           SeednoteImportRepository
-	seednotePosts             SeednotePostRepository
-	seednotePostAliases       SeednotePostAliasRepository
-	seednoteMetricVersions    SeednoteMetricVersionRepository
-	wechatTrackings           WechatTrackingRepository
-	wechatPublications        WechatPublicationRepository
-	wechatMetricSnapshots     WechatMetricSnapshotRepository
-	wechatAnalyticsImports    WechatAnalyticsImportRepository
-	wechatAccountAnalytics    WechatAccountAnalyticsRepository
-	wechatCapabilities        WechatCapabilityRepository
-	wechatOpenPlatformAuths   WechatOpenPlatformAuthorizationRepository
-	channelsTrackings         ChannelsTrackingRepository
-	channelsMetricSnapshots   ChannelsMetricSnapshotRepository
-	templates                 TemplateRepository
-	viralAnalyses             ViralAnalysisRepository
-	posterTasks               PosterTaskRepository
-	topicPools                TopicPoolRepository
-	contentAssets             ContentAssetRepository
-	trendSnapshots            TrendSnapshotRepository
-	agentFeedbacks            AgentFeedbackRepository
-	feedbackLoop              FeedbackLoopRepository
-	contentMetadata           ContentMetadataRepository
-	ilinkBindings             IlinkBindingRepository
-	ilinkNotifications        IlinkNotificationRepository
-	billing                   BillingRepository
-	searchOperations          SearchOperationRepository
+	db                          *gorm.DB
+	users                       UserRepository
+	sessions                    SessionRepository
+	plans                       PlanRepository
+	planEntries                 PlanEntryRepository
+	tasks                       TaskRepository
+	taskExecutions              TaskExecutionRepository
+	files                       TaskFileRepository
+	taskShares                  TaskShareRepository
+	uploadSessions              UploadSessionRepository
+	assets                      AssetRepository
+	userMediaAssets             UserMediaAssetRepository
+	imageAnalyses               ImageAnalysisRepository
+	projects                    ProjectRepository
+	projectProfileRevisions     ProjectProfileRevisionRepository
+	projectProfileStates        ProjectProfileStateRepository
+	assistantCheckpoints        AssistantCheckpointRepository
+	assistantSessions           AssistantSessionRepository
+	assistantWorkspaces         AssistantWorkspaceRepository
+	assistantInteractions       AssistantInteractionRepository
+	interactiveCommitReceipts   InteractiveCommitReceiptRepository
+	projectChannelConfigs       ProjectChannelConfigRepository
+	apiKeys                     APIKeyRepository
+	feedbacks                   FeedbackRepository
+	taskFeedbacks               TaskFeedbackRepository
+	seednoteTrackings           SeednoteTrackingRepository
+	seednoteMetricSnapshots     SeednoteMetricSnapshotRepository
+	seednoteImports             SeednoteImportRepository
+	seednotePosts               SeednotePostRepository
+	seednotePostAliases         SeednotePostAliasRepository
+	seednoteMetricVersions      SeednoteMetricVersionRepository
+	wechatTrackings             WechatTrackingRepository
+	wechatPublications          WechatPublicationRepository
+	wechatMetricSnapshots       WechatMetricSnapshotRepository
+	wechatAnalyticsImports      WechatAnalyticsImportRepository
+	wechatAccountAnalytics      WechatAccountAnalyticsRepository
+	wechatCapabilities          WechatCapabilityRepository
+	wechatOpenPlatformAuths     WechatOpenPlatformAuthorizationRepository
+	channelsTrackings           ChannelsTrackingRepository
+	channelsMetricSnapshots     ChannelsMetricSnapshotRepository
+	templates                   TemplateRepository
+	viralAnalyses               ViralAnalysisRepository
+	posterTasks                 PosterTaskRepository
+	topicPools                  TopicPoolRepository
+	topicSubscriptions          TopicSubscriptionRepository
+	topicDigests                TopicDigestRepository
+	topicSuggestions            TopicSuggestionRepository
+	topicSuggestionAdoptions    TopicSuggestionAdoptionRepository
+	topicScriptJobs             TopicScriptJobRepository
+	topicNotificationChannels   TopicNotificationChannelRepository
+	topicNotificationDeliveries TopicNotificationDeliveryRepository
+	contentAssets               ContentAssetRepository
+	trendSnapshots              TrendSnapshotRepository
+	agentFeedbacks              AgentFeedbackRepository
+	feedbackLoop                FeedbackLoopRepository
+	contentMetadata             ContentMetadataRepository
+	ilinkBindings               IlinkBindingRepository
+	ilinkNotifications          IlinkNotificationRepository
+	billing                     BillingRepository
+	searchOperations            SearchOperationRepository
 }
 
 // New creates a new Repository backed by the given *gorm.DB.
@@ -734,6 +831,13 @@ func New(db *gorm.DB) Repository {
 	viralAnalyses := newViralAnalysisRepository(db)
 	posterTasks := newPosterTaskRepository(db)
 	topicPools := newTopicPoolRepository(db)
+	topicSubscriptions := newTopicSubscriptionRepository(db)
+	topicDigests := newTopicDigestRepository(db)
+	topicSuggestions := newTopicSuggestionRepository(db)
+	topicSuggestionAdoptions := newTopicAdoptionRepository(db)
+	topicScriptJobs := newTopicScriptJobRepository(db)
+	topicNotificationChannels := newTopicNotificationChannelRepository(db)
+	topicNotificationDeliveries := newTopicNotificationDeliveryRepository(db)
 	contentAssets := newContentAssetRepository(db)
 	trendSnapshots := newTrendSnapshotRepository(db)
 	agentFeedbacks := newAgentFeedbackRepository(db)
@@ -745,59 +849,66 @@ func New(db *gorm.DB) Repository {
 	searchOperations := newSearchOperationRepository(db)
 
 	return &repository{
-		db:                        db,
-		users:                     users,
-		sessions:                  sessions,
-		plans:                     plans,
-		planEntries:               newPlanEntryRepository(db),
-		tasks:                     tasks,
-		taskExecutions:            taskExecutions,
-		files:                     files,
-		taskShares:                newTaskShareRepository(db),
-		uploadSessions:            uploadSessions,
-		assets:                    assets,
-		userMediaAssets:           userMediaAssets,
-		imageAnalyses:             imageAnalyses,
-		projects:                  projects,
-		projectProfileRevisions:   newProjectProfileRevisionRepository(db),
-		projectProfileStates:      newProjectProfileStateRepository(db),
-		assistantCheckpoints:      newAssistantCheckpointRepository(db),
-		assistantSessions:         newAssistantSessionRepository(db),
-		assistantWorkspaces:       newAssistantWorkspaceRepository(db),
-		assistantInteractions:     newAssistantInteractionRepository(db),
-		interactiveCommitReceipts: newInteractiveCommitReceiptRepository(db),
-		projectChannelConfigs:     projectChannelConfigs,
-		apiKeys:                   apiKeys,
-		feedbacks:                 feedbacks,
-		taskFeedbacks:             taskFeedbacks,
-		seednoteTrackings:         seednoteTrackings,
-		seednoteMetricSnapshots:   seednoteMetricSnapshots,
-		seednoteImports:           seednoteImports,
-		seednotePosts:             seednotePosts,
-		seednotePostAliases:       seednotePostAliases,
-		seednoteMetricVersions:    seednoteMetricVersions,
-		wechatTrackings:           wechatTrackings,
-		wechatPublications:        wechatPublications,
-		wechatMetricSnapshots:     wechatMetricSnapshots,
-		wechatAnalyticsImports:    wechatAnalyticsImports,
-		wechatAccountAnalytics:    wechatAccountAnalytics,
-		wechatCapabilities:        wechatCapabilities,
-		wechatOpenPlatformAuths:   wechatOpenPlatformAuths,
-		channelsTrackings:         channelsTrackings,
-		channelsMetricSnapshots:   channelsMetricSnapshots,
-		templates:                 templates,
-		viralAnalyses:             viralAnalyses,
-		posterTasks:               posterTasks,
-		topicPools:                topicPools,
-		contentAssets:             contentAssets,
-		trendSnapshots:            trendSnapshots,
-		agentFeedbacks:            agentFeedbacks,
-		feedbackLoop:              feedbackLoop,
-		contentMetadata:           contentMetadata,
-		ilinkBindings:             ilinkBindings,
-		ilinkNotifications:        ilinkNotifications,
-		billing:                   billing,
-		searchOperations:          searchOperations,
+		db:                          db,
+		users:                       users,
+		sessions:                    sessions,
+		plans:                       plans,
+		planEntries:                 newPlanEntryRepository(db),
+		tasks:                       tasks,
+		taskExecutions:              taskExecutions,
+		files:                       files,
+		taskShares:                  newTaskShareRepository(db),
+		uploadSessions:              uploadSessions,
+		assets:                      assets,
+		userMediaAssets:             userMediaAssets,
+		imageAnalyses:               imageAnalyses,
+		projects:                    projects,
+		projectProfileRevisions:     newProjectProfileRevisionRepository(db),
+		projectProfileStates:        newProjectProfileStateRepository(db),
+		assistantCheckpoints:        newAssistantCheckpointRepository(db),
+		assistantSessions:           newAssistantSessionRepository(db),
+		assistantWorkspaces:         newAssistantWorkspaceRepository(db),
+		assistantInteractions:       newAssistantInteractionRepository(db),
+		interactiveCommitReceipts:   newInteractiveCommitReceiptRepository(db),
+		projectChannelConfigs:       projectChannelConfigs,
+		apiKeys:                     apiKeys,
+		feedbacks:                   feedbacks,
+		taskFeedbacks:               taskFeedbacks,
+		seednoteTrackings:           seednoteTrackings,
+		seednoteMetricSnapshots:     seednoteMetricSnapshots,
+		seednoteImports:             seednoteImports,
+		seednotePosts:               seednotePosts,
+		seednotePostAliases:         seednotePostAliases,
+		seednoteMetricVersions:      seednoteMetricVersions,
+		wechatTrackings:             wechatTrackings,
+		wechatPublications:          wechatPublications,
+		wechatMetricSnapshots:       wechatMetricSnapshots,
+		wechatAnalyticsImports:      wechatAnalyticsImports,
+		wechatAccountAnalytics:      wechatAccountAnalytics,
+		wechatCapabilities:          wechatCapabilities,
+		wechatOpenPlatformAuths:     wechatOpenPlatformAuths,
+		channelsTrackings:           channelsTrackings,
+		channelsMetricSnapshots:     channelsMetricSnapshots,
+		templates:                   templates,
+		viralAnalyses:               viralAnalyses,
+		posterTasks:                 posterTasks,
+		topicPools:                  topicPools,
+		topicSubscriptions:          topicSubscriptions,
+		topicDigests:                topicDigests,
+		topicSuggestions:            topicSuggestions,
+		topicSuggestionAdoptions:    topicSuggestionAdoptions,
+		topicScriptJobs:             topicScriptJobs,
+		topicNotificationChannels:   topicNotificationChannels,
+		topicNotificationDeliveries: topicNotificationDeliveries,
+		contentAssets:               contentAssets,
+		trendSnapshots:              trendSnapshots,
+		agentFeedbacks:              agentFeedbacks,
+		feedbackLoop:                feedbackLoop,
+		contentMetadata:             contentMetadata,
+		ilinkBindings:               ilinkBindings,
+		ilinkNotifications:          ilinkNotifications,
+		billing:                     billing,
+		searchOperations:            searchOperations,
 	}
 }
 
@@ -829,7 +940,9 @@ func (r *repository) AssistantCheckpoints() AssistantCheckpointRepository {
 }
 func (r *repository) AssistantSessions() AssistantSessionRepository     { return r.assistantSessions }
 func (r *repository) AssistantWorkspaces() AssistantWorkspaceRepository { return r.assistantWorkspaces }
-func (r *repository) AssistantInteractions() AssistantInteractionRepository { return r.assistantInteractions }
+func (r *repository) AssistantInteractions() AssistantInteractionRepository {
+	return r.assistantInteractions
+}
 func (r *repository) ProjectChannelConfigs() ProjectChannelConfigRepository {
 	return r.projectChannelConfigs
 }
@@ -872,7 +985,20 @@ func (r *repository) AgentFeedbacks() AgentFeedbackRepository    { return r.agen
 func (r *repository) FeedbackLoop() FeedbackLoopRepository       { return r.feedbackLoop }
 func (r *repository) ContentMetadata() ContentMetadataRepository { return r.contentMetadata }
 
-func (r *repository) TopicPools() TopicPoolRepository         { return r.topicPools }
+func (r *repository) TopicPools() TopicPoolRepository                 { return r.topicPools }
+func (r *repository) TopicSubscriptions() TopicSubscriptionRepository { return r.topicSubscriptions }
+func (r *repository) TopicDigests() TopicDigestRepository             { return r.topicDigests }
+func (r *repository) TopicSuggestions() TopicSuggestionRepository     { return r.topicSuggestions }
+func (r *repository) TopicSuggestionAdoptions() TopicSuggestionAdoptionRepository {
+	return r.topicSuggestionAdoptions
+}
+func (r *repository) TopicScriptJobs() TopicScriptJobRepository { return r.topicScriptJobs }
+func (r *repository) TopicNotificationChannels() TopicNotificationChannelRepository {
+	return r.topicNotificationChannels
+}
+func (r *repository) TopicNotificationDeliveries() TopicNotificationDeliveryRepository {
+	return r.topicNotificationDeliveries
+}
 func (r *repository) ContentAssets() ContentAssetRepository   { return r.contentAssets }
 func (r *repository) TrendSnapshots() TrendSnapshotRepository { return r.trendSnapshots }
 func (r *repository) IlinkBindings() IlinkBindingRepository {
@@ -908,114 +1034,128 @@ func (r *repository) Close() error {
 // -----------------------------------------------------------------------------
 
 type txRepository struct {
-	db                      *gorm.DB
-	users                   UserRepository
-	sessions                SessionRepository
-	plans                   PlanRepository
-	planEntries             PlanEntryRepository
-	tasks                   TaskRepository
-	taskExecutions          TaskExecutionRepository
-	files                   TaskFileRepository
-	taskShares              TaskShareRepository
-	uploadSessions          UploadSessionRepository
-	assets                  AssetRepository
-	userMediaAssets         UserMediaAssetRepository
-	imageAnalyses           ImageAnalysisRepository
-	projects                ProjectRepository
-	projectProfileRevisions ProjectProfileRevisionRepository
-	assistantCheckpoints    AssistantCheckpointRepository
-	assistantSessions       AssistantSessionRepository
-	assistantWorkspaces     AssistantWorkspaceRepository
-	assistantInteractions   AssistantInteractionRepository
-	projectProfileStates    ProjectProfileStateRepository
-	projectChannelConfigs   ProjectChannelConfigRepository
-	apiKeys                 APIKeyRepository
-	feedbacks               FeedbackRepository
-	taskFeedbacks           TaskFeedbackRepository
-	seednoteTrackings       SeednoteTrackingRepository
-	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
-	seednoteImports         SeednoteImportRepository
-	seednotePosts           SeednotePostRepository
-	seednotePostAliases     SeednotePostAliasRepository
-	seednoteMetricVersions  SeednoteMetricVersionRepository
-	wechatTrackings         WechatTrackingRepository
-	wechatPublications      WechatPublicationRepository
-	wechatMetricSnapshots   WechatMetricSnapshotRepository
-	wechatAnalyticsImports  WechatAnalyticsImportRepository
-	wechatAccountAnalytics  WechatAccountAnalyticsRepository
-	wechatCapabilities      WechatCapabilityRepository
-	wechatOpenPlatformAuths WechatOpenPlatformAuthorizationRepository
-	channelsTrackings       ChannelsTrackingRepository
-	channelsMetricSnapshots ChannelsMetricSnapshotRepository
-	templates               TemplateRepository
-	viralAnalyses           ViralAnalysisRepository
-	posterTasks             PosterTaskRepository
-	topicPools              TopicPoolRepository
-	contentAssets           ContentAssetRepository
-	trendSnapshots          TrendSnapshotRepository
-	agentFeedbacks          AgentFeedbackRepository
-	feedbackLoop            FeedbackLoopRepository
-	contentMetadata         ContentMetadataRepository
-	ilinkBindings           IlinkBindingRepository
-	ilinkNotifications      IlinkNotificationRepository
-	billing                 BillingRepository
-	searchOperations        SearchOperationRepository
+	db                          *gorm.DB
+	users                       UserRepository
+	sessions                    SessionRepository
+	plans                       PlanRepository
+	planEntries                 PlanEntryRepository
+	tasks                       TaskRepository
+	taskExecutions              TaskExecutionRepository
+	files                       TaskFileRepository
+	taskShares                  TaskShareRepository
+	uploadSessions              UploadSessionRepository
+	assets                      AssetRepository
+	userMediaAssets             UserMediaAssetRepository
+	imageAnalyses               ImageAnalysisRepository
+	projects                    ProjectRepository
+	projectProfileRevisions     ProjectProfileRevisionRepository
+	assistantCheckpoints        AssistantCheckpointRepository
+	assistantSessions           AssistantSessionRepository
+	assistantWorkspaces         AssistantWorkspaceRepository
+	assistantInteractions       AssistantInteractionRepository
+	projectProfileStates        ProjectProfileStateRepository
+	projectChannelConfigs       ProjectChannelConfigRepository
+	apiKeys                     APIKeyRepository
+	feedbacks                   FeedbackRepository
+	taskFeedbacks               TaskFeedbackRepository
+	seednoteTrackings           SeednoteTrackingRepository
+	seednoteMetricSnapshots     SeednoteMetricSnapshotRepository
+	seednoteImports             SeednoteImportRepository
+	seednotePosts               SeednotePostRepository
+	seednotePostAliases         SeednotePostAliasRepository
+	seednoteMetricVersions      SeednoteMetricVersionRepository
+	wechatTrackings             WechatTrackingRepository
+	wechatPublications          WechatPublicationRepository
+	wechatMetricSnapshots       WechatMetricSnapshotRepository
+	wechatAnalyticsImports      WechatAnalyticsImportRepository
+	wechatAccountAnalytics      WechatAccountAnalyticsRepository
+	wechatCapabilities          WechatCapabilityRepository
+	wechatOpenPlatformAuths     WechatOpenPlatformAuthorizationRepository
+	channelsTrackings           ChannelsTrackingRepository
+	channelsMetricSnapshots     ChannelsMetricSnapshotRepository
+	templates                   TemplateRepository
+	viralAnalyses               ViralAnalysisRepository
+	posterTasks                 PosterTaskRepository
+	topicPools                  TopicPoolRepository
+	topicSubscriptions          TopicSubscriptionRepository
+	topicDigests                TopicDigestRepository
+	topicSuggestions            TopicSuggestionRepository
+	topicSuggestionAdoptions    TopicSuggestionAdoptionRepository
+	topicScriptJobs             TopicScriptJobRepository
+	topicNotificationChannels   TopicNotificationChannelRepository
+	topicNotificationDeliveries TopicNotificationDeliveryRepository
+	contentAssets               ContentAssetRepository
+	trendSnapshots              TrendSnapshotRepository
+	agentFeedbacks              AgentFeedbackRepository
+	feedbackLoop                FeedbackLoopRepository
+	contentMetadata             ContentMetadataRepository
+	ilinkBindings               IlinkBindingRepository
+	ilinkNotifications          IlinkNotificationRepository
+	billing                     BillingRepository
+	searchOperations            SearchOperationRepository
 }
 
 func newTxRepository(tx *gorm.DB) *txRepository {
 	return &txRepository{
-		db:                      tx,
-		users:                   newUserRepository(tx),
-		sessions:                newSessionRepository(tx),
-		plans:                   newPlanRepository(tx),
-		planEntries:             newPlanEntryRepository(tx),
-		tasks:                   newTaskRepository(tx),
-		taskExecutions:          newTaskExecutionRepository(tx),
-		files:                   newTaskFileRepository(tx),
-		taskShares:              newTaskShareRepository(tx),
-		uploadSessions:          newUploadSessionRepository(tx),
-		assets:                  newAssetRepository(tx),
-		userMediaAssets:         newUserMediaAssetRepository(tx),
-		imageAnalyses:           newImageAnalysisRepository(tx),
-		projects:                newProjectRepository(tx),
-		projectProfileRevisions: newProjectProfileRevisionRepository(tx),
-		assistantCheckpoints:    newAssistantCheckpointRepository(tx),
-		assistantSessions:       newAssistantSessionRepository(tx),
-		assistantWorkspaces:     newAssistantWorkspaceRepository(tx),
-		assistantInteractions:   newAssistantInteractionRepository(tx),
-		projectProfileStates:    newProjectProfileStateRepository(tx),
-		projectChannelConfigs:   newProjectChannelConfigRepository(tx),
-		apiKeys:                 newAPIKeyRepository(tx),
-		feedbacks:               newFeedbackRepository(tx),
-		taskFeedbacks:           newTaskFeedbackRepository(tx),
-		seednoteTrackings:       newSeednoteTrackingRepository(tx),
-		seednoteMetricSnapshots: newSeednoteMetricSnapshotRepository(tx),
-		seednoteImports:         newSeednoteImportRepository(tx),
-		seednotePosts:           newSeednotePostRepository(tx),
-		seednotePostAliases:     newSeednotePostAliasRepository(tx),
-		seednoteMetricVersions:  newSeednoteMetricVersionRepository(tx),
-		wechatTrackings:         newWechatTrackingRepository(tx),
-		wechatPublications:      newWechatPublicationRepository(tx),
-		wechatMetricSnapshots:   newWechatMetricSnapshotRepository(tx),
-		wechatAnalyticsImports:  newWechatAnalyticsImportRepository(tx),
-		wechatAccountAnalytics:  newWechatAccountAnalyticsRepository(tx),
-		wechatCapabilities:      newWechatCapabilityRepository(tx),
-		wechatOpenPlatformAuths: newWechatOpenPlatformAuthorizationRepository(tx),
-		channelsTrackings:       newChannelsTrackingRepository(tx),
-		channelsMetricSnapshots: newChannelsMetricSnapshotRepository(tx),
-		templates:               newTemplateRepository(tx),
-		viralAnalyses:           newViralAnalysisRepository(tx),
-		posterTasks:             newPosterTaskRepository(tx),
-		topicPools:              newTopicPoolRepository(tx),
-		contentAssets:           newContentAssetRepository(tx),
-		trendSnapshots:          newTrendSnapshotRepository(tx),
-		agentFeedbacks:          newAgentFeedbackRepository(tx),
-		feedbackLoop:            newFeedbackLoopRepository(tx),
-		contentMetadata:         newContentMetadataRepository(tx),
-		ilinkBindings:           newIlinkBindingRepository(tx),
-		ilinkNotifications:      newIlinkNotificationRepository(tx),
-		billing:                 newTxBillingRepository(tx),
-		searchOperations:        newSearchOperationRepository(tx),
+		db:                          tx,
+		users:                       newUserRepository(tx),
+		sessions:                    newSessionRepository(tx),
+		plans:                       newPlanRepository(tx),
+		planEntries:                 newPlanEntryRepository(tx),
+		tasks:                       newTaskRepository(tx),
+		taskExecutions:              newTaskExecutionRepository(tx),
+		files:                       newTaskFileRepository(tx),
+		taskShares:                  newTaskShareRepository(tx),
+		uploadSessions:              newUploadSessionRepository(tx),
+		assets:                      newAssetRepository(tx),
+		userMediaAssets:             newUserMediaAssetRepository(tx),
+		imageAnalyses:               newImageAnalysisRepository(tx),
+		projects:                    newProjectRepository(tx),
+		projectProfileRevisions:     newProjectProfileRevisionRepository(tx),
+		assistantCheckpoints:        newAssistantCheckpointRepository(tx),
+		assistantSessions:           newAssistantSessionRepository(tx),
+		assistantWorkspaces:         newAssistantWorkspaceRepository(tx),
+		assistantInteractions:       newAssistantInteractionRepository(tx),
+		projectProfileStates:        newProjectProfileStateRepository(tx),
+		projectChannelConfigs:       newProjectChannelConfigRepository(tx),
+		apiKeys:                     newAPIKeyRepository(tx),
+		feedbacks:                   newFeedbackRepository(tx),
+		taskFeedbacks:               newTaskFeedbackRepository(tx),
+		seednoteTrackings:           newSeednoteTrackingRepository(tx),
+		seednoteMetricSnapshots:     newSeednoteMetricSnapshotRepository(tx),
+		seednoteImports:             newSeednoteImportRepository(tx),
+		seednotePosts:               newSeednotePostRepository(tx),
+		seednotePostAliases:         newSeednotePostAliasRepository(tx),
+		seednoteMetricVersions:      newSeednoteMetricVersionRepository(tx),
+		wechatTrackings:             newWechatTrackingRepository(tx),
+		wechatPublications:          newWechatPublicationRepository(tx),
+		wechatMetricSnapshots:       newWechatMetricSnapshotRepository(tx),
+		wechatAnalyticsImports:      newWechatAnalyticsImportRepository(tx),
+		wechatAccountAnalytics:      newWechatAccountAnalyticsRepository(tx),
+		wechatCapabilities:          newWechatCapabilityRepository(tx),
+		wechatOpenPlatformAuths:     newWechatOpenPlatformAuthorizationRepository(tx),
+		channelsTrackings:           newChannelsTrackingRepository(tx),
+		channelsMetricSnapshots:     newChannelsMetricSnapshotRepository(tx),
+		templates:                   newTemplateRepository(tx),
+		viralAnalyses:               newViralAnalysisRepository(tx),
+		posterTasks:                 newPosterTaskRepository(tx),
+		topicPools:                  newTopicPoolRepository(tx),
+		topicSubscriptions:          newTopicSubscriptionRepository(tx),
+		topicDigests:                newTopicDigestRepository(tx),
+		topicSuggestions:            newTopicSuggestionRepository(tx),
+		topicSuggestionAdoptions:    newTopicAdoptionRepository(tx),
+		topicScriptJobs:             newTopicScriptJobRepository(tx),
+		topicNotificationChannels:   newTopicNotificationChannelRepository(tx),
+		topicNotificationDeliveries: newTopicNotificationDeliveryRepository(tx),
+		contentAssets:               newContentAssetRepository(tx),
+		trendSnapshots:              newTrendSnapshotRepository(tx),
+		agentFeedbacks:              newAgentFeedbackRepository(tx),
+		feedbackLoop:                newFeedbackLoopRepository(tx),
+		contentMetadata:             newContentMetadataRepository(tx),
+		ilinkBindings:               newIlinkBindingRepository(tx),
+		ilinkNotifications:          newIlinkNotificationRepository(tx),
+		billing:                     newTxBillingRepository(tx),
+		searchOperations:            newSearchOperationRepository(tx),
 	}
 }
 
@@ -1049,7 +1189,9 @@ func (r *txRepository) AssistantSessions() AssistantSessionRepository { return r
 func (r *txRepository) AssistantWorkspaces() AssistantWorkspaceRepository {
 	return r.assistantWorkspaces
 }
-func (r *txRepository) AssistantInteractions() AssistantInteractionRepository { return r.assistantInteractions }
+func (r *txRepository) AssistantInteractions() AssistantInteractionRepository {
+	return r.assistantInteractions
+}
 func (r *txRepository) ProjectChannelConfigs() ProjectChannelConfigRepository {
 	return r.projectChannelConfigs
 }
@@ -1094,7 +1236,20 @@ func (r *txRepository) AgentFeedbacks() AgentFeedbackRepository    { return r.ag
 func (r *txRepository) FeedbackLoop() FeedbackLoopRepository       { return r.feedbackLoop }
 func (r *txRepository) ContentMetadata() ContentMetadataRepository { return r.contentMetadata }
 
-func (r *txRepository) TopicPools() TopicPoolRepository         { return r.topicPools }
+func (r *txRepository) TopicPools() TopicPoolRepository                 { return r.topicPools }
+func (r *txRepository) TopicSubscriptions() TopicSubscriptionRepository { return r.topicSubscriptions }
+func (r *txRepository) TopicDigests() TopicDigestRepository             { return r.topicDigests }
+func (r *txRepository) TopicSuggestions() TopicSuggestionRepository     { return r.topicSuggestions }
+func (r *txRepository) TopicSuggestionAdoptions() TopicSuggestionAdoptionRepository {
+	return r.topicSuggestionAdoptions
+}
+func (r *txRepository) TopicScriptJobs() TopicScriptJobRepository { return r.topicScriptJobs }
+func (r *txRepository) TopicNotificationChannels() TopicNotificationChannelRepository {
+	return r.topicNotificationChannels
+}
+func (r *txRepository) TopicNotificationDeliveries() TopicNotificationDeliveryRepository {
+	return r.topicNotificationDeliveries
+}
 func (r *txRepository) ContentAssets() ContentAssetRepository   { return r.contentAssets }
 func (r *txRepository) TrendSnapshots() TrendSnapshotRepository { return r.trendSnapshots }
 func (r *txRepository) IlinkBindings() IlinkBindingRepository {

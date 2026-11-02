@@ -66,6 +66,11 @@ export const queryKeys = {
     all: (projectId: string) => ['topic-pool', projectId] as const,
     list: (projectId: string, status?: string) => ['topic-pool', projectId, status] as const,
   },
+  topicRadar: {
+    subscriptions: (projectId: string) => ['topic-radar', 'subscriptions', projectId] as const,
+    digests: (subscriptionId: string) => ['topic-radar', 'digests', subscriptionId] as const,
+    suggestions: (digestId: string) => ['topic-radar', 'suggestions', digestId] as const,
+  },
   trends: {
     all: (platforms?: string, limit?: number) => ['trends', platforms, limit] as const,
   },

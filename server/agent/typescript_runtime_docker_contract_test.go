@@ -56,6 +56,7 @@ func TestManagedAgentImagesUsePinnedNode(t *testing.T) {
 	for _, name := range []string{
 		"Dockerfile.agent-ecommerce",
 		"Dockerfile.agent-feedback-analysis",
+		"Dockerfile.agent-topic-radar",
 		"Dockerfile.agent-hypit",
 		"Dockerfile.agent-moments",
 		"Dockerfile.agent-montage",

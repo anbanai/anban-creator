@@ -89,8 +89,8 @@ func TestOnboardingRoutesRequireAuthentication(t *testing.T) {
 func TestAssistantInteractionRoutesUseInteractionScopedAnswers(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	app := NewRouter(&Services{
-		Config:          &config.Config{},
-		Logger:          &logger,
+		Config:           &config.Config{},
+		Logger:           &logger,
 		AssistantHandler: handler.NewAssistantHandler(nil, nil, nil),
 	})
 	routes := app.GetRoutes()
@@ -267,6 +267,7 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 		wechatAnalyticsHandler := handler.NewWechatAnalyticsHandler(wechatTrackingSvc, &logger)
 		channelsAnalyticsHandler := handler.NewChannelsAnalyticsHandler(channelsTrackingSvc, &logger)
 		timelineHandler := handler.NewTimelineHandler(repo, &logger)
+		topicRadarHandler := handler.NewTopicRadarHandler(service.NewTopicRadarService(repo, nil, nil), repo, &logger)
 		montageCapabilityHandler := handler.NewMontageCapabilityHandler(
 			service.NewMontageCapabilityService(cfg.Montage),
 		)
@@ -287,6 +288,7 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 			WechatAnalyticsHandler:   wechatAnalyticsHandler,
 			ChannelsAnalyticsHandler: channelsAnalyticsHandler,
 			TimelineHandler:          timelineHandler,
+			TopicRadarHandler:        topicRadarHandler,
 			MontageCapabilityHandler: montageCapabilityHandler,
 			HypitCapabilityHandler:   handler.NewHypitCapabilityHandler(service.NewHypitCapabilityService(cfg.Hypit)),
 		}

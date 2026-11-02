@@ -15,6 +15,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const interactionRuntimeTTL = 24 * time.Hour
+
 type AssistantInteractionInput struct {
 	ModeID              string `json:"mode_id"`
 	ProjectID           string `json:"project_id,omitempty"`
@@ -43,10 +45,16 @@ type AssistantInteractionService struct {
 	locks        map[string]*sync.Mutex
 	runtimeMu    sync.RWMutex
 	runtimes     map[string]Runtime
-	modeSessions map[string]map[string]string
+	modeSessions map[string]map[interactionSessionScope]string
 	capabilities map[string]interactionRuntimeCapability
 	liveEvents   map[string][]interactionLiveEvent
 	metrics      interactionMetrics
+}
+
+type interactionSessionScope struct {
+	ModeID    string
+	ProjectID string
+	ContentID string
 }
 
 type interactionLiveEvent struct {
@@ -76,7 +84,7 @@ func NewAssistantInteractionService(repo repository.Repository, runtime RuntimeF
 	}
 	return &AssistantInteractionService{
 		repo: repo, factory: runtime, clock: clock, locks: map[string]*sync.Mutex{},
-		runtimes: map[string]Runtime{}, modeSessions: map[string]map[string]string{}, capabilities: map[string]interactionRuntimeCapability{}, liveEvents: map[string][]interactionLiveEvent{},
+		runtimes: map[string]Runtime{}, modeSessions: map[string]map[interactionSessionScope]string{}, capabilities: map[string]interactionRuntimeCapability{}, liveEvents: map[string][]interactionLiveEvent{},
 	}
 }
 
@@ -141,11 +149,14 @@ func (s *AssistantInteractionService) CreateOrResume(ctx context.Context, userID
 	}
 	lockKey := userID + ":" + in.ProjectID + ":" + in.ContentID
 	if strings.TrimSpace(in.ResumeInteractionID) != "" {
-		lockKey = "interaction:" + in.ResumeInteractionID
+		lockKey = in.ResumeInteractionID
 	}
 	lock := s.lockFor(lockKey)
 	lock.Lock()
 	defer lock.Unlock()
+	if _, _, contextErr := s.interactionContextRecords(ctx, userID, in.ProjectID, in.ContentID); contextErr != nil {
+		return InteractionSnapshot{}, contextErr
+	}
 	now := s.clock()
 	var interaction *model.AssistantInteraction
 	var err error
@@ -175,7 +186,7 @@ func (s *AssistantInteractionService) CreateOrResume(ctx context.Context, userID
 		if in.PrepareOnly {
 			lifecycle = model.AssistantInteractionPrepared
 		}
-		interaction, _, err = s.repo.AssistantInteractions().FindOrCreateActive(ctx, &model.AssistantInteraction{ID: uuid.NewString(), UserID: userID, ModeID: in.ModeID, ProjectID: in.ProjectID, ContentID: in.ContentID, Lifecycle: lifecycle, Generation: 1, ExpiresAt: now.Add(24 * time.Hour), LastActivityAt: now, CreatedAt: now, UpdatedAt: now})
+		interaction, _, err = s.repo.AssistantInteractions().FindOrCreateActive(ctx, &model.AssistantInteraction{ID: uuid.NewString(), UserID: userID, ModeID: in.ModeID, ProjectID: in.ProjectID, ContentID: in.ContentID, Lifecycle: lifecycle, Generation: 1, ExpiresAt: now.Add(interactionRuntimeTTL), LastActivityAt: now, CreatedAt: now, UpdatedAt: now})
 		if err != nil {
 			return InteractionSnapshot{}, err
 		}
@@ -225,13 +236,12 @@ func (s *AssistantInteractionService) CreateOrResume(ctx context.Context, userID
 		}
 	}
 	if in.PrepareOnly || interaction.Lifecycle == model.AssistantInteractionPrepared {
-		s.refreshCapabilityMode(interaction.ID, interaction.Generation, interaction.ModeID)
+		s.refreshCapabilityMode(interaction)
 		return s.snapshotWithDrafts(ctx, userID, interaction)
 	}
 	if _, ensureErr := s.ensureRuntimeLocked(ctx, userID, interaction); ensureErr != nil {
 		return InteractionSnapshot{}, ensureErr
 	}
-	s.refreshCapabilityMode(interaction.ID, interaction.Generation, interaction.ModeID)
 	return s.snapshotWithDrafts(ctx, userID, interaction)
 }
 
@@ -259,6 +269,15 @@ func (s *AssistantInteractionService) Snapshot(ctx context.Context, userID, inte
 	// or lifecycle update did not.
 	if drafts, draftErr := s.repo.AssistantInteractions().ListDrafts(ctx, userID, interaction.ID); draftErr == nil {
 		for _, draft := range drafts {
+			if draft != nil && draft.ModeID == AssistantModeCreation {
+				snapshot, err := s.snapshotWithDrafts(ctx, userID, interaction)
+				if err != nil || snapshot.Lifecycle != model.AssistantInteractionActive || snapshot.RecoveryErrorCode == InteractionErrorCommitReconciliationRequired || s.clock().Before(interaction.ExpiresAt) {
+					return snapshot, err
+				}
+				// Editable drafts survive runtime expiry, but their next message
+				// needs the renewed generation provided by runtime recovery below.
+				break
+			}
 			if draft != nil && draft.Ready && draft.ConfirmationState != model.AssistantInteractionDraftConsumed {
 				if interaction.Lifecycle != model.AssistantInteractionNeedsConfirmation {
 					// Derive this terminal-for-runtime state from the durable draft
@@ -294,7 +313,24 @@ func (s *AssistantInteractionService) Snapshot(ctx context.Context, userID, inte
 }
 
 func (s *AssistantInteractionService) snapshotWithDrafts(ctx context.Context, userID string, interaction *model.AssistantInteraction) (InteractionSnapshot, error) {
+	var drafts []*model.AssistantInteractionDraft
+	var receipt *model.AssistantInteractionAttempt
+	var draftErr, receiptErr error
+	if interaction.ModeID == AssistantModeCreation {
+		interaction, drafts, receipt, draftErr = s.repo.AssistantInteractions().ReadCreationState(ctx, userID, interaction.ID)
+		if draftErr != nil {
+			return InteractionSnapshot{}, errors.Join(ErrInteractivePersistence, draftErr)
+		}
+		if receipt == nil {
+			receiptErr = gorm.ErrRecordNotFound
+		}
+	} else {
+		drafts, draftErr = s.repo.AssistantInteractions().ListDrafts(ctx, userID, interaction.ID)
+	}
 	snapshot := s.snapshotFromInteraction(interaction)
+	if interaction.ModeID == AssistantModeCreation {
+		snapshot.StateSequence = interaction.CommandSequence
+	}
 	if current, runtimeErr := s.repo.AssistantInteractions().FindCurrentRuntime(ctx, interaction.ID, interaction.Generation); runtimeErr == nil {
 		snapshot.RuntimeStatus = current.Status
 		if current.Status != model.AssistantInteractionRuntimeClosed && s.runtimeFor(interaction.ID, interaction.Generation) == nil {
@@ -312,18 +348,51 @@ func (s *AssistantInteractionService) snapshotWithDrafts(ctx context.Context, us
 	} else {
 		snapshot.RuntimeStatus = model.AssistantInteractionRuntimeStarting
 	}
-	if drafts, draftErr := s.repo.AssistantInteractions().ListDrafts(ctx, userID, interaction.ID); draftErr == nil {
+	if draftErr == nil {
 		snapshot.Drafts = make([]InteractionDraftView, 0, len(drafts))
+		latest := map[string]bool{}
+		claimed := false
 		for _, draft := range drafts {
-			snapshot.Drafts = append(snapshot.Drafts, InteractionDraftView{ID: draft.ID, ModeID: draft.ModeID, Revision: draft.Revision, Payload: draft.Payload, PayloadDigest: draft.PayloadDigest, Ready: draft.Ready, ConfirmationState: draft.ConfirmationState})
+			if draft.ModeID == AssistantModeCreation && (draft.ConfirmationState == model.AssistantInteractionDraftConfirmed || draft.ConfirmationState == model.AssistantInteractionDraftConsumed) {
+				claimed = true
+			}
 		}
+		for _, draft := range drafts {
+			eligible := !latest[draft.ModeID] && !claimed && draft.ExpiresAt.After(s.clock()) && interaction.Lifecycle != model.AssistantInteractionCompleted && interaction.Lifecycle != model.AssistantInteractionAbandoned
+			view := interactionDraftView(draft, eligible)
+			if draft.ModeID == AssistantModeCreation {
+				view.StateSequence = snapshot.StateSequence
+			}
+			if draft.ModeID == AssistantModeCreation && !latest[draft.ModeID] && interaction.Lifecycle != model.AssistantInteractionCompleted && interaction.Lifecycle != model.AssistantInteractionAbandoned {
+				snapshot.AvailableActions = creationDraftActions(view)
+				if view.Ready {
+					snapshot.Lifecycle = model.AssistantInteractionNeedsConfirmation
+				} else if snapshot.Lifecycle == model.AssistantInteractionNeedsConfirmation {
+					snapshot.Lifecycle = model.AssistantInteractionActive
+				}
+			}
+			latest[draft.ModeID] = true
+			snapshot.Drafts = append(snapshot.Drafts, view)
+		}
+		if claimed && interaction.Lifecycle != model.AssistantInteractionCompleted && interaction.Lifecycle != model.AssistantInteractionAbandoned {
+			snapshot.RecoveryErrorCode = InteractionErrorCommitReconciliationRequired
+			snapshot.AvailableActions = []string{"view_task", "reconcile_commit"}
+		}
+	} else {
+		return InteractionSnapshot{}, errors.Join(ErrInteractivePersistence, draftErr)
 	}
-	if receipt, receiptErr := s.repo.AssistantInteractions().FindLatestCommitAttempt(ctx, interaction.ID); receiptErr == nil {
+	if interaction.ModeID != AssistantModeCreation {
+		receipt, receiptErr = s.repo.AssistantInteractions().FindLatestCommitAttempt(ctx, interaction.ID)
+	}
+	if receiptErr == nil {
 		if receipt.ErrorCode == InteractionErrorCommitReconciliationRequired {
 			// An ambiguous external side effect is durable evidence in its own
 			// right. Surface the reconciliation action after a restart instead of
 			// presenting a ready draft that invites an unsafe blind retry.
 			snapshot.RecoveryErrorCode = receipt.ErrorCode
+			snapshot.AvailableActions = []string{"view_task", "reconcile_commit"}
+		} else if receipt.Status == model.AssistantInteractionAttemptPending && receipt.ErrorCode == "" && len(receipt.Result) == 0 && receipt.Operation == string(InteractionOperationCommit) {
+			snapshot.RecoveryErrorCode = InteractionErrorCommitReconciliationRequired
 			snapshot.AvailableActions = []string{"view_task", "reconcile_commit"}
 		} else if len(receipt.Result) > 0 {
 			var result InteractionCommitResult
@@ -331,12 +400,36 @@ func (s *AssistantInteractionService) snapshotWithDrafts(ctx context.Context, us
 				return InteractionSnapshot{}, errors.Join(ErrInteractivePersistence, err)
 			}
 			snapshot.CommitResult = &result
+			snapshot.RecoveryErrorCode = ""
 			// A successful receipt is the durable authority even if the process
 			// stopped after writing it and before the lifecycle update committed.
 			// Surface the terminal state immediately so refresh cannot offer a
 			// misleading second confirmation.
 			snapshot.Lifecycle = model.AssistantInteractionCompleted
 			snapshot.AvailableActions = []string{"view_task", "restart"}
+		} else if receipt.ErrorCode == InteractionErrorDraftRevisionConflict && interaction.ModeID == AssistantModeCreation {
+			for _, view := range snapshot.Drafts {
+				if view.ModeID != AssistantModeCreation {
+					continue
+				}
+				if receipt.PayloadDigest == commitPayloadDigest(InteractionCommitRequest{DraftID: view.ID, Revision: view.Revision}) {
+					if draft, err := s.repo.AssistantInteractions().FindDraftForUser(ctx, userID, view.ID); err == nil {
+						if structured := s.legacyCreationFailure(ctx, userID, draft); structured != nil {
+							snapshot.RecoveryErrorCode = structured.Code
+						}
+					}
+				}
+				break
+			}
+		}
+	} else if !errors.Is(receiptErr, gorm.ErrRecordNotFound) {
+		return InteractionSnapshot{}, errors.Join(ErrInteractivePersistence, receiptErr)
+	}
+	if snapshot.CommitResult != nil || snapshot.RecoveryErrorCode == InteractionErrorCommitReconciliationRequired {
+		for i := range snapshot.Drafts {
+			if snapshot.Drafts[i].ModeID == AssistantModeCreation {
+				snapshot.Drafts[i].Ready = false
+			}
 		}
 	}
 	if snapshot.CommitResult == nil && snapshot.RecoveryErrorCode == "" {
@@ -356,9 +449,21 @@ func (s *AssistantInteractionService) Events(ctx context.Context, userID, intera
 	if err != nil {
 		return nil, err
 	}
+	snapshot, err := s.snapshotWithDrafts(ctx, userID, current)
+	if err != nil {
+		return nil, err
+	}
 	events, err := s.repo.AssistantInteractions().ListEventsAfter(ctx, interactionID, current.Generation, after, 200)
 	if err != nil {
 		return nil, err
+	}
+	// A transition may commit between the snapshot and event queries. Never
+	// consume its cursor while hydrating it with an older claim/release view.
+	if current.ModeID == AssistantModeCreation && len(events) > 0 && events[len(events)-1].Sequence > snapshot.StateSequence {
+		snapshot, err = s.snapshotWithDrafts(ctx, userID, current)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// Runtime messages are retained in memory for the active process so the
 	// live stream remains useful, while the durable rows contain metadata only.
@@ -378,9 +483,6 @@ func (s *AssistantInteractionService) Events(ctx context.Context, userID, intera
 	}
 	live = kept
 	s.runtimeMu.Unlock()
-	if len(live) == 0 || len(events) == 0 {
-		return events, nil
-	}
 	bySequence := make(map[uint64]*model.AssistantInteractionEvent, len(live))
 	for _, item := range live {
 		if item.generation == current.Generation && item.event != nil {
@@ -390,6 +492,25 @@ func (s *AssistantInteractionService) Events(ctx context.Context, userID, intera
 	for i, event := range events {
 		if replacement := bySequence[event.Sequence]; replacement != nil {
 			events[i] = replacement
+		}
+		if events[i].Type == "draft.ready" {
+			var data struct {
+				DraftID string                `json:"draft_id"`
+				Draft   *InteractionDraftView `json:"draft"`
+			}
+			if json.Unmarshal(events[i].Data, &data) == nil {
+				if data.Draft != nil {
+					data.DraftID = data.Draft.ID
+				}
+				for _, view := range snapshot.Drafts {
+					if view.ID == data.DraftID && view.ModeID == AssistantModeCreation {
+						copy := *events[i]
+						copy.Data, _ = json.Marshal(map[string]any{"durable": true, "mode_id": view.ModeID, "draft": view})
+						events[i] = &copy
+						break
+					}
+				}
+			}
 		}
 	}
 	return events, nil
@@ -446,13 +567,25 @@ func (s *AssistantInteractionService) EnsureRuntime(ctx context.Context, userID,
 	return s.ensureRuntimeLocked(ctx, userID, interaction)
 }
 
-func (s *AssistantInteractionService) ensureRuntimeLocked(ctx context.Context, _ string, interaction *model.AssistantInteraction) (RuntimeBindingView, error) {
+func (s *AssistantInteractionService) ensureRuntimeLocked(ctx context.Context, userID string, interaction *model.AssistantInteraction) (RuntimeBindingView, error) {
 	if terminalErr := interactionRuntimeTerminalError(interaction.Lifecycle); terminalErr != nil {
 		return RuntimeBindingView{}, terminalErr
+	}
+	// Expiry fences the runtime generation, not the durable conversation. A
+	// replacement must receive a fresh lease before its MCP handshake starts.
+	if !s.clock().Before(interaction.ExpiresAt) {
+		return s.replaceRuntimeLocked(ctx, userID, interaction, interaction.Generation, "runtime_expired")
 	}
 	current, err := s.repo.AssistantInteractions().FindCurrentRuntime(ctx, interaction.ID, interaction.Generation)
 	if err == nil {
 		if runtime := s.runtimeFor(interaction.ID, interaction.Generation); runtime != nil {
+			capability, bound := s.runtimeCapability(current.TokenHash)
+			// Project context may have committed before a failed replacement.
+			// The bound credential retains the runtime's original mount identity.
+			if !bound || capability.ProjectID != interaction.ProjectID {
+				return s.replaceRuntimeLocked(ctx, userID, interaction, interaction.Generation, "project_binding_changed")
+			}
+			s.refreshCapabilityMode(interaction)
 			logicalSessionID, sessionErr := s.ensureModeSessionLocked(ctx, interaction, runtime)
 			if sessionErr != nil {
 				return RuntimeBindingView{}, sessionErr
@@ -465,7 +598,8 @@ func (s *AssistantInteractionService) ensureRuntimeLocked(ctx context.Context, _
 		now := s.clock()
 		_ = s.repo.AssistantInteractions().CloseRuntime(ctx, current.ID, now)
 		s.clearModeSessions(interaction.ID, interaction.Generation)
-		if ok, casErr := s.repo.AssistantInteractions().CompareAndSwapGeneration(ctx, interaction.ID, interaction.Generation, interaction.Generation+1, now); casErr != nil || !ok {
+		expiresAt := now.Add(interactionRuntimeTTL)
+		if ok, casErr := s.repo.AssistantInteractions().CompareAndSwapGeneration(ctx, interaction.ID, interaction.Generation, interaction.Generation+1, now, expiresAt); casErr != nil || !ok {
 			if casErr != nil {
 				return RuntimeBindingView{}, casErr
 			}
@@ -474,6 +608,7 @@ func (s *AssistantInteractionService) ensureRuntimeLocked(ctx context.Context, _
 		s.metrics.observeGenerationReplacement()
 		s.metrics.observeRecovery("server_restart", "replaced")
 		interaction.Generation++
+		interaction.ExpiresAt = expiresAt
 		_ = s.repo.AssistantInteractions().UpdateLifecycle(ctx, interaction.ID, model.AssistantInteractionReconnecting, now)
 		// The old binding has been fenced and the next generation must follow
 		// the normal runtime creation path below.
@@ -484,6 +619,10 @@ func (s *AssistantInteractionService) ensureRuntimeLocked(ctx context.Context, _
 	}
 	if s.factory == nil {
 		return RuntimeBindingView{InteractionID: interaction.ID, Generation: interaction.Generation, RuntimeStatus: InteractionRuntimeStarting}, nil
+	}
+	initialContext, contextErr := s.interactionInitialContext(ctx, interaction)
+	if contextErr != nil {
+		return RuntimeBindingView{}, contextErr
 	}
 	logicalSessionID := uuid.NewString()
 	generation := interaction.Generation
@@ -504,7 +643,7 @@ func (s *AssistantInteractionService) ensureRuntimeLocked(ctx context.Context, _
 		s.runtimeMu.Unlock()
 	}
 	runtime, startErr := s.startRuntime(ctx, interaction, logicalSessionID, runtimeToken, func(eventType string, data any) {
-		s.AcceptRuntimeEvent(interaction.ID, generation, eventType, data)
+		s.acceptRuntimeEventForToken(interaction.ID, generation, tokenHash, eventType, data)
 	})
 	if startErr != nil {
 		removeCapability()
@@ -518,14 +657,15 @@ func (s *AssistantInteractionService) ensureRuntimeLocked(ctx context.Context, _
 	// stale runtime cannot initialize a session under the new generation.
 	s.runtimeMu.Lock()
 	if s.modeSessions == nil {
-		s.modeSessions = map[string]map[string]string{}
+		s.modeSessions = map[string]map[interactionSessionScope]string{}
 	}
-	s.modeSessions[runtimeKey(interaction.ID, interaction.Generation)] = map[string]string{interaction.ModeID: logicalSessionID}
+	scope := interactionSessionScope{interaction.ModeID, interaction.ProjectID, interaction.ContentID}
+	s.modeSessions[runtimeKey(interaction.ID, interaction.Generation)] = map[interactionSessionScope]string{scope: logicalSessionID}
 	s.runtimeMu.Unlock()
 	if err := runtime.Command(ctx, "session/start", map[string]any{
 		"sessionId":      logicalSessionID,
 		"presetId":       agentPackIDForInteraction(interaction.ModeID),
-		"initialContext": "",
+		"initialContext": initialContext,
 		"interaction_id": interaction.ID,
 		"generation":     interaction.Generation,
 	}); err != nil {
@@ -547,9 +687,9 @@ func (s *AssistantInteractionService) ensureRuntimeLocked(ctx context.Context, _
 	s.runtimeMu.Lock()
 	s.runtimes[runtimeKey(interaction.ID, interaction.Generation)] = runtime
 	if s.modeSessions == nil {
-		s.modeSessions = map[string]map[string]string{}
+		s.modeSessions = map[string]map[interactionSessionScope]string{}
 	}
-	s.modeSessions[runtimeKey(interaction.ID, interaction.Generation)] = map[string]string{interaction.ModeID: logicalSessionID}
+	s.modeSessions[runtimeKey(interaction.ID, interaction.Generation)] = map[interactionSessionScope]string{scope: logicalSessionID}
 	s.capabilities[binding.TokenHash] = interactionRuntimeCapability{UserID: interaction.UserID, InteractionID: interaction.ID, ModeID: interaction.ModeID, ProjectID: interaction.ProjectID, Generation: interaction.Generation, ExpiresAt: interaction.ExpiresAt}
 	s.runtimeMu.Unlock()
 	return RuntimeBindingView{InteractionID: interaction.ID, Generation: interaction.Generation, RuntimeStatus: binding.Status, RuntimeID: binding.RuntimeID, LogicalSessionID: binding.LogicalSession, runtime: runtime}, nil
@@ -576,33 +716,45 @@ func (s *AssistantInteractionService) runtimeFor(interactionID string, generatio
 	return s.runtimes[runtimeKey(interactionID, generation)]
 }
 
+func (s *AssistantInteractionService) runtimeCapability(tokenHash string) (interactionRuntimeCapability, bool) {
+	s.runtimeMu.RLock()
+	defer s.runtimeMu.RUnlock()
+	capability, bound := s.capabilities[tokenHash]
+	return capability, bound
+}
+
 func (s *AssistantInteractionService) clearModeSessions(interactionID string, generation int64) {
 	s.runtimeMu.Lock()
 	defer s.runtimeMu.Unlock()
 	delete(s.modeSessions, runtimeKey(interactionID, generation))
 }
 
-// ensureModeSessionLocked gives each Assistant mode its own logical DSH
-// session while keeping one Bridge runtime shared by the interaction.
+// ensureModeSessionLocked gives each Assistant mode and selected work its own
+// logical DSH session while sharing the interaction's project runtime.
 // This mapping is process-local; a Server restart replaces the generation
 // before any command can reuse a stale logical session.
 func (s *AssistantInteractionService) ensureModeSessionLocked(ctx context.Context, interaction *model.AssistantInteraction, runtime Runtime) (string, error) {
 	key := runtimeKey(interaction.ID, interaction.Generation)
+	scope := interactionSessionScope{interaction.ModeID, interaction.ProjectID, interaction.ContentID}
 	s.runtimeMu.RLock()
 	modeSessions := s.modeSessions[key]
 	logicalSessionID := ""
 	if modeSessions != nil {
-		logicalSessionID = modeSessions[interaction.ModeID]
+		logicalSessionID = modeSessions[scope]
 	}
 	s.runtimeMu.RUnlock()
 	if logicalSessionID != "" {
 		return logicalSessionID, nil
 	}
+	initialContext, err := s.interactionInitialContext(ctx, interaction)
+	if err != nil {
+		return "", err
+	}
 	logicalSessionID = uuid.NewString()
 	if err := runtime.Command(ctx, "session/start", map[string]any{
 		"sessionId":      logicalSessionID,
 		"presetId":       agentPackIDForInteraction(interaction.ModeID),
-		"initialContext": "",
+		"initialContext": initialContext,
 		"interaction_id": interaction.ID,
 		"generation":     interaction.Generation,
 	}); err != nil {
@@ -611,26 +763,26 @@ func (s *AssistantInteractionService) ensureModeSessionLocked(ctx context.Contex
 	}
 	s.runtimeMu.Lock()
 	if s.modeSessions == nil {
-		s.modeSessions = map[string]map[string]string{}
+		s.modeSessions = map[string]map[interactionSessionScope]string{}
 	}
 	if s.modeSessions[key] == nil {
-		s.modeSessions[key] = map[string]string{}
+		s.modeSessions[key] = map[interactionSessionScope]string{}
 	}
-	if existing := s.modeSessions[key][interaction.ModeID]; existing != "" {
+	if existing := s.modeSessions[key][scope]; existing != "" {
 		logicalSessionID = existing
 	} else {
-		s.modeSessions[key][interaction.ModeID] = logicalSessionID
+		s.modeSessions[key][scope] = logicalSessionID
 	}
 	s.runtimeMu.Unlock()
 	return logicalSessionID, nil
 }
 
-func (s *AssistantInteractionService) refreshCapabilityMode(interactionID string, generation int64, modeID string) {
+func (s *AssistantInteractionService) refreshCapabilityMode(interaction *model.AssistantInteraction) {
 	s.runtimeMu.Lock()
 	defer s.runtimeMu.Unlock()
 	for tokenHash, capability := range s.capabilities {
-		if capability.InteractionID == interactionID && capability.Generation == generation {
-			capability.ModeID = modeID
+		if capability.InteractionID == interaction.ID && capability.Generation == interaction.Generation {
+			capability.ModeID = interaction.ModeID
 			s.capabilities[tokenHash] = capability
 		}
 	}
@@ -657,14 +809,14 @@ func (s *AssistantInteractionService) ResolveRuntimeCapability(token string) (us
 	s.runtimeMu.RLock()
 	capability, ok := s.capabilities[hash]
 	s.runtimeMu.RUnlock()
-	if !ok || s.clock().After(capability.ExpiresAt) {
+	if !ok || !s.clock().Before(capability.ExpiresAt) {
 		return "", "", "", "", 0, time.Time{}, ErrInteractiveToken
 	}
 	if s.repo == nil || s.repo.AssistantInteractions() == nil {
 		return "", "", "", "", 0, time.Time{}, ErrInteractiveToken
 	}
 	interaction, lookupErr := s.repo.AssistantInteractions().FindByID(context.Background(), capability.InteractionID)
-	if lookupErr != nil || interaction.UserID != capability.UserID || interaction.Generation != capability.Generation || interaction.Lifecycle == model.AssistantInteractionAbandoned || interaction.Lifecycle == model.AssistantInteractionCompleted {
+	if lookupErr != nil || interaction.UserID != capability.UserID || interaction.ProjectID != capability.ProjectID || interaction.Generation != capability.Generation || interaction.Lifecycle == model.AssistantInteractionAbandoned || interaction.Lifecycle == model.AssistantInteractionCompleted {
 		return "", "", "", "", 0, time.Time{}, ErrInteractiveToken
 	}
 	return capability.UserID, capability.InteractionID, capability.ModeID, capability.ProjectID, capability.Generation, capability.ExpiresAt, nil
@@ -733,16 +885,18 @@ func (s *AssistantInteractionService) replaceRuntimeLocked(ctx context.Context, 
 	_ = s.repo.AssistantInteractions().UpdateLifecycle(ctx, interaction.ID, model.AssistantInteractionReconnecting, now)
 	if current, findErr := s.repo.AssistantInteractions().FindCurrentRuntime(ctx, interaction.ID, failedGeneration); findErr == nil {
 		_ = s.repo.AssistantInteractions().CloseRuntime(ctx, current.ID, now)
-		if runtime := s.runtimeFor(interaction.ID, failedGeneration); runtime != nil {
-			_ = runtime.Close()
-		}
+		runtime := s.runtimeFor(interaction.ID, failedGeneration)
 		s.clearModeSessions(interaction.ID, failedGeneration)
 		s.runtimeMu.Lock()
 		delete(s.runtimes, runtimeKey(interaction.ID, failedGeneration))
 		delete(s.capabilities, current.TokenHash)
 		s.runtimeMu.Unlock()
+		if runtime != nil {
+			_ = runtime.Close()
+		}
 	}
-	if ok, casErr := s.repo.AssistantInteractions().CompareAndSwapGeneration(ctx, interaction.ID, failedGeneration, failedGeneration+1, now); casErr != nil || !ok {
+	expiresAt := now.Add(interactionRuntimeTTL)
+	if ok, casErr := s.repo.AssistantInteractions().CompareAndSwapGeneration(ctx, interaction.ID, failedGeneration, failedGeneration+1, now, expiresAt); casErr != nil || !ok {
 		if casErr != nil {
 			return RuntimeBindingView{}, casErr
 		}
@@ -751,17 +905,33 @@ func (s *AssistantInteractionService) replaceRuntimeLocked(ctx context.Context, 
 	s.metrics.observeGenerationReplacement()
 	s.metrics.observeRecovery(cause, "replaced")
 	interaction.Generation = failedGeneration + 1
+	interaction.ExpiresAt = expiresAt
 	interaction.Lifecycle = model.AssistantInteractionReconnecting
 	_ = cause
 	binding, startErr := s.ensureRuntimeLocked(ctx, userID, interaction)
 	if startErr != nil {
 		return RuntimeBindingView{}, startErr
 	}
-	_ = s.repo.AssistantInteractions().UpdateLifecycle(ctx, interaction.ID, model.AssistantInteractionActive, s.clock())
+	if err := s.repo.AssistantInteractions().UpdateLifecycle(ctx, interaction.ID, model.AssistantInteractionActive, s.clock()); err != nil {
+		return RuntimeBindingView{}, err
+	}
+	interaction.Lifecycle = model.AssistantInteractionActive
 	return binding, nil
 }
 
 func (s *AssistantInteractionService) AcceptRuntimeEvent(interactionID string, generation int64, eventType string, data any) bool {
+	binding, err := s.repo.AssistantInteractions().FindCurrentRuntime(context.Background(), interactionID, generation)
+	if err != nil {
+		return false
+	}
+	return s.acceptRuntimeEventForToken(interactionID, generation, binding.TokenHash, eventType, data)
+}
+
+func (s *AssistantInteractionService) acceptRuntimeEventForToken(interactionID string, generation int64, tokenHash, eventType string, data any) bool {
+	capability, bound := s.runtimeCapability(tokenHash)
+	if !bound || capability.InteractionID != interactionID || capability.Generation != generation {
+		return false
+	}
 	data = s.annotateRuntimeEventMode(interactionID, generation, data)
 	durable, err := durableInteractionEventData(eventType, data)
 	if err != nil {
@@ -769,7 +939,7 @@ func (s *AssistantInteractionService) AcceptRuntimeEvent(interactionID string, g
 	}
 	now := s.clock()
 	durableEvent := &model.AssistantInteractionEvent{ID: uuid.NewString(), InteractionID: interactionID, Type: eventType, Data: durable, CreatedAt: now}
-	accepted, appendErr := s.repo.AssistantInteractions().AppendEvent(context.Background(), interactionID, generation, durableEvent)
+	accepted, appendErr := s.repo.AssistantInteractions().AppendEvent(context.Background(), interactionID, generation, capability.ProjectID, durableEvent)
 	if appendErr != nil || !accepted {
 		return false
 	}
@@ -797,9 +967,9 @@ func (s *AssistantInteractionService) annotateRuntimeEventMode(interactionID str
 		return raw
 	}
 	s.runtimeMu.RLock()
-	for modeID, logicalSessionID := range s.modeSessions[runtimeKey(interactionID, generation)] {
+	for scope, logicalSessionID := range s.modeSessions[runtimeKey(interactionID, generation)] {
 		if logicalSessionID == sessionID {
-			raw["mode_id"] = modeID
+			raw["mode_id"] = scope.ModeID
 			break
 		}
 	}

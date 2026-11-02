@@ -17,6 +17,7 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -179,7 +180,7 @@ func newAssistantInteractionServiceTest(t *testing.T) (*AssistantInteractionServ
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.AssistantInteraction{}, &model.AssistantInteractionRuntime{}, &model.AssistantInteractionDraft{}, &model.AssistantInteractionEvent{}, &model.AssistantInteractionAttempt{}, &model.Project{}, &model.Task{}, &model.ProjectProfileState{}, &model.ProjectProfileRevision{}); err != nil {
+	if err := db.AutoMigrate(&model.AssistantInteraction{}, &model.AssistantInteractionRuntime{}, &model.AssistantInteractionDraft{}, &model.AssistantInteractionEvent{}, &model.AssistantInteractionAttempt{}, &model.Project{}, &model.ProjectProfileState{}, &model.ProjectProfileRevision{}, &model.Task{}, &model.TaskFile{}, &model.AnalyticsState{}, &model.AnalyticsContent{}, &model.AnalyticsObservation{}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { sqlDB, _ := db.DB(); _ = sqlDB.Close() })
@@ -303,12 +304,14 @@ func TestAssistantInteractionStartsLogicalSessionBeforeCommands(t *testing.T) {
 
 func TestAssistantInteractionPrepareDefersRuntimeUntilFirstMessage(t *testing.T) {
 	svc, factory := newAssistantInteractionServiceTest(t)
+	logger := zerolog.Nop()
+	svc.SetTaskService(NewTaskService(svc.repo, nil, nil, &logger, "", nil, nil))
 	for _, project := range []*model.Project{{ID: "project-1", UserID: "user-1"}, {ID: "project-2", UserID: "user-1"}} {
 		if err := svc.repo.Projects().Create(context.Background(), project); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := svc.repo.Tasks().Create(context.Background(), &model.Task{ID: "content-1", UserID: "user-1", ProjectID: "project-2"}); err != nil {
+	if err := svc.repo.Tasks().Create(context.Background(), &model.Task{ID: "content-1", UserID: "user-1", ProjectID: "project-2", Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
 	prepared, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation, ProjectID: "project-1", PrepareOnly: true}, "prepare-1")
@@ -346,6 +349,29 @@ func TestAssistantInteractionPrepareDefersRuntimeUntilFirstMessage(t *testing.T)
 	defer factory.mu.Unlock()
 	if len(factory.commands) != 2 || factory.commands[0] != "session/start" || factory.commands[1] != "session/prompt" {
 		t.Fatalf("runtime commands after activation = %#v", factory.commands)
+	}
+}
+
+func TestAssistantInteractionExpiredPreparationStartsFirstPromptWithoutGenerationChange(t *testing.T) {
+	svc, factory := newAssistantInteractionServiceTest(t)
+	ctx := context.Background()
+	prepared, err := svc.CreateOrResume(ctx, "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation, PrepareOnly: true}, "prepare-expiry")
+	if err != nil {
+		t.Fatal(err)
+	}
+	activatedAt := svc.clock().Add(interactionRuntimeTTL + time.Hour)
+	svc.clock = func() time.Time { return activatedAt }
+	if err := svc.SendMessage(ctx, "user-1", prepared.ID, InteractionMessageInput{Generation: prepared.Generation, ClientMessageID: "first", Text: "hello"}); err != nil {
+		t.Fatalf("first prompt after idle preparation: %v", err)
+	}
+	current, err := svc.repo.AssistantInteractions().FindByIDForUser(ctx, "user-1", prepared.ID)
+	if err != nil || current.Generation != prepared.Generation || !current.ExpiresAt.Equal(activatedAt.Add(interactionRuntimeTTL)) || !current.LastActivityAt.Equal(activatedAt) || !current.UpdatedAt.Equal(activatedAt) {
+		t.Fatalf("activation lease = %#v, %v", current, err)
+	}
+	factory.mu.Lock()
+	defer factory.mu.Unlock()
+	if factory.starts != 1 || !reflect.DeepEqual(factory.commands, []string{"session/start", "session/prompt"}) {
+		t.Fatalf("first prompt runtime: starts=%d commands=%v", factory.starts, factory.commands)
 	}
 }
 
@@ -428,6 +454,8 @@ func TestCompletedInteractionSnapshotDoesNotRestartRuntime(t *testing.T) {
 	svc.runtimeMu.Lock()
 	svc.runtimes = map[string]Runtime{}
 	svc.runtimeMu.Unlock()
+	createdAt := svc.clock()
+	svc.clock = func() time.Time { return createdAt.Add(25 * time.Hour) }
 	if _, err := svc.Snapshot(context.Background(), "user-1", snapshot.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -503,6 +531,7 @@ func TestInteractionModeSwitchUsesOneRuntimeAndModeScopedLogicalSessions(t *test
 
 func TestAssistantInteractionCreateOrResumeReusesScope(t *testing.T) {
 	svc, factory := newAssistantInteractionServiceTest(t)
+	createInteractionContextFixture(t, svc.repo, "project-1", "content-1")
 	input := AssistantInteractionInput{ModeID: "creation", ProjectID: "project-1", ContentID: "content-1", AgentID: "project-creator", Intent: "create"}
 	first, err := svc.CreateOrResume(context.Background(), "user-1", input, "attempt-1")
 	if err != nil {
@@ -519,6 +548,7 @@ func TestAssistantInteractionCreateOrResumeReusesScope(t *testing.T) {
 
 func TestAssistantInteractionCreateOrResumeReplaysIdempotencyAfterCompletion(t *testing.T) {
 	svc, _ := newAssistantInteractionServiceTest(t)
+	createInteractionContextFixture(t, svc.repo, "project-1", "content-1")
 	input := AssistantInteractionInput{ModeID: AssistantModeCreation, ProjectID: "project-1", ContentID: "content-1"}
 	first, err := svc.CreateOrResume(context.Background(), "user-1", input, "stable-create")
 	if err != nil {
@@ -539,6 +569,7 @@ func TestAssistantInteractionCreateOrResumeReplaysIdempotencyAfterCompletion(t *
 
 func TestAssistantInteractionCreateOrResumeRejectsIdempotencyKeyReuseWithDifferentInput(t *testing.T) {
 	svc, _ := newAssistantInteractionServiceTest(t)
+	createInteractionContextFixture(t, svc.repo, "project-1", "")
 	if _, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation, ProjectID: "project-1"}, "stable-create"); err != nil {
 		t.Fatal(err)
 	}
@@ -562,6 +593,7 @@ func TestAssistantInteractionCreateOrResumeRejectsUnknownMode(t *testing.T) {
 
 func TestAssistantInteractionModesShareOneInteraction(t *testing.T) {
 	svc, _ := newAssistantInteractionServiceTest(t)
+	createInteractionContextFixture(t, svc.repo, "project-1", "")
 	first, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation, ProjectID: "project-1"}, "create")
 	if err != nil {
 		t.Fatal(err)
@@ -580,6 +612,10 @@ func TestAssistantInteractionModesShareOneInteraction(t *testing.T) {
 
 func TestAssistantInteractionResumeUpdatesModeAndContextOnSameInteraction(t *testing.T) {
 	svc, _ := newAssistantInteractionServiceTest(t)
+	createInteractionContextFixture(t, svc.repo, "project-1", "")
+	createInteractionContextFixture(t, svc.repo, "project-2", "content-2")
+	logger := zerolog.Nop()
+	svc.SetTaskService(NewTaskService(svc.repo, nil, nil, &logger, "", nil, nil))
 	first, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation, ProjectID: "project-1"}, "create")
 	if err != nil {
 		t.Fatal(err)
@@ -933,7 +969,7 @@ func TestAssistantInteractionSnapshotKeepsReadyDraftWhenRuntimeReplacementFails(
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload := json.RawMessage(`{"plan":{"goal":"runtime independent confirmation"}}`)
+	payload := json.RawMessage(completeInteractionPlan)
 	digest := sha256.Sum256(payload)
 	if _, err := svc.StageDraftForInteraction(context.Background(), "user-1", InteractionStageInput{
 		InteractionID: snapshot.ID,
@@ -949,6 +985,8 @@ func TestAssistantInteractionSnapshotKeepsReadyDraftWhenRuntimeReplacementFails(
 
 	// The durable draft must remain readable even if the old runtime is gone
 	// and the replacement cannot start. Confirmation no longer depends on it.
+	createdAt := svc.clock()
+	svc.clock = func() time.Time { return createdAt.Add(25 * time.Hour) }
 	restarted := NewAssistantInteractionService(svc.repo, assistantInteractionFailingFactory{}, svc.clock)
 	recovered, err := restarted.Snapshot(context.Background(), "user-1", snapshot.ID)
 	if err != nil {
@@ -1056,6 +1094,34 @@ func TestAssistantInteractionPreparedRejectsUnauthorizedContext(t *testing.T) {
 				t.Fatalf("unauthorized context started %d runtimes", factory.starts)
 			}
 		})
+	}
+}
+
+func TestAssistantInteractionPreparedRejectsUnfinishedWorkBeforeActivation(t *testing.T) {
+	svc, factory := newAssistantInteractionServiceTest(t)
+	ctx := context.Background()
+	if err := svc.repo.Projects().Create(ctx, &model.Project{ID: "project", UserID: "user-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.repo.Tasks().Create(ctx, &model.Task{ID: "content", UserID: "user-1", ProjectID: "project", Status: model.TaskStatusPending}); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := svc.CreateOrResume(ctx, "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation, PrepareOnly: true}, "prepare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = svc.SendMessage(ctx, "user-1", prepared.ID, InteractionMessageInput{Generation: prepared.Generation, ClientMessageID: "first", Text: "hello", ModeID: interactionStringPtr(AssistantModeReview), ProjectID: interactionStringPtr("project"), ContentID: interactionStringPtr("content")})
+	if !errors.Is(err, ErrInteractiveSessionOwner) {
+		t.Fatalf("unfinished work = %v", err)
+	}
+	snapshot, err := svc.Snapshot(ctx, "user-1", prepared.ID)
+	if err != nil || snapshot.Lifecycle != InteractionLifecyclePrepared || snapshot.ProjectID != "" {
+		t.Fatalf("rejected context changed prepared interaction: %#v, %v", snapshot, err)
+	}
+	factory.mu.Lock()
+	defer factory.mu.Unlock()
+	if factory.starts != 0 {
+		t.Fatalf("rejected context started %d runtimes", factory.starts)
 	}
 }
 

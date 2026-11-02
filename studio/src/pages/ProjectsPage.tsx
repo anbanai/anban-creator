@@ -244,7 +244,7 @@ export default function ProjectsPage() {
       const project = visibleProjects.find((item) => item.id === projectID)
       if (project) {
         setChannelProject(project)
-        toast.success('公众号已绑定，可保存到草稿箱')
+        toast.success('公众号已绑定，可选择交付方式')
       } else {
         toast.error('授权已完成，但未找到对应的人设')
       }
@@ -598,7 +598,7 @@ export default function ProjectsPage() {
                       </span>
                       <div className="min-w-0">
                         <h3 id="wechat-publishing-title" className="text-sm font-medium">公众号扫码绑定</h3>
-                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">文章与贴图共用一个公众号。创作结果可保存到草稿箱，正式发布需在任务详情确认。</p>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">文章与贴图共用一个公众号。创作结果支持手动复制、发布到草稿箱或正式发布。</p>
                       </div>
                     </div>
                     <span className="shrink-0 text-xs font-medium text-muted-foreground">创建后自动配置</span>

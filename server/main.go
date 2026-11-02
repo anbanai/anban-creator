@@ -654,7 +654,9 @@ func main() {
 	var topicPoolHandler *handler.TopicPoolHandler
 	var contentAssetHandler *handler.ContentAssetHandler
 	var trendsHandler *handler.TrendsHandler
+	var topicRadarHandler *handler.TopicRadarHandler
 	var trendSvc *service.TrendService
+	var topicRadarSvc *service.TopicRadarService
 	var topicPoolSvc *service.TopicPoolService
 	var contentAssetSvc *service.ContentAssetService
 	var agentFeedbackSvc *service.AgentFeedbackService
@@ -760,6 +762,10 @@ func main() {
 		contentAssetHandler = handler.NewContentAssetHandler(contentAssetSvc, log)
 		trendSvc = service.NewTrendService(repo, rdb, cfg.Trends, log)
 		trendsHandler = handler.NewTrendsHandler(trendSvc, log)
+		topicRadarSvc = service.NewTopicRadarService(repo, asynqClient, nil)
+		topicRadarSvc.SetTaskService(taskSvc)
+		taskSvc.SetTopicRadarFinalizer(topicRadarSvc.FinalizeTopicRadarExecution)
+		topicRadarHandler = handler.NewTopicRadarHandler(topicRadarSvc, repo, log)
 		if taskSvc != nil {
 			taskSvc.SetTopicPoolService(topicPoolSvc)
 		}
@@ -1015,8 +1021,12 @@ func main() {
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
-		asynqServer = startAsynqServer(repo, taskSvc, contentAssetSvc, imageAnalysisSvc, wechatPublicationSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, analyticsRebuildManager, feedbackScheduler, feedbackAttributionSvc, cfg, log, rdb)
+		asynqServer = startAsynqServer(repo, taskSvc, contentAssetSvc, imageAnalysisSvc, wechatPublicationSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, analyticsRebuildManager, feedbackScheduler, feedbackAttributionSvc, topicRadarSvc, cfg, log, rdb)
 		startAnalyticsRebuildRecovery(ctx, repo, asynqClient, log)
+	}
+
+	if topicRadarSvc != nil {
+		startTopicRadarLoops(ctx, topicRadarSvc, log)
 	}
 
 	// 15.1 Start plan checker if repository and task service are available.
@@ -1141,6 +1151,7 @@ func main() {
 		TopicPoolHandler:                    topicPoolHandler,
 		ContentAssetHandler:                 contentAssetHandler,
 		TrendsHandler:                       trendsHandler,
+		TopicRadarHandler:                   topicRadarHandler,
 		IlinkHandler:                        ilinkHandler,
 		MCPHandler:                          mcpHandler,
 		StorageProvider:                     store,
@@ -1682,7 +1693,7 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
-func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, contentAssetSvc *service.ContentAssetService, imageAnalysisSvc *service.ImageAnalysisService, wechatPublicationSvc *service.WechatPublicationService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, analyticsRebuildManager *service.AnalyticsRebuildManager, feedbackScheduler *service.FeedbackScheduler, feedbackAttributionSvc *service.FeedbackAttributionService, cfg *config.Config, log *zerolog.Logger, rdb *redis.Client) *scheduler.TaskProcessor {
+func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, contentAssetSvc *service.ContentAssetService, imageAnalysisSvc *service.ImageAnalysisService, wechatPublicationSvc *service.WechatPublicationService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, analyticsRebuildManager *service.AnalyticsRebuildManager, feedbackScheduler *service.FeedbackScheduler, feedbackAttributionSvc *service.FeedbackAttributionService, topicRadarSvc *service.TopicRadarService, cfg *config.Config, log *zerolog.Logger, rdb *redis.Client) *scheduler.TaskProcessor {
 	var seednoteCaptureHandler scheduler.SeednoteTrackingHandler
 	if seednoteTrackingSvc != nil {
 		seednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
@@ -1729,6 +1740,9 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 		log,
 		publicationHandlers,
 	)
+	if topicRadarSvc != nil {
+		srv.RegisterTopicRadarHandlers(topicRadarSvc.ProcessTopicDigest, topicRadarSvc.ProcessTopicScript)
+	}
 	if imageAnalysisSvc != nil {
 		srv.RegisterImageAnalysisHandler(imageAnalysisSvc.Process, log)
 	}

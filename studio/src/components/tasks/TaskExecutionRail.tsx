@@ -622,7 +622,7 @@ function PublicationStageActions({
   const formalPublishAvailable = canFormallyPublish !== false && !isNewspic
   const keepAndPublishActions = publication?.status === 'drafted' && stage.state === 'pending' ? (
     <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
-      <span className="text-[11px] text-muted-foreground">项目默认：{deliveryMode === 'direct_publish' ? '正式发布' : '草稿箱'}</span>
+      <span className="text-[11px] text-muted-foreground">项目默认：{deliveryMode === 'direct_publish' ? '正式发布' : deliveryMode === 'user_assisted' ? '手动复制' : '发布到草稿箱'}</span>
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant={publication.delivery_mode === 'draft' ? 'secondary' : 'outline'} className="min-h-11" aria-pressed={publication.delivery_mode === 'draft'} loading={pending} onClick={onKeepDraft}>保留在草稿箱</Button>
         <Tooltip>

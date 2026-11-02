@@ -147,6 +147,13 @@ export interface AgentPackArtifact {
   required: boolean;
 }
 
+export interface AgentPackArtifactStage {
+  id: string;
+  trigger: string;
+  required?: string[];
+  terminal?: boolean;
+}
+
 export interface AgentPack {
   id: string;
   version: string;
@@ -157,6 +164,7 @@ export interface AgentPack {
   runtime: { profile?: string; adapter?: string };
   artifacts?: AgentPackArtifact[];
   artifacts_by_task_type?: Record<string, AgentPackArtifact[]>;
+  artifact_stages?: AgentPackArtifactStage[];
 }
 
 export interface ResolvedBootstrapResponse extends BootstrapResponse {

@@ -151,7 +151,20 @@ func (s *AssistantInteractionService) runRuntimeCommand(ctx context.Context, use
 		}
 	}
 	if interaction.Lifecycle == model.AssistantInteractionPrepared {
-		if err := s.repo.AssistantInteractions().UpdateLifecycle(ctx, interaction.ID, model.AssistantInteractionActive, s.clock()); err != nil {
+		// Preparation has no runtime to expire; its lease starts with the first prompt.
+		now := s.clock()
+		expiresAt := now.Add(interactionRuntimeTTL)
+		if renewed, err := s.repo.AssistantInteractions().CompareAndSwapGeneration(ctx, interaction.ID, generation, generation, now, expiresAt); err != nil || !renewed {
+			_ = s.repo.AssistantInteractions().UpdateAttempt(ctx, interactionID, attemptID, model.AssistantInteractionAttemptFailed, nil, InteractionErrorGenerationChanged)
+			if err != nil {
+				return s.commandErrorWithSnapshot(ctx, userID, interaction, errors.Join(ErrInteractivePersistence, err))
+			}
+			return s.commandErrorWithSnapshot(ctx, userID, interaction, NewInteractionError(InteractionErrorGenerationChanged, 409, "对话状态已更新，请加载最新内容", "reload_snapshot"))
+		}
+		interaction.ExpiresAt = expiresAt
+		interaction.LastActivityAt = now
+		interaction.UpdatedAt = now
+		if err := s.repo.AssistantInteractions().UpdateLifecycle(ctx, interaction.ID, model.AssistantInteractionActive, now); err != nil {
 			_ = s.repo.AssistantInteractions().UpdateAttempt(ctx, interactionID, attemptID, model.AssistantInteractionAttemptFailed, nil, InteractionErrorMessageNotAccepted)
 			return s.commandErrorWithSnapshot(ctx, userID, interaction, errors.Join(ErrInteractivePersistence, err))
 		}
@@ -204,7 +217,7 @@ func (s *AssistantInteractionService) runRuntimeCommand(ctx context.Context, use
 	if err := s.repo.AssistantInteractions().UpdateAttempt(ctx, interactionID, attemptID, model.AssistantInteractionAttemptCompleted, json.RawMessage(`{"accepted":true}`), ""); err != nil {
 		return errors.Join(ErrInteractivePersistence, err)
 	}
-	_, _ = s.repo.AssistantInteractions().AppendEvent(ctx, interactionID, generation, &model.AssistantInteractionEvent{ID: uuid.NewString(), InteractionID: interactionID, Type: "user.message.accepted", Data: json.RawMessage(fmt.Sprintf(`{"length":%d}`, resultSize)), CreatedAt: now})
+	_, _ = s.repo.AssistantInteractions().AppendEvent(ctx, interactionID, generation, interaction.ProjectID, &model.AssistantInteractionEvent{ID: uuid.NewString(), InteractionID: interactionID, Type: "user.message.accepted", Data: json.RawMessage(fmt.Sprintf(`{"length":%d}`, resultSize)), CreatedAt: now})
 	return nil
 }
 
@@ -234,7 +247,8 @@ func (s *AssistantInteractionService) validatePreparedContext(ctx context.Contex
 			return ErrInteractiveSessionOwner
 		}
 	}
-	return nil
+	_, _, err := s.interactionContextRecords(ctx, userID, projectID, contentID)
+	return err
 }
 
 const (
@@ -281,12 +295,30 @@ func (s *AssistantInteractionService) CommitInteraction(ctx context.Context, use
 			}
 			return replay, nil
 		}
+		if interaction.ModeID == AssistantModeCreation {
+			if result, handled, authorityErr := s.creationCommitAuthority(ctx, userID, interaction); handled || authorityErr != nil {
+				return result, authorityErr
+			}
+		}
 		if attempt.ErrorCode == InteractionErrorDraftRevisionConflict {
+			if draft, draftErr := s.repo.AssistantInteractions().FindDraftForUser(ctx, userID, req.DraftID); draftErr == nil && draft.InteractionID == interactionID && draft.Revision == req.Revision && draft.ModeID == AssistantModeCreation {
+				if structured := s.legacyCreationFailure(ctx, userID, draft); structured != nil {
+					return InteractionCommitResult{}, s.creationErrorWithSnapshot(ctx, userID, interaction, structured)
+				}
+			}
 			return InteractionCommitResult{}, NewInteractionError(InteractionErrorDraftRevisionConflict, 409, "计划当前不可确认，请恢复最新计划", "reload_snapshot", "restore_draft")
+		}
+		if attempt.Status == model.AssistantInteractionAttemptFailed {
+			return InteractionCommitResult{}, s.creationErrorWithSnapshot(ctx, userID, interaction, creationDraftError(attempt.ErrorCode, nil))
 		}
 		return InteractionCommitResult{}, NewInteractionError(InteractionErrorCommitReconciliationRequired, 409, "创建结果需要核对，请查看任务状态", "view_task", "reconcile_commit")
 	} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
 		return InteractionCommitResult{}, errors.Join(ErrInteractivePersistence, findErr)
+	}
+	if interaction.ModeID == AssistantModeCreation {
+		if result, handled, authorityErr := s.creationCommitAuthority(ctx, userID, interaction); handled || authorityErr != nil {
+			return result, authorityErr
+		}
 	}
 	if interaction.Lifecycle == model.AssistantInteractionCompleted {
 		if latest, latestErr := s.repo.AssistantInteractions().FindLatestCommitAttempt(ctx, interactionID); latestErr == nil && len(latest.Result) > 0 {
@@ -306,8 +338,11 @@ func (s *AssistantInteractionService) CommitInteraction(ctx context.Context, use
 	// cleanup at the shared 30-day retention boundary cannot turn an already
 	// applied commit into a false revision conflict.
 	draft, err := s.repo.AssistantInteractions().FindDraftForUser(ctx, userID, req.DraftID)
-	if err != nil || draft.InteractionID != interaction.ID || draft.Revision != req.Revision || !draft.Ready {
+	if err != nil || draft.InteractionID != interaction.ID || draft.Revision != req.Revision || (draft.ModeID != AssistantModeCreation && !draft.Ready) {
 		return InteractionCommitResult{}, NewInteractionError(InteractionErrorDraftRevisionConflict, 409, "计划版本已更新，请恢复最新计划后确认", "reload_snapshot", "restore_draft")
+	}
+	if draft.ModeID == AssistantModeCreation {
+		return s.commitCreationInteraction(ctx, userID, interaction, draft, req, digest)
 	}
 	if draft.ModeID == AssistantModeProfile {
 		result, profileErr := s.commitProfileInteraction(ctx, userID, interactionID, interaction.Generation, draft, req, digest)

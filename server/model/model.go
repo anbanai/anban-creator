@@ -4,6 +4,9 @@ import "gorm.io/gorm"
 
 // AutoMigrate creates or updates all database tables.
 func AutoMigrate(db *gorm.DB) error {
+	if err := prepareTopicPoolDedupe(db); err != nil {
+		return err
+	}
 	return db.AutoMigrate(
 		&AnalyticsState{}, &AnalyticsContent{}, &AnalyticsObservation{}, &AnalyticsRawPayload{}, &AnalyticsBucket{}, &AnalyticsIdempotency{}, &AnalyticsRebuildJob{},
 		&FeedbackJob{}, &FeedbackLease{}, &FeedbackInsight{}, &StrategySnapshot{}, &GenerationContext{},
@@ -66,6 +69,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&ViralAnalysis{},
 		&PosterTask{},
 		&TopicPool{},
+		&TopicSubscription{}, &TopicDigest{}, &TopicSuggestion{}, &TopicSuggestionAdoption{}, &TopicScriptJob{}, &TopicNotificationChannel{}, &TopicNotificationDelivery{},
 		&ContentAsset{}, &ContentAssetEvidence{}, &ContentAssetLink{}, &ContentAssetScoreSnapshot{}, &ContentReuseRun{}, &ContentReuseStageExecution{}, &ContentAssetResearchJob{}, &ContentReuseAuditEvent{}, &ContentAutopilotPolicy{}, &ContentReuseOperationBudget{},
 		&TrendSnapshot{},
 		&AgentFeedback{},

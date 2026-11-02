@@ -674,6 +674,15 @@ func (s *TaskService) cloudFinalizationStep(task *model.Task, execution *model.T
 			return s.finalizeCloudExecutionCore(ctx, task, execution, result)
 		}, nil
 	case model.TaskExecutionFinalizationArtifacts:
+		return model.TaskExecutionFinalizationDomain, func(ctx context.Context) error {
+			if s.topicRadarFinalizer != nil && task != nil && task.Channel == model.ChannelTopicRadar {
+				if err := s.topicRadarFinalizer(ctx, task, execution); err != nil {
+					return fmt.Errorf("finalize Topic Radar domain result: %w", err)
+				}
+			}
+			return nil
+		}, nil
+	case model.TaskExecutionFinalizationDomain:
 		return model.TaskExecutionFinalizationResult, func(ctx context.Context) error {
 			if task != nil && task.TaskKind == model.TaskKindFeedbackAnalysis {
 				if err := s.finalizeFeedbackExecution(ctx, task, execution, result); err != nil {

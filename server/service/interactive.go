@@ -465,6 +465,10 @@ func (s *InteractiveService) assistantReviewWorkContent(ctx context.Context, use
 	s.mu.RLock()
 	tasks := s.taskSvc
 	s.mu.RUnlock()
+	return assistantReviewWorkContent(ctx, tasks, userID, taskID, availableBytes)
+}
+
+func assistantReviewWorkContent(ctx context.Context, tasks *TaskService, userID, taskID string, availableBytes int) (string, error) {
 	if tasks == nil {
 		return "", ErrInteractivePersistence
 	}
