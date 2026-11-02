@@ -170,7 +170,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "1743bf1c32e79dfa7f969c874fbdc6961842c4693a0a0fbf0ed988ce518d6696"
+      "digest": "3cb4853a1bb77cf32197a450353c70c76c768550efcffb8db9f2642bfd2dfa67"
     },
     {
       "id": "content-planning",
@@ -3452,7 +3452,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "57cfb0d52f44225f47a7db7f123aba0bf4b7ef3dd007998c7c1a42a537f143e5"
+      "digest": "4761a7ba1e2dd4074df45f73d6cf38d4f69c7f99b580b359ee1b631e4f32ff27"
     },
     {
       "id": "talking-head-montage",
@@ -4014,7 +4014,7 @@
       "ui": {
         "renderer": "custom:talking-head-montage"
       },
-      "digest": "4a4066f00dc3d36c175e46f270e0b144d7005af07f2779e8fad98605c5434a80"
+      "digest": "7add76828957d176ff79a82aad451307391dbd5cbbfc2dfdd38484adb54def8b"
     },
     {
       "id": "topic-radar",

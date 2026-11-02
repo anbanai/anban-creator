@@ -18,7 +18,7 @@ func TestPluginAssetsDoNotControlManagedWorkspaceDirectories(t *testing.T) {
 			return err
 		}
 		if entry.IsDir() {
-			if path == filepath.Join(root, "skills", "humanizer") {
+			if isUpstreamSkillPath(path) {
 				return filepath.SkipDir
 			}
 			return nil

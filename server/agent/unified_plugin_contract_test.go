@@ -266,7 +266,7 @@ func pluginWorkflowFiles(t *testing.T, root string) []string {
 				return err
 			}
 			if entry.IsDir() {
-				if path != dir && filepath.Base(path) == "humanizer" {
+				if path != dir && isUpstreamSkillPath(path) {
 					return filepath.SkipDir
 				}
 				return nil
