@@ -61,6 +61,40 @@ func TestSearchConfigDefaultsEditionSpecificEndpoints(t *testing.T) {
 	}
 }
 
+func TestTrendsConfigDefaultsToDefaultProvider(t *testing.T) {
+	cfg := Config{}
+	cfg.applyDefaults()
+	if cfg.Trends.Provider != "default" {
+		t.Fatalf("trends provider = %q, want default", cfg.Trends.Provider)
+	}
+	if cfg.Trends.RedFox.Endpoint != "https://redfox.hk/story/api/hotKeyword/list" {
+		t.Fatalf("redfox endpoint = %q", cfg.Trends.RedFox.Endpoint)
+	}
+	if cfg.Trends.RedFox.Timeout != 8*time.Second {
+		t.Fatalf("redfox timeout = %s, want 8s", cfg.Trends.RedFox.Timeout)
+	}
+}
+
+func TestTrendsConfigValidationRequiresRedFoxCredentialsWhenSelected(t *testing.T) {
+	cfg := Config{Trends: TrendsConfig{
+		Provider: "redfox",
+		TTL:      time.Minute,
+		Timeout:  time.Second,
+		RedFox:   TrendsRedFoxConfig{Endpoint: "https://redfox.example.test/hot"},
+	}}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "trends.redfox.api_key") {
+		t.Fatalf("validation error = %v, want redfox api key error", err)
+	}
+}
+
+func TestTrendsConfigValidationRejectsUnknownProvider(t *testing.T) {
+	cfg := Config{Trends: TrendsConfig{Provider: "unknown", TTL: time.Minute, Timeout: time.Second}}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), `trends.provider "unknown" is unsupported`) {
+		t.Fatalf("validation error = %v", err)
+	}
+}
+
 func TestSearchConfigValidationAcceptsDeepSeekWithinOfficialLimits(t *testing.T) {
 	cfg, err := loadClaudeConfigYAML(t, validClaudeConfigYAML)
 	if err != nil {

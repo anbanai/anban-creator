@@ -384,6 +384,8 @@ func main() {
 		MontageEnv:              cfg.Montage.Env,
 		VideoEdit:               cfg.VideoEdit,
 		TalkingHeadEditor:       cfg.TalkingHeadEditor,
+		RedFoxAgentAPIKey:       cfg.Trends.RedFox.AgentAPIKey,
+		RedFoxAgentEndpoint:     cfg.Trends.RedFox.Endpoint,
 		Hypit:                   cfg.Hypit,
 		Registry:                agentProfiles,
 		ProjectMemory:           projectMemoryStore,

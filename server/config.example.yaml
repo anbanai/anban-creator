@@ -62,8 +62,14 @@ redis:
   db: ${ANBAN_REDIS_DB:-0}
 
 trends:
+  provider: "${ANBAN_TRENDS_PROVIDER:-default}"
   ttl: 10m
   timeout: 8s
+  redfox:
+    endpoint: "${ANBAN_REDFOX_ENDPOINT:-https://redfox.hk/story/api/hotKeyword/list}"
+    api_key: "${ANBAN_REDFOX_API_KEY:-}"
+    agent_api_key: "${ANBAN_REDFOX_AGENT_API_KEY:-}"
+    timeout: 15s
 
 jwt:
   secret_key: "${ANBAN_JWT_SECRET_KEY}"

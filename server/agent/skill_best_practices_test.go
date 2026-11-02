@@ -168,8 +168,8 @@ func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 		"moments":        {"content-tagging", "moments"},
 		"hypit":          {"content-reuse", "content-tagging"},
 		"montage":        {"content-reuse", "content-tagging", "montage"},
-		"seednote":       {"content-reuse", "content-tagging", "seednote-research", "seednote-writing", "seednote-visual-design"},
-		"wechat-article": {"content-reuse", "content-tagging", "content-writing", "article-visual-design", "article-cover-design", "article-research"},
+		"seednote":       {"content-reuse", "content-tagging", "seednote-research", "redfox-research", "seednote-writing", "seednote-visual-design"},
+		"wechat-article": {"content-reuse", "content-tagging", "content-writing", "article-visual-design", "article-cover-design", "article-research", "redfox-research"},
 	}
 
 	for agentName, want := range expected {
@@ -288,6 +288,7 @@ func TestArticleCodexAgentDeclaresOwnedSkills(t *testing.T) {
 		"article-visual-design",
 		"article-cover-design",
 		"article-research",
+		"redfox-research",
 		"trending-topics",
 		"trend-rider",
 		"topic-evaluator",

@@ -160,7 +160,7 @@ const MANAGED_ALLOWED_MCP_TOOLS: Record<string, ReadonlySet<string>> = {
     "render_template", "convert_markdown", "get_content_reuse_context", "list_trends", "search_web", "fetch_web_page",
     "search_images", "list_search_receipts", "list_resources", "get_resource", "generate_image", "analyze_image",
     "upload_image", "download_image", "compress_image", "crop_image", "set_task_progress_plan", "update_task_progress",
-    "submit_agent_feedback", "submit_completion_metadata",
+    "submit_agent_feedback", "submit_completion_metadata", "redfox_research",
   ]),
   "wechat-picture": new Set([
     "get_project_profile", "list_project_titles", "finalize_task_title", "list_trends", "search_web", "fetch_web_page",
@@ -172,11 +172,12 @@ const MANAGED_ALLOWED_MCP_TOOLS: Record<string, ReadonlySet<string>> = {
     "get_project_profile", "list_project_titles", "finalize_task_title", "claim_topic", "list_topics", "list_trends",
     "search_web", "fetch_web_page", "search_images", "list_search_receipts", "list_resources", "get_resource",
     "generate_image", "analyze_image", "upload_image", "download_image", "compress_image", "crop_image", "export_seednote",
-    "set_task_progress_plan", "update_task_progress", "submit_agent_feedback", "submit_completion_metadata",
+    "set_task_progress_plan", "update_task_progress", "submit_agent_feedback", "submit_completion_metadata", "redfox_research",
   ]),
+  "content-research": new Set(["get_project_profile", "list_project_titles", "list_trends", "search_web", "fetch_web_page", "list_search_receipts", "redfox_research", "submit_completion_metadata"]),
   viral_analysis: new Set([
     "get_project_profile", "list_project_titles", "list_trends", "search_web", "fetch_web_page", "search_images",
-    "list_search_receipts", "list_resources", "get_resource", "submit_agent_feedback", "submit_completion_metadata",
+    "list_search_receipts", "list_resources", "get_resource", "submit_agent_feedback", "submit_completion_metadata", "redfox_research",
   ]),
   profile_analysis: new Set(["get_project_profile", "submit_profile_result", "submit_completion_metadata"]),
   feedback_analysis: new Set(["get_feedback_context", "submit_agent_feedback", "submit_completion_metadata"]),
@@ -206,20 +207,20 @@ const MANAGED_PARALLEL_TASK_TYPES = new Set(["wechat-article", "wechat-picture",
 const MANAGED_READONLY_WORKER = "managed-readonly-worker";
 const MANAGED_READONLY_WORKER_TOOLS = ["Read", "Glob", "Grep"];
 const MANAGED_READONLY_WORKER_MCP_TOOLS: Record<string, string[]> = {
-  "wechat-article": ["mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends"],
+  "wechat-article": ["mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends", "mcp__redfox__redfox_research"],
   "wechat-picture": ["mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends"],
   seednote: [
-    "mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends",
+    "mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends", "mcp__redfox__redfox_research",
   ],
   viral_analysis: [
-    "mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends",
+    "mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends", "mcp__redfox__redfox_research",
   ],
 };
 const MANAGED_READONLY_WORKER_SKILLS: Record<string, string[]> = {
-  "wechat-article": ["article-research", "trending-topics", "seo-optimization"],
+  "wechat-article": ["article-research", "trending-topics", "redfox-research", "seo-optimization"],
   "wechat-picture": ["wechat-picture-research", "wechat-picture-writing"],
-  seednote: ["seednote-research", "trending-topics", "seednote-viral-analysis"],
-  viral_analysis: ["seednote-research", "trending-topics", "seednote-viral-analysis"],
+  seednote: ["seednote-research", "trending-topics", "redfox-research", "seednote-viral-analysis"],
+  viral_analysis: ["seednote-research", "trending-topics", "redfox-research", "seednote-viral-analysis"],
 };
 const MANAGED_READONLY_WORKER_PROMPT = `You are the managed read-only research worker. Inspect public sources and return concise findings to the main agent. Use Anban MCP tools for public trend snapshots; never invent heat, freshness, or interaction data. Public trend discovery is research input only: leave trend-rider judgments, topic-evaluator decisions, final topic selection, and all workflow decisions to the main agent. Do not write or edit files, run commands, create tasks, invoke other agents, generate or upload media, publish, report progress, or submit completion metadata.`;
 const MANAGED_PARALLEL_WORKER_CONTRACT = `\n\nManaged parallel-worker contract: You remain the main agent and own all workflow decisions, file writes, task lifecycle, generation, publishing, feedback, progress, and completion. Delegate only when there are at least two independent research, material-analysis, or quality-review tasks. You may invoke exactly one worker type: \`${MANAGED_READONLY_WORKER}\`, with at most three concurrent Workers. Worker results must be consumed in this foreground turn. Do not request other worker types, model overrides, isolation, or background execution; worker calls are forced to \`run_in_background: false\`.`;
@@ -421,7 +422,19 @@ export function buildQueryOptions(
       };
     },
     plugins: [{ type: "local", path: pluginRoot, skipMcpDiscovery: true }],
-    mcpServers: { anban: { type: "http", url: `${serverURL}/mcp`, headers: { Authorization: `Bearer ${token}` }, timeout: 900000 } },
+    mcpServers: {
+      anban: { type: "http", url: `${serverURL}/mcp`, headers: { Authorization: `Bearer ${token}` }, timeout: 900000 },
+      ...(redFoxResearchEnabled(data.task_type) ? {
+        redfox: {
+          type: "stdio" as const,
+          command: "node",
+          args: ["/app/runtime-claude/dist/redfox-mcp.js"],
+          env: { REDFOX_API_KEY: data.env?.REDFOX_API_KEY ?? "" },
+          timeout: 900000,
+          alwaysLoad: true,
+        },
+      } : {}),
+    },
     strictMcpConfig: true,
     env: {
       ...buildExecutionEnvironment(process.env, data, serverURL, token, workspace),
@@ -684,12 +697,19 @@ export function buildExecutionEnvironment(
     ? Object.fromEntries(Object.entries(processEnvironment).filter(([key]) => HYPIT_INHERITED_ENV_KEYS.has(key)))
     : { ...processEnvironment };
   for (const key of CLAUDE_ENVIRONMENT_KEYS_TO_UNSET) delete environment[key];
+  delete environment.REDFOX_API_BASE_URL;
   sanitizeCredentialEnvironment(environment);
   if (["montage", "hypit", "video-edit"].includes(data.task_type)) {
     if (data.task_type === "hypit") validateHypitEnvironment(data.env ?? {});
     for (const [key, value] of Object.entries(data.env ?? {})) {
-      if (/^(?:ANBAN_|ANTHROPIC_|CLAUDE_)/.test(key) || ["PATH", "HOME", "NODE_OPTIONS", "LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH"].includes(key)) continue;
+      if (/^(?:ANBAN_|ANTHROPIC_|CLAUDE_)/.test(key) || ["PATH", "HOME", "NODE_OPTIONS", "LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH", "REDFOX_API_KEY"].includes(key)) continue;
       environment[key] = value;
+    }
+  }
+  if (["wechat-article", "seednote", "viral_analysis", "content-research"].includes(data.task_type)) {
+    for (const key of ["REDFOX_API_KEY", "REDFOX_API_BASE_URL"] as const) {
+      const value = data.env?.[key];
+      if (typeof value === "string" && value.trim()) environment[key] = value;
     }
   }
   const managed: NodeJS.ProcessEnv = {
@@ -720,6 +740,12 @@ export function validateManagedInit(message: Pick<SDKSystemMessage, "type" | "su
   for (const required of requiredMCPTools(taskType)) if (!tools.has(required)) throw new Error(`managed MCP readiness failed: server "anban" is missing required tool for ${taskType}: ${required}`);
   const skills = new Set(message.skills);
   for (const required of requiredSkills(taskType)) if (!skills.has(required)) throw new Error(`managed plugin readiness failed: skill ${required} is not loaded`);
+  if (redFoxResearchEnabled(taskType)) {
+    const redfox = message.mcp_servers.find((server) => server.name === "redfox");
+    if (!redfox || redfox.status !== "connected") throw new Error(`managed MCP readiness failed: server "redfox" is not connected`);
+    const redfoxTools = new Set(message.tools.filter((tool) => tool.startsWith("mcp__redfox__")).map((tool) => tool.slice("mcp__redfox__".length)));
+    if (!redfoxTools.has("redfox_research")) throw new Error("managed MCP readiness failed: server \"redfox\" is missing required tool: redfox_research");
+  }
 }
 
 async function consumeMessage(message: SDKMessage, progress: Pick<BestEffortProgressReporter, "report">, logText: string, toolCalls: Map<string, TrackedToolCall>, toolUseDiagnostics: ToolUseDiagnostics, cwd: string, serverURL: string, token: string, signal: AbortSignal, _taskType: string, aliases: BootstrapResponse["execution_profile"]["model_usage_aliases"]): Promise<{ logText: string; terminal?: ExecutionResult }> {
@@ -748,6 +774,7 @@ function isManagedToolAllowed(taskType: string, toolName: string, input: unknown
     const allowedMCPTools = MANAGED_ALLOWED_MCP_TOOLS[taskType];
     return allowedMCPTools?.has(toolName.slice("mcp__anban__".length)) ?? false;
   }
+  if (toolName === "mcp__redfox__redfox_research") return redFoxResearchEnabled(taskType);
   if (toolName !== "Agent" || !managedParallelWorkersEnabled(taskType) || !isRecord(input)) return false;
   return input.subagent_type === MANAGED_READONLY_WORKER;
 }
@@ -1049,9 +1076,10 @@ function runSeednoteGate(cwd: string, taskType: string, pluginRoot: string, sign
 function requiredSkills(taskType: string): string[] {
 	if (taskType === "feedback_analysis") return ["anban:data-tracker", "anban:publish-analytics", "anban:performance-review", "anban:content-postmortem", "anban:strategy-advisor"];
 	if (taskType === "profile_analysis") return ["anban:profile-builder"];
-  if (taskType === "seednote") return ["anban:seednote-research", "anban:seednote-viral-analysis", "anban:seednote-writing", "anban:seednote-visual-design", "anban:humanizer", "anban:portrait-cover-design"];
-  if (taskType === "viral_analysis") return ["anban:seednote-research", "anban:seednote-viral-analysis"];
-  if (taskType === "wechat-article") return ["anban:humanizer", "anban:portrait-cover-design"];
+  if (taskType === "seednote") return ["anban:seednote-research", "anban:redfox-research", "anban:seednote-viral-analysis", "anban:seednote-writing", "anban:seednote-visual-design", "anban:humanizer", "anban:portrait-cover-design"];
+  if (taskType === "viral_analysis") return ["anban:seednote-research", "anban:redfox-research", "anban:seednote-viral-analysis"];
+  if (taskType === "wechat-article") return ["anban:humanizer", "anban:redfox-research", "anban:portrait-cover-design"];
+  if (taskType === "content-research") return ["anban:redfox-research"];
   if (taskType === "ecommerce") return ["anban:humanizer"];
   if (taskType === "montage") return ["anban:montage", "anban:portrait-cover-design"];
   if (taskType === "video-edit") return ["anban:video-edit", "anban:content-tagging"];
@@ -1068,6 +1096,10 @@ function requiredMCPTools(taskType: string): string[] {
   if (taskType === "montage") return ["analyze_image", "analyze_video", "generate_image", "get_project_profile", "submit_agent_feedback"];
   if (taskType === "video-edit") return ["get_project_profile"];
   return [];
+}
+
+function redFoxResearchEnabled(taskType: string): boolean {
+  return taskType === "wechat-article" || taskType === "seednote" || taskType === "viral_analysis" || taskType === "content-research";
 }
 
 function toolBaseName(name: string): string { return name.startsWith("mcp__") ? name.split("__", 3)[2] ?? name : name; }

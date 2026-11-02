@@ -1368,6 +1368,29 @@ func TestRuntimeEnvScopesVideoEditScribeCredential(t *testing.T) {
 	}
 }
 
+func TestRuntimeEnvScopesRedFoxCredentialToResearchTasks(t *testing.T) {
+	svc := &AgentBootstrapService{cfg: AgentBootstrapConfig{RedFoxAgentAPIKey: "agent-redfox-key", RedFoxAgentEndpoint: "https://redfox.example.test/story/api/hotKeyword/list"}}
+	for _, taskType := range []string{model.TaskTypeWechatArticle, model.PlatformSeednote, model.TaskTypeContentResearch} {
+		got := svc.runtimeEnv(&model.Task{Type: taskType})
+		if got["REDFOX_API_KEY"] != "agent-redfox-key" || got["REDFOX_API_BASE_URL"] != "https://redfox.example.test" {
+			t.Fatalf("%s runtime env = %#v", taskType, got)
+		}
+	}
+	for _, taskType := range []string{model.PlatformMontage, model.PlatformVideoEdit, model.TaskTypeTopicDigest} {
+		if got := svc.runtimeEnv(&model.Task{Type: taskType}); got["REDFOX_API_KEY"] != "" {
+			t.Fatalf("%s leaked RedFox credential: %#v", taskType, got)
+		}
+	}
+}
+
+func TestRedFoxBaseURLRejectsUnsafeEndpoints(t *testing.T) {
+	for _, endpoint := range []string{"http://redfox.example.test/hot", "https://user:pass@redfox.example.test/hot", "not-a-url"} {
+		if got := redFoxBaseURL(endpoint); got != "" {
+			t.Fatalf("redfoxBaseURL(%q) = %q", endpoint, got)
+		}
+	}
+}
+
 func TestRuntimeEnvMapsTalkingHeadTranscriptionCredentialToUpstreamVariable(t *testing.T) {
 	svc := &AgentBootstrapService{cfg: AgentBootstrapConfig{
 		TalkingHeadEditor: config.TalkingHeadEditorConfig{

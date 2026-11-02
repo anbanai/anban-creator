@@ -182,7 +182,8 @@
       "agent": {
         "name": "content-planning",
         "skills": [
-          "content-planning-evidence"
+          "content-planning-evidence",
+          "redfox-research"
         ],
         "max_turns": 80
       },
@@ -673,6 +674,97 @@
                       "content_id",
                       "analytics_revision"
                     ]
+                  },
+                  "redfox_evidence": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "schema_version": {
+                        "type": "string",
+                        "enum": [
+                          "1.0"
+                        ]
+                      },
+                      "data_source": {
+                        "type": "string",
+                        "enum": [
+                          "redfox"
+                        ]
+                      },
+                      "query": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "cross_platform",
+                              "wechat_search",
+                              "xiaohongshu_search",
+                              "douyin_search",
+                              "douyin_daily"
+                            ]
+                          },
+                          "query": {
+                            "type": "string"
+                          },
+                          "date": {
+                            "type": "string"
+                          },
+                          "start_date": {
+                            "type": "string"
+                          },
+                          "end_date": {
+                            "type": "string"
+                          },
+                          "category": {
+                            "type": "string"
+                          },
+                          "page": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 50
+                          }
+                        }
+                      },
+                      "fetched_at": {
+                        "type": "string"
+                      },
+                      "freshness": {
+                        "type": "string",
+                        "enum": [
+                          "fresh",
+                          "stale",
+                          "unknown"
+                        ]
+                      },
+                      "source_url": {
+                        "type": "string"
+                      },
+                      "missing_fields": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "fallback_reason": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "schema_version",
+                      "data_source",
+                      "query",
+                      "fetched_at",
+                      "freshness",
+                      "source_url",
+                      "missing_fields",
+                      "fallback_reason"
+                    ]
                   }
                 },
                 "required": [
@@ -1049,6 +1141,97 @@
                           "content_id",
                           "analytics_revision"
                         ]
+                      },
+                      "redfox_evidence": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "schema_version": {
+                            "type": "string",
+                            "enum": [
+                              "1.0"
+                            ]
+                          },
+                          "data_source": {
+                            "type": "string",
+                            "enum": [
+                              "redfox"
+                            ]
+                          },
+                          "query": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "enum": [
+                                  "cross_platform",
+                                  "wechat_search",
+                                  "xiaohongshu_search",
+                                  "douyin_search",
+                                  "douyin_daily"
+                                ]
+                              },
+                              "query": {
+                                "type": "string"
+                              },
+                              "date": {
+                                "type": "string"
+                              },
+                              "start_date": {
+                                "type": "string"
+                              },
+                              "end_date": {
+                                "type": "string"
+                              },
+                              "category": {
+                                "type": "string"
+                              },
+                              "page": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "limit": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 50
+                              }
+                            }
+                          },
+                          "fetched_at": {
+                            "type": "string"
+                          },
+                          "freshness": {
+                            "type": "string",
+                            "enum": [
+                              "fresh",
+                              "stale",
+                              "unknown"
+                            ]
+                          },
+                          "source_url": {
+                            "type": "string"
+                          },
+                          "missing_fields": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "fallback_reason": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "schema_version",
+                          "data_source",
+                          "query",
+                          "fetched_at",
+                          "freshness",
+                          "source_url",
+                          "missing_fields",
+                          "fallback_reason"
+                        ]
                       }
                     },
                     "required": [
@@ -1308,7 +1491,7 @@
       "ui": {
         "renderer": "custom:content-planning"
       },
-      "digest": "8de2d1687cf7cea726d0f530816d9babcd39ce3b905b8cece33a63f103448911"
+      "digest": "1d43ff8999311d26f1ab46bca5143318e5e4e20e6b0f89ff346a097bece074a1"
     },
     {
       "id": "creation-planner",
@@ -2680,6 +2863,7 @@
           "portrait-cover-design",
           "humanizer",
           "seednote-research",
+          "redfox-research",
           "trending-topics",
           "trend-rider",
           "topic-evaluator",
@@ -2922,7 +3106,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "a92520f39ef3e2573261ee60cced4e2f20b8d199ce677985ee7954b90a3b54bf"
+      "digest": "93a8bac49b8bab16e749c7c11ef7583128f880664f4c9379d5824a1cbfe9d2d8"
     },
     {
       "id": "talking-head-editor",
@@ -5797,6 +5981,7 @@
           "article-visual-design",
           "article-cover-design",
           "article-research",
+          "redfox-research",
           "content-tagging",
           "trending-topics",
           "trend-rider",
@@ -6042,7 +6227,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "fd8c922520e33acce25351baa91f290277ec08ab1712cd19684cfb62dd824125"
+      "digest": "d282729ac275bd3be4fdb26f0c75868aa227888b1ab3fe1bd320e45aac30fe59"
     },
     {
       "id": "wechat-picture",
