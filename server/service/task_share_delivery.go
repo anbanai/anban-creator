@@ -258,7 +258,7 @@ func (s *TaskShareService) content(ctx context.Context, task *model.Task, token 
 		_ = stream.Body.Close()
 		result.Images = append(result.Images, TaskShareImage{ID: image.file.ID, URL: shareImageURL(token, image.file.ID), Alt: image.file.FileName, Role: image.role})
 	}
-	resolve := s.imageResolver(token, delivery)
+	resolve := s.imageResolver(ctx, token, delivery)
 	if task.Channel == model.ChannelArticle {
 		result.Format = "html"
 		result.Body, err = rewriteShareHTML(data, resolve)
@@ -288,7 +288,9 @@ func (s *TaskShareService) Image(ctx context.Context, token, fileID string) (*Ta
 	return nil, ErrTaskShareNotFound
 }
 
-func (s *TaskShareService) imageResolver(token string, delivery *taskShareDelivery) func(string) (string, error) {
+func (s *TaskShareService) imageResolver(ctx context.Context, token string, delivery *taskShareDelivery) func(string) (string, error) {
+	var history []*model.TaskFile
+	historyLoaded := false
 	return func(source string) (string, error) {
 		source = strings.TrimSpace(source)
 		parsed, err := url.Parse(source)
@@ -306,6 +308,32 @@ func (s *TaskShareService) imageResolver(token string, delivery *taskShareDelive
 			if parsed.Scheme == "" && parsed.Host == "" && parsed.RawQuery == "" && parsed.Fragment == "" && !strings.HasPrefix(parsed.Path, "/") {
 				if path.Clean(parsed.Path) == file.FilePath || path.Join(path.Dir(delivery.body.FilePath), parsed.Path) == file.FilePath {
 					return mapped, nil
+				}
+			}
+		}
+		if !model.IsPublicArticleImageURL(source) {
+			return "", ErrTaskShareUnavailable
+		}
+		if !historyLoaded {
+			history, err = s.repo.TaskFiles().FindAllByTaskID(ctx, delivery.body.TaskID)
+			if err != nil {
+				return "", err
+			}
+			historyLoaded = true
+		}
+		// A resumed article may keep an earlier execution's platform image URL.
+		// Resolve it only to an identical image in the current public delivery.
+		for _, previous := range history {
+			if previous.TaskID != delivery.body.TaskID || previous.ExecutionID == "" || previous.ExecutionID == delivery.body.ExecutionID ||
+				(previous.State != model.TaskFileStateRetained && previous.State != model.TaskFileStateSuperseded) || previous.PlatformImageURL != source {
+				continue
+			}
+			for _, image := range delivery.images {
+				file := image.file
+				if file.FilePath == previous.FilePath && file.FileSize == previous.FileSize &&
+					normalizedMediaType(file.MimeType) == normalizedMediaType(previous.MimeType) &&
+					isExactLowerHex(strings.ToLower(file.ContentHash), 64) && strings.EqualFold(file.ContentHash, previous.ContentHash) {
+					return shareImageURL(token, file.ID), nil
 				}
 			}
 		}

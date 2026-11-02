@@ -65,7 +65,8 @@ vi.mock('@/lib/api', async () => {
   }
 })
 
-vi.mock('@/lib/interactive-events', () => ({
+vi.mock('@/lib/interactive-events', async () => ({
+  ...await vi.importActual<typeof import('@/lib/interactive-events')>('@/lib/interactive-events'),
   streamAssistantWorkspace: (workspaceId: string, _token: string, signal: AbortSignal, options?: { expectedSessionId?: string; onConnected?: () => void }) => (async function* () {
     mocks.streamCalls(workspaceId, options)
     if (mocks.connectionGate) await mocks.connectionGate
@@ -144,7 +145,7 @@ describe('AssistantWorkspace', () => {
     renderPage()
     const card = await screen.findByRole('region', { name: '创作草稿' })
     expect(within(card).getByText('请补充必要的活动日期')).toBeInTheDocument()
-    expect(within(card).queryByRole('button', { name: '创作作品' })).not.toBeInTheDocument()
+    expect(within(card).queryByRole('button', { name: '开始创作' })).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
     expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('保留我的输入')
     expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
@@ -168,12 +169,12 @@ describe('AssistantWorkspace', () => {
     mocks.workspaceCommit.mockRejectedValue(new Error('request timed out'))
     renderPage()
     const card = await screen.findByRole('region', { name: '确认创作' })
-    fireEvent.click(within(card).getByRole('button', { name: '创作作品' }))
+    fireEvent.click(within(card).getByRole('button', { name: '开始创作' }))
     await screen.findByText('request timed out')
     expect(mocks.workspaceCheckpoint).not.toHaveBeenCalled()
     expect(mocks.workspaceCommit).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({ draft_id: 'displayed-draft', revision: 4, options: { plan: expect.objectContaining({ execution_profile: 'effective' }) } }))
     const first = mocks.workspaceCommit.mock.calls[0]?.[2]
-    fireEvent.click(within(card).getByRole('button', { name: '创作作品' }))
+    fireEvent.click(within(card).getByRole('button', { name: '开始创作' }))
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledTimes(2))
     expect(mocks.workspaceCommit.mock.calls[1]?.[2]).toEqual(first)
   })
@@ -194,7 +195,7 @@ describe('AssistantWorkspace', () => {
     mocks.getInteractionSnapshot.mockResolvedValue(editing)
     renderPage()
     await screen.findByRole('region', { name: '创作草稿' })
-    expect(screen.queryByRole('button', { name: '创作作品' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '开始创作' })).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
   })
 
@@ -216,7 +217,7 @@ describe('AssistantWorkspace', () => {
     mocks.workspaceCommit.mockResolvedValue({ interaction_status: 'created', task: { id: 'corrected-task' } })
     renderPage()
     await screen.findByRole('button', { name: /选择参数：.*标准图像/ })
-    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '创作作品' }))
+    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '开始创作' }))
     expect(await screen.findByText('请选择有效的图片画幅')).toBeInTheDocument()
     expect(screen.getByRole('region', { name: '确认创作' })).toHaveTextContent('保留创作计划')
     expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('保留我的输入')
@@ -226,7 +227,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: /选择参数：/ }))
     fireEvent.click(await screen.findByRole('button', { name: '1:1' }))
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
-    fireEvent.click(screen.getByRole('button', { name: '创作作品' }))
+    fireEvent.click(screen.getByRole('button', { name: '开始创作' }))
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledTimes(2))
     const corrected = mocks.workspaceCommit.mock.calls[1]?.[2]
     expect(corrected).toEqual(expect.objectContaining({ draft_id: 'displayed-draft', revision: 4, options: { plan: { ...first.options.plan, image_ratio: '1:1' } } }))
@@ -243,7 +244,7 @@ describe('AssistantWorkspace', () => {
     renderPage()
     expect(await screen.findByRole('region', { name: '创作草稿' })).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: '核对结果' }))
-    expect(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '创作作品' })).toBeEnabled()
+    expect(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '开始创作' })).toBeEnabled()
     expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('保留我的输入')
     expect(mocks.workspaceCommit).not.toHaveBeenCalled()
   })
@@ -252,10 +253,10 @@ describe('AssistantWorkspace', () => {
     restoreCreation()
     mocks.workspaceCommit.mockResolvedValue({ interaction_status: 'needs_reconciliation', task_id: 'uncertain-task' })
     renderPage()
-    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '创作作品' }))
+    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '开始创作' }))
     expect(await screen.findByRole('button', { name: '核对结果' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: '创作草稿' })).toHaveTextContent('保留创作计划')
-    expect(screen.queryByRole('button', { name: '创作作品' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '开始创作' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '继续讨论' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '重新开始' })).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
@@ -270,7 +271,7 @@ describe('AssistantWorkspace', () => {
     const queryClient = createTestQueryClient()
     const page = render(<QueryClientProvider client={queryClient}><MemoryRouter><nav><Link to="/">首页</Link></nav><Routes><Route path="/" element={<AssistantWorkspace />} /><Route path="/tasks/:id" element={<h1>任务详情</h1>} /></Routes><LocationProbe /></MemoryRouter></QueryClientProvider>)
 
-    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '创作作品' }))
+    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '开始创作' }))
     await screen.findByRole('heading', { name: '任务详情' })
     expect(screen.getByTestId('location')).toHaveTextContent('/tasks/created-task')
     expect(screen.queryByTestId('assistant-workspace')).not.toBeInTheDocument()
@@ -315,18 +316,18 @@ describe('AssistantWorkspace', () => {
     restoreCreation()
     mocks.workspaceCommit.mockRejectedValue(new Error('request timed out'))
     const page = renderPage()
-    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '创作作品' }))
+    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '开始创作' }))
     await screen.findByText('request timed out')
     const first = mocks.workspaceCommit.mock.calls[0]?.[2]
     page.unmount()
     renderPage()
-    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '创作作品' }))
+    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '开始创作' }))
     await screen.findByText('request timed out')
     expect(mocks.workspaceCommit.mock.calls[1]?.[2]).toEqual(first)
     fireEvent.click(screen.getByRole('button', { name: /选择参数：/ }))
     fireEvent.click(await screen.findByRole('button', { name: '1:1' }))
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
-    fireEvent.click(screen.getByRole('button', { name: '创作作品' }))
+    fireEvent.click(screen.getByRole('button', { name: '开始创作' }))
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledTimes(3))
     expect(mocks.workspaceCommit.mock.calls[2]?.[2]).toEqual(expect.objectContaining({ draft_id: 'displayed-draft', revision: 4, options: { plan: expect.objectContaining({ image_ratio: '1:1' }) } }))
     expect(mocks.workspaceCommit.mock.calls[2]?.[2].idempotency_key).not.toBe(first.idempotency_key)
@@ -452,9 +453,49 @@ describe('AssistantWorkspace', () => {
     expect(mocks.createWorkspace).toHaveBeenCalledTimes(1)
   })
 
-  it('restores authoritative context after a lost activation response and a changed selection', async () => {
+  it('recovers a timed-out message through snapshot and event replay without resending', async () => {
+    const active = { ...preparedWorkspace().interaction_snapshot!, lifecycle: 'active', runtime_status: 'running' }
+    let recover!: (snapshot: AssistantInteractionSnapshot) => void
+    mocks.getInteractionSnapshot.mockReturnValueOnce(new Promise((resolve) => { recover = resolve }))
+    mocks.workspaceMessage.mockRejectedValueOnce(Object.assign(new Error('Request failed with status code 504'), { response: { status: 504 } }))
+    mocks.streamEvents = [{ event: 'question.opened', id: '12', data: JSON.stringify({ mode_id: 'profile', call_id: 'recovered-question', questions: [{ id: 'topic', question: '这次想写什么主题？', options: [{ label: 'AI 创作' }] }] }) }]
+    renderPage()
+    await waitFor(() => expect(mocks.streamCalls).toHaveBeenCalledTimes(1))
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '创作一篇文章' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(await screen.findByText('正在恢复连接')).toBeInTheDocument()
+    expect(screen.queryByText('刚才的消息未送出，内容已保留')).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('创作一篇文章')
+    mocks.existingConversation = true
+    await act(async () => recover(active))
+
+    expect(await screen.findByText('这次想写什么主题？')).toBeInTheDocument()
+    expect(mocks.streamCalls).toHaveBeenCalledTimes(2)
+    expect(mocks.workspaceMessage).toHaveBeenCalledTimes(1)
+    expect(mocks.createWorkspace).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText('正在恢复连接')).not.toBeInTheDocument()
+    expect(screen.queryByText('Request failed with status code 504')).not.toBeInTheDocument()
+  })
+
+  it('reopens a stopped event stream when recovering the same interaction generation', async () => {
+    mocks.streamCalls.mockImplementationOnce(() => { throw new TypeError('network error') })
+    mocks.getInteractionSnapshot.mockResolvedValue({ ...preparedWorkspace().interaction_snapshot!, lifecycle: 'active', runtime_status: 'running' })
+    renderPage()
+    expect(await screen.findByText('正在恢复连接')).toBeInTheDocument()
+    mocks.existingConversation = true
+    fireEvent.click(screen.getByRole('button', { name: '恢复连接' }))
+
+    expect(await screen.findByText('收到，我开始处理。')).toBeInTheDocument()
+    expect(mocks.streamCalls).toHaveBeenCalledTimes(2)
+    expect(mocks.workspaceMessage).not.toHaveBeenCalled()
+    expect(mocks.createWorkspace).toHaveBeenCalledTimes(1)
+  })
+
+  it('restores authoritative context after lost activation and unavailable snapshot recovery', async () => {
     bootstrapFivePersonas()
     const snapshot = { ...preparedWorkspace({ mode_id: 'creation', project_id: 'draft-ready' }).interaction_snapshot!, lifecycle: 'active', runtime_status: 'running' }
+    mocks.getInteractionSnapshot.mockRejectedValueOnce(new Error('snapshot unavailable'))
     mocks.workspaceMessage.mockRejectedValueOnce(new Error('response lost')).mockRejectedValueOnce(Object.assign(new Error('context changed'), {
       response: { status: 409, data: { error_code: 'assistant_message_not_accepted', data: snapshot } },
     }))
@@ -1098,7 +1139,7 @@ describe('AssistantWorkspace', () => {
     expect(await screen.findByRole('button', { name: /选择参数：.*3:4/ })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '介绍新茶\n\n创作类型：seednote', false, expect.any(Object)))
-    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '创作作品' }))
+    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '开始创作' }))
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
       options: { plan: expect.objectContaining({ content_type: 'seednote', image_ratio: '3:4' }) },
     })))
@@ -2014,7 +2055,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '自动剪辑我的访谈素材' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', expect.stringContaining('自动剪辑我的访谈素材'), false, expect.any(Object)))
-    fireEvent.click(await screen.findByRole('button', { name: '创作作品' }))
+    fireEvent.click(await screen.findByRole('button', { name: '开始创作' }))
 
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
       options: { plan: expect.objectContaining({
@@ -2058,12 +2099,13 @@ describe('AssistantWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
 
     const card = await screen.findByRole('region', { name: '确认创作' })
+    expect(mocks.workspaceCommit).not.toHaveBeenCalled()
     expect(within(card).getByText('发布春季新品')).toBeInTheDocument()
     expect(within(card).getByText('公众号文章')).toBeInTheDocument()
-    expect(within(card).getByRole('button', { name: '创作作品' })).toBeEnabled()
+    expect(within(card).getByRole('button', { name: '开始创作' })).toBeEnabled()
     expect(within(card).getByRole('button', { name: '继续讨论' })).toBeEnabled()
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
-    fireEvent.click(within(card).getByRole('button', { name: '创作作品' }))
+    fireEvent.click(within(card).getByRole('button', { name: '开始创作' }))
 
     expect(mocks.workspaceCheckpoint).not.toHaveBeenCalled()
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
@@ -2091,7 +2133,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     const card = await screen.findByRole('region', { name: '确认创作' })
     expect(within(card).getByText('1:1')).toBeInTheDocument()
-    fireEvent.click(within(card).getByRole('button', { name: '创作作品' }))
+    fireEvent.click(within(card).getByRole('button', { name: '开始创作' }))
 
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledWith('workspace-ratio', 'creation', expect.objectContaining({
       options: { plan: expect.objectContaining({ image_ratio: '1:1' }) },
@@ -2123,7 +2165,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     const card = await screen.findByRole('region', { name: '确认创作' })
     fireEvent.change(composer, { target: { value: '不应并发发送' } })
-    fireEvent.click(within(card).getByRole('button', { name: '创作作品' }))
+    fireEvent.click(within(card).getByRole('button', { name: '开始创作' }))
 
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalled())
     expect(composer).toBeDisabled()
@@ -2158,7 +2200,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '按照资料完成文章' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     const card = await screen.findByRole('region', { name: '确认创作' })
-    fireEvent.click(within(card).getByRole('button', { name: '创作作品' }))
+    fireEvent.click(within(card).getByRole('button', { name: '开始创作' }))
 
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
       options: { plan: {
