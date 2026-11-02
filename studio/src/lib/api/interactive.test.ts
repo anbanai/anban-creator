@@ -38,6 +38,43 @@ describe('streamAssistantInteraction', () => {
     vi.restoreAllMocks()
   })
 
+  it('reconnects from the last complete event after a response body fails', async () => {
+    vi.useFakeTimers()
+    let controller!: ReadableStreamDefaultController<Uint8Array>
+    const body = new ReadableStream<Uint8Array>({ start(value) { controller = value } })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(body))
+      .mockResolvedValueOnce(response('event:question.opened\nid:12\ndata:{"generation":1,"call_id":"question-1"}\n\n'))
+    const stream = streamAssistantInteraction('interaction-1', 'token')
+    controller.enqueue(new TextEncoder().encode('event:turn.start\nid:11\ndata:{"generation":1}\n\nevent:question.opened\nid:12\ndata:{"call_id":"incomplete'))
+    await expect(stream.next()).resolves.toMatchObject({ value: { id: '11' } })
+
+    const next = stream.next()
+    controller.error(new TypeError('network error'))
+    await Promise.all([
+      expect(next).resolves.toMatchObject({ value: { event: 'question.opened', id: '12', data: '{"generation":1,"call_id":"question-1"}' } }),
+      vi.advanceTimersByTimeAsync(250),
+    ])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1]?.[1]?.headers).toMatchObject({ 'Last-Event-ID': '11' })
+    await stream.return(undefined)
+  })
+
+  it('does not reconnect when a response body fails because the caller aborted', async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>
+    const body = new ReadableStream<Uint8Array>({ start(value) { controller = value } })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(body))
+    const abort = new AbortController()
+    const stream = streamAssistantInteraction('interaction-1', 'token', abort.signal)
+    controller.enqueue(new TextEncoder().encode('event:turn.start\nid:11\ndata:{}\n\n'))
+    await stream.next()
+    const next = stream.next()
+    abort.abort()
+    controller.error(abort.signal.reason)
+    await expect(next).rejects.toMatchObject({ name: 'AbortError' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('ignores events from an older generation while accepting the current generation', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.spyOn(globalThis, 'fetch')

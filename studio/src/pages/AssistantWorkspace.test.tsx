@@ -65,7 +65,8 @@ vi.mock('@/lib/api', async () => {
   }
 })
 
-vi.mock('@/lib/interactive-events', () => ({
+vi.mock('@/lib/interactive-events', async () => ({
+  ...await vi.importActual<typeof import('@/lib/interactive-events')>('@/lib/interactive-events'),
   streamAssistantWorkspace: (workspaceId: string, _token: string, signal: AbortSignal, options?: { expectedSessionId?: string; onConnected?: () => void }) => (async function* () {
     mocks.streamCalls(workspaceId, options)
     if (mocks.connectionGate) await mocks.connectionGate
@@ -452,9 +453,49 @@ describe('AssistantWorkspace', () => {
     expect(mocks.createWorkspace).toHaveBeenCalledTimes(1)
   })
 
-  it('restores authoritative context after a lost activation response and a changed selection', async () => {
+  it('recovers a timed-out message through snapshot and event replay without resending', async () => {
+    const active = { ...preparedWorkspace().interaction_snapshot!, lifecycle: 'active', runtime_status: 'running' }
+    let recover!: (snapshot: AssistantInteractionSnapshot) => void
+    mocks.getInteractionSnapshot.mockReturnValueOnce(new Promise((resolve) => { recover = resolve }))
+    mocks.workspaceMessage.mockRejectedValueOnce(Object.assign(new Error('Request failed with status code 504'), { response: { status: 504 } }))
+    mocks.streamEvents = [{ event: 'question.opened', id: '12', data: JSON.stringify({ mode_id: 'profile', call_id: 'recovered-question', questions: [{ id: 'topic', question: '这次想写什么主题？', options: [{ label: 'AI 创作' }] }] }) }]
+    renderPage()
+    await waitFor(() => expect(mocks.streamCalls).toHaveBeenCalledTimes(1))
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '创作一篇文章' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(await screen.findByText('正在恢复连接')).toBeInTheDocument()
+    expect(screen.queryByText('刚才的消息未送出，内容已保留')).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('创作一篇文章')
+    mocks.existingConversation = true
+    await act(async () => recover(active))
+
+    expect(await screen.findByText('这次想写什么主题？')).toBeInTheDocument()
+    expect(mocks.streamCalls).toHaveBeenCalledTimes(2)
+    expect(mocks.workspaceMessage).toHaveBeenCalledTimes(1)
+    expect(mocks.createWorkspace).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText('正在恢复连接')).not.toBeInTheDocument()
+    expect(screen.queryByText('Request failed with status code 504')).not.toBeInTheDocument()
+  })
+
+  it('reopens a stopped event stream when recovering the same interaction generation', async () => {
+    mocks.streamCalls.mockImplementationOnce(() => { throw new TypeError('network error') })
+    mocks.getInteractionSnapshot.mockResolvedValue({ ...preparedWorkspace().interaction_snapshot!, lifecycle: 'active', runtime_status: 'running' })
+    renderPage()
+    expect(await screen.findByText('正在恢复连接')).toBeInTheDocument()
+    mocks.existingConversation = true
+    fireEvent.click(screen.getByRole('button', { name: '恢复连接' }))
+
+    expect(await screen.findByText('收到，我开始处理。')).toBeInTheDocument()
+    expect(mocks.streamCalls).toHaveBeenCalledTimes(2)
+    expect(mocks.workspaceMessage).not.toHaveBeenCalled()
+    expect(mocks.createWorkspace).toHaveBeenCalledTimes(1)
+  })
+
+  it('restores authoritative context after lost activation and unavailable snapshot recovery', async () => {
     bootstrapFivePersonas()
     const snapshot = { ...preparedWorkspace({ mode_id: 'creation', project_id: 'draft-ready' }).interaction_snapshot!, lifecycle: 'active', runtime_status: 'running' }
+    mocks.getInteractionSnapshot.mockRejectedValueOnce(new Error('snapshot unavailable'))
     mocks.workspaceMessage.mockRejectedValueOnce(new Error('response lost')).mockRejectedValueOnce(Object.assign(new Error('context changed'), {
       response: { status: 409, data: { error_code: 'assistant_message_not_accepted', data: snapshot } },
     }))

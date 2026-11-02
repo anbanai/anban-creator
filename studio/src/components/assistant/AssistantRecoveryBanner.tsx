@@ -10,6 +10,7 @@ export function AssistantRecoveryBanner({ state, onRetry, onRetryUncertain, onRe
   return <div role="status" className="flex items-center gap-3 border-b bg-muted/30 px-4 py-2 text-sm">
     {busy ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : state.status === 'completed' ? <CheckCircle2 className="size-4 text-emerald-600" aria-hidden="true" /> : <AlertTriangle className="size-4 text-amber-600" aria-hidden="true" />}
     <span className="flex-1">{label}</span>
+    {state.status === 'reconnecting' && onRetry ? <Button size="sm" variant="outline" onClick={onRetry}><RefreshCw className="mr-1 size-4" />恢复连接</Button> : null}
     {state.status === 'input_retryable' && onRetry ? <Button size="sm" variant="outline" onClick={onRetry}><RefreshCw className="mr-1 size-4" />重试发送</Button> : null}
     {state.status === 'command_uncertain' && onRetryUncertain ? <Button size="sm" variant="outline" onClick={onRetryUncertain}><RefreshCw className="mr-1 size-4" />仍然重试</Button> : null}
     {state.status === 'command_uncertain' && onRestart ? <Button size="sm" variant="ghost" onClick={onRestart}>重新开始</Button> : null}
