@@ -1651,7 +1651,7 @@ function DraftConfirmationCard({ mode, draft, attemptIssues, committing, confirm
   const issues = attemptIssues ?? draft.blocking_issues
   const isProfile = mode === 'profile'
   const title = isCreation ? confirmable ? '确认创作' : '创作草稿' : isProfile ? '保存人设' : '确认复盘结论'
-  const buttonLabel = isCreation ? '创作作品' : isProfile ? '保存人设' : '保存复盘结论'
+  const buttonLabel = isCreation ? '开始创作' : isProfile ? '保存人设' : '保存复盘结论'
   const continueLabel = isCreation ? '继续讨论' : '继续深入访谈'
   return <section role="region" aria-label={title} className="mt-6 rounded-xl border border-primary/30 bg-primary/[0.04] p-4">
     <div className="flex items-center gap-2 text-sm font-medium"><Check className="size-4 text-emerald-600" />{title}</div>
