@@ -125,7 +125,6 @@ export function assistantInteractionReducer(state: AssistantInteractionState, ac
 
 export function assistantInteractionRecoveryLabel(state: AssistantInteractionState): string {
   switch (state.status) {
-    case 'prepared': return '连接已准备，发送消息后开始对话'
     case 'reconnecting': return '正在恢复连接'
     case 'command_uncertain': return '上一条操作的结果无法确认，重新提交可能重复执行'
     case 'needs_confirmation': return '计划已准备好，请确认'
