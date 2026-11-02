@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
+	"github.com/rs/zerolog"
 )
 
 var (
@@ -30,11 +32,25 @@ type UserMediaLibraryService struct {
 	repo     repository.Repository
 	store    storage.Provider
 	analysis *ImageAnalysisService
+	semantic storage.MediaSemanticSearch
+	logger   *zerolog.Logger
 	now      func() time.Time
 }
 
 func NewUserMediaLibraryService(repo repository.Repository, store storage.Provider, analysis *ImageAnalysisService) *UserMediaLibraryService {
 	return &UserMediaLibraryService{repo: repo, store: store, analysis: analysis, now: time.Now}
+}
+
+func (s *UserMediaLibraryService) SetSemanticSearch(search storage.MediaSemanticSearch) {
+	if s != nil {
+		s.semantic = search
+	}
+}
+
+func (s *UserMediaLibraryService) SetLogger(logger *zerolog.Logger) {
+	if s != nil {
+		s.logger = logger
+	}
 }
 
 type UserMediaListRequest struct {
@@ -71,6 +87,9 @@ type UserMediaAssetView struct {
 	ProjectID        string     `json:"project_id,omitempty"`
 	Status           string     `json:"status"`
 	Description      string     `json:"description,omitempty"`
+	Summary          string     `json:"summary,omitempty"`
+	AnalysisProvider string     `json:"analysis_provider,omitempty"`
+	IndexedAt        *time.Time `json:"indexed_at,omitempty"`
 	RecommendedUses  []string   `json:"recommended_uses,omitempty"`
 	UsageNotes       string     `json:"usage_notes,omitempty"`
 	ErrorCode        string     `json:"error_code,omitempty"`
@@ -256,6 +275,57 @@ func (s *UserMediaLibraryService) Remove(ctx context.Context, userID, id string)
 }
 
 func (s *UserMediaLibraryService) SearchCandidates(ctx context.Context, userID, projectID, query, mediaType string, limit int) ([]*UserMediaAssetView, error) {
+	if strings.TrimSpace(query) != "" && strings.TrimSpace(mediaType) == "video" {
+		if s.semantic == nil {
+			return nil, errors.New("OSS semantic search is not configured")
+		}
+		results, err := s.semantic.Search(ctx, strings.TrimSpace(query), "assets/users/"+strings.TrimSpace(userID)+"/", "video", limit)
+		if err != nil {
+			return nil, err
+		}
+		keys := make([]string, 0, len(results))
+		byKey := make(map[string]storage.SemanticMediaResult, len(results))
+		for _, result := range results {
+			keys = append(keys, result.ObjectKey)
+			byKey[result.ObjectKey] = result
+		}
+		rows, err := s.repo.UserMediaAssets().FindActiveByStorageKeysForUser(ctx, strings.TrimSpace(userID), keys, "video")
+		if err != nil {
+			return nil, err
+		}
+		rowByKey := make(map[string]*model.UserMediaAsset, len(rows))
+		keyByRow := make(map[string]string, len(rows))
+		for _, row := range rows {
+			asset, assetErr := s.repo.Assets().FindOwnedByID(ctx, row.AssetID, row.UserID)
+			if assetErr == nil {
+				rowByKey[asset.StorageKey] = row
+				keyByRow[row.ID] = asset.StorageKey
+			} else if s.logger != nil {
+				s.logger.Debug().Msg("discarded OSS semantic result without a valid media-library asset")
+			}
+		}
+		ordered := make([]*model.UserMediaAsset, 0, len(results))
+		for _, result := range results {
+			if row := rowByKey[result.ObjectKey]; row != nil {
+				ordered = append(ordered, row)
+			}
+		}
+		if projectID != "" {
+			sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].ProjectID == projectID && ordered[j].ProjectID != projectID })
+		}
+		items := make([]*UserMediaAssetView, 0, len(ordered))
+		for _, row := range ordered {
+			view, viewErr := s.present(ctx, row)
+			if viewErr != nil {
+				return nil, viewErr
+			}
+			if result, ok := byKey[keyByRow[row.ID]]; ok {
+				view.Summary, view.Description = result.Summary, result.Description
+			}
+			items = append(items, view)
+		}
+		return items, nil
+	}
 	rows, err := s.repo.UserMediaAssets().ListReadyCandidates(ctx, strings.TrimSpace(userID), strings.TrimSpace(projectID), strings.TrimSpace(query), strings.TrimSpace(mediaType), limit)
 	if err != nil {
 		return nil, err
@@ -299,7 +369,7 @@ func (s *UserMediaLibraryService) present(ctx context.Context, row *model.UserMe
 	}
 	view := &UserMediaAssetView{
 		ID: row.ID, OptionLabel: "media_asset:" + row.ID, AssetID: row.AssetID, FileName: asset.FileName, ContentType: asset.ContentType, Size: asset.Size,
-		MediaType: row.MediaType, ProjectID: row.ProjectID, Status: row.Status, Description: row.Description,
+		MediaType: row.MediaType, ProjectID: row.ProjectID, Status: row.Status, Description: row.Description, Summary: row.Summary, AnalysisProvider: row.AnalysisProvider, IndexedAt: row.IndexedAt,
 		RecommendedUses: append([]string(nil), row.RecommendedUses...), UsageNotes: row.UsageNotes,
 		ErrorCode: row.ErrorCode, ErrorMessage: row.ErrorMessage, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}

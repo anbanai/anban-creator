@@ -35,7 +35,7 @@ func searchUserMediaAssetsHandler(ctx context.Context, req *mcp.CallToolRequest)
 	} else if identity, ok := getMCPInteractiveIdentity(ctx); ok {
 		userID, projectID = identity.UserID, identity.ProjectID
 	} else {
-		userID = getUserID(ctx)
+		return errorResult(`{"code":"identity_required","message":"an execution or interactive creation identity is required"}`), nil
 	}
 	if strings.TrimSpace(userID) == "" {
 		return errorResult(`{"code":"identity_required","message":"an authenticated user identity is required"}`), nil
@@ -79,6 +79,7 @@ func searchUserMediaAssetsHandler(ctx context.Context, req *mcp.CallToolRequest)
 			"media_type":       item.MediaType,
 			"project_id":       item.ProjectID,
 			"description":      item.Description,
+			"summary":          item.Summary,
 			"recommended_uses": item.RecommendedUses,
 			"usage_notes":      item.UsageNotes,
 			"preview_url":      item.PreviewURL,
@@ -86,5 +87,9 @@ func searchUserMediaAssetsHandler(ctx context.Context, req *mcp.CallToolRequest)
 		}
 		candidates = append(candidates, candidate)
 	}
-	return textResult(map[string]any{"items": candidates, "selection": map[string]any{"option_label_prefix": "media_asset:", "requires_confirmation": true}})
+	provider := "database"
+	if strings.TrimSpace(mediaType) == "video" && strings.TrimSpace(query) != "" {
+		provider = "oss_ai_content_awareness"
+	}
+	return textResult(map[string]any{"items": candidates, "search": map[string]any{"provider": provider, "query": strings.TrimSpace(query)}, "selection": map[string]any{"option_label_prefix": "media_asset:", "requires_confirmation": true}})
 }

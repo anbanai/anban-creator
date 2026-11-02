@@ -1037,18 +1037,35 @@ type TokenUsage struct {
 // StorageConfig holds file storage configuration.
 // Supports "oss" (Alibaba Cloud OSS) or "local" (filesystem).
 type StorageConfig struct {
-	Provider                   string `yaml:"provider"` // "oss" or "local", default "local"
-	Endpoint                   string `yaml:"endpoint"` // OSS endpoint, e.g. "oss-cn-hangzhou.aliyuncs.com"
-	AccessKeyID                string `yaml:"access_key_id"`
-	AccessKeySecret            string `yaml:"access_key_secret"`
-	BucketName                 string `yaml:"bucket_name"`
-	Region                     string `yaml:"region"`
-	CustomDomain               string `yaml:"custom_domain"`                 // Optional CDN domain for public file URLs
-	STSRoleArn                 string `yaml:"sts_role_arn"`                  // Optional RAM role used for browser direct uploads
-	STSSessionName             string `yaml:"sts_session_name"`              // Optional direct upload STS session name
-	STSEndpoint                string `yaml:"sts_endpoint"`                  // Optional STS endpoint override
-	DirectUploadExpiresSeconds int    `yaml:"direct_upload_expires_seconds"` // Default 900
-	LocalDataDir               string `yaml:"local_data_dir"`                // Default "./data/files"
+	Provider                   string                   `yaml:"provider"` // "oss" or "local", default "local"
+	Endpoint                   string                   `yaml:"endpoint"` // OSS endpoint, e.g. "oss-cn-hangzhou.aliyuncs.com"
+	AccessKeyID                string                   `yaml:"access_key_id"`
+	AccessKeySecret            string                   `yaml:"access_key_secret"`
+	BucketName                 string                   `yaml:"bucket_name"`
+	Region                     string                   `yaml:"region"`
+	CustomDomain               string                   `yaml:"custom_domain"`                 // Optional CDN domain for public file URLs
+	STSRoleArn                 string                   `yaml:"sts_role_arn"`                  // Optional RAM role used for browser direct uploads
+	STSSessionName             string                   `yaml:"sts_session_name"`              // Optional direct upload STS session name
+	STSEndpoint                string                   `yaml:"sts_endpoint"`                  // Optional STS endpoint override
+	DirectUploadExpiresSeconds int                      `yaml:"direct_upload_expires_seconds"` // Default 900
+	LocalDataDir               string                   `yaml:"local_data_dir"`                // Default "./data/files"
+	AIContentAwareness         AIContentAwarenessConfig `yaml:"ai_content_awareness"`
+}
+
+type AIContentAwarenessConfig struct {
+	Enabled      bool          `yaml:"enabled"`
+	VideoEnabled bool          `yaml:"video_enabled"`
+	QueryTimeout time.Duration `yaml:"query_timeout"`
+	MaxResults   int           `yaml:"max_results"`
+}
+
+func (c *AIContentAwarenessConfig) ApplyDefaults() {
+	if c.QueryTimeout <= 0 {
+		c.QueryTimeout = 10 * time.Second
+	}
+	if c.MaxResults <= 0 || c.MaxResults > 100 {
+		c.MaxResults = 20
+	}
 }
 
 // ImageAPIConfig is an internal runtime adapter for server/app/image. It is built from
@@ -1820,6 +1837,7 @@ func (c *Config) applyDefaults() {
 	if c.Storage.LocalDataDir == "" {
 		c.Storage.LocalDataDir = "./data/files"
 	}
+	c.Storage.AIContentAwareness.ApplyDefaults()
 	if c.Claude.ProjectMemory.RootDir == "" {
 		c.Claude.ProjectMemory.RootDir = "/app/data/project-memory"
 	}
@@ -2497,6 +2515,12 @@ func (c *Config) Validate() error {
 		if err := validateStorageCustomDomain(c.Storage.CustomDomain); err != nil {
 			errs = append(errs, err.Error())
 		}
+	}
+	if c.Storage.AIContentAwareness.Enabled && c.Storage.Provider != "oss" {
+		errs = append(errs, "storage.ai_content_awareness requires storage.provider to be \"oss\"")
+	}
+	if c.Storage.AIContentAwareness.VideoEnabled && !c.Storage.AIContentAwareness.Enabled {
+		errs = append(errs, "storage.ai_content_awareness.video_enabled requires storage.ai_content_awareness.enabled")
 	}
 
 	pm := c.Claude.ProjectMemory

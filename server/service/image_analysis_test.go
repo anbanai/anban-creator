@@ -64,6 +64,18 @@ type imageAnalysisLLMFake struct {
 
 type userMediaVideoLLMFake struct{}
 
+type userMediaSemanticFake struct {
+	result *storage.SemanticMediaResult
+	err    error
+}
+
+func (f userMediaSemanticFake) Search(context.Context, string, string, string, int) ([]storage.SemanticMediaResult, error) {
+	return nil, nil
+}
+func (f userMediaSemanticFake) Lookup(context.Context, string, string) (*storage.SemanticMediaResult, error) {
+	return f.result, f.err
+}
+
 func (userMediaVideoLLMFake) Complete(context.Context, string, string) (string, error) {
 	return "", nil
 }
@@ -149,9 +161,8 @@ func TestUserMediaVideoAnalysisUsesNativeClientAndKeepsNotesOnRetry(t *testing.T
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard)
 	enqueuer := &imageAnalysisEnqueuerFake{}
-	client := userMediaVideoLLMFake{}
 	svc := NewImageAnalysisService(repo, &imageAnalysisStorageFake{data: map[string][]byte{}}, nil, enqueuer, nil, ImageAnalysisConfig{LeaseDuration: time.Minute}, &logger)
-	svc.SetVideoClient(client, "video-provider", "video-model")
+	svc.SetMediaSemanticSearch(userMediaSemanticFake{result: &storage.SemanticMediaResult{Summary: "产品开箱", Description: "一段展示产品开箱过程的视频。"}})
 	asset := &model.Asset{ID: uuid.NewString(), UserID: "user-1", Purpose: DirectUploadPurposeMediaLibrary, StorageKey: "media.mp4", FileName: "media.mp4", ContentType: "video/mp4", Size: 12, ETag: "etag"}
 	if err := repo.Assets().Create(t.Context(), asset); err != nil {
 		t.Fatal(err)
@@ -200,15 +211,93 @@ func TestUserMediaVideoAnalysisRequiresConfiguredVideoClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Process(t.Context(), job.ID, job.Generation); !errors.Is(err, ErrVideoUnderstandingUnavailable) {
-		t.Fatalf("Process error = %v, want ErrVideoUnderstandingUnavailable", err)
+	if err := svc.Process(t.Context(), job.ID, job.Generation); err == nil || !strings.Contains(err.Error(), "OSS semantic search is not configured") {
+		t.Fatalf("Process error = %v, want OSS semantic configuration error", err)
 	}
 	got, err := repo.UserMediaAssets().FindByIDForUser(t.Context(), "user-1", media.ID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != model.UserMediaAssetStatusQueued || got.ErrorCode != "video_model_unavailable" {
+	if got.Status != model.UserMediaAssetStatusQueued || got.ErrorCode != "analysis_failed" {
 		t.Fatalf("media after missing video route = %#v", got)
+	}
+}
+
+func TestUserMediaVideoAnalysisPendingKeepsQueuedForRecovery(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.Asset{}, &model.UserMediaAsset{}, &model.ImageAnalysisJob{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard)
+	enqueuer := &imageAnalysisEnqueuerFake{}
+	svc := NewImageAnalysisService(repo, &imageAnalysisStorageFake{data: map[string][]byte{}}, nil, enqueuer, nil, ImageAnalysisConfig{LeaseDuration: time.Minute}, &logger)
+	svc.SetMediaSemanticSearch(userMediaSemanticFake{err: storage.ErrSemanticIndexPending})
+	asset := &model.Asset{ID: uuid.NewString(), UserID: "user-1", Purpose: DirectUploadPurposeMediaLibrary, StorageKey: "media.mp4", FileName: "media.mp4", ContentType: "video/mp4", Size: 12, ETag: "etag"}
+	if err := repo.Assets().Create(t.Context(), asset); err != nil {
+		t.Fatal(err)
+	}
+	media := &model.UserMediaAsset{ID: uuid.NewString(), UserID: "user-1", AssetID: asset.ID, MediaType: "video", Status: model.UserMediaAssetStatusQueued}
+	if err := repo.UserMediaAssets().Create(t.Context(), media); err != nil {
+		t.Fatal(err)
+	}
+	job, err := svc.CreateUserMediaJob(t.Context(), media)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Process(t.Context(), job.ID, job.Generation); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	persisted, err := repo.ImageAnalyses().FindByID(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != model.ImageAnalysisStatusQueued || persisted.EnqueuedAt == nil || persisted.ErrorCode != "index_pending" {
+		t.Fatalf("pending job = %#v", persisted)
+	}
+	got, err := repo.UserMediaAssets().FindByIDForUser(t.Context(), "user-1", media.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.UserMediaAssetStatusQueued || got.ErrorCode != "index_pending" {
+		t.Fatalf("pending media = %#v", got)
+	}
+}
+
+func TestUserMediaAnalysisDoesNotClaimRemovedMedia(t *testing.T) {
+	svc, repo, _, _ := setupImageAnalysisService(t)
+	asset := &model.Asset{ID: uuid.NewString(), UserID: "user-1", Purpose: DirectUploadPurposeMediaLibrary, StorageKey: "media.mp4", FileName: "media.mp4", ContentType: "video/mp4", Size: 12, ETag: "etag"}
+	if err := repo.Assets().Create(t.Context(), asset); err != nil {
+		t.Fatal(err)
+	}
+	removedAt := time.Now().UTC()
+	media := &model.UserMediaAsset{ID: uuid.NewString(), UserID: "user-1", AssetID: asset.ID, MediaType: "video", Status: model.UserMediaAssetStatusQueued, RemovedAt: &removedAt}
+	if err := repo.UserMediaAssets().Create(t.Context(), media); err != nil {
+		t.Fatal(err)
+	}
+	job, err := svc.CreateUserMediaJob(t.Context(), media)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Process(t.Context(), job.ID, job.Generation); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	persisted, err := repo.ImageAnalyses().FindByID(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != model.ImageAnalysisStatusSuperseded {
+		t.Fatalf("removed media job = %#v", persisted)
+	}
+	got, err := repo.UserMediaAssets().FindByIDForUser(t.Context(), "user-1", media.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.UserMediaAssetStatusQueued || got.ErrorCode != "" {
+		t.Fatalf("removed media row was modified = %#v", got)
 	}
 }
 
