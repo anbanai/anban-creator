@@ -23,6 +23,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	serverimage "github.com/anbanai/anban-creator/server/app/image"
 	appwechat "github.com/anbanai/anban-creator/server/app/wechat"
 	"github.com/anbanai/anban-creator/server/auth"
 	serverbilling "github.com/anbanai/anban-creator/server/billing"
@@ -78,6 +79,16 @@ func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	logger := zerolog.New(os.Stderr).With().Timestamp().Logger().Level(logLevel)
 	log := &logger
+
+	// libvips backs the image-understanding downscale path. Deployments without
+	// an understanding route never touch it, so only start (and fail fast) when
+	// that route is configured.
+	if cfg.ImageUnderstanding.BaseURL != "" && cfg.ImageUnderstanding.Key != "" && cfg.ImageUnderstanding.Model != "" {
+		if err := serverimage.StartVisionRuntime(); err != nil {
+			log.Fatal().Err(err).Msg("start image processing runtime")
+		}
+		defer serverimage.StopVisionRuntime()
+	}
 
 	log.Info().
 		Int("port", cfg.Server.Port).
@@ -984,6 +995,8 @@ func main() {
 				UnderstandingModel:    cfg.ImageUnderstanding.Model,
 				UnderstandingTimeout:  cfg.ImageUnderstanding.Timeout,
 				PublicBaseURL:         cfg.Server.PublicBaseURL,
+				MaxImageEdge:          cfg.ImageUnderstanding.MaxImageEdge,
+				ImageQuality:          cfg.ImageUnderstanding.ImageQuality,
 			}, log),
 			TaskVideoOperationsSvc: service.NewTaskVideoOperationsService(repo, store, videoUnderstandingClient, fixedBilling.Cost, service.TaskVideoOperationsConfig{
 				UnderstandingProvider: cfg.VideoUnderstanding.ProviderKey,

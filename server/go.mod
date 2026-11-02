@@ -8,6 +8,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/aliyun/aliyun-oss-go-sdk v3.0.2+incompatible
 	github.com/aliyun/credentials-go v1.4.14
+	github.com/davidbyttow/govips/v2 v2.20.0
 	github.com/disintegration/imaging v1.6.2
 	github.com/distribution/reference v0.6.0
 	github.com/docker/docker v28.5.2+incompatible

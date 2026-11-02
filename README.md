@@ -257,6 +257,19 @@ make server-build
 ./bin/anban-creator-server -config server/config.yaml
 ```
 
+The Server links libvips through govips for the image-understanding downscale
+path, so every Go build and test needs the library installed:
+
+```bash
+# macOS
+brew install vips pkg-config
+# Debian/Ubuntu
+sudo apt-get install -y libvips-dev
+```
+
+The Server container installs `vips` at runtime and builds with
+`CGO_ENABLED=1`; there is no static-binary build anymore.
+
 Frontend build:
 
 ```bash

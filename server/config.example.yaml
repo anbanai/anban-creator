@@ -249,6 +249,17 @@ model_routes:
     model: "kimi-k2.7-code-highspeed"
     timeout: 90s
     require_usage: true
+    # Cap on the long edge of an image before the Server base64-encodes it for
+    # the vision model. The encoded payload and the image token cost both scale
+    # with resolution, so this is the main lever on analyze_image latency and
+    # traffic. Omit to use the 1600 default; set 0 to disable downscaling
+    # entirely; raise to 2048 when verbatim text review needs more detail.
+    max_image_edge: 1600
+    # JPEG quality used when the image has to be re-encoded (1-100). Resolution
+    # and quality trade different costs: max_image_edge drives image tokens and
+    # prefill time, this drives encoded bytes and small-text legibility. Raise it
+    # when verbatim text review regresses; omit to use the 85 default.
+    image_quality: 85
 
   video_understanding:
     provider: "moonshot"
