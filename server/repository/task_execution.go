@@ -27,6 +27,13 @@ var activeTaskExecutionStatuses = []string{
 	model.TaskExecutionRunning,
 }
 
+var terminalTaskExecutionStatuses = []string{
+	model.TaskExecutionSucceeded,
+	model.TaskExecutionFailed,
+	model.TaskExecutionCancelled,
+	model.TaskExecutionTimedOut,
+}
+
 type taskExecutionRepository struct {
 	db *gorm.DB
 }
@@ -256,12 +263,10 @@ func (r *taskExecutionRepository) FindCurrentByTaskID(ctx context.Context, taskI
 func (r *taskExecutionRepository) FindReconcilable(ctx context.Context, before time.Time, limit int) ([]*model.TaskExecution, error) {
 	var executions []*model.TaskExecution
 	err := r.db.WithContext(ctx).
-		Where("(status IN ? AND updated_at <= ?) OR (status IN ? AND ((finalization_status <> '' AND finalization_status <> ?) OR cleanup_status = ?))", []string{
-			model.TaskExecutionCreated,
-			model.TaskExecutionDispatching,
-			model.TaskExecutionStarting,
-			model.TaskExecutionRunning,
-		}, before, []string{model.TaskExecutionSucceeded, model.TaskExecutionFailed, model.TaskExecutionCancelled, model.TaskExecutionTimedOut}, model.TaskExecutionFinalizationDone, model.TaskExecutionCleanupPending).
+		Where("(status IN ? AND updated_at <= ?) OR (status IN ? AND ((finalization_status <> '' AND finalization_status NOT IN (?, ?)) OR cleanup_status = ?))",
+			activeTaskExecutionStatuses, before, terminalTaskExecutionStatuses,
+			model.TaskExecutionFinalizationDone, model.TaskExecutionFinalizationSuperseded,
+			model.TaskExecutionCleanupPending).
 		Order("updated_at ASC").
 		Limit(limit).
 		Find(&executions).Error
@@ -508,7 +513,7 @@ func (r *taskExecutionRepository) ClaimFinalization(ctx context.Context, id, tok
 		return false, fmt.Errorf("finalization lease: %w", err)
 	}
 	result := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
-		Where("id = ? AND finalization_status <> ?", id, model.TaskExecutionFinalizationDone).
+		Where("id = ? AND finalization_status NOT IN (?, ?)", id, model.TaskExecutionFinalizationDone, model.TaskExecutionFinalizationSuperseded).
 		Where("finalization_token = '' OR finalization_at IS NULL OR "+stalePredicate, staleArg).
 		Updates(map[string]any{"finalization_token": token, "finalization_at": now})
 	return result.RowsAffected == 1, result.Error
@@ -540,6 +545,56 @@ func (r *taskExecutionRepository) ReleaseFinalization(ctx context.Context, id, t
 	return r.db.WithContext(ctx).Model(&model.TaskExecution{}).
 		Where("id = ? AND finalization_token = ?", id, token).
 		Updates(map[string]any{"finalization_token": "", "finalization_at": nil}).Error
+}
+
+// RetireTerminalFinalization abandons a terminal attempt's durable
+// finalization because another attempt became the task's current execution.
+// The attempt's status, result, diagnostics, completed_at, terminal reason, and
+// cleanup evidence stay intact; only the finalization lease is released.
+func (r *taskExecutionRepository) RetireTerminalFinalization(ctx context.Context, id string) (bool, error) {
+	now, err := databaseNow(r.db)
+	if err != nil {
+		return false, fmt.Errorf("retire superseded finalization: %w", err)
+	}
+	result := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
+		Where("id = ? AND status IN ?", id, terminalTaskExecutionStatuses).
+		Where("finalization_status NOT IN (?, ?)", model.TaskExecutionFinalizationDone, model.TaskExecutionFinalizationSuperseded).
+		Updates(map[string]any{
+			"finalization_status": model.TaskExecutionFinalizationSuperseded,
+			"finalization_token":  "",
+			"finalization_at":     now,
+			"cleanup_status":      gorm.Expr("CASE WHEN cleanup_status = ? THEN ? ELSE cleanup_status END", "", model.TaskExecutionCleanupPending),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
+// CancelSupersededExecution terminalizes a still-active attempt that another
+// attempt already replaced. Its runtime workload is left for the reconciler's
+// cleanup lease; no task, billing, or publication evidence is written.
+func (r *taskExecutionRepository) CancelSupersededExecution(ctx context.Context, id string) (bool, error) {
+	now, err := databaseNow(r.db)
+	if err != nil {
+		return false, fmt.Errorf("cancel superseded execution: %w", err)
+	}
+	result := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
+		Where("id = ? AND status IN ?", id, activeTaskExecutionStatuses).
+		Where("finalization_status <> ?", model.TaskExecutionFinalizationSuperseded).
+		Updates(map[string]any{
+			"status":              model.TaskExecutionCancelled,
+			"terminal_reason":     "superseded",
+			"completed_at":        now,
+			"finalization_status": model.TaskExecutionFinalizationSuperseded,
+			"finalization_token":  "",
+			"finalization_at":     nil,
+			"cleanup_status":      gorm.Expr("CASE WHEN cleanup_status = ? THEN ? ELSE cleanup_status END", "", model.TaskExecutionCleanupPending),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
 }
 
 func (r *taskExecutionRepository) TransitionDraftDelivery(ctx context.Context, id, from, to string, deliveryResult []byte) (bool, error) {
