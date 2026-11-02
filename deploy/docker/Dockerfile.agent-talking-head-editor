@@ -1,4 +1,4 @@
-FROM node:24.22.0-bookworm-slim AS builder
+FROM crpi-671lgv9lrdyll4t9.cn-chengdu.personal.cr.aliyuncs.com/bx_anbanai/node:24.22.0-bookworm-slim AS builder
 WORKDIR /app/runtime-claude
 COPY runtime-claude/package.json runtime-claude/package-lock.json ./
 RUN npm ci
