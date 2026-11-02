@@ -154,7 +154,7 @@ func TestSkillBoundariesStayHostNeutral(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if entry.IsDir() || entry.Name() != "SKILL.md" || strings.Contains(filepath.ToSlash(file), "/humanizer/") {
+		if entry.IsDir() || entry.Name() != "SKILL.md" || isUpstreamSkillFile(file) {
 			return nil
 		}
 		body, err := os.ReadFile(file)
