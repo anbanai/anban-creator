@@ -628,6 +628,10 @@ func normalizeDockerfileImageRefs(body string) string {
 		}
 		imageIndex := 1
 		for imageIndex < len(fields) && strings.HasPrefix(fields[imageIndex], "--") {
+			if fields[imageIndex] == "--platform" {
+				imageIndex += 2
+				continue
+			}
 			imageIndex++
 		}
 		if imageIndex >= len(fields) {

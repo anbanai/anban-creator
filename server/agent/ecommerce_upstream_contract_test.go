@@ -2,6 +2,7 @@ package agent
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -56,6 +57,44 @@ func TestEcommerceUpstreamSubmoduleIsPinnedReadOnly(t *testing.T) {
 	}
 	if info.Mode()&0o111 == 0 {
 		t.Fatal("check-ecommerce-upstream.sh must be executable")
+	}
+}
+
+func TestEcommerceUpstreamSubmodulePinIsRecordedAsGitlink(t *testing.T) {
+	root := repoRoot(t)
+	const pinned = "7fd4abaa5a280dddf414ccc1372d886bef702cba"
+
+	cmd := exec.Command("git", "-C", filepath.Join(root, "harness"), "ls-files", "--stage", "--", ecommerceUpstreamPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git ls-files harness/%s: %v: %s", ecommerceUpstreamPath, err, output)
+	}
+	fields := strings.Fields(string(output))
+	if len(fields) < 2 || fields[0] != "160000" || fields[1] != pinned {
+		t.Fatalf("harness/%s must be a 160000 gitlink pinned at %s; got %q", ecommerceUpstreamPath, pinned, strings.TrimSpace(string(output)))
+	}
+
+	cmd = exec.Command("git", "-C", filepath.Join(root, "harness", filepath.FromSlash(ecommerceUpstreamPath)), "rev-parse", "HEAD")
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse ecommerce upstream HEAD: %v: %s", err, output)
+	}
+	if got := strings.TrimSpace(string(output)); got != pinned {
+		t.Fatalf("ecommerce upstream checkout = %s, want pinned %s", got, pinned)
+	}
+}
+
+func TestEcommerceEntrypointPersistsGateABeforeGeneration(t *testing.T) {
+	root := repoRoot(t)
+	body := readRepoFile(t, filepath.Join(root, "harness", "skills", "ecommerce", "SKILL.md"))
+	for _, want := range []string{
+		"Gate A 写入 `output/quality-gate.md`",
+		"追加 Gate B",
+		"若宿主未注入该变量",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("ecommerce entrypoint missing quality-gate/upstream fallback contract %q", want)
+		}
 	}
 }
 
@@ -115,6 +154,7 @@ func TestEcommerceAgentsReusePinnedUpstreamSOP(t *testing.T) {
 			body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(tc.path)))
 			for _, want := range []string{
 				tc.pluginRoot + "/" + ecommerceUpstreamPath,
+				"UPSTREAM_ECOMMERCE_SKILL=",
 				"upstream_skill_unavailable",
 				"resume_from=bootstrap",
 				"output/quality-gate.md",
@@ -123,6 +163,7 @@ func TestEcommerceAgentsReusePinnedUpstreamSOP(t *testing.T) {
 				"KV1",
 				"80 分",
 				"2 轮",
+				"text_rendering=degraded",
 				"upstream-copy-mapping.md",
 			} {
 				if !strings.Contains(body, want) {
@@ -158,7 +199,7 @@ func TestEcommerceSkillsDelegateToUpstreamAdapters(t *testing.T) {
 		{
 			skill:    "ecommerce-visual-design/SKILL.md",
 			adapter:  "references/upstream-visual-mapping.md",
-			contains: []string{"Campaign Style Lock", "Storyboard", "KV1", "显式传 `aspect_ratio`"},
+			contains: []string{"Campaign Style Lock", "Storyboard", "KV1", "显式传 `aspect_ratio`", "text_verbatim", "kv1_identifiable", "text_rendering_status"},
 		},
 		{
 			skill:    "ecommerce-platform-specs/SKILL.md",
@@ -194,7 +235,9 @@ func TestEcommerceRuntimeProvidesPythonForUpstreamScripts(t *testing.T) {
 	for _, want := range []string{
 		"python3",
 		"apt-get -o Acquire::Retries=5",
+		"ln -sf /usr/bin/python3 /usr/local/bin/python",
 		"COPY harness/ /anbanai/",
+		"test -f /anbanai/third_party/ecommerce-visual-copywriting-skill/SKILL.md",
 		"ENV CLAUDE_PLUGIN_ROOT=/anbanai",
 	} {
 		if !strings.Contains(body, want) {

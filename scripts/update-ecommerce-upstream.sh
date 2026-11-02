@@ -2,7 +2,8 @@
 
 set -eu
 
-repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(git -C "$script_dir/.." rev-parse --show-toplevel 2>/dev/null) || {
   echo "error: update-ecommerce-upstream.sh must be run inside a Git working tree" >&2
   exit 1
 }
