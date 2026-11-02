@@ -149,6 +149,132 @@ describe('AssistantWorkspace', () => {
     return snapshot
   }
 
+  it('uses one persistent final action area and focuses review without a ready warning or disabled composer', async () => {
+    restoreCreation()
+    renderPage()
+    const card = await screen.findByRole('region', { name: '确认创作' })
+    const actions = screen.getByRole('region', { name: '创作确认操作' })
+    expect(screen.getAllByRole('button', { name: '开始创作' })).toHaveLength(1)
+    expect(within(actions).getByRole('button', { name: '修改需求' })).toBeEnabled()
+    expect(within(card).queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: '发送消息' })).not.toBeInTheDocument()
+    expect(screen.queryByText('计划已准备好，请确认')).not.toBeInTheDocument()
+    const heading = within(card).getByRole('heading', { name: '创作计划总结' })
+    expect(heading).toHaveFocus()
+    const params = within(actions).getByRole('button', { name: /选择参数：/ })
+    params.focus()
+    fireEvent.click(params)
+    expect(heading).not.toHaveFocus()
+  })
+
+  it('blocks approval after known missing-input failure and directs the user to revise requirements', async () => {
+    const snapshot = restoreCreation()
+    mocks.workspaceCommit.mockRejectedValue(Object.assign(new Error('missing inputs'), { response: { status: 422, data: {
+      error_code: 'assistant_creation_inputs_missing', data: snapshot,
+      blocking_issues: [{ code: 'missing_input', field: 'plan.missing_inputs', message: '请补充活动日期' }],
+      available_actions: ['continue_editing'],
+    } } }))
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: '开始创作' }))
+    await screen.findByText('请补充活动日期')
+    const actions = screen.getByRole('region', { name: '创作确认操作' })
+    expect(within(actions).getByRole('button', { name: '开始创作' })).toBeDisabled()
+    expect(within(actions).getByRole('button', { name: '修改需求' })).toBeEnabled()
+    expect(within(actions).getByText('请先修改需求，补充必要信息后再确认。')).toBeVisible()
+    expect(screen.queryByText('计划已准备好，请确认')).not.toBeInTheDocument()
+    fireEvent.click(within(actions).getByRole('button', { name: '开始创作' }))
+    expect(mocks.workspaceCommit).toHaveBeenCalledTimes(1)
+  })
+
+  it('collapses the superseded plan and cannot confirm it while editing', async () => {
+    const ready = restoreCreation()
+    mocks.continueInteraction.mockResolvedValue({ ...ready, lifecycle: 'active', available_actions: ['send_message', 'continue_editing'], drafts: ready.drafts.map(draft => ({ ...draft, ready: false, confirmation_state: 'superseded' })) })
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: '修改需求' }))
+    const previous = await screen.findByText('查看上一版计划')
+    expect(previous.closest('details')).not.toHaveAttribute('open')
+    expect(screen.getByText('保留创作计划')).not.toBeVisible()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: '开始创作' })).not.toBeInTheDocument()
+    fireEvent.click(previous)
+    expect(screen.getByText('保留创作计划')).toBeVisible()
+    expect(mocks.workspaceCommit).not.toHaveBeenCalled()
+  })
+
+  it('recovers only the latest plan revision and prevents duplicate approval clicks', async () => {
+    const snapshot = restoreCreation()
+    mocks.getInteractionSnapshot.mockResolvedValue({ ...snapshot, drafts: [...snapshot.drafts, { ...snapshot.drafts[0], revision: 5, draft_id: 'latest', payload: { plan: { goal: '修订后的计划' } } }] })
+    mocks.workspaceCommit.mockReturnValue(new Promise(() => {}))
+    renderPage()
+    await screen.findByText('修订后的计划')
+    expect(screen.queryByText('保留创作计划')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('region', { name: '确认创作' })).toHaveLength(1)
+    const button = screen.getByRole('button', { name: '开始创作' })
+    fireEvent.click(button)
+    fireEvent.click(button)
+    await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledTimes(1))
+    expect(mocks.workspaceCommit.mock.calls[0][2]).toMatchObject({ draft_id: 'latest', revision: 5 })
+  })
+
+  it('shows concise decision records with original questions and complete custom answers in disclosure', async () => {
+    restoreCreation(false)
+    const saved = JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!)
+    saved.questionsByMode.creation = [{ callId: 'decision', order: 2, questions: [{ id: 'q', header: '语气', question: '请确认这篇文章面向新手时应该使用什么表达语气？', detail: '保留专业词解释', options: [{ label: '亲切' }, { label: '严肃' }] }], answers: [{ id: 'q', selected: ['亲切'], custom: '专业词要逐一解释\n不要删减真实体验' }] }]
+    sessionStorage.setItem('anban:assistant-workspace', JSON.stringify(saved))
+    renderPage()
+    const record = await screen.findByRole('region', { name: '历史问答' })
+    expect(within(record).getByText('语气')).toBeVisible()
+    expect(within(record).getAllByText(/专业词要逐一解释/)[0]).toBeVisible()
+    const original = within(record).getByText('请确认这篇文章面向新手时应该使用什么表达语气？')
+    expect(original).not.toBeVisible()
+    fireEvent.click(within(record).getByText('查看完整问答'))
+    expect(original).toBeVisible()
+    expect(within(record).getByText('保留专业词解释')).toBeVisible()
+    expect(within(record).getByText('严肃')).toBeVisible()
+    expect(within(record).getAllByText(/专业词要逐一解释/)).toHaveLength(2)
+  })
+
+  it('preserves explicitly stored display text through replay without stripping user prose', async () => {
+    restoreCreation(false)
+    const saved = JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!)
+    saved.messagesByMode.creation = [{ id: 'original', role: 'user', text: '请保留创作类型：这几个字\n\n创作类型：wechat-article', displayText: '请保留创作类型：这几个字', order: 1 }]
+    sessionStorage.setItem('anban:assistant-workspace', JSON.stringify(saved))
+    mocks.streamEvents = [{ event: 'user.message', id: 'original', data: JSON.stringify({ text: saved.messagesByMode.creation[0].text }) }]
+    const page = renderPage()
+    await screen.findByText('请保留创作类型：这几个字')
+    expect(screen.queryByText(/wechat-article/)).not.toBeInTheDocument()
+    page.unmount()
+    renderPage()
+    await screen.findByText('请保留创作类型：这几个字')
+    expect(JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!).messagesByMode.creation[0].text).toContain('wechat-article')
+  })
+
+  it('uses explicit original text when supplied by a live replay and preserves unknown historical prose', async () => {
+    restoreCreation(false)
+    const saved = JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!)
+    delete saved.messagesByMode
+    sessionStorage.setItem('anban:assistant-workspace', JSON.stringify(saved))
+    mocks.streamEvents = [
+      { event: 'user.message', id: 'durable-original', data: JSON.stringify({ text: '帮我写春茶\n\n创作类型：wechat-article', display_text: '帮我写春茶' }) },
+      { event: 'user.message', id: 'unknown-old', data: JSON.stringify({ text: '旧消息保留原样：创作类型：wechat-article' }) },
+    ]
+    renderPage()
+    expect(await screen.findByText('帮我写春茶')).toBeVisible()
+    expect(screen.getByText('旧消息保留原样：创作类型：wechat-article')).toBeVisible()
+    expect(screen.queryByText(/^帮我写春茶.*wechat-article/s)).not.toBeInTheDocument()
+  })
+
+  it('shows optimistic original text while sending the complete execution context', async () => {
+    restoreCreation(false)
+    mocks.streamEventsEnabled = false
+    renderPage()
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '我的创作类型：请保留这句话' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    expect(await screen.findByText('我的创作类型：请保留这句话')).toBeVisible()
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '我的创作类型：请保留这句话\n\n创作类型：wechat-article'))
+  })
+
   it('ends a restored conversation and returns home without waiting for cleanup', async () => {
     const snapshot = restoreCreation()
     mocks.streamEventsEnabled = false
@@ -217,13 +343,13 @@ describe('AssistantWorkspace', () => {
     restoreCreation()
     mocks.workspaceCommit.mockRejectedValue(new Error('request timed out'))
     renderPage()
-    const card = await screen.findByRole('region', { name: '确认创作' })
-    fireEvent.click(within(card).getByRole('button', { name: '开始创作' }))
+    await screen.findByRole('region', { name: '确认创作' })
+    fireEvent.click(screen.getByRole('button', { name: '开始创作' }))
     await screen.findByText('request timed out')
     expect(mocks.workspaceCheckpoint).not.toHaveBeenCalled()
     expect(mocks.workspaceCommit).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({ draft_id: 'displayed-draft', revision: 4, options: { plan: expect.objectContaining({ execution_profile: 'effective' }) } }))
     const first = mocks.workspaceCommit.mock.calls[0]?.[2]
-    fireEvent.click(within(card).getByRole('button', { name: '开始创作' }))
+    fireEvent.click(screen.getByRole('button', { name: '开始创作' }))
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledTimes(2))
     expect(mocks.workspaceCommit.mock.calls[1]?.[2]).toEqual(first)
   })
@@ -234,16 +360,16 @@ describe('AssistantWorkspace', () => {
     mocks.continueInteraction.mockResolvedValue(editing)
     mocks.streamEvents = [{ event: 'draft.ready', id: 'replayed-ready', data: JSON.stringify({ mode_id: 'creation', durable: true, draft: ready.drafts[0] }) }]
     const page = renderPage()
-    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '继续讨论' }))
+    fireEvent.click(await screen.findByRole('button', { name: '修改需求' }))
     await waitFor(() => expect(mocks.continueInteraction).toHaveBeenCalledWith('workspace-1', { draft_id: 'displayed-draft', revision: 4 }))
-    await screen.findByRole('region', { name: '创作草稿' })
+    await screen.findByText('查看上一版计划')
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
     expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('保留我的输入')
     expect(JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!).questionsByMode.creation[0].answers).toEqual([{ id: 'q', selected: ['回答已保留'] }])
     page.unmount()
     mocks.getInteractionSnapshot.mockResolvedValue(editing)
     renderPage()
-    await screen.findByRole('region', { name: '创作草稿' })
+    await screen.findByText('查看上一版计划')
     expect(screen.queryByRole('button', { name: '开始创作' })).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
   })
@@ -252,11 +378,11 @@ describe('AssistantWorkspace', () => {
     restoreCreation()
     mocks.continueInteraction.mockRejectedValue(new Error('continue failed'))
     renderPage()
-    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '继续讨论' }))
+    fireEvent.click(await screen.findByRole('button', { name: '修改需求' }))
     await screen.findByText('continue failed')
     expect(screen.getByRole('region', { name: '确认创作' })).toHaveTextContent('保留创作计划')
-    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('保留我的输入')
-    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
+    expect(JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!).composer).toBe('保留我的输入')
+    expect(screen.queryByRole('textbox', { name: '发送消息' })).not.toBeInTheDocument()
   })
 
   it('keeps option validation attempt-local and confirms the same draft with corrected options', async () => {
@@ -266,10 +392,10 @@ describe('AssistantWorkspace', () => {
     mocks.workspaceCommit.mockResolvedValue({ interaction_status: 'created', task: { id: 'corrected-task' } })
     renderPage()
     await screen.findByRole('button', { name: /选择参数：.*标准图像/ })
-    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '开始创作' }))
+    fireEvent.click(await screen.findByRole('button', { name: '开始创作' }))
     expect(await screen.findByText('请选择有效的图片画幅')).toBeInTheDocument()
     expect(screen.getByRole('region', { name: '确认创作' })).toHaveTextContent('保留创作计划')
-    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('保留我的输入')
+    expect(JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!).composer).toBe('保留我的输入')
     expect(JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!).questionsByMode.creation[0].answers).toEqual([{ id: 'q', selected: ['回答已保留'] }])
     expect(screen.queryByRole('button', { name: '重试发送' })).not.toBeInTheDocument()
     const first = mocks.workspaceCommit.mock.calls[0]?.[2]
@@ -293,8 +419,8 @@ describe('AssistantWorkspace', () => {
     renderPage()
     expect(await screen.findByRole('region', { name: '创作草稿' })).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: '核对结果' }))
-    expect(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '开始创作' })).toBeEnabled()
-    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('保留我的输入')
+    expect(await screen.findByRole('button', { name: '开始创作' })).toBeEnabled()
+    expect(JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!).composer).toBe('保留我的输入')
     expect(mocks.workspaceCommit).not.toHaveBeenCalled()
   })
 
@@ -302,7 +428,7 @@ describe('AssistantWorkspace', () => {
     restoreCreation()
     mocks.workspaceCommit.mockResolvedValue({ interaction_status: 'needs_reconciliation', task_id: 'uncertain-task' })
     renderPage()
-    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '开始创作' }))
+    fireEvent.click(await screen.findByRole('button', { name: '开始创作' }))
     expect(await screen.findByRole('button', { name: '核对结果' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: '创作草稿' })).toHaveTextContent('保留创作计划')
     expect(screen.queryByRole('button', { name: '开始创作' })).not.toBeInTheDocument()
@@ -320,7 +446,7 @@ describe('AssistantWorkspace', () => {
     const queryClient = createTestQueryClient()
     const page = render(<QueryClientProvider client={queryClient}><MemoryRouter><nav><Link to="/">首页</Link></nav><Routes><Route path="/" element={<AssistantWorkspace />} /><Route path="/tasks/:id" element={<h1>任务详情</h1>} /></Routes><LocationProbe /></MemoryRouter></QueryClientProvider>)
 
-    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '开始创作' }))
+    fireEvent.click(await screen.findByRole('button', { name: '开始创作' }))
     await screen.findByRole('heading', { name: '任务详情' })
     expect(screen.getByTestId('location')).toHaveTextContent('/tasks/created-task')
     expect(screen.queryByTestId('assistant-workspace')).not.toBeInTheDocument()
@@ -365,12 +491,12 @@ describe('AssistantWorkspace', () => {
     restoreCreation()
     mocks.workspaceCommit.mockRejectedValue(new Error('request timed out'))
     const page = renderPage()
-    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '开始创作' }))
+    fireEvent.click(await screen.findByRole('button', { name: '开始创作' }))
     await screen.findByText('request timed out')
     const first = mocks.workspaceCommit.mock.calls[0]?.[2]
     page.unmount()
     renderPage()
-    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '开始创作' }))
+    fireEvent.click(await screen.findByRole('button', { name: '开始创作' }))
     await screen.findByText('request timed out')
     expect(mocks.workspaceCommit.mock.calls[1]?.[2]).toEqual(first)
     fireEvent.click(screen.getByRole('button', { name: /选择参数：/ }))
@@ -586,8 +712,8 @@ describe('AssistantWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
 
     expect(await screen.findByRole('button', { name: '开始创作' })).toBeInTheDocument()
-    expect(screen.getByRole('status', { name: '当前模式' })).toHaveTextContent('创作模式')
-    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('新的想法')
+    expect(screen.getByRole('region', { name: '确认创作' })).toBeInTheDocument()
+    expect(JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!).composer).toBe('新的想法')
     expect(mocks.workspaceMessage).not.toHaveBeenCalled()
   })
 
@@ -1277,7 +1403,7 @@ describe('AssistantWorkspace', () => {
     expect(await screen.findByRole('button', { name: /选择参数：.*3:4/ })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '介绍新茶\n\n创作类型：seednote', false, expect.any(Object)))
-    fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '开始创作' }))
+    fireEvent.click(await screen.findByRole('button', { name: '开始创作' }))
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
       options: { plan: expect.objectContaining({ content_type: 'seednote', image_ratio: '3:4' }) },
     })))
@@ -1681,8 +1807,8 @@ describe('AssistantWorkspace', () => {
 
     await waitFor(() => expect(mocks.workspaceAnswer).toHaveBeenCalledWith('workspace-1', mode, 'call-1', [{ id: 'q1', selected: ['主题一'] }], 1))
     await within(conversation).findByText('已回答')
-    expect(within(conversation).getByRole('heading', { name: '先确定作品主题？' })).toBeInTheDocument()
-    expect(within(conversation).getByText('主题一')).toBeVisible()
+    expect(within(conversation).getByRole('heading', { name: '先确定作品主题？', hidden: true })).not.toBeVisible()
+    expect(within(conversation).getAllByText('主题一').filter(node => !node.closest('details'))).toHaveLength(1)
     expect(within(conversation).queryByRole('button', { name: '提交回答' })).not.toBeInTheDocument()
     firstRender.unmount()
 
@@ -1690,10 +1816,10 @@ describe('AssistantWorkspace', () => {
     const restored = await screen.findByTestId('assistant-conversation')
     await within(restored).findByText('已回答')
     await waitFor(() => expect(mocks.getInteractionSnapshot).toHaveBeenCalledTimes(2))
-    expect(within(restored).getAllByRole('heading', { name: '先确定作品主题？' })).toHaveLength(1)
-    expect(within(restored).getByText('主题一')).toBeVisible()
+    expect(within(restored).getByRole('heading', { name: '先确定作品主题？', hidden: true })).not.toBeVisible()
+    expect(within(restored).getAllByText('主题一').filter(node => !node.closest('details'))).toHaveLength(1)
     expect(within(restored).queryByRole('button', { name: '提交回答' })).not.toBeInTheDocument()
-    expect(within(restored).getByText('收到，我开始处理。').compareDocumentPosition(within(restored).getByText('主题一')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(restored).getByText('收到，我开始处理。').compareDocumentPosition(within(restored).getAllByText('主题一')[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('replays all selected, custom and skipped answers in chronological order', async () => {
@@ -1714,12 +1840,12 @@ describe('AssistantWorkspace', () => {
 
     const conversation = await screen.findByTestId('assistant-conversation')
     await within(conversation).findByText('已了解你的读者和限制。')
-    expect(within(conversation).getByText(/新手、爱好者/)).toBeVisible()
-    expect(within(conversation).getByText(/也欢迎专业人士交流/)).toBeVisible()
-    expect(within(conversation).getByRole('heading', { name: '还有哪些限制？' })).toBeVisible()
-    expect(within(conversation).getByText('已跳过')).toBeVisible()
+    expect(within(conversation).getAllByText(/新手、爱好者/)[0]).toBeVisible()
+    expect(within(conversation).getAllByText(/也欢迎专业人士交流/)[0]).toBeVisible()
+    expect(within(conversation).getByRole('heading', { name: '还有哪些限制？', hidden: true })).not.toBeVisible()
+    expect(within(conversation).getAllByText('已跳过')[0]).toBeVisible()
     expect(within(conversation).queryByRole('button', { name: '提交回答' })).not.toBeInTheDocument()
-    expect(within(conversation).getByText('已跳过').compareDocumentPosition(within(conversation).getByText('已了解你的读者和限制。')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(conversation).getAllByText('已跳过')[0].compareDocumentPosition(within(conversation).getByText('已了解你的读者和限制。')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it.each(['completed', 'abandoned'])('starts a new interview when reopening a %s interaction', async (lifecycle) => {
@@ -2440,14 +2566,14 @@ describe('AssistantWorkspace', () => {
     expect(persona.compareDocumentPosition(conversation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(conversation).toContainElement(card)
     expect(within(conversation).getByText('收到，我开始处理。').compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(within(card).getByText('发布春季新品').compareDocumentPosition(within(card).getByRole('button', { name: '开始创作' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(card).getByText('发布春季新品').compareDocumentPosition(screen.getByRole('button', { name: '开始创作' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(mocks.workspaceCommit).not.toHaveBeenCalled()
     expect(within(card).getByText('发布春季新品')).toBeInTheDocument()
     expect(within(card).getByText('公众号文章')).toBeInTheDocument()
-    expect(within(card).getByRole('button', { name: '开始创作' })).toBeEnabled()
-    expect(within(card).getByRole('button', { name: '继续讨论' })).toBeEnabled()
-    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
-    fireEvent.click(within(card).getByRole('button', { name: '开始创作' }))
+    expect(screen.getByRole('button', { name: '开始创作' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '修改需求' })).toBeEnabled()
+    expect(screen.queryByRole('textbox', { name: '发送消息' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '开始创作' }))
 
     expect(mocks.workspaceCheckpoint).not.toHaveBeenCalled()
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
@@ -2475,7 +2601,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     const card = await screen.findByRole('region', { name: '确认创作' })
     expect(within(card).getByText('1:1')).toBeInTheDocument()
-    fireEvent.click(within(card).getByRole('button', { name: '开始创作' }))
+    fireEvent.click(screen.getByRole('button', { name: '开始创作' }))
 
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledWith('workspace-ratio', 'creation', expect.objectContaining({
       options: { plan: expect.objectContaining({ image_ratio: '1:1' }) },
@@ -2505,13 +2631,13 @@ describe('AssistantWorkspace', () => {
     const composer = await screen.findByRole('textbox', { name: '发送消息' })
     fireEvent.change(composer, { target: { value: '开始创作' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    const card = await screen.findByRole('region', { name: '确认创作' })
-    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '不应并发发送' } })
-    fireEvent.click(within(card).getByRole('button', { name: '开始创作' }))
+    await screen.findByRole('region', { name: '确认创作' })
+    fireEvent.click(screen.getByRole('button', { name: '开始创作' }))
 
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalled())
-    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+    expect(screen.queryByRole('textbox', { name: '发送消息' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '开始创作' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '修改需求' })).toBeDisabled()
 
     resolveCommit({ mode_id: 'creation', status: 'committed', task: { id: 'task-created-2', project_id: 'project-1', status: 'pending' } })
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tasks/task-created-2'))
@@ -2541,8 +2667,8 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'ai_entry_attachment' })))
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '按照资料完成文章' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    const card = await screen.findByRole('region', { name: '确认创作' })
-    fireEvent.click(within(card).getByRole('button', { name: '开始创作' }))
+    await screen.findByRole('region', { name: '确认创作' })
+    fireEvent.click(screen.getByRole('button', { name: '开始创作' }))
 
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
       options: { plan: {

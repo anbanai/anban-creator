@@ -15,6 +15,9 @@ const PROFILE_FIELDS = [
 const CREATION_FIELDS = [
   ['goal', '创作目标'], ['content_type', '内容类型'], ['topic', '创作话题'], ['angle', '切入角度'], ['expression_form', '表达形式'], ['target_audience', '目标受众'],
   ['profile_context', '沿用的人设信息'], ['temporary_overrides', '本次临时调整'],
+  ['expected_result', '预期成果'], ['requirements', '具体要求'], ['constraints', '约束与红线'],
+  ['assets', '已提供素材'], ['missing_inputs', '待补充信息'], ['agent_decisions', '交由助手决定'],
+  ['video_edit_brief', '剪辑要求'], ['video_edit_preferences', '剪辑偏好'],
   ['outline', '内容结构与大纲'], ['style_constraints', '风格与约束'],
   ['asset_plan', '素材与配图计划'], ['acceptance_criteria', '质量验收标准'],
   ['cost_estimate', '预计成本'], ['execution_options', '执行选项'], ['execution_profile', '执行配置'],
@@ -33,9 +36,9 @@ const SUMMARY_GROUPS: Record<AssistantModeID, { title: string; keys: string[]; s
     { title: '仍需了解', keys: ['analysis_limits', 'follow_up_questions'], secondary: true },
   ],
   creation: [
-    { title: '内容方向', keys: ['topic', 'angle', 'expression_form', 'target_audience'] },
-    { title: '内容安排', keys: ['outline', 'style_constraints', 'asset_plan', 'acceptance_criteria'] },
-    { title: '人设与本次调整', keys: ['profile_context', 'temporary_overrides'] },
+    { title: '内容方向', keys: ['topic', 'angle', 'expression_form', 'target_audience', 'expected_result'] },
+    { title: '要求与安排', keys: ['requirements', 'constraints', 'temporary_overrides', 'outline', 'style_constraints', 'assets', 'asset_plan', 'acceptance_criteria', 'missing_inputs', 'agent_decisions', 'video_edit_brief', 'video_edit_preferences'] },
+    { title: '人设背景', keys: ['profile_context'], secondary: true },
     { title: '执行设置', keys: ['cost_estimate', 'execution_options', 'execution_profile', 'image_ratio', 'image_capability_key'], secondary: true },
   ],
   review: [
@@ -45,6 +48,7 @@ const SUMMARY_GROUPS: Record<AssistantModeID, { title: string; keys: string[]; s
 }
 
 const DETAIL_LABELS: Record<string, string> = {
+  file_name: '文件名', type: '类型', asset_id: '素材', download_url: '下载链接', preview_url: '预览链接',
   identity: '定位', style: '风格', audience: '受众', platforms: '平台', preferences: '偏好与红线', memory: '记忆',
   reason: '建议原因', evidence: '支持证据', updates: '建议调整', source: '来源', metrics: '表现数据',
   title: '标题', summary: '摘要', description: '说明', content: '内容', opening: '开头', tone: '语气',
@@ -139,6 +143,27 @@ export function AssistantDraftSummary({ draft, mode, compact = false }: { draft:
   const headline = visible.find(([key]) => key === headlineKey)
   const metaKey = mode === 'profile' ? 'platform' : mode === 'creation' ? 'content_type' : undefined
   const meta = visible.find(([key]) => key === metaKey)
+  if (mode === 'creation') {
+    return <div className="@container space-y-3">
+      {(headline || meta) && <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+        {headline && <div className="min-w-0 flex-1"><p className="text-xs text-muted-foreground">创作目标</p><div className="mt-0.5 text-base font-semibold leading-6"><DraftValue value={fields.goal} label={headline[1]} field="goal" /></div></div>}
+        {meta && <div className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground"><DraftValue value={fields.content_type} label={meta[1]} field="content_type" /></div>}
+      </div>}
+      {SUMMARY_GROUPS.creation.map((group) => {
+        const entries = visible.filter(([key]) => group.keys.includes(key))
+        if (!entries.length) return null
+        const rows = <dl className={group.title === '内容方向' ? 'grid min-w-0 gap-x-5 gap-y-2 @min-[32rem]:grid-cols-2' : 'space-y-2'}>
+          {entries.map(([key, label]) => <div key={key} className={`min-w-0 ${group.title === '内容方向' ? '' : 'grid gap-x-3 gap-y-0.5 @min-[28rem]:grid-cols-[7.5rem_minmax(0,1fr)]'}`}>
+            <dt className="text-xs leading-5 text-muted-foreground">{label}</dt>
+            <dd className="min-w-0 text-sm leading-5"><DraftValue value={fields[key]} label={label} field={key} /></dd>
+          </div>)}
+        </dl>
+        return group.secondary
+          ? <details key={group.title} className="border-t border-border/60 pt-2"><summary className="cursor-pointer text-xs font-medium text-muted-foreground">{group.title}</summary><div className="pt-2">{rows}</div></details>
+          : <section key={group.title} aria-label={group.title} className="border-t border-border/60 pt-3"><h3 className="mb-2 text-xs font-semibold">{group.title}</h3>{rows}</section>
+      })}
+    </div>
+  }
   return <div className={compact ? '@container space-y-6' : '@container space-y-8'}>
     {(headline || meta) && <div className="rounded-xl bg-muted/40 px-4 py-4 sm:px-5">
       {headline && <>
