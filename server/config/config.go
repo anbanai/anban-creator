@@ -2570,11 +2570,12 @@ func (c *Config) Validate() error {
 			errs = append(errs, name+".timeout must be positive")
 			continue
 		}
-		minimumOperationTimeout := route.Timeout + c.ModelRoutes.ImageUnderstanding.Timeout
-		if c.MCP.ToolTimeouts.GenerateImage <= minimumOperationTimeout {
+		// generate_image owns only the provider generation attempt; analyze_image
+		// is a separate MCP tool with its own image-understanding route budget.
+		if c.MCP.ToolTimeouts.GenerateImage <= route.Timeout {
 			errs = append(errs, fmt.Sprintf(
-				"mcp.tool_timeouts.generate_image (%s) must be greater than %s.timeout (%s) plus model_routes.image_understanding.timeout (%s)",
-				c.MCP.ToolTimeouts.GenerateImage, name, route.Timeout, c.ModelRoutes.ImageUnderstanding.Timeout))
+				"mcp.tool_timeouts.generate_image (%s) must be greater than %s.timeout (%s); raise mcp.tool_timeouts.generate_image or lower the generation route timeout",
+				c.MCP.ToolTimeouts.GenerateImage, name, route.Timeout))
 		}
 	}
 

@@ -139,6 +139,59 @@ func TestValidateImageCapabilities(t *testing.T) {
 	}
 }
 
+func TestValidateGenerateImageToolTimeoutIsIndependentOfImageUnderstanding(t *testing.T) {
+	cfg := baseKubernetesConfigForTest()
+	cfg.ModelRoutes.ImageGeneration = ImageGenerationRoutesConfig{
+		DefaultCapability: "standard",
+		Capabilities: map[string]ImageGenerationRouteConfig{
+			"standard":     validCapabilityForConfigTest(),
+			"professional": validProfessionalCapabilityForConfigTest(),
+		},
+	}
+	// analyze_image is an independent MCP tool; a separate understanding route
+	// timeout must not consume the generate_image operation budget.
+	cfg.ModelRoutes.ImageUnderstanding = UnderstandingRouteConfig{
+		RouteConfig: RouteConfig{Provider: "moonshot", Model: "kimi-k2.7-code-highspeed", Timeout: 5 * time.Minute},
+	}
+	cfg.MCP.ToolTimeouts.GenerateImage = 10 * time.Minute
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want generate_image budget independent of image understanding", err)
+	}
+}
+
+func TestValidateRejectsGenerateImageTimeoutAtGenerationDeadline(t *testing.T) {
+	cfg := baseKubernetesConfigForTest()
+	cfg.ModelRoutes.ImageGeneration = ImageGenerationRoutesConfig{
+		DefaultCapability: "standard",
+		Capabilities: map[string]ImageGenerationRouteConfig{
+			"standard":     validCapabilityForConfigTest(),
+			"professional": validProfessionalCapabilityForConfigTest(),
+		},
+	}
+	cfg.MCP.ToolTimeouts.GenerateImage = 5 * time.Minute
+	cfg.ModelRoutes.ImageUnderstanding = UnderstandingRouteConfig{
+		RouteConfig: RouteConfig{Provider: "moonshot", Model: "kimi-k2.7-code-highspeed", Timeout: 5 * time.Minute},
+	}
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "mcp.tool_timeouts.generate_image") {
+		t.Fatalf("Validate() error = %v, want generate_image timeout relationship error", err)
+	}
+	if strings.Contains(err.Error(), "image_understanding") {
+		t.Fatalf("Validate() error = %v, must not couple generate_image timeout to image understanding", err)
+	}
+}
+
+func validProfessionalCapabilityForConfigTest() ImageGenerationRouteConfig {
+	professional := validCapabilityForConfigTest()
+	professional.Alias = "Professional"
+	professional.Description = "Detailed image creation"
+	professional.MinTier = "enterprise"
+	professional.BillingSKU = "image.professional"
+	return professional
+}
+
 func TestValidateEnabledImageCapabilityAllowsPublicPlaintextBaseURL(t *testing.T) {
 	route := validCapabilityForConfigTest()
 	route.BaseURL = "http://18.141.196.64:18888/v1"
