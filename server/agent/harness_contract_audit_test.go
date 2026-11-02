@@ -224,6 +224,27 @@ func TestWechatDeliveryInstructionsStayConsistentAcrossHostDistributions(t *test
 	}
 }
 
+func TestWechatArticleEvidenceQualityChecksStayConsistentAcrossHostDistributions(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	paths := []string{
+		"harness/skills/content-writing/SKILL.md",
+		"harness/dsh/presets/wechat-article/skills/content-writing/SKILL.md",
+		"harness/packs/wechat-article/agent.claude.md",
+		"harness/packs/wechat-article/agent.codex.toml",
+		"harness/packs/wechat-article/agent.dsh.yml",
+	}
+	for _, rel := range paths {
+		t.Run(rel, func(t *testing.T) {
+			body := readArticleContractFile(t, filepath.Join(root, rel))
+			for _, term := range []string{"论点证据边界", "来源与案例真实性", "小标题逻辑", "体裁解释结构"} {
+				if !strings.Contains(body, term) {
+					t.Fatalf("%s is missing evidence quality contract %q", rel, term)
+				}
+			}
+		})
+	}
+}
+
 func TestVisualPromptBlueprintsBindSourceFactsAndReviewLayout(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	for _, rel := range []string{
