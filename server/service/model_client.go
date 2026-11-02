@@ -190,7 +190,13 @@ type imageUnderstandingRequestTrace struct {
 }
 
 func (t *imageUnderstandingRequestTrace) clientTrace() *httptrace.ClientTrace {
-	return &httptrace.ClientTrace{WroteRequest: func(httptrace.WroteRequestInfo) {
+	return &httptrace.ClientTrace{WroteRequest: func(info httptrace.WroteRequestInfo) {
+		// net/http invokes this hook with Err set when the body write aborts.
+		// Recording that as "written" would send triage the wrong way: an
+		// upload that never completed is not evidence the provider hung.
+		if info.Err != nil {
+			return
+		}
 		t.mu.Lock()
 		defer t.mu.Unlock()
 		if t.wroteRequestAt.IsZero() {

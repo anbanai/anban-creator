@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"net/url"
 	"strings"
 	"testing"
@@ -294,4 +295,16 @@ func TestVisionTimeoutDiagnostics(t *testing.T) {
 			t.Fatalf("timeout diagnostics = %#v", providerErr)
 		}
 	})
+}
+
+func TestImageUnderstandingTraceIgnoresFailedRequestWrite(t *testing.T) {
+	trace := &imageUnderstandingRequestTrace{}
+	trace.clientTrace().WroteRequest(httptrace.WroteRequestInfo{Err: errors.New("connection reset during upload")})
+	if diagnostics := trace.diagnostics(time.Now(), "route_timeout"); diagnostics.RequestWritten {
+		t.Fatalf("failed request write was recorded as written: %#v", diagnostics)
+	}
+	trace.clientTrace().WroteRequest(httptrace.WroteRequestInfo{})
+	if diagnostics := trace.diagnostics(time.Now(), "route_timeout"); !diagnostics.RequestWritten {
+		t.Fatalf("successful request write was not recorded: %#v", diagnostics)
+	}
 }
