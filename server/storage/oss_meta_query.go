@@ -143,6 +143,9 @@ func mapMetaQueryFiles(files []ossv2.MetaQueryFile) []SemanticMediaResult {
 			if file.Insights.Video.Description != nil {
 				result.Description = strings.TrimSpace(*file.Insights.Video.Description)
 			}
+			if result.Description == "" {
+				result.Description = result.Summary
+			}
 		}
 		results = append(results, result)
 	}

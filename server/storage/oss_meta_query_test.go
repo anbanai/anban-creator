@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	ossv2 "github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss"
 	"github.com/anbanai/anban-creator/server/config"
 )
 
@@ -57,5 +58,14 @@ func TestOSSMetaQueryLookupReturnsPendingWhenObjectIsNotIndexed(t *testing.T) {
 	_, err = provider.Lookup(context.Background(), "assets/users/user-1/a.mp4", "video")
 	if !errors.Is(err, ErrSemanticIndexPending) {
 		t.Fatalf("lookup error = %v, want pending", err)
+	}
+}
+
+func TestMapMetaQueryFilesFallsBackToVideoCaption(t *testing.T) {
+	caption := "店员制作咖啡"
+	key := "assets/users/user-1/a.mp4"
+	got := mapMetaQueryFiles([]ossv2.MetaQueryFile{{Filename: &key, Insights: &ossv2.MetaQueryFileInsights{Video: &ossv2.MetaQueryFileInsightsVideo{Caption: &caption}}}})
+	if len(got) != 1 || got[0].Summary != caption || got[0].Description != caption {
+		t.Fatalf("mapped caption-only result = %#v", got)
 	}
 }

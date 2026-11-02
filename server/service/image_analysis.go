@@ -280,6 +280,7 @@ func (s *ImageAnalysisService) CreateUserMediaJobInTx(ctx context.Context, tx re
 	}
 	media.Status = model.UserMediaAssetStatusQueued
 	media.ErrorCode, media.ErrorMessage = "", ""
+	media.Summary, media.AnalysisProvider, media.IndexedAt = "", "", nil
 	if err := tx.UserMediaAssets().Update(ctx, media); err != nil {
 		return nil, err
 	}
@@ -306,6 +307,7 @@ func (s *ImageAnalysisService) RetryUserMedia(ctx context.Context, userID, id st
 		current.LeaseExpiresAt, current.EnqueuedAt, current.CompletedAt = nil, nil, nil
 		subject.userMedia.Status = model.UserMediaAssetStatusQueued
 		subject.userMedia.ErrorCode, subject.userMedia.ErrorMessage = "", ""
+		subject.userMedia.Summary, subject.userMedia.AnalysisProvider, subject.userMedia.IndexedAt = "", "", nil
 		if err := tx.UserMediaAssets().Update(ctx, subject.userMedia); err != nil {
 			return err
 		}
@@ -731,6 +733,12 @@ func (s *ImageAnalysisService) finishFailure(ctx context.Context, attempted *mod
 		if job.Generation != attempted.Generation || job.Status != model.ImageAnalysisStatusRunning {
 			return nil
 		}
+		if subject.userMedia != nil && (subject.userMedia.RemovedAt != nil || subject.userMedia.AssetID != job.SourceAssetID) {
+			now := s.now().UTC()
+			job.Status = model.ImageAnalysisStatusSuperseded
+			job.LeaseExpiresAt, job.EnqueuedAt, job.CompletedAt = nil, nil, &now
+			return tx.ImageAnalyses().Update(ctx, job)
+		}
 		job.LeaseExpiresAt, job.EnqueuedAt = nil, nil
 		job.ErrorCode = "analysis_failed"
 		job.ErrorMessage = "图片识别失败，请稍后重试"
@@ -865,7 +873,14 @@ func (s *ImageAnalysisService) finishSuccess(ctx context.Context, attempted *mod
 					AnalysisProvider string   `json:"analysis_provider"`
 					RecommendedUses  []string `json:"recommended_uses"`
 				}
-				if err := json.Unmarshal([]byte(result), &parsed); err != nil || strings.TrimSpace(parsed.Description) == "" {
+				if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+					return errors.New("invalid user media analysis result")
+				}
+				parsed.Description = strings.TrimSpace(parsed.Description)
+				if parsed.Description == "" {
+					parsed.Description = strings.TrimSpace(parsed.Summary)
+				}
+				if parsed.Description == "" {
 					return errors.New("invalid user media analysis result")
 				}
 				media.Description = parsed.Description
@@ -956,6 +971,12 @@ func (s *ImageAnalysisService) requeueExpired(ctx context.Context, id string) (b
 			return nil
 		}
 		job.LeaseExpiresAt, job.EnqueuedAt = nil, nil
+		if subject.userMedia != nil && (subject.userMedia.RemovedAt != nil || subject.userMedia.AssetID != job.SourceAssetID) {
+			now := s.now().UTC()
+			job.Status = model.ImageAnalysisStatusSuperseded
+			job.CompletedAt = &now
+			return tx.ImageAnalyses().Update(ctx, job)
+		}
 		if job.AttemptCount >= imageAnalysisMaxAttempts {
 			now := s.now().UTC()
 			job.Status = model.ImageAnalysisStatusFailed

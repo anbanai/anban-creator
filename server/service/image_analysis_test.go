@@ -301,6 +301,47 @@ func TestUserMediaAnalysisDoesNotClaimRemovedMedia(t *testing.T) {
 	}
 }
 
+func TestUserMediaAnalysisFailureDoesNotRewriteRemovedMedia(t *testing.T) {
+	svc, repo, _, db := setupImageAnalysisService(t)
+	asset := &model.Asset{ID: uuid.NewString(), UserID: "user-1", Purpose: DirectUploadPurposeMediaLibrary, StorageKey: "media.mp4", FileName: "media.mp4", ContentType: "video/mp4", Size: 12, ETag: "etag"}
+	if err := repo.Assets().Create(t.Context(), asset); err != nil {
+		t.Fatal(err)
+	}
+	media := &model.UserMediaAsset{ID: uuid.NewString(), UserID: "user-1", AssetID: asset.ID, MediaType: "video", Status: model.UserMediaAssetStatusQueued}
+	if err := repo.UserMediaAssets().Create(t.Context(), media); err != nil {
+		t.Fatal(err)
+	}
+	job, err := svc.CreateUserMediaJob(t.Context(), media)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, ok, err := svc.claim(t.Context(), job.ID, job.Generation)
+	if err != nil || !ok {
+		t.Fatalf("claim = %#v, %v, %v", claimed, ok, err)
+	}
+	removedAt := time.Now().UTC()
+	if err := repo.UserMediaAssets().MarkRemoved(t.Context(), "user-1", media.ID, removedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.finishFailure(t.Context(), claimed, errors.New("provider unavailable")); err == nil {
+		t.Fatal("finishFailure unexpectedly succeeded")
+	}
+	persisted, err := repo.ImageAnalyses().FindByID(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != model.ImageAnalysisStatusSuperseded {
+		t.Fatalf("job status = %s, want superseded", persisted.Status)
+	}
+	var removed model.UserMediaAsset
+	if err := db.First(&removed, "id = ?", media.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if removed.Status != model.UserMediaAssetStatusAnalyzing || removed.ErrorCode != "" {
+		t.Fatalf("removed media was rewritten = %#v", removed)
+	}
+}
+
 func seedAnalysisAsset(t *testing.T, repo repository.Repository, userID, purpose string) *model.Asset {
 	t.Helper()
 	asset := &model.Asset{ID: uuid.NewString(), UserID: userID, Purpose: purpose, StorageKey: "image.png", FileName: "image.png", ContentType: "image/png", Size: 8, ETag: "etag"}
