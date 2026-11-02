@@ -42,6 +42,7 @@ func initializeInteractiveRuntime(ctx context.Context, svc *service.InteractiveS
 		if err == nil {
 			err = attemptCtx.Err()
 		}
+		attemptErr := attemptCtx.Err()
 		cancel()
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -53,7 +54,7 @@ func initializeInteractiveRuntime(ctx context.Context, svc *service.InteractiveS
 		// Runtime/database errors may include credentials. Retain only the phase
 		// and timeout classification in the final startup diagnostic.
 		reason := "failed"
-		if errors.Is(err, context.DeadlineExceeded) {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(attemptErr, context.DeadlineExceeded) {
 			reason = "timed out"
 		}
 		failure = fmt.Errorf("interactive startup %s %s after %d attempts", phase, reason, attempt)

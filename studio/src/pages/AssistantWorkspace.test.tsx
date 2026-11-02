@@ -1213,21 +1213,52 @@ describe('AssistantWorkspace', () => {
     expect(screen.queryByText('先创建一个人设，之后即可澄清创作需求')).not.toBeInTheDocument()
   })
 
-  it('keeps modes disabled when the assistant runtime is unavailable', async () => {
-    setBootstrap({
-      defaultModeId: 'profile',
-      modes: [
-        { id: 'profile', displayName: '画像模式', description: '建立画像', available: false, disabledReason: '助手运行环境暂不可用，请稍后重试' },
-        { id: 'creation', displayName: '创作模式', description: '制定计划', available: false, disabledReason: '助手运行环境暂不可用，请稍后重试' },
-        { id: 'review', displayName: '复盘模式', description: '复盘作品', available: false, disabledReason: '助手运行环境暂不可用，请稍后重试' },
-      ],
-      projects: [{ id: 'active-persona', name: '可用人设', platform: 'wechat', profileRevision: 0, profileReady: false, works: [] }],
-    })
-    renderPage({ modeId: 'creation' })
+  describe.each([
+    '助手运行环境暂不可用，请稍后重试',
+    '助手运行环境尚未初始化完成，请稍后重试',
+  ])('runtime unavailable: %s', (disabledReason) => {
+    it.each([
+      { context: 'creation with a persona', modeId: 'creation' as const, hasPersona: true },
+      { context: 'review with a selected work', modeId: 'review' as const, hasPersona: true },
+      { context: 'creation without a persona', modeId: 'creation' as const, hasPersona: false },
+    ])('keeps $context disabled without preparing a workspace', async ({ modeId, hasPersona }) => {
+      setBootstrap({
+        defaultModeId: modeId,
+        modes: [
+          { id: 'profile', displayName: '画像模式', description: '建立画像', available: false, disabledReason },
+          { id: 'creation', displayName: '创作模式', description: '制定计划', available: false, disabledReason },
+          { id: 'review', displayName: '复盘模式', description: '复盘作品', available: false, disabledReason },
+        ],
+        projects: hasPersona ? [{ id: 'active-persona', name: '可用人设', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }] : [],
+      })
+      mocks.works.mockResolvedValue({ items: [{ id: 'work-1', title: '已完成作品', type: 'article', createdAt: '2026-10-22T00:00:00Z' }], has_more: false })
+      renderPage({ modeId, ...(hasPersona ? { projectId: 'active-persona' } : {}), ...(modeId === 'review' ? { contentId: 'work-1' } : {}) })
 
-    const composer = await screen.findByRole('textbox', { name: '发送消息' })
-    await waitFor(() => expect(composer).toBeDisabled())
-    expect(screen.queryByRole('button', { name: '创作模式' })).not.toBeInTheDocument()
+      if (hasPersona) await screen.findByRole('heading', { name: '可用人设' })
+      if (modeId === 'review') {
+        await screen.findByRole('option', { name: '已完成作品' })
+        expect(screen.getByRole('combobox', { name: '选择作品' })).toHaveValue('work-1')
+      }
+      expect(await screen.findByText(disabledReason)).toHaveAttribute('role', 'status')
+      const composer = screen.getByRole('textbox', { name: '发送消息' })
+      expect(composer).toBeDisabled()
+      expect(composer).not.toHaveAttribute('placeholder', '先完成新人设创建后即可输入消息')
+      fireEvent.change(composer, { target: { value: '运行环境恢复后再处理' } })
+      const send = screen.getByRole('button', { name: '发送消息' })
+      expect(send).toBeDisabled()
+      fireEvent.click(send)
+      expect(mocks.createWorkspace).not.toHaveBeenCalled()
+      expect(mocks.workspaceMessage).not.toHaveBeenCalled()
+      expect(screen.queryByRole('button', { name: '去建立人设' })).not.toBeInTheDocument()
+      if (hasPersona) {
+        fireEvent.click(within(screen.getByRole('region', { name: '当前人设' })).getByRole('button', { name: '调整人设：可用人设' }))
+        fireEvent.click(within(screen.getByRole('region', { name: '当前人设' })).getByRole('button', { name: '开始创作' }))
+        expect(screen.getAllByText(disabledReason)).toHaveLength(1)
+        expect(screen.getByText(disabledReason)).toHaveAttribute('role', 'status')
+        expect(composer).toBeDisabled()
+        expect(mocks.createWorkspace).not.toHaveBeenCalled()
+      }
+    })
   })
 
   it('selects the first active persona by default for creation', async () => {

@@ -68,6 +68,10 @@ type PersistedWorkspace = {
 }
 
 const WORKSPACE_STORAGE_KEY = 'anban:assistant-workspace'
+const RUNTIME_UNAVAILABLE_REASONS = [
+  '助手运行环境暂不可用，请稍后重试',
+  '助手运行环境尚未初始化完成，请稍后重试',
+]
 
 function isMode(value: unknown): value is AssistantModeID {
   return value === 'profile' || value === 'creation' || value === 'review'
@@ -524,7 +528,7 @@ export default function AssistantWorkspace() {
   const creationConfirmation = mode === 'creation' && Boolean(activeDraft) && draftPending && creationCanConfirm
   const creationEditing = mode === 'creation' && creationReceipt?.confirmation_state === 'superseded'
   const bootstrapMode = bootstrap?.modes.find((candidate) => candidate.id === mode)
-  const isRuntimeUnavailable = bootstrapMode?.disabledReason === '助手运行环境暂不可用，请稍后重试'
+  const isRuntimeUnavailable = RUNTIME_UNAVAILABLE_REASONS.includes(bootstrapMode?.disabledReason ?? '')
   const activeMode = bootstrapMode && !isRuntimeUnavailable && mode === 'creation'
     ? { ...bootstrapMode, available: Boolean(selectedProject || completeProjects.length), disabledReason: bootstrapMode.disabledReason ?? '先创建一个人设，之后即可澄清创作需求' }
     : bootstrapMode && !isRuntimeUnavailable && mode === 'review' && selectedWork
@@ -1032,8 +1036,8 @@ export default function AssistantWorkspace() {
       setError('当前模式暂时无法加载，请稍后重试')
       return
     }
-    if (!candidate.available && candidate.disabledReason === '助手运行环境暂不可用，请稍后重试') {
-      setError(candidate.disabledReason)
+    if (!candidate.available && RUNTIME_UNAVAILABLE_REASONS.includes(candidate.disabledReason ?? '')) {
+      setError(!activeMode?.available && activeMode?.disabledReason === candidate.disabledReason ? null : candidate.disabledReason ?? null)
       return
     }
     modeChosenByUser.current = true
@@ -1579,7 +1583,7 @@ export default function AssistantWorkspace() {
             {personaRail}
             <div className="assistant-scroll min-h-0 max-h-[45%] overflow-y-auto overscroll-contain">
             {routeHasContext && mode === 'review' && <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} onProject={resetCreationProject} onContent={setContentId} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />}
-            {!activeMode?.available && activeMode?.disabledReason && !isRuntimeUnavailable && <div className="mx-auto mt-4 flex w-full max-w-2xl flex-col items-center gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3 sm:flex-row sm:justify-between"><p role="status" className="text-left text-sm leading-6 text-muted-foreground">{activeMode.disabledReason}</p><Button type="button" variant="outline" size="sm" className="shrink-0" onClick={selectModePrerequisiteAction}>{modePrerequisiteAction.label}</Button></div>}
+            {!activeMode?.available && activeMode?.disabledReason && <div className="mx-auto mt-4 flex w-full max-w-2xl flex-col items-center gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3 sm:flex-row sm:justify-between"><p role="status" className="text-left text-sm leading-6 text-muted-foreground">{activeMode.disabledReason}</p>{!isRuntimeUnavailable && <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={selectModePrerequisiteAction}>{modePrerequisiteAction.label}</Button>}</div>}
             {bootstrapQuery.isError && <div className="mt-3 flex flex-wrap items-center justify-center gap-3"><p role="alert" className="text-sm text-destructive">首页暂时无法加载，请稍后重试。</p><Button type="button" variant="outline" size="sm" disabled={bootstrapQuery.isFetching} onClick={() => void bootstrapQuery.refetch()}>{bootstrapQuery.isFetching ? <Loader2 className="size-4 animate-spin" /> : '重试加载'}</Button></div>}
             {projectsQuery.isError && <div className="mt-3 flex flex-wrap items-center justify-center gap-3"><p role="alert" className="text-sm text-destructive">人设暂时无法加载，请稍后重试。</p><Button type="button" variant="outline" size="sm" disabled={projectsQuery.isFetching} onClick={() => void projectsQuery.refetch()}>重试加载人设</Button></div>}
             {bootstrapQuery.isLoading && <p role="status" className="sr-only">正在加载首页</p>}

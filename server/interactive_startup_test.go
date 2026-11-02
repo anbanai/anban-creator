@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/service"
@@ -199,5 +200,49 @@ func TestInitializeInteractiveRuntimeRequiresDurableRecovery(t *testing.T) {
 	got, err := initializeInteractiveRuntime(context.Background(), svc, factory, func(context.Context) error { t.Fatal("cleanup before durable storage is configured"); return nil }, nil, func(context.Context, time.Duration) error { t.Fatal("retrying a missing configuration"); return nil })
 	if got != nil || svc.Enabled() || err == nil || !strings.Contains(err.Error(), "durable session storage unavailable") {
 		t.Fatalf("storage gate = %v, %v, %v", got, svc.Enabled(), err)
+	}
+}
+
+func TestInitializeInteractiveRuntimeClassifiesExpiredAttemptWithProcessError(t *testing.T) {
+	for _, failedPhase := range []string{"cleanup", "recovery"} {
+		t.Run(failedPhase, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				factory := &startupRuntimeFactory{}
+				svc := service.NewInteractiveServiceWithRuntime(nil, factory)
+				svc.SetEnabled(true)
+				cleanupCalls, recoveryCalls := 0, 0
+				started := time.Now()
+				expireAttempt := func(ctx context.Context) error {
+					if svc.Enabled() {
+						t.Fatal("session admission enabled during startup")
+					}
+					<-ctx.Done()
+					return errors.New("docker command: signal: killed private-token")
+				}
+				got, err := initializeInteractiveRuntime(context.Background(), svc, factory, func(ctx context.Context) error {
+					cleanupCalls++
+					if failedPhase == "cleanup" {
+						return expireAttempt(ctx)
+					}
+					return nil
+				}, func(ctx context.Context) error {
+					recoveryCalls++
+					return expireAttempt(ctx)
+				}, nil)
+				if got != nil || svc.Enabled() {
+					t.Fatalf("expired startup admitted sessions: factory=%v enabled=%v", got, svc.Enabled())
+				}
+				if cleanupCalls != 3 || failedPhase == "cleanup" && recoveryCalls != 0 || failedPhase == "recovery" && recoveryCalls != 3 {
+					t.Fatalf("attempt counts: cleanup=%d recovery=%d", cleanupCalls, recoveryCalls)
+				}
+				if elapsed := time.Since(started); elapsed != 100*time.Second {
+					t.Fatalf("startup duration = %v, want three 30s attempts and two 5s waits", elapsed)
+				}
+				want := "interactive startup " + failedPhase + " timed out after 3 attempts"
+				if err == nil || err.Error() != want {
+					t.Fatalf("unsafe/inaccurate startup reason: %v, want %q", err, want)
+				}
+			})
+		})
 	}
 }
