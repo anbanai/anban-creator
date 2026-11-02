@@ -52,4 +52,19 @@ describe('streamAssistantInteraction', () => {
     expect(onGenerationChanged).not.toHaveBeenCalled()
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
+
+  it('signals readiness as soon as the SSE response body is available', async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>
+    const body = new ReadableStream<Uint8Array>({ start(value) { controller = value } })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(body))
+    const onConnected = vi.fn()
+    const stream = streamAssistantInteraction('interaction-1', 'token', undefined, { onConnected })
+    const next = stream.next()
+    await vi.waitFor(() => expect(onConnected).toHaveBeenCalledTimes(1))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    controller.enqueue(new TextEncoder().encode('event:session.closed\ndata:{}\n\n'))
+    await expect(next).resolves.toMatchObject({ value: { event: 'session.closed' } })
+    await stream.return(undefined)
+
+  })
 })

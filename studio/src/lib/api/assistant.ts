@@ -6,7 +6,7 @@ const ASSISTANT_COMMAND_TIMEOUT_MS = 15 * 60 * 1000
 
 export type AssistantModeID = 'profile' | 'creation' | 'review'
 
-export type AssistantInteractionLifecycle = 'active' | 'reconnecting' | 'needs_confirmation' | 'completed' | 'abandoned' | string
+export type AssistantInteractionLifecycle = 'prepared' | 'active' | 'reconnecting' | 'needs_confirmation' | 'completed' | 'abandoned' | string
 
 export interface AssistantBlockingIssue {
   code: string
@@ -130,6 +130,7 @@ export interface AssistantWorkspace {
   content_id?: string
   runtime_id?: string
   runtime_status: string
+  lifecycle?: AssistantInteractionLifecycle
   expires_at: string
   generation?: number
   interaction_snapshot?: AssistantInteractionSnapshot
@@ -157,7 +158,8 @@ export type AssistantSession = InteractiveSession & {
   content_id?: string
 }
 
-const pendingMessageAttempts = new Map<string, string>()
+type InteractionMessageContext = { mode_id?: AssistantModeID; project_id?: string; content_id?: string }
+const pendingMessageAttempts = new Map<string, { id: string; context?: InteractionMessageContext }>()
 const pendingAnswerAttempts = new Map<string, string>()
 
 export const assistantApi = {
@@ -192,21 +194,31 @@ export const assistantApi = {
 
   close: (sessionId: string) => http.delete(`/assistant/sessions/${encodeURIComponent(sessionId)}`),
 
-  createWorkspace: async (request: { mode_id: AssistantModeID; project_id?: string; content_id?: string; checkpoint_id?: string }, idempotencyKey?: string) =>
-    interactionSnapshotAsWorkspace(await assistantApi.createInteraction({ mode_id: request.mode_id, project_id: request.project_id, content_id: request.content_id }, idempotencyKey)),
+  createWorkspace: async (request: { mode_id: AssistantModeID; project_id?: string; content_id?: string; checkpoint_id?: string; prepare_only?: boolean }, idempotencyKey?: string) =>
+    interactionSnapshotAsWorkspace(await assistantApi.createInteraction({ mode_id: request.mode_id, project_id: request.project_id, content_id: request.content_id, prepare_only: request.prepare_only }, idempotencyKey)),
 
   switchWorkspaceMode: (workspaceId: string, modeId: AssistantModeID, context?: { project_id?: string; content_id?: string; checkpoint_id?: string }) =>
     assistantApi.createInteraction({ mode_id: modeId, project_id: context?.project_id, content_id: context?.content_id, resume_interaction_id: workspaceId }).then(interactionSnapshotAsWorkspace),
 
-  workspaceMessage: async (workspaceId: string, _modeId: AssistantModeID, text: string, forceNewAttempt = false) => {
+  workspaceMessage: async (workspaceId: string, _modeId: AssistantModeID, text: string, forceNewAttempt = false, context?: InteractionMessageContext) => {
     const attemptKey = `${workspaceId}\u0000${text}`
     if (forceNewAttempt) pendingMessageAttempts.delete(attemptKey)
-    const clientMessageID = pendingMessageAttempts.get(attemptKey) ?? crypto.randomUUID()
-    pendingMessageAttempts.set(attemptKey, clientMessageID)
+    const previous = pendingMessageAttempts.get(attemptKey)
+    const contextChanged = context !== undefined && JSON.stringify(previous?.context) !== JSON.stringify(context)
+    const attempt = previous && !contextChanged ? previous : { id: crypto.randomUUID(), context: context && { ...context } }
+    pendingMessageAttempts.set(attemptKey, attempt)
     const snapshot = await assistantApi.getInteractionSnapshot(workspaceId)
-    const result = await assistantApi.sendInteractionMessage(workspaceId, { generation: snapshot.generation, client_message_id: clientMessageID, text })
-    if (pendingMessageAttempts.get(attemptKey) === clientMessageID) pendingMessageAttempts.delete(attemptKey)
-    return result
+    try {
+      const result = await assistantApi.sendInteractionMessage(workspaceId, { generation: snapshot.generation, client_message_id: attempt.id, text, ...attempt.context })
+      if (pendingMessageAttempts.get(attemptKey) === attempt) pendingMessageAttempts.delete(attemptKey)
+      return result
+    } catch (error) {
+      const response = (error as { response?: { status?: number; data?: { error_code?: string } } } | null)?.response
+      if (response?.status === 409 && response.data?.error_code === 'assistant_message_not_accepted' && pendingMessageAttempts.get(attemptKey) === attempt) {
+        pendingMessageAttempts.delete(attemptKey)
+      }
+      throw error
+    }
   },
 
   workspaceAnswer: async (workspaceId: string, _modeId: AssistantModeID, callId: string, answers: Array<{ id: string; selected: string[]; custom?: string }>, forceNewAttempt = false) => {
@@ -247,14 +259,14 @@ export const assistantApi = {
 
   closeWorkspace: (workspaceId: string) => http.delete(`/assistant/interactions/${encodeURIComponent(workspaceId)}`),
 
-  createInteraction: (request: { mode_id: AssistantModeID; project_id?: string; content_id?: string; resume_interaction_id?: string }, idempotencyKey?: string) =>
+  createInteraction: (request: { mode_id: AssistantModeID; project_id?: string; content_id?: string; resume_interaction_id?: string; prepare_only?: boolean }, idempotencyKey?: string) =>
     unwrap<AssistantInteractionSnapshot>(http.post('/assistant/interactions', request, {
       timeout: ASSISTANT_COMMAND_TIMEOUT_MS,
       ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),
     })),
   getInteractionSnapshot: (interactionId: string) =>
     unwrap<AssistantInteractionSnapshot>(http.get(`/assistant/interactions/${encodeURIComponent(interactionId)}`)),
-  sendInteractionMessage: (interactionId: string, payload: { generation: number; client_message_id: string; text: string }) =>
+  sendInteractionMessage: (interactionId: string, payload: { generation: number; client_message_id: string; text: string; mode_id?: AssistantModeID; project_id?: string; content_id?: string }) =>
     unwrap<{ accepted: boolean }>(http.post(`/assistant/interactions/${encodeURIComponent(interactionId)}/messages`, payload, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
   answerInteractionQuestion: (interactionId: string, callId: string, payload: { generation: number; attempt_id: string; answers: Array<{ id: string; selected: string[]; custom?: string }> }) =>
     unwrap<{ accepted: boolean }>(http.post(`/assistant/interactions/${encodeURIComponent(interactionId)}/answers`, { ...payload, call_id: callId }, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
@@ -265,5 +277,5 @@ export const assistantApi = {
 }
 
 function interactionSnapshotAsWorkspace(snapshot: AssistantInteractionSnapshot): AssistantWorkspace {
-  return { id: snapshot.interaction_id, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, runtime_status: snapshot.runtime_status, expires_at: snapshot.expires_at, generation: snapshot.generation, interaction_snapshot: snapshot }
+  return { id: snapshot.interaction_id, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, runtime_status: snapshot.runtime_status, lifecycle: snapshot.lifecycle, expires_at: snapshot.expires_at, generation: snapshot.generation, interaction_snapshot: snapshot }
 }

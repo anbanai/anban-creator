@@ -7,7 +7,7 @@ import ProjectsPage from './ProjectsPage'
 import { createTestQueryClient } from '@/test/test-utils'
 import { mockProjects } from '@/test/mocks/handlers'
 import type { Project } from '@/types'
-import type { AssistantBootstrap, AssistantInteractionSnapshot } from '@/lib/api/assistant'
+import type { AssistantBootstrap, AssistantInteractionSnapshot, AssistantWorkspace as Workspace } from '@/lib/api/assistant'
 
 const mocks = vi.hoisted(() => ({
   bootstrap: vi.fn(),
@@ -32,6 +32,12 @@ const mocks = vi.hoisted(() => ({
   imageCapabilities: vi.fn(),
   platformConfigs: vi.fn(),
   userMediaList: vi.fn(),
+  streamCalls: vi.fn(),
+  connectionGate: null as Promise<void> | null,
+  messageDelivered: null as Promise<void> | null,
+  deliverMessage: () => {},
+  existingConversation: false,
+  streamEventsEnabled: true,
   streamEvents: [] as { event: string; id: string; data: string }[],
 }))
 
@@ -45,7 +51,11 @@ vi.mock('@/lib/api', async () => {
     ...actual,
     api: {
       ...actual.api,
-      assistant: { ...actual.api.assistant, ...mocks },
+      assistant: { ...actual.api.assistant, ...mocks, workspaceMessage: async (...args: unknown[]) => {
+        const result = await mocks.workspaceMessage(...args)
+        mocks.deliverMessage()
+        return result
+      } },
       agentProfiles: { ...actual.api.agentProfiles, list: mocks.agentProfiles },
       imageCapabilities: { ...actual.api.imageCapabilities, list: mocks.imageCapabilities },
       projects: { ...actual.api.projects, list: mocks.projectsList, update: mocks.projectUpdate, platformConfigs: mocks.platformConfigs, archive: mocks.projectArchive, restore: mocks.projectRestore, stats: mocks.projectStats },
@@ -56,7 +66,13 @@ vi.mock('@/lib/api', async () => {
 })
 
 vi.mock('@/lib/interactive-events', () => ({
-  streamAssistantWorkspace: (workspaceId: string, _token: string, _signal: AbortSignal, options?: { expectedSessionId?: string }) => (async function* () {
+  streamAssistantWorkspace: (workspaceId: string, _token: string, signal: AbortSignal, options?: { expectedSessionId?: string; onConnected?: () => void }) => (async function* () {
+    mocks.streamCalls(workspaceId, options)
+    if (mocks.connectionGate) await mocks.connectionGate
+    if (signal.aborted) return
+    options?.onConnected?.()
+    if (!mocks.existingConversation) await mocks.messageDelivered
+    if (signal.aborted || !mocks.streamEventsEnabled) return
     const sessionId = workspaceId === 'locked-workspace' ? 'locked-session' : options?.expectedSessionId ?? 'session-1'
     const terminalStream = mocks.streamEvents.some((event) => ['session.expired', 'expired'].includes(event.event))
     if (!terminalStream) {
@@ -81,7 +97,19 @@ function LocationProbe() {
 }
 
 function renderPage(state?: Partial<{ modeId: 'profile' | 'creation' | 'review'; projectId: string; contentId: string; checkpointId: string; initialMessage: string }>, queryClient = createTestQueryClient()) {
+  const saved = JSON.parse(sessionStorage.getItem('anban:assistant-workspace') ?? '{}')
+  mocks.existingConversation = Boolean(saved.workspace && saved.workspace.lifecycle !== 'prepared')
   return { ...render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={[{ pathname: '/', state }]}><AssistantWorkspace /><LocationProbe /></MemoryRouter></QueryClientProvider>), queryClient }
+}
+
+function preparedWorkspace(context: { mode_id?: Workspace['mode_id']; project_id?: string; content_id?: string; id?: string; [key: string]: unknown } = {}): Workspace {
+  const snapshot = {
+    interaction_id: context.id ?? 'workspace-1', mode_id: context.mode_id ?? 'profile',
+    project_id: context.project_id, content_id: context.content_id,
+    lifecycle: 'prepared', generation: 1, runtime_status: 'not_started', expires_at: '',
+    last_activity_at: '', available_actions: ['send_message'], drafts: [],
+  }
+  return { id: snapshot.interaction_id, ...snapshot, interaction_snapshot: snapshot }
 }
 
 function activePersona(id: string, name: string, overrides: Partial<Project> = {}): Project {
@@ -187,6 +215,7 @@ describe('AssistantWorkspace', () => {
     mocks.workspaceCommit.mockRejectedValueOnce(Object.assign(new Error('invalid'), { response: { status: 422, data: { error_code: 'assistant_draft_invalid', available_actions: ['continue_editing'], blocking_issues: issues, data: snapshot } } }))
     mocks.workspaceCommit.mockResolvedValue({ interaction_status: 'created', task: { id: 'corrected-task' } })
     renderPage()
+    await screen.findByRole('button', { name: /选择参数：.*标准图像/ })
     fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '创作作品' }))
     expect(await screen.findByText('请选择有效的图片画幅')).toBeInTheDocument()
     expect(screen.getByRole('region', { name: '确认创作' })).toHaveTextContent('保留创作计划')
@@ -257,13 +286,13 @@ describe('AssistantWorkspace', () => {
     expect(mocks.getInteractionSnapshot).toHaveBeenCalledTimes(1)
 
     page.unmount()
+    mocks.createWorkspace.mockResolvedValue(preparedWorkspace({ id: 'next-workspace', mode_id: 'creation', project_id: 'project-1' }))
     renderPage(undefined, queryClient)
     await screen.findByRole('region', { name: '首页人设选择' })
     expect(mocks.getInteractionSnapshot).toHaveBeenCalledTimes(1)
-    mocks.createWorkspace.mockResolvedValue({ id: 'next-workspace', mode_id: 'creation', project_id: 'project-1', runtime_status: 'starting', expires_at: '' })
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '下一篇创作需求' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('next-workspace', 'creation', expect.stringContaining('下一篇创作需求')))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('next-workspace', 'creation', expect.stringContaining('下一篇创作需求'), false, { mode_id: 'creation', project_id: 'project-1', content_id: '' }))
     expect(mocks.workspaceCommit).toHaveBeenCalledTimes(1)
   })
 
@@ -304,11 +333,15 @@ describe('AssistantWorkspace', () => {
   })
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.useRealTimers()
   })
 
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.streamEvents = []
+    mocks.connectionGate = null
+    mocks.streamEventsEnabled = true
+    mocks.messageDelivered = new Promise<void>((resolve) => { mocks.deliverMessage = resolve })
     sessionStorage.clear()
     mocks.projectsList.mockResolvedValue([])
     mocks.projectStats.mockResolvedValue({})
@@ -322,13 +355,13 @@ describe('AssistantWorkspace', () => {
       projects: [],
     })
     mocks.works.mockResolvedValue({ items: [], has_more: false })
-    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'profile', session_id: 'session-1', sessions: { profile: 'session-1' }, runtime_status: 'starting', expires_at: '' })
+    mocks.createWorkspace.mockReset().mockImplementation(async (request) => preparedWorkspace(request))
     mocks.getInteractionSnapshot.mockResolvedValue({
       interaction_id: 'workspace-1', mode_id: 'profile', project_id: 'draft-ready', lifecycle: 'needs_confirmation', generation: 1,
       runtime_status: 'running', expires_at: '', last_activity_at: '', available_actions: ['confirm_draft'],
       drafts: [{ draft_id: 'draft-1', mode_id: 'profile', revision: 1, payload: { project: { name: '恢复后的人设', platform: 'wechat' } }, payload_digest: 'digest-1', ready: true, confirmation_state: 'pending' }],
     })
-    mocks.workspaceMessage.mockResolvedValue(undefined)
+    mocks.workspaceMessage.mockReset().mockResolvedValue(undefined)
     mocks.workspaceAnswer.mockResolvedValue(undefined)
     mocks.closeWorkspace.mockResolvedValue(undefined)
     mocks.workspaceCommit.mockResolvedValue({ mode_id: 'profile', status: 'committed', project: { id: 'project-new', name: '新画像', platform: 'wechat' } })
@@ -343,6 +376,146 @@ describe('AssistantWorkspace', () => {
     mocks.imageCapabilities.mockResolvedValue({ tier: 'free', default_capability: 'standard', items: [{ key: 'standard', display_name: '标准图像', description: '适合日常配图', enabled: true, price_available: true, price_credits: 300 }] })
     mocks.platformConfigs.mockResolvedValue([{ id: 'wechat', supported_image_ratios: ['16:9', '1:1'] }])
     mocks.userMediaList.mockResolvedValue({ items: [], total: 0, offset: 0, limit: 30 })
+  })
+
+  it('preconnects without sending a message and keeps home controls available', async () => {
+    renderPage()
+    await waitFor(() => expect(mocks.streamCalls).toHaveBeenCalledTimes(1))
+    expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'profile', prepare_only: true }, expect.any(String))
+    expect(mocks.workspaceMessage).not.toHaveBeenCalled()
+    expect(mocks.switchWorkspaceMode).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '创建新人设' })).toBeInTheDocument()
+    expect(JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!).workspace).toMatchObject({ lifecycle: 'prepared', runtime_status: 'not_started' })
+  })
+
+  it('queues an immediate first message until prepare and SSE are ready', async () => {
+    let finishPrepare!: (workspace: Workspace) => void
+    let connect!: () => void
+    mocks.createWorkspace.mockReturnValue(new Promise<Workspace>((resolve) => { finishPrepare = resolve }))
+    mocks.connectionGate = new Promise<void>((resolve) => { connect = resolve })
+    renderPage()
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(1))
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '首条消息' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    expect(mocks.workspaceMessage).not.toHaveBeenCalled()
+    await act(async () => finishPrepare(preparedWorkspace()))
+    await waitFor(() => expect(mocks.streamCalls).toHaveBeenCalledTimes(1))
+    expect(mocks.workspaceMessage).not.toHaveBeenCalled()
+    await act(async () => connect())
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'profile', '首条消息', false, { mode_id: 'profile', project_id: '', content_id: '' }))
+    expect(mocks.createWorkspace).toHaveBeenCalledTimes(1)
+    expect(mocks.streamCalls).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!).workspace.lifecycle).toBe('active'))
+  })
+
+  it('clears the prepared persona when starting a new profile without reopening SSE', async () => {
+    bootstrapFivePersonas()
+    renderPage()
+    await waitFor(() => expect(mocks.streamCalls).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: '创建新人设' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '建立新人设' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'profile', '建立新人设', false, { mode_id: 'profile', project_id: '', content_id: '' }))
+    expect(mocks.closeWorkspace).not.toHaveBeenCalled()
+    expect(mocks.switchWorkspaceMode).not.toHaveBeenCalled()
+    expect(mocks.streamCalls).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!).workspace.project_id).toBe(''))
+  })
+
+  it('uses the latest selected work on the prepared interaction first message', async () => {
+    bootstrapFivePersonas()
+    mocks.works.mockResolvedValue({ items: [
+      { id: 'work-1', title: '第一篇', type: 'article', createdAt: '' },
+      { id: 'work-2', title: '第二篇', type: 'article', createdAt: '' },
+    ], has_more: false })
+    renderPage({ modeId: 'review', projectId: 'draft-ready', contentId: 'work-1' })
+    await waitFor(() => expect(mocks.streamCalls).toHaveBeenCalledTimes(1))
+    fireEvent.change(screen.getByRole('combobox', { name: '选择作品' }), { target: { value: 'work-2' } })
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '复盘第二篇' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'review', '复盘第二篇', false, { mode_id: 'review', project_id: 'draft-ready', content_id: 'work-2' }))
+    expect(mocks.createWorkspace).toHaveBeenCalledTimes(1)
+    expect(mocks.streamCalls).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends on the same interaction after the SSE connection wait times out', async () => {
+    mocks.connectionGate = new Promise(() => {})
+    renderPage()
+    await waitFor(() => expect(mocks.streamCalls).toHaveBeenCalledTimes(1))
+    vi.useFakeTimers()
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '网络恢复后继续' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_999) })
+    expect(mocks.workspaceMessage).not.toHaveBeenCalled()
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'profile', '网络恢复后继续', false, expect.any(Object))
+    expect(mocks.createWorkspace).toHaveBeenCalledTimes(1)
+  })
+
+  it('restores authoritative context after a lost activation response and a changed selection', async () => {
+    bootstrapFivePersonas()
+    const snapshot = { ...preparedWorkspace({ mode_id: 'creation', project_id: 'draft-ready' }).interaction_snapshot!, lifecycle: 'active', runtime_status: 'running' }
+    mocks.workspaceMessage.mockRejectedValueOnce(new Error('response lost')).mockRejectedValueOnce(Object.assign(new Error('context changed'), {
+      response: { status: 409, data: { error_code: 'assistant_message_not_accepted', data: snapshot } },
+    }))
+    renderPage()
+    await waitFor(() => expect(mocks.streamCalls).toHaveBeenCalledTimes(1))
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('开始创作'))
+    fireEvent.click(screen.getByRole('button', { name: '选择人设：空画像' }))
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('已保存草稿'))
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('开始创作')
+    expect(mocks.createWorkspace).toHaveBeenCalledTimes(1)
+  })
+
+  it('synchronizes the selected mode if prepare resumes an already active interaction', async () => {
+    const prepared = preparedWorkspace({ mode_id: 'creation' })
+    mocks.createWorkspace.mockResolvedValue({ ...prepared, lifecycle: 'active', interaction_snapshot: { ...prepared.interaction_snapshot!, lifecycle: 'active' } })
+    mocks.switchWorkspaceMode.mockResolvedValue({ ...prepared, mode_id: 'profile', lifecycle: 'active' })
+    renderPage()
+    await waitFor(() => expect(mocks.streamCalls).toHaveBeenCalledTimes(1))
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '继续建立人设' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'profile', '继续建立人设'))
+    expect(mocks.switchWorkspaceMode).toHaveBeenCalledWith('workspace-1', 'profile', { project_id: '', content_id: '' })
+    expect(mocks.streamCalls).toHaveBeenCalledTimes(1)
+  })
+
+  it('retains an early streamed draft and idle state when the send response arrives later', async () => {
+    let finishMessage!: () => void
+    mocks.workspaceMessage.mockReturnValue(new Promise<void>((resolve) => { finishMessage = resolve }))
+    renderPage()
+    await waitFor(() => expect(mocks.streamCalls).toHaveBeenCalledTimes(1))
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '先收到回复' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledTimes(1))
+    expect(screen.getByText('先收到回复')).toBeInTheDocument()
+    await act(async () => mocks.deliverMessage())
+    expect(screen.getByText('收到，我开始处理。')).toBeInTheDocument()
+    await act(async () => finishMessage())
+    expect(screen.getByRole('region', { name: '保存人设' })).toBeInTheDocument()
+    expect(screen.getByText('收到，我开始处理。')).toBeInTheDocument()
+    expect(screen.queryByText('AI 正在处理…')).not.toBeInTheDocument()
+    expect(mocks.streamCalls).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps an early streamed draft visible when the send response is lost', async () => {
+    let failMessage!: (error: Error) => void
+    mocks.workspaceMessage.mockReturnValue(new Promise<void>((_, reject) => { failMessage = reject }))
+    renderPage()
+    await waitFor(() => expect(mocks.streamCalls).toHaveBeenCalledTimes(1))
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '回复丢失仍保留草稿' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledTimes(1))
+    await act(async () => mocks.deliverMessage())
+    expect(screen.getByRole('region', { name: '保存人设' })).toBeInTheDocument()
+    await act(async () => failMessage(new Error('response lost')))
+    expect(screen.getByRole('region', { name: '保存人设' })).toBeInTheDocument()
+    expect(screen.getByText('收到，我开始处理。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存人设' })).toBeEnabled()
   })
 
   const fivePersonas = [
@@ -421,7 +594,8 @@ describe('AssistantWorkspace', () => {
     expect(indicator).toHaveTextContent('创作模式')
     expect(within(surface).getByRole('combobox', { name: '本次创作类型' })).toBeInTheDocument()
     expect(input).toHaveValue('保留我的创作需求')
-    expect(mocks.createWorkspace).not.toHaveBeenCalled()
+    expect(mocks.createWorkspace).toHaveBeenCalledWith(expect.objectContaining({ prepare_only: true }), expect.any(String))
+    expect(mocks.workspaceMessage).not.toHaveBeenCalled()
   })
 
   it('keeps management and return-to-creation actions reachable for the only persona', async () => {
@@ -455,8 +629,8 @@ describe('AssistantWorkspace', () => {
     expect(within(rail).getByRole('button', { name: `选择人设：${name}`, pressed: true })).toBeInTheDocument()
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'creation', project_id: id }, expect.any(String)))
-    expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '开始创作\n\n创作类型：wechat-article')
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'creation', project_id: 'draft-ready', prepare_only: true }, expect.any(String)))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '开始创作\n\n创作类型：wechat-article', false, { mode_id: 'creation', project_id: id, content_id: '' }))
     expect(mocks.projectsList).toHaveBeenCalledWith({ status: 'active' })
   })
 
@@ -494,7 +668,8 @@ describe('AssistantWorkspace', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '不要更新归档人设' } })
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    expect(mocks.createWorkspace).not.toHaveBeenCalled()
+    expect(mocks.createWorkspace).toHaveBeenCalledWith(expect.objectContaining({ prepare_only: true }), expect.any(String))
+    expect(mocks.workspaceMessage).not.toHaveBeenCalled()
   })
 
   it('reconciles cached creation prerequisites with active-list archive and restore refreshes', async () => {
@@ -518,6 +693,7 @@ describe('AssistantWorkspace', () => {
 
   it('refreshes homepage membership after archiving and restoring on the personas page', async () => {
     bootstrapFivePersonas()
+    mocks.getInteractionSnapshot.mockResolvedValue(preparedWorkspace({ mode_id: 'creation', project_id: 'draft-ready' }).interaction_snapshot)
     let archived = false
     mocks.projectsList.mockImplementation(async ({ status }: { status: string }) => status === 'archived'
       ? archived ? [{ ...fivePersonas[0], status: 'archived' }] : []
@@ -546,7 +722,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '恢复后继续创作' } })
     await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'creation', project_id: 'draft-ready' }, expect.any(String)))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'creation', project_id: 'draft-ready', prepare_only: true }, expect.any(String)))
     expect(mocks.bootstrap).toHaveBeenCalledTimes(1)
   })
 
@@ -578,7 +754,7 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(screen.getByRole('status', { name: '当前模式' })).toHaveTextContent('创作模式'))
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '使用新增人设' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'creation', project_id: 'draft-ready' }, expect.any(String)))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'creation', project_id: 'draft-ready', prepare_only: true }, expect.any(String)))
   })
 
   it('can adjust a saved unready persona after starting a new profile', async () => {
@@ -590,7 +766,7 @@ describe('AssistantWorkspace', () => {
     expect(screen.getByRole('status', { name: '当前模式' })).toHaveTextContent('人设模式')
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '更新已保存内容' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'profile', project_id: 'draft-ready' }, expect.any(String)))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'creation', project_id: 'draft-ready', prepare_only: true }, expect.any(String)))
   })
 
   it.each(['已保存草稿', '空画像'])('returns to creation when selecting %s after editing a persona', async (name) => {
@@ -608,7 +784,8 @@ describe('AssistantWorkspace', () => {
     expect(screen.getByRole('heading', { name })).toBeInTheDocument()
     expect(composer).toHaveValue('保留这段创作想法')
     expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
-    expect(mocks.createWorkspace).not.toHaveBeenCalled()
+    expect(mocks.createWorkspace).toHaveBeenCalledWith(expect.objectContaining({ prepare_only: true }), expect.any(String))
+    expect(mocks.workspaceMessage).not.toHaveBeenCalled()
   })
 
   it('returns from creating a new persona to creation when selecting an existing card', async () => {
@@ -658,8 +835,8 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled())
     expect(composer).toHaveValue('调整人设的表达风格')
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'profile', project_id: 'draft-ready' }, expect.any(String)))
-    expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'profile', '调整人设的表达风格')
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'creation', project_id: 'draft-ready', prepare_only: true }, expect.any(String)))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'profile', '调整人设的表达风格', false, { mode_id: 'profile', project_id: 'draft-ready', content_id: '' }))
   })
 
   it('allows drafting while bootstrap is pending and enables sending when it is ready', async () => {
@@ -681,7 +858,7 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled())
     expect(composer).toHaveValue('先写下需求')
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'profile' }, expect.any(String)))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'profile', prepare_only: true }, expect.any(String)))
   })
 
   it('retries bootstrap after an initial failure and enables sending when it recovers', async () => {
@@ -704,7 +881,7 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled())
     expect(composer).toHaveValue('失败时保留这条需求')
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'profile' }, expect.any(String)))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'profile', prepare_only: true }, expect.any(String)))
   })
 
   it('keeps creation unavailable until a persona exists and offers the create card', async () => {
@@ -784,7 +961,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.change(composer, { target: { value: '写一篇种草笔记' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
 
-    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '写一篇种草笔记'))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '写一篇种草笔记', false, expect.any(Object)))
     expect(screen.queryByText('创作类型：seednote')).not.toBeInTheDocument()
   })
 
@@ -860,14 +1037,15 @@ describe('AssistantWorkspace', () => {
     expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('做一组茶知识图片')
     expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
     expect(screen.getByRole('combobox', { name: '本次创作类型' })).toHaveTextContent('公众号贴图')
-    expect(mocks.createWorkspace).not.toHaveBeenCalled()
+    expect(mocks.createWorkspace).toHaveBeenCalledWith(expect.objectContaining({ prepare_only: true }), expect.any(String))
+    expect(mocks.workspaceMessage).not.toHaveBeenCalled()
     expect(mocks.workspaceMessage).not.toHaveBeenCalled()
     view.unmount()
     renderPage()
     await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled())
     expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('做一组茶知识图片')
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '做一组茶知识图片\n\n创作类型：wechat-picture'))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '做一组茶知识图片\n\n创作类型：wechat-picture', false, expect.any(Object)))
   })
 
   it('does not modify settings when cancelled and keeps a failed save retryable', async () => {
@@ -895,7 +1073,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.pointerDown(await screen.findByRole('option', { name: '公众号贴图' }))
     fireEvent.click(await screen.findByRole('option', { name: '公众号贴图' }))
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '图片创作\n\n创作类型：wechat-picture'))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '图片创作\n\n创作类型：wechat-picture', false, expect.any(Object)))
   })
 
   it('offers seednote on a WeChat persona and submits the selected type and its image defaults', async () => {
@@ -905,7 +1083,7 @@ describe('AssistantWorkspace', () => {
       { id: 'wechat', default_image_ratio: '16:9', supported_image_ratios: ['16:9', '1:1'] },
       { id: 'seednote', default_image_ratio: '3:4', supported_image_ratios: ['3:4', '1:1'] },
     ])
-    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: persona.id, runtime_status: 'starting', expires_at: '' })
+    mocks.createWorkspace.mockResolvedValue(preparedWorkspace({ id: 'workspace-1', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: persona.id, runtime_status: 'starting', expires_at: '' }))
     mocks.streamEvents = [{ event: 'draft.ready', id: 'seednote-draft', data: JSON.stringify({ mode_id: 'creation', session_id: 'session-1', draft: { ...creationDraftIdentity, ready: true, payload: { plan: { goal: '介绍新茶', content_type: 'seednote', topic: '春茶', angle: '冲泡体验', expression_form: '图文笔记' } } } }) }]
     renderPage({ modeId: 'creation', projectId: persona.id, initialMessage: '介绍新茶' })
 
@@ -919,7 +1097,7 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(selector).toHaveFocus())
     expect(await screen.findByRole('button', { name: /选择参数：.*3:4/ })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '介绍新茶\n\n创作类型：seednote'))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '介绍新茶\n\n创作类型：seednote', false, expect.any(Object)))
     fireEvent.click(within(await screen.findByRole('region', { name: '确认创作' })).getByRole('button', { name: '创作作品' }))
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
       options: { plan: expect.objectContaining({ content_type: 'seednote', image_ratio: '3:4' }) },
@@ -1015,8 +1193,8 @@ describe('AssistantWorkspace', () => {
     fireEvent.click(send)
 
     await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(1))
-    expect(mocks.workspaceMessage).toHaveBeenCalledTimes(1)
-    resolveMessage()
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledTimes(1))
+    await act(async () => resolveMessage())
   })
 
   it('uses the DSH-style inline composer and removes setup controls after chat starts', async () => {
@@ -1069,7 +1247,7 @@ describe('AssistantWorkspace', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '仍然重试' }))
     await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledTimes(2))
-    expect(mocks.workspaceMessage).toHaveBeenLastCalledWith('workspace-1', 'profile', '继续当前需求', true)
+    expect(mocks.workspaceMessage).toHaveBeenLastCalledWith('workspace-1', 'profile', '继续当前需求', true, { mode_id: 'profile', project_id: '', content_id: '' })
   })
 
   it('distinguishes workspace mode conflicts from generic conversation conflicts', async () => {
@@ -1220,8 +1398,8 @@ describe('AssistantWorkspace', () => {
     expect(await screen.findByRole('heading', { name: '神秘人' })).toBeInTheDocument()
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '帮我建立一个人设' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'profile' }, expect.any(String)))
-    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'profile', '帮我建立一个人设'))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'profile', prepare_only: true }, expect.any(String)))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'profile', '帮我建立一个人设', false, expect.any(Object)))
     expect(screen.getByTestId('location')).toHaveTextContent('/')
     expect(await screen.findByText('收到，我开始处理。')).toBeInTheDocument()
     expect(screen.queryByRole('tab')).not.toBeInTheDocument()
@@ -1452,7 +1630,8 @@ describe('AssistantWorkspace', () => {
     fireEvent.click(await screen.findByRole('button', { name: '创建新人设' }))
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
     expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
-    expect(mocks.createWorkspace).not.toHaveBeenCalled()
+    expect(mocks.createWorkspace).toHaveBeenCalledWith(expect.objectContaining({ prepare_only: true }), expect.any(String))
+    expect(mocks.workspaceMessage).not.toHaveBeenCalled()
     expect(screen.getByTestId('location')).toHaveTextContent('/')
   })
 
@@ -1493,7 +1672,7 @@ describe('AssistantWorkspace', () => {
   it('reuses the workspace creation idempotency key after a failed response', async () => {
     mocks.createWorkspace
       .mockRejectedValueOnce(new Error('temporary network failure'))
-      .mockResolvedValueOnce({ id: 'workspace-1', mode_id: 'profile', session_id: 'session-1', sessions: { profile: 'session-1' }, runtime_status: 'starting', expires_at: '' })
+      .mockResolvedValueOnce(preparedWorkspace())
     renderPage()
     const composer = await screen.findByRole('textbox', { name: '发送消息' })
     fireEvent.change(composer, { target: { value: '第一次发送' } })
@@ -1522,7 +1701,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledTimes(2))
-    expect(mocks.workspaceMessage).toHaveBeenLastCalledWith('workspace-1', 'profile', '继续完善画像')
+    expect(mocks.workspaceMessage).toHaveBeenLastCalledWith('workspace-1', 'profile', '继续完善画像', false, expect.any(Object))
   })
 
   it('starts a conversation when the initial snapshot omits empty drafts', async () => {
@@ -1782,7 +1961,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.change(screen.getByRole('combobox', { name: '选择作品' }), { target: { value: 'work-1' } })
     fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '复盘这篇作品' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'review', project_id: 'project-1', content_id: 'work-1' }, expect.any(String)))
+    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledWith({ mode_id: 'review', project_id: 'project-1', content_id: 'work-1', prepare_only: true }, expect.any(String)))
     expect(mocks.switchWorkspaceMode).not.toHaveBeenCalled()
   })
 
@@ -1819,7 +1998,7 @@ describe('AssistantWorkspace', () => {
       ],
       projects: [{ id: 'video-project', name: '视频项目', platform: 'video-edit', profileRevision: 1, profileReady: true, works: [] }],
     })
-    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'video-project', runtime_status: 'starting', expires_at: '' })
+    mocks.createWorkspace.mockResolvedValue(preparedWorkspace({ id: 'workspace-1', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'video-project', runtime_status: 'starting', expires_at: '' }))
     mocks.streamEvents = [{ event: 'draft.ready', id: 'video-creation', data: JSON.stringify({ mode_id: 'creation', draft: { ...creationDraftIdentity, ready: true, payload: { plan: { goal: '剪辑访谈', content_type: 'video-edit' } } } }) }]
     uploadToOSSMock.mockResolvedValue({ uploadSessionId: 'upload-session-1', uploadId: 'upload-session-1', key: 'staging/video.mp4', previewUrl: '/preview.mp4', publicUrl: '/video.mp4', contentType: 'video/mp4', size: 42 })
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:assistant-video')
@@ -1834,7 +2013,7 @@ describe('AssistantWorkspace', () => {
     await screen.findByText('interview.mp4')
     fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '自动剪辑我的访谈素材' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', expect.stringContaining('自动剪辑我的访谈素材')))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', expect.stringContaining('自动剪辑我的访谈素材'), false, expect.any(Object)))
     fireEvent.click(await screen.findByRole('button', { name: '创作作品' }))
 
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalledWith('workspace-1', 'creation', expect.objectContaining({
@@ -1857,7 +2036,7 @@ describe('AssistantWorkspace', () => {
       ],
       projects: [{ id: 'project-1', name: '我的人设', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
     })
-    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'project-1', runtime_status: 'starting', expires_at: '' })
+    mocks.createWorkspace.mockResolvedValue(preparedWorkspace({ id: 'workspace-1', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'project-1', runtime_status: 'starting', expires_at: '' }))
     mocks.workspaceCommit.mockResolvedValue({ mode_id: 'creation', status: 'committed', task: { id: 'task-created-1', project_id: 'project-1', status: 'pending' } })
     mocks.streamEvents = [{
       event: 'draft.ready',
@@ -1904,7 +2083,7 @@ describe('AssistantWorkspace', () => {
     })
     mocks.projectsList.mockResolvedValue([{ id: 'project-ratio', name: '画幅人设', platform: 'wechat', image_ratio: '1:1', status: 'active' }])
     mocks.platformConfigs.mockResolvedValue([{ id: 'wechat', default_image_ratio: '16:9', supported_image_ratios: ['16:9', '1:1'] }])
-    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-ratio', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'project-ratio', runtime_status: 'starting', expires_at: '' })
+    mocks.createWorkspace.mockResolvedValue(preparedWorkspace({ id: 'workspace-ratio', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'project-ratio', runtime_status: 'starting', expires_at: '' }))
     mocks.streamEvents = [{ event: 'draft.ready', id: 'event-ratio', data: JSON.stringify({ mode_id: 'creation', session_id: 'session-1', draft: { ...creationDraftIdentity, ready: true, payload: { plan: { goal: '按人设画幅创作', content_type: 'wechat-article', topic: '春茶冲泡', angle: '新手常见问题', expression_form: '步骤教程' } } } }) }]
     renderPage({ modeId: 'creation', projectId: 'project-ratio' })
 
@@ -1929,7 +2108,7 @@ describe('AssistantWorkspace', () => {
       ],
       projects: [{ id: 'project-1', name: '我的人设', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
     })
-    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'project-1', runtime_status: 'starting', expires_at: '' })
+    mocks.createWorkspace.mockResolvedValue(preparedWorkspace({ id: 'workspace-1', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'project-1', runtime_status: 'starting', expires_at: '' }))
     let resolveCommit!: (value: unknown) => void
     mocks.workspaceCommit.mockReturnValue(new Promise((resolve) => { resolveCommit = resolve }))
     mocks.streamEvents = [{
@@ -1964,7 +2143,7 @@ describe('AssistantWorkspace', () => {
       ],
       projects: [{ id: 'project-1', name: '我的人设', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
     })
-    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'project-1', runtime_status: 'starting', expires_at: '' })
+    mocks.createWorkspace.mockResolvedValue(preparedWorkspace({ id: 'workspace-1', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'project-1', runtime_status: 'starting', expires_at: '' }))
     mocks.streamEvents = [{
       event: 'draft.ready',
       id: 'event-attachment-draft',
@@ -1999,7 +2178,7 @@ describe('AssistantWorkspace', () => {
       projects: [{ id: 'project-1', name: '我的人设', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
     })
     mocks.projectsList.mockResolvedValue([{ id: 'project-1', name: '我的人设', platform: 'wechat', status: 'active' }])
-    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'project-1', runtime_status: 'starting', expires_at: '' })
+    mocks.createWorkspace.mockResolvedValue(preparedWorkspace({ id: 'workspace-1', mode_id: 'creation', session_id: 'session-1', sessions: { creation: 'session-1' }, project_id: 'project-1', runtime_status: 'starting', expires_at: '' }))
     uploadToOSSMock.mockResolvedValue({ uploadSessionId: 'upload-1', uploadId: 'upload-1', key: 'staging/cover.png', previewUrl: '', publicUrl: '', contentType: 'image/png', size: 4 })
     renderPage({ modeId: 'creation', projectId: 'project-1' })
 
@@ -2024,7 +2203,7 @@ describe('AssistantWorkspace', () => {
       projects: [{ id: 'project-1', name: '已有的人设', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
     })
     mocks.projectsList.mockResolvedValue([{ id: 'project-1', name: '已有的人设', platform: 'wechat', avatar_url: '', description: '公众号内容创作', status: 'active' }])
-    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'profile', session_id: 'session-1', sessions: { profile: 'session-1' }, project_id: 'project-1', runtime_status: 'starting', expires_at: '' })
+    mocks.createWorkspace.mockResolvedValue(preparedWorkspace({ id: 'workspace-1', mode_id: 'profile', session_id: 'session-1', sessions: { profile: 'session-1' }, project_id: 'project-1', runtime_status: 'starting', expires_at: '' }))
     renderPage({ modeId: 'profile', projectId: 'project-1' })
 
     fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '继续完善已有的人设' } })
@@ -2032,7 +2211,7 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(screen.queryByText('AI 正在处理…')).not.toBeInTheDocument())
 
-    expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('已有的人设')
+    await waitFor(() => expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('已有的人设'))
     expect(screen.queryByRole('combobox', { name: '人设配置' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '进入人设模式' })).not.toBeInTheDocument()
   })
@@ -2057,7 +2236,7 @@ describe('AssistantWorkspace', () => {
     mocks.works.mockImplementation(async (projectId: string) => projectId === 'project-2'
       ? { items: [{ id: 'work-2', title: '第二个人设的作品', type: 'note', createdAt: '2026-10-22T00:00:00Z' }], has_more: false }
       : { items: [{ id: 'work-1', title: '第一个人设的作品', type: 'article', createdAt: '2026-10-22T00:00:00Z' }], has_more: false })
-    mocks.createWorkspace.mockResolvedValue({ id: 'workspace-1', mode_id: 'review', session_id: 'session-1', sessions: { review: 'session-1' }, project_id: 'project-1', content_id: 'work-1', runtime_status: 'starting', expires_at: '' })
+    mocks.createWorkspace.mockResolvedValue(preparedWorkspace({ id: 'workspace-1', mode_id: 'review', session_id: 'session-1', sessions: { review: 'session-1' }, project_id: 'project-1', content_id: 'work-1', runtime_status: 'starting', expires_at: '' }))
     mocks.switchWorkspaceMode.mockResolvedValue({ id: 'workspace-1', mode_id: 'review', session_id: 'session-2', sessions: { review: 'session-2' }, project_id: 'project-2', content_id: 'work-2', runtime_status: 'starting', expires_at: '' })
     renderPage({ modeId: 'review', projectId: 'project-1', contentId: 'work-1' })
 
