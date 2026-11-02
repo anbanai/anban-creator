@@ -6,11 +6,13 @@ import (
 )
 
 const (
+	AssistantInteractionPrepared          = "prepared"
 	AssistantInteractionActive            = "active"
 	AssistantInteractionReconnecting      = "reconnecting"
 	AssistantInteractionNeedsConfirmation = "needs_confirmation"
 	AssistantInteractionCompleted         = "completed"
 	AssistantInteractionAbandoned         = "abandoned"
+	AssistantInteractionRuntimeNotStarted = "not_started"
 	AssistantInteractionRuntimeStarting   = "starting"
 	AssistantInteractionRuntimeRunning    = "running"
 	AssistantInteractionRuntimeClosed     = "closed"

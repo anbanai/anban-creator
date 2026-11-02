@@ -24,6 +24,7 @@ type AssistantInteractionInput struct {
 	ResumeInteractionID string `json:"resume_interaction_id,omitempty"`
 	AgentID             string `json:"agent_id,omitempty"`
 	Intent              string `json:"intent,omitempty"`
+	PrepareOnly         bool   `json:"prepare_only,omitempty"`
 }
 
 type RuntimeBindingView struct {
@@ -170,6 +171,9 @@ func (s *AssistantInteractionService) CreateOrResume(ctx context.Context, userID
 		if interaction.Lifecycle == model.AssistantInteractionCompleted || interaction.Lifecycle == model.AssistantInteractionAbandoned {
 			return s.snapshotWithDrafts(ctx, userID, interaction)
 		}
+		if in.PrepareOnly {
+			return s.snapshotWithDrafts(ctx, userID, interaction)
+		}
 		if err := s.repo.AssistantInteractions().UpdateContext(ctx, interaction.ID, in.ModeID, in.ProjectID, in.ContentID, now); err != nil {
 			return InteractionSnapshot{}, err
 		}
@@ -178,14 +182,20 @@ func (s *AssistantInteractionService) CreateOrResume(ctx context.Context, userID
 		interaction.ContentID = in.ContentID
 		interaction.UpdatedAt = now
 	} else {
-		interaction, _, err = s.repo.AssistantInteractions().FindOrCreateActive(ctx, &model.AssistantInteraction{ID: uuid.NewString(), UserID: userID, ModeID: in.ModeID, ProjectID: in.ProjectID, ContentID: in.ContentID, Lifecycle: model.AssistantInteractionActive, Generation: 1, ExpiresAt: now.Add(interactionRuntimeTTL), LastActivityAt: now, CreatedAt: now, UpdatedAt: now})
+		lifecycle := model.AssistantInteractionActive
+		if in.PrepareOnly {
+			lifecycle = model.AssistantInteractionPrepared
+		}
+		interaction, _, err = s.repo.AssistantInteractions().FindOrCreateActive(ctx, &model.AssistantInteraction{ID: uuid.NewString(), UserID: userID, ModeID: in.ModeID, ProjectID: in.ProjectID, ContentID: in.ContentID, Lifecycle: lifecycle, Generation: 1, ExpiresAt: now.Add(interactionRuntimeTTL), LastActivityAt: now, CreatedAt: now, UpdatedAt: now})
 		if err != nil {
 			return InteractionSnapshot{}, err
 		}
-		interaction.ModeID = in.ModeID
-		interaction.UpdatedAt = now
-		if err := s.repo.AssistantInteractions().UpdateMode(ctx, interaction.ID, in.ModeID, now); err != nil {
-			return InteractionSnapshot{}, err
+		if !in.PrepareOnly {
+			interaction.ModeID = in.ModeID
+			interaction.UpdatedAt = now
+			if err := s.repo.AssistantInteractions().UpdateMode(ctx, interaction.ID, in.ModeID, now); err != nil {
+				return InteractionSnapshot{}, err
+			}
 		}
 	}
 	if createAttemptID != "" {
@@ -225,8 +235,12 @@ func (s *AssistantInteractionService) CreateOrResume(ctx context.Context, userID
 			return InteractionSnapshot{}, errors.Join(ErrInteractivePersistence, createErr)
 		}
 	}
-	if _, err := s.ensureRuntimeLocked(ctx, userID, interaction); err != nil {
-		return InteractionSnapshot{}, err
+	if in.PrepareOnly || interaction.Lifecycle == model.AssistantInteractionPrepared {
+		s.refreshCapabilityMode(interaction)
+		return s.snapshotWithDrafts(ctx, userID, interaction)
+	}
+	if _, ensureErr := s.ensureRuntimeLocked(ctx, userID, interaction); ensureErr != nil {
+		return InteractionSnapshot{}, ensureErr
 	}
 	return s.snapshotWithDrafts(ctx, userID, interaction)
 }
@@ -243,6 +257,9 @@ func (s *AssistantInteractionService) Snapshot(ctx context.Context, userID, inte
 	// reopening a runtime here could create a new execution after confirmation.
 	// Abandoned interactions are terminal for the same reason.
 	if interaction.Lifecycle == model.AssistantInteractionCompleted || interaction.Lifecycle == model.AssistantInteractionAbandoned {
+		return s.snapshotWithDrafts(ctx, userID, interaction)
+	}
+	if interaction.Lifecycle == model.AssistantInteractionPrepared {
 		return s.snapshotWithDrafts(ctx, userID, interaction)
 	}
 	// A ready draft is a durable confirmation boundary. It must remain
@@ -324,6 +341,8 @@ func (s *AssistantInteractionService) snapshotWithDrafts(ctx context.Context, us
 		}
 	} else if interaction.Lifecycle == model.AssistantInteractionCompleted || interaction.Lifecycle == model.AssistantInteractionAbandoned {
 		snapshot.RuntimeStatus = model.AssistantInteractionRuntimeClosed
+	} else if interaction.Lifecycle == model.AssistantInteractionPrepared {
+		snapshot.RuntimeStatus = model.AssistantInteractionRuntimeNotStarted
 	} else if interaction.Lifecycle == model.AssistantInteractionReconnecting {
 		snapshot.RuntimeStatus = model.AssistantInteractionRuntimeFailed
 	} else {
@@ -423,11 +442,14 @@ func (s *AssistantInteractionService) snapshotWithDrafts(ctx context.Context, us
 }
 
 func (s *AssistantInteractionService) Events(ctx context.Context, userID, interactionID string, after uint64) ([]*model.AssistantInteractionEvent, error) {
-	snapshot, err := s.Snapshot(ctx, userID, interactionID)
+	// The SSE handler repairs runtime state once before opening the stream.
+	// Polling must stay readable while initialization or a command holds the
+	// interaction lock, so it only authenticates and reads the current generation.
+	current, err := s.repo.AssistantInteractions().FindByIDForUser(ctx, userID, interactionID)
 	if err != nil {
 		return nil, err
 	}
-	current, err := s.repo.AssistantInteractions().FindByIDForUser(ctx, userID, interactionID)
+	snapshot, err := s.snapshotWithDrafts(ctx, userID, current)
 	if err != nil {
 		return nil, err
 	}
@@ -627,6 +649,7 @@ func (s *AssistantInteractionService) ensureRuntimeLocked(ctx context.Context, u
 		removeCapability()
 		s.metrics.observeRecovery("runtime_start_failed", "restart_required")
 		_ = s.repo.AssistantInteractions().UpdateLifecycle(ctx, interaction.ID, model.AssistantInteractionReconnecting, s.clock())
+		interaction.Lifecycle = model.AssistantInteractionReconnecting
 		return RuntimeBindingView{}, &InteractionError{Code: InteractionErrorRestartRequired, Status: 410, Message: "当前连接已结束，已保留可恢复内容", AvailableActions: []string{"restore_draft", "restart"}, cause: startErr}
 	}
 	// A freshly started Bridge has no logical session until the Server admits
@@ -651,6 +674,7 @@ func (s *AssistantInteractionService) ensureRuntimeLocked(ctx context.Context, u
 		s.clearModeSessions(interaction.ID, interaction.Generation)
 		_ = runtime.Close()
 		_ = s.repo.AssistantInteractions().UpdateLifecycle(ctx, interaction.ID, model.AssistantInteractionReconnecting, s.clock())
+		interaction.Lifecycle = model.AssistantInteractionReconnecting
 		return RuntimeBindingView{}, &InteractionError{Code: InteractionErrorRestartRequired, Status: 410, Message: "当前连接已结束，已保留可恢复内容", AvailableActions: []string{"restore_draft", "restart"}, cause: err}
 	}
 	now := s.clock()
@@ -1030,5 +1054,9 @@ func (s *AssistantInteractionService) snapshotFromInteraction(value *model.Assis
 	if value.Lifecycle == model.AssistantInteractionCompleted {
 		actions = []string{"view_task", "restart"}
 	}
-	return InteractionSnapshot{ID: value.ID, ModeID: value.ModeID, ProjectID: value.ProjectID, ContentID: value.ContentID, Lifecycle: value.Lifecycle, Generation: value.Generation, RuntimeStatus: InteractionRuntimeRunning, ExpiresAt: value.ExpiresAt.UTC().Format(time.RFC3339Nano), LastActivityAt: value.LastActivityAt.UTC().Format(time.RFC3339Nano), AvailableActions: actions}
+	runtimeStatus := InteractionRuntimeRunning
+	if value.Lifecycle == model.AssistantInteractionPrepared {
+		runtimeStatus = InteractionRuntimeNotStarted
+	}
+	return InteractionSnapshot{ID: value.ID, ModeID: value.ModeID, ProjectID: value.ProjectID, ContentID: value.ContentID, Lifecycle: value.Lifecycle, Generation: value.Generation, RuntimeStatus: runtimeStatus, ExpiresAt: value.ExpiresAt.UTC().Format(time.RFC3339Nano), LastActivityAt: value.LastActivityAt.UTC().Format(time.RFC3339Nano), AvailableActions: actions}
 }

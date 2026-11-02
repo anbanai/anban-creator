@@ -1,6 +1,6 @@
 import type { AssistantBlockingIssue, AssistantInteractionCommitResult, AssistantInteractionDraftReceipt, AssistantInteractionSnapshot } from '@/lib/api/assistant'
 
-export type AssistantInteractionStatus = 'connecting' | 'reconnecting' | 'needs_confirmation' | 'input_retryable' | 'command_uncertain' | 'draft_retryable' | 'draft_editable' | 'restart_required' | 'completed'
+export type AssistantInteractionStatus = 'connecting' | 'prepared' | 'reconnecting' | 'needs_confirmation' | 'input_retryable' | 'command_uncertain' | 'draft_retryable' | 'draft_editable' | 'restart_required' | 'completed'
 
 export interface AssistantInteractionState {
   interactionId?: string
@@ -73,7 +73,7 @@ export function assistantInteractionReducer(state: AssistantInteractionState, ac
         ? 'restart_required'
         : snapshot.recovery_error_code && ['assistant_creation_inputs_missing', 'assistant_draft_invalid', 'assistant_draft_not_ready'].includes(snapshot.recovery_error_code)
         ? 'draft_editable'
-        : snapshot.lifecycle === 'completed' ? 'completed' : readyDraft ? 'needs_confirmation' : snapshot.lifecycle === 'reconnecting' ? 'reconnecting' : 'connecting'
+        : snapshot.lifecycle === 'completed' ? 'completed' : readyDraft ? 'needs_confirmation' : snapshot.lifecycle === 'reconnecting' ? 'reconnecting' : snapshot.lifecycle === 'prepared' ? 'prepared' : 'connecting'
       return { ...state, interactionId: snapshot.interaction_id, generation: snapshot.generation, stateSequence: sequence, blockingIssues: undefined, status, availableActions: snapshot.available_actions ?? [], drafts: snapshot.drafts ?? [], errorCode: snapshot.recovery_error_code ?? (status === 'restart_required' ? 'assistant_commit_reconciliation_required' : undefined), taskId: snapshot.commit_result?.task_id }
     }
     case 'composer': return { ...state, composer: action.value }
@@ -122,6 +122,7 @@ export function assistantInteractionReducer(state: AssistantInteractionState, ac
 
 export function assistantInteractionRecoveryLabel(state: AssistantInteractionState): string {
   switch (state.status) {
+    case 'prepared': return '连接已准备，发送消息后开始对话'
     case 'reconnecting': return '正在恢复连接'
     case 'command_uncertain': return '上一条操作的结果无法确认，重新提交可能重复执行'
     case 'needs_confirmation': return '计划已准备好，请确认'
