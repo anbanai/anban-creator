@@ -1282,7 +1282,7 @@ describe('AssistantWorkspace', () => {
     await act(async () => resolveMessage())
   })
 
-  it('uses the DSH-style inline composer and removes setup controls after chat starts', async () => {
+  it('keeps messages and the inline composer together in the chat panel after chat starts', async () => {
     renderPage()
     expect(screen.getByRole('textbox', { name: '发送消息' }).closest('[data-slot="input-group"]')).not.toHaveClass('before:bg-gradient-to-b')
     fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '开始聊天' } })
@@ -1295,7 +1295,10 @@ describe('AssistantWorkspace', () => {
     expect(screen.getByTestId('assistant-context-bar')).toHaveAttribute('data-phase', 'locked')
     expect(screen.getByTestId('assistant-context-bar')).not.toHaveClass('border-b', 'border-border/50')
     expect(screen.queryByRole('button', { name: '人设配置' })).not.toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: '发送消息' }).closest('[data-slot="input-group"]')).toHaveClass('before:bg-gradient-to-b')
+    const chat = screen.getByRole('region', { name: '对话' })
+    expect(within(chat).getByText('收到，我开始处理。')).toBeInTheDocument()
+    expect(within(chat).getByRole('textbox', { name: '发送消息' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' }).closest('[data-slot="input-group"]')).not.toHaveClass('before:bg-gradient-to-b')
     expect(screen.getByRole('button', { name: '发送消息' }).parentElement).toHaveAttribute('data-align', 'inline-end')
   })
 
@@ -1561,7 +1564,7 @@ describe('AssistantWorkspace', () => {
     expect(entries[0].compareDocumentPosition(entries[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(entries[1].compareDocumentPosition(entries[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(entries[2].compareDocumentPosition(entries[3]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(conversation.parentElement).toHaveClass('max-w-6xl')
+    expect(screen.getByRole('region', { name: '对话' })).toContainElement(conversation)
   })
 
   it('removes answered question cards from the home conversation', async () => {
@@ -1847,7 +1850,8 @@ describe('AssistantWorkspace', () => {
     const composer = await screen.findByRole('textbox', { name: '发送消息' })
     fireEvent.change(composer, { target: { value: '继续完善画像' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(composer).toHaveValue('继续完善画像'))
+    expect(await screen.findByRole('button', { name: '重新开始' })).toBeEnabled()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('继续完善画像')
     expect(screen.queryByText(/对话已过期/)).not.toBeInTheDocument()
     expect(screen.queryByText(/SSE connection failed/)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
@@ -2207,6 +2211,10 @@ describe('AssistantWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
 
     const card = await screen.findByRole('region', { name: '确认创作' })
+    const sidebar = screen.getByRole('complementary', { name: '人设与操作' })
+    expect(within(sidebar).getByRole('region', { name: '确认创作' })).toBe(card)
+    expect(within(sidebar).getByText('我的人设')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: '对话' })).queryByRole('button', { name: '开始创作' })).not.toBeInTheDocument()
     expect(mocks.workspaceCommit).not.toHaveBeenCalled()
     expect(within(card).getByText('发布春季新品')).toBeInTheDocument()
     expect(within(card).getByText('公众号文章')).toBeInTheDocument()
@@ -2272,11 +2280,11 @@ describe('AssistantWorkspace', () => {
     fireEvent.change(composer, { target: { value: '开始创作' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     const card = await screen.findByRole('region', { name: '确认创作' })
-    fireEvent.change(composer, { target: { value: '不应并发发送' } })
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '不应并发发送' } })
     fireEvent.click(within(card).getByRole('button', { name: '开始创作' }))
 
     await waitFor(() => expect(mocks.workspaceCommit).toHaveBeenCalled())
-    expect(composer).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
 
     resolveCommit({ mode_id: 'creation', status: 'committed', task: { id: 'task-created-2', project_id: 'project-1', status: 'pending' } })
@@ -2342,7 +2350,7 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'ai_entry_attachment' })))
   })
 
-  it('keeps persona context in the composer header without a profile-mode entry action', async () => {
+  it('places persona context and profile actions in the sidebar while keeping the chat editable after continuing', async () => {
     setBootstrap({
       defaultModeId: 'profile',
       modes: [
@@ -2362,8 +2370,18 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(screen.queryByText('AI 正在处理…')).not.toBeInTheDocument())
 
     await waitFor(() => expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('已有的人设'))
+    const sidebar = screen.getByRole('complementary', { name: '人设与操作' })
+    expect(within(sidebar).getByTestId('assistant-context-bar')).toHaveTextContent('已有的人设')
+    expect(within(sidebar).getByRole('button', { name: '保存人设' })).toBeEnabled()
+    expect(within(sidebar).getByRole('button', { name: '继续深入访谈' })).toBeEnabled()
+    const chat = screen.getByRole('region', { name: '对话' })
+    expect(within(chat).queryByTestId('assistant-context-bar')).not.toBeInTheDocument()
+    expect(within(chat).queryByRole('button', { name: '保存人设' })).not.toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: '人设配置' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '进入人设模式' })).not.toBeInTheDocument()
+    fireEvent.click(within(sidebar).getByRole('button', { name: '继续深入访谈' }))
+    expect(within(chat).getByRole('textbox', { name: '发送消息' })).toBeEnabled()
+    expect(within(sidebar).queryByRole('button', { name: '保存人设' })).not.toBeInTheDocument()
   })
 
   it('synchronizes an active review persona change after selecting a work', async () => {
