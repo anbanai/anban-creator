@@ -1,4 +1,4 @@
-FROM golang:alpine AS builder
+FROM crpi-671lgv9lrdyll4t9.cn-chengdu.personal.cr.aliyuncs.com/bx_anbanai/golang:alpine AS builder
 
 WORKDIR /build/server
 
