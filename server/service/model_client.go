@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openai/openai-go/v3"
@@ -75,7 +77,14 @@ func (c *openaiLLMClient) chatCompletionParams(systemPrompt, userPrompt string) 
 			Content: openai.ChatCompletionUserMessageParamContentUnion{OfString: openai.String(userPrompt)},
 		},
 	})
-	params := openai.ChatCompletionNewParams{Messages: messages, Model: shared.ChatModel(c.model)}
+	return c.applyThinkingPolicy(openai.ChatCompletionNewParams{Messages: messages, Model: shared.ChatModel(c.model)})
+}
+
+// applyThinkingPolicy pins Kimi thinking models to non-thinking responses for
+// every Server-internal call. Vision requests must share the text and video
+// policy: a thinking model can stay silent past the route timeout while the
+// request body is still valid.
+func (c *openaiLLMClient) applyThinkingPolicy(params openai.ChatCompletionNewParams) openai.ChatCompletionNewParams {
 	if isKimiThinkingModel(c.model) {
 		params.SetExtraFields(map[string]any{"thinking": map[string]string{"type": "disabled"}})
 	}
@@ -117,11 +126,15 @@ func (c *openaiLLMClient) CompleteWithImage(ctx context.Context, systemPrompt, u
 }
 
 func (c *openaiLLMClient) CompleteWithImageResult(ctx context.Context, systemPrompt, userPrompt, imageURL string) (*LLMResult, error) {
+	started := time.Now()
+	timeoutSource := imageUnderstandingTimeoutSource(ctx, c.timeout, started)
 	if c.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, c.timeout)
 		defer cancel()
 	}
+	trace := &imageUnderstandingRequestTrace{}
+	ctx = httptrace.WithClientTrace(ctx, trace.clientTrace())
 	messages := []openai.ChatCompletionMessageParamUnion{}
 	if systemPrompt != "" {
 		messages = append(messages, openai.ChatCompletionMessageParamUnion{
@@ -141,25 +154,86 @@ func (c *openaiLLMClient) CompleteWithImageResult(ctx context.Context, systemPro
 		},
 	})
 	var httpResponse *http.Response
-	resp, err := c.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{Messages: messages, Model: shared.ChatModel(c.model)}, option.WithResponseInto(&httpResponse))
+	params := c.applyThinkingPolicy(openai.ChatCompletionNewParams{Messages: messages, Model: shared.ChatModel(c.model)})
+	resp, err := c.client.Chat.Completions.New(ctx, params, option.WithResponseInto(&httpResponse))
 	if err != nil {
-		return nil, newImageUnderstandingProviderError(err, httpResponse)
+		return nil, newImageUnderstandingProviderError(err, httpResponse, trace.diagnostics(started, timeoutSource))
 	}
 	if len(resp.Choices) == 0 {
-		return nil, newImageUnderstandingProviderError(errors.New("llm returned no choices"), httpResponse)
+		return nil, newImageUnderstandingProviderError(errors.New("llm returned no choices"), httpResponse, trace.diagnostics(started, timeoutSource))
 	}
 	return &LLMResult{Text: resp.Choices[0].Message.Content, Model: responseModel(resp.Model, c.model), Usage: chatCompletionUsage(resp.Usage)}, nil
+}
+
+// imageUnderstandingTimeoutSource reports which deadline ends a vision call so
+// an operator can tell a route timeout from a caller (tool/agent) deadline.
+func imageUnderstandingTimeoutSource(ctx context.Context, routeTimeout time.Duration, now time.Time) string {
+	deadline, hasDeadline := ctx.Deadline()
+	switch {
+	case routeTimeout <= 0 && hasDeadline:
+		return "caller_deadline"
+	case routeTimeout <= 0:
+		return "none"
+	case hasDeadline && deadline.Before(now.Add(routeTimeout)):
+		return "caller_deadline"
+	default:
+		return "route_timeout"
+	}
+}
+
+// imageUnderstandingRequestTrace records whether the request body was fully
+// written. A timeout after WroteRequest means the provider never answered; a
+// timeout without it means the upload itself stalled (payload or transport).
+type imageUnderstandingRequestTrace struct {
+	mu             sync.Mutex
+	wroteRequestAt time.Time
+}
+
+func (t *imageUnderstandingRequestTrace) clientTrace() *httptrace.ClientTrace {
+	return &httptrace.ClientTrace{WroteRequest: func(info httptrace.WroteRequestInfo) {
+		// net/http invokes this hook with Err set when the body write aborts.
+		// Recording that as "written" would send triage the wrong way: an
+		// upload that never completed is not evidence the provider hung.
+		if info.Err != nil {
+			return
+		}
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		if t.wroteRequestAt.IsZero() {
+			t.wroteRequestAt = time.Now()
+		}
+	}}
+}
+
+func (t *imageUnderstandingRequestTrace) diagnostics(started time.Time, timeoutSource string) imageUnderstandingDiagnostics {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	diagnostics := imageUnderstandingDiagnostics{TimeoutSource: timeoutSource}
+	if !t.wroteRequestAt.IsZero() {
+		diagnostics.RequestWritten = true
+		diagnostics.RequestWriteMS = t.wroteRequestAt.Sub(started).Milliseconds()
+	}
+	return diagnostics
+}
+
+type imageUnderstandingDiagnostics struct {
+	TimeoutSource  string
+	RequestWritten bool
+	RequestWriteMS int64
 }
 
 // Keep response bodies, request credentials and internal endpoints out of errors returned to agents.
 // Unwrap preserves SDK API status and context cancellation for server callers.
 type imageUnderstandingProviderError struct {
-	Code        string
-	StatusCode  int
-	ContentType string
-	Endpoint    string
-	RequestID   string
-	cause       error
+	Code           string
+	StatusCode     int
+	ContentType    string
+	Endpoint       string
+	RequestID      string
+	TimeoutSource  string
+	RequestWritten bool
+	RequestWriteMS int64
+	cause          error
 }
 
 func (e *imageUnderstandingProviderError) Error() string {
@@ -168,8 +242,13 @@ func (e *imageUnderstandingProviderError) Error() string {
 
 func (e *imageUnderstandingProviderError) Unwrap() error { return e.cause }
 
-func newImageUnderstandingProviderError(err error, response *http.Response) *imageUnderstandingProviderError {
-	result := &imageUnderstandingProviderError{Code: "provider_request_error", cause: err}
+func newImageUnderstandingProviderError(err error, response *http.Response, diagnostics imageUnderstandingDiagnostics) *imageUnderstandingProviderError {
+	result := &imageUnderstandingProviderError{
+		Code: "provider_request_error", cause: err,
+		TimeoutSource:  diagnostics.TimeoutSource,
+		RequestWritten: diagnostics.RequestWritten,
+		RequestWriteMS: diagnostics.RequestWriteMS,
+	}
 	if response != nil {
 		result.StatusCode = response.StatusCode
 		result.ContentType, _, _ = mime.ParseMediaType(response.Header.Get("Content-Type"))
@@ -233,10 +312,7 @@ func (c *openaiLLMClient) CompleteWithVideoURLResult(ctx context.Context, system
 			},
 		},
 	})
-	params := openai.ChatCompletionNewParams{Messages: messages, Model: shared.ChatModel(c.model)}
-	if isKimiThinkingModel(c.model) {
-		params.SetExtraFields(map[string]any{"thinking": map[string]string{"type": "disabled"}})
-	}
+	params := c.applyThinkingPolicy(openai.ChatCompletionNewParams{Messages: messages, Model: shared.ChatModel(c.model)})
 	resp, err := c.client.Chat.Completions.New(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("llm video completion: %w", err)
@@ -268,8 +344,12 @@ func chatCompletionUsage(usage openai.CompletionUsage) srvconfig.TokenUsage {
 }
 
 func isKimiThinkingModel(model string) bool {
-	switch model {
-	case "kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking", "kimi-k2-thinking-turbo",
+	name := strings.ToLower(strings.TrimSpace(model))
+	if index := strings.IndexByte(name, '['); index > 0 {
+		name = name[:index]
+	}
+	switch name {
+	case "kimi-k3", "kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking", "kimi-k2-thinking-turbo",
 		"kimi-k2-0905-preview", "kimi-k2-turbo-preview":
 		return true
 	default:

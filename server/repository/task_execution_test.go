@@ -876,3 +876,163 @@ func TestBlockedCleanupRequiresMatchingReviewedEvidence(t *testing.T) {
 		t.Fatal("reopen changed frozen identity, failure outcome, or cleanup evidence")
 	}
 }
+
+func TestRetireTerminalFinalizationPreservesOutcome(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	execution := seedTaskExecution(t, repo, model.TaskExecutionFailed)
+	completedAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+	wantResult := datatypes.JSON(`{"success":false,"error":"runtime exited"}`)
+	wantDiagnostics := datatypes.JSON(`{"reason":"runtime_failed"}`)
+	if err := repo.db.Model(execution).Updates(map[string]any{
+		"finalization_status": model.TaskExecutionFinalizationResult,
+		"cleanup_status":      model.TaskExecutionCleanupDone,
+		"completed_at":        completedAt,
+		"result":              wantResult,
+		"diagnostics":         wantDiagnostics,
+		"terminal_reason":     "runtime_failed",
+		"cleanup_attempts":    2,
+	}).Error; err != nil {
+		t.Fatalf("seed terminal attempt: %v", err)
+	}
+
+	won, err := repo.TaskExecutions().RetireTerminalFinalization(ctx, execution.ID)
+	if err != nil || !won {
+		t.Fatalf("retire finalization = %v, %v; want true", won, err)
+	}
+	retired, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retired.Status != model.TaskExecutionFailed || retired.FinalizationStatus != model.TaskExecutionFinalizationSuperseded ||
+		retired.CleanupStatus != model.TaskExecutionCleanupDone || retired.TerminalReason != "runtime_failed" ||
+		string(retired.Result) != string(wantResult) || string(retired.Diagnostics) != string(wantDiagnostics) ||
+		retired.CleanupAttempts != 2 {
+		t.Fatalf("retired attempt changed its recorded outcome: %#v", retired)
+	}
+	if retired.CompletedAt == nil || !retired.CompletedAt.Equal(completedAt) {
+		t.Fatalf("completed_at = %v, want %v", retired.CompletedAt, completedAt)
+	}
+	if retired.FinalizationAt == nil || retired.FinalizationToken != "" {
+		t.Fatalf("finalization lease was not released: at=%v token=%q", retired.FinalizationAt, retired.FinalizationToken)
+	}
+	if won, err := repo.TaskExecutions().RetireTerminalFinalization(ctx, execution.ID); err != nil || won {
+		t.Fatalf("second retire = %v, %v; want false", won, err)
+	}
+}
+
+func TestRetireTerminalFinalizationSchedulesMissingCleanup(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	execution := seedTaskExecution(t, repo, model.TaskExecutionFailed)
+	if err := repo.db.Model(execution).Updates(map[string]any{
+		"finalization_status": model.TaskExecutionFinalizationTerminal,
+		"cleanup_status":      "",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if won, err := repo.TaskExecutions().RetireTerminalFinalization(ctx, execution.ID); err != nil || !won {
+		t.Fatalf("retire finalization = %v, %v; want true", won, err)
+	}
+	retired, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retired.CleanupStatus != model.TaskExecutionCleanupPending {
+		t.Fatalf("cleanup status = %q, want %q", retired.CleanupStatus, model.TaskExecutionCleanupPending)
+	}
+
+	finished := seedTaskExecution(t, repo, model.TaskExecutionSucceeded)
+	if err := repo.db.Model(finished).Update("finalization_status", model.TaskExecutionFinalizationDone).Error; err != nil {
+		t.Fatal(err)
+	}
+	if won, err := repo.TaskExecutions().RetireTerminalFinalization(ctx, finished.ID); err != nil || won {
+		t.Fatalf("retire completed finalization = %v, %v; want false", won, err)
+	}
+}
+
+func TestCancelSupersededExecutionTerminalizesActiveAttempt(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	execution := seedTaskExecution(t, repo, model.TaskExecutionRunning)
+	won, err := repo.TaskExecutions().CancelSupersededExecution(ctx, execution.ID)
+	if err != nil || !won {
+		t.Fatalf("cancel superseded execution = %v, %v; want true", won, err)
+	}
+	retired, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retired.Status != model.TaskExecutionCancelled || retired.TerminalReason != "superseded" ||
+		retired.FinalizationStatus != model.TaskExecutionFinalizationSuperseded ||
+		retired.CleanupStatus != model.TaskExecutionCleanupPending || retired.CompletedAt == nil {
+		t.Fatalf("cancelled superseded attempt = %#v", retired)
+	}
+	if retired.Result != nil || retired.Diagnostics != nil {
+		t.Fatalf("superseded attempt fabricated outcome evidence: result=%s diagnostics=%s", retired.Result, retired.Diagnostics)
+	}
+	if won, err := repo.TaskExecutions().CancelSupersededExecution(ctx, execution.ID); err != nil || won {
+		t.Fatalf("second cancel = %v, %v; want false", won, err)
+	}
+
+	terminal := seedTaskExecution(t, repo, model.TaskExecutionFailed)
+	if err := repo.db.Model(terminal).Update("finalization_status", model.TaskExecutionFinalizationTerminal).Error; err != nil {
+		t.Fatal(err)
+	}
+	if won, err := repo.TaskExecutions().CancelSupersededExecution(ctx, terminal.ID); err != nil || won {
+		t.Fatalf("cancel terminal attempt = %v, %v; want false", won, err)
+	}
+}
+
+func TestFindReconcilableSkipsSupersededFinalization(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	superseded := seedTaskExecution(t, repo, model.TaskExecutionFailed)
+	pendingCleanup := seedTaskExecution(t, repo, model.TaskExecutionFailed)
+	done := seedTaskExecution(t, repo, model.TaskExecutionSucceeded)
+	if err := repo.db.Model(superseded).Updates(map[string]any{
+		"finalization_status": model.TaskExecutionFinalizationSuperseded,
+		"cleanup_status":      model.TaskExecutionCleanupDone,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.db.Model(pendingCleanup).Updates(map[string]any{
+		"finalization_status": model.TaskExecutionFinalizationSuperseded,
+		"cleanup_status":      model.TaskExecutionCleanupPending,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.db.Model(done).Updates(map[string]any{
+		"finalization_status": model.TaskExecutionFinalizationDone,
+		"cleanup_status":      model.TaskExecutionCleanupDone,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := repo.TaskExecutions().FindReconcilable(ctx, time.Now().Add(time.Hour), 100)
+	if err != nil {
+		t.Fatalf("find reconcilable: %v", err)
+	}
+	if len(found) != 1 || found[0].ID != pendingCleanup.ID {
+		t.Fatalf("reconcilable = %+v, want only pending cleanup %s", found, pendingCleanup.ID)
+	}
+}
+
+func TestClaimFinalizationRejectsSupersededAttempt(t *testing.T) {
+	repo := setupTaskExecutionRepository(t)
+	ctx := context.Background()
+	active := seedTaskExecution(t, repo, model.TaskExecutionFailed)
+	superseded := seedTaskExecution(t, repo, model.TaskExecutionFailed)
+	if err := repo.db.Model(active).Update("finalization_status", model.TaskExecutionFinalizationTerminal).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.db.Model(superseded).Update("finalization_status", model.TaskExecutionFinalizationSuperseded).Error; err != nil {
+		t.Fatal(err)
+	}
+	if won, err := repo.TaskExecutions().ClaimFinalization(ctx, active.ID, "owner", time.Minute); err != nil || !won {
+		t.Fatalf("claim active finalization = %v, %v; want true", won, err)
+	}
+	if won, err := repo.TaskExecutions().ClaimFinalization(ctx, superseded.ID, "owner", time.Minute); err != nil || won {
+		t.Fatalf("claim superseded finalization = %v, %v; want false", won, err)
+	}
+}

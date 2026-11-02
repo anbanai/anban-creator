@@ -18,12 +18,20 @@ const (
 	runtimeExecutionIdentityUnavailableExitCode int32 = 3
 )
 
+// ErrExecutionNotCurrent reports that an attempt is no longer the task's
+// current execution. Its durable finalization must be retired instead of
+// retried; the task outcome stays owned by the newer attempt.
+var ErrExecutionNotCurrent = errors.New("runtime execution is no longer current")
+
 type RuntimeReconcileService interface {
 	FindReconcilableExecutions(context.Context, time.Time, int) ([]*model.TaskExecution, error)
 	RecordExecutionInstance(context.Context, string, string) error
 	ResumeExecutionDispatch(context.Context, string) error
 	ResumeExecutionFinalization(context.Context, string) error
 	ReconcileExecutionFailure(context.Context, string, string, string, []byte) error
+	// RetireSupersededExecution records that a non-current attempt is
+	// abandoned. It never mutates task, billing, or publication state.
+	RetireSupersededExecution(context.Context, string) (bool, error)
 	ClaimExecutionCleanup(context.Context, string, string, time.Duration) (bool, error)
 	ResolveExecutionCleanupRuntime(context.Context, string, string) (*model.TaskExecution, bool, error)
 	CompleteExecutionCleanup(context.Context, string, string) (bool, error)
@@ -128,10 +136,24 @@ func (r *RuntimeReconciler) ReconcileOnce(ctx context.Context) error {
 
 func (r *RuntimeReconciler) reconcileOne(ctx context.Context, execution *model.TaskExecution, now time.Time) error {
 	if isTerminalRuntimeExecution(execution.Status) {
-		finalizeErr := r.service.ResumeExecutionFinalization(ctx, execution.ID)
+		var finalizeErr error
+		if execution.FinalizationStatus != model.TaskExecutionFinalizationSuperseded {
+			finalizeErr = r.service.ResumeExecutionFinalization(ctx, execution.ID)
+			if errors.Is(finalizeErr, ErrExecutionNotCurrent) {
+				finalizeErr = r.retireSuperseded(ctx, execution)
+			}
+		}
 		cleanupErr := r.cleanupExecution(ctx, execution)
 		return errors.Join(finalizeErr, cleanupErr)
 	}
+	err := r.reconcileActive(ctx, execution, now)
+	if errors.Is(err, ErrExecutionNotCurrent) {
+		return r.retireSuperseded(ctx, execution)
+	}
+	return err
+}
+
+func (r *RuntimeReconciler) reconcileActive(ctx context.Context, execution *model.TaskExecution, now time.Time) error {
 	activeDeadline := r.config.ActiveDeadline
 	if execution.ActiveDeadlineSeconds > 0 {
 		activeDeadline = time.Duration(execution.ActiveDeadlineSeconds) * time.Second
@@ -193,6 +215,25 @@ func (r *RuntimeReconciler) reconcileOne(ctx context.Context, execution *model.T
 		if heartbeatBase != nil && now.Sub(*heartbeatBase) >= r.config.HeartbeatTimeout {
 			return r.fail(ctx, execution, model.TaskExecutionTimedOut, "deadline_exceeded", state.Reason, "Agent heartbeat deadline exceeded", state.ExitCode)
 		}
+	}
+	return nil
+}
+
+// retireSuperseded abandons an attempt that another attempt already replaced.
+// It records the transition once and never logs a reconciliation failure: the
+// state is expected, and the workload cleanup keeps running through the normal
+// terminal path on this or the next cycle.
+func (r *RuntimeReconciler) retireSuperseded(ctx context.Context, execution *model.TaskExecution) error {
+	retired, err := r.service.RetireSupersededExecution(ctx, execution.ID)
+	if err != nil {
+		return err
+	}
+	if retired {
+		r.logger.Info().
+			Str("task_id", execution.TaskID).
+			Str("execution_id", execution.ID).
+			Str("attempt_status", execution.Status).
+			Msg("retired superseded runtime execution")
 	}
 	return nil
 }

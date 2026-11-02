@@ -279,6 +279,12 @@ type TaskExecutionRepository interface {
 	AdvanceFinalization(ctx context.Context, id, token, from, to string) (bool, error)
 	RenewFinalizationClaim(ctx context.Context, id, token string) (bool, error)
 	ReleaseFinalization(ctx context.Context, id, token string) error
+	// RetireTerminalFinalization abandons a terminal attempt's durable
+	// finalization without changing its recorded outcome or cleanup evidence.
+	RetireTerminalFinalization(ctx context.Context, id string) (bool, error)
+	// CancelSupersededExecution terminalizes a still-active attempt that another
+	// attempt already replaced, leaving its runtime workload for cleanup.
+	CancelSupersededExecution(ctx context.Context, id string) (bool, error)
 	TransitionDraftDelivery(ctx context.Context, id, from, to string, result []byte) (bool, error)
 	ClaimCleanup(ctx context.Context, id, token string, lease time.Duration) (bool, error)
 	CompleteCleanup(ctx context.Context, id, token string) (bool, error)

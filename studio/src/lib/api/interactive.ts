@@ -81,6 +81,7 @@ export const interactiveApi = {
 export interface InteractionEventStreamOptions {
   generation?: number
   lastEventId?: string
+  onConnected?: () => void
   onGenerationChanged?: (generation: number) => void
   onEvent?: (event: { event: string; id?: string; data: string }) => void
 }
@@ -148,6 +149,7 @@ export function streamAssistantInteraction(interactionId: string, token: string,
         continue
       }
       if (!response.body) return
+      options.onConnected?.()
       reconnects = 0
       const reader = response.body.getReader()
       const decoder = new TextDecoder()

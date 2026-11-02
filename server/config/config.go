@@ -2515,9 +2515,17 @@ func (c *Config) Validate() error {
 		errs = append(errs, err.Error())
 	}
 
+	if c.ModelRoutes.ImageUnderstanding.Model != "" || c.ModelRoutes.ImageUnderstanding.Provider != "" {
+		if c.ModelRoutes.ImageUnderstanding.Timeout <= 0 {
+			errs = append(errs, "model_routes.image_understanding.timeout must be positive")
+		}
+	}
 	if c.ModelRoutes.VideoUnderstanding.Model != "" || c.ModelRoutes.VideoUnderstanding.Provider != "" {
 		if !c.ModelRoutes.VideoUnderstanding.RequireNativeVideo {
 			errs = append(errs, "model_routes.video_understanding.require_native_video must be true")
+		}
+		if c.ModelRoutes.VideoUnderstanding.Timeout <= 0 {
+			errs = append(errs, "model_routes.video_understanding.timeout must be positive")
 		}
 	}
 

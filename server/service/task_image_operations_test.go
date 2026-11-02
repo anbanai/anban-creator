@@ -1298,3 +1298,41 @@ func TestTaskImageAnalysisCostEvidenceLifecycle(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskImageAnalyzeLogsProviderTimeoutDiagnostics(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	var logs bytes.Buffer
+	logger := zerolog.New(&logs)
+	providerErr := &imageUnderstandingProviderError{
+		Code: "provider_timeout", TimeoutSource: "route_timeout",
+		RequestWritten: true, RequestWriteMS: 12,
+	}
+	svc := NewTaskImageOperationsService(f.tasks, nil, &fakeTaskImageUnderstandingClient{err: providerErr}, nil, TaskImageOperationsConfig{
+		UnderstandingProvider: "tokenplayer_openai", UnderstandingModel: "kimi-k3",
+		UnderstandingTimeout: 3 * time.Minute,
+	}, &logger)
+
+	_, err := svc.Analyze(context.Background(), AnalyzeTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID,
+		FilePath: "output/source-a.png", Prompt: "inspect",
+	})
+	if err == nil || !strings.Contains(err.Error(), "provider_timeout") {
+		t.Fatalf("analyze error = %v, want provider timeout", err)
+	}
+	line := strings.TrimSpace(logs.String())
+	var event map[string]any
+	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		t.Fatalf("decode log %q: %v", line, err)
+	}
+	if event["message"] != "image understanding provider call failed" ||
+		event["error_code"] != "provider_timeout" ||
+		event["timeout_source"] != "route_timeout" ||
+		event["request_written"] != true ||
+		event["request_write_ms"] != float64(12) ||
+		event["timeout_ms"] != float64(180000) {
+		t.Fatalf("log event = %#v", event)
+	}
+	if event["operation_id"] == "" || event["image_data_url_bytes"] == float64(0) {
+		t.Fatalf("log event lost correlation/size fields: %#v", event)
+	}
+}
