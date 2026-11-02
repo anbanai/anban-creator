@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   userMediaList: vi.fn(),
   streamCalls: vi.fn(),
   connectionGate: null as Promise<void> | null,
+  streamCompletionGate: null as Promise<void> | null,
   messageDelivered: null as Promise<void> | null,
   deliverMessage: () => {},
   existingConversation: false,
@@ -86,6 +87,10 @@ vi.mock('@/lib/interactive-events', async () => ({
       yield { event: 'turn.end', id: `event-${sessionId}-end`, data: JSON.stringify({ session_id: sessionId }) }
     }
     for (const event of mocks.streamEvents) yield event
+    if (mocks.streamCompletionGate) {
+      await mocks.streamCompletionGate
+      if (!signal.aborted) yield { event: 'turn.end', id: 'deferred-turn-end', data: JSON.stringify({ session_id: sessionId }) }
+    }
   })(),
 }))
 
@@ -386,6 +391,7 @@ describe('AssistantWorkspace', () => {
     mocks.streamDefaults = true
     mocks.streamEvents = []
     mocks.connectionGate = null
+    mocks.streamCompletionGate = null
     mocks.streamEventsEnabled = true
     mocks.streamError = null
     mocks.messageDelivered = new Promise<void>((resolve) => { mocks.deliverMessage = resolve })
@@ -1740,6 +1746,28 @@ describe('AssistantWorkspace', () => {
     expect(screen.queryByText('上次已经完成的访谈')).not.toBeInTheDocument()
   })
 
+  it('keeps the confirmation summary in view when the response finishes after the draft arrives', async () => {
+    const snapshot = restoreCreation()
+    mocks.getInteractionSnapshot.mockResolvedValue({ ...snapshot, lifecycle: 'active', drafts: [] })
+    mocks.streamDefaults = false
+    mocks.streamEvents = [
+      { event: 'turn.start', id: 'turn-start', data: '{}' },
+      { event: 'draft.ready', id: 'ready-summary', data: JSON.stringify({ mode_id: 'creation', draft: snapshot.drafts[0] }) },
+    ]
+    let finishResponse!: () => void
+    mocks.streamCompletionGate = new Promise<void>((resolve) => { finishResponse = resolve })
+    renderPage()
+    await screen.findByRole('region', { name: '确认创作' })
+    await screen.findByText('AI 正在处理…')
+    const scrollIntoView = vi.mocked(HTMLElement.prototype.scrollIntoView)
+    scrollIntoView.mockClear()
+
+    await act(async () => { finishResponse() })
+
+    expect(screen.queryByText('AI 正在处理…')).not.toBeInTheDocument()
+    expect(scrollIntoView).not.toHaveBeenCalled()
+  })
+
   it.each([
     { mode: 'profile' as const, title: '保存人设', summary: '面向新茶客分享真实冲泡经验', payload: { project: { name: '茶饮账号', platform: 'wechat' }, profile: { dimensions: { identity: { content: { positioning: '面向新茶客分享真实冲泡经验' } } } } } },
     { mode: 'creation' as const, title: '确认创作', summary: '为新茶客梳理春茶冲泡步骤', payload: { plan: { goal: '为新茶客梳理春茶冲泡步骤', content_type: 'wechat-article', topic: '春茶', angle: '冲泡', expression_form: '教程' } } },
@@ -1758,7 +1786,7 @@ describe('AssistantWorkspace', () => {
     const firstRender = renderPage()
     const card = await screen.findByRole('region', { name: title })
     expect(await within(card).findByText(summary)).toBeVisible()
-    expect(screen.getByRole('complementary', { name: '人设与操作' })).toContainElement(card)
+    expect(screen.getByTestId('assistant-conversation')).toContainElement(card)
     expect(vi.mocked(HTMLElement.prototype.scrollIntoView).mock.contexts).toContain(card)
     firstRender.unmount()
 
@@ -2405,10 +2433,14 @@ describe('AssistantWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
 
     const card = await screen.findByRole('region', { name: '确认创作' })
-    const sidebar = screen.getByRole('complementary', { name: '人设与操作' })
-    expect(within(sidebar).getByRole('region', { name: '确认创作' })).toBe(card)
-    expect(within(sidebar).getByText('我的人设')).toBeInTheDocument()
-    expect(within(screen.getByRole('region', { name: '对话' })).queryByRole('button', { name: '开始创作' })).not.toBeInTheDocument()
+    const chat = screen.getByRole('region', { name: '对话' })
+    const persona = within(chat).getByRole('region', { name: '人设信息' })
+    const conversation = within(chat).getByTestId('assistant-conversation')
+    expect(persona).toHaveTextContent('我的人设')
+    expect(persona.compareDocumentPosition(conversation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(conversation).toContainElement(card)
+    expect(within(conversation).getByText('收到，我开始处理。').compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(card).getByText('发布春季新品').compareDocumentPosition(within(card).getByRole('button', { name: '开始创作' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(mocks.workspaceCommit).not.toHaveBeenCalled()
     expect(within(card).getByText('发布春季新品')).toBeInTheDocument()
     expect(within(card).getByText('公众号文章')).toBeInTheDocument()
@@ -2544,7 +2576,7 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'ai_entry_attachment' })))
   })
 
-  it('places persona context and profile actions in the sidebar while keeping the chat editable after continuing', async () => {
+  it('places persona context above the conversation and profile actions below its summary while keeping the chat editable after continuing', async () => {
     setBootstrap({
       defaultModeId: 'profile',
       modes: [
@@ -2564,18 +2596,20 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(screen.queryByText('AI 正在处理…')).not.toBeInTheDocument())
 
     await waitFor(() => expect(screen.getByTestId('assistant-context-bar')).toHaveTextContent('已有的人设'))
-    const sidebar = screen.getByRole('complementary', { name: '人设与操作' })
-    expect(within(sidebar).getByTestId('assistant-context-bar')).toHaveTextContent('已有的人设')
-    expect(within(sidebar).getByRole('button', { name: '保存人设' })).toBeEnabled()
-    expect(within(sidebar).getByRole('button', { name: '继续深入访谈' })).toBeEnabled()
     const chat = screen.getByRole('region', { name: '对话' })
-    expect(within(chat).queryByTestId('assistant-context-bar')).not.toBeInTheDocument()
-    expect(within(chat).queryByRole('button', { name: '保存人设' })).not.toBeInTheDocument()
+    const persona = within(chat).getByRole('region', { name: '人设信息' })
+    const conversation = within(chat).getByTestId('assistant-conversation')
+    const card = within(conversation).getByRole('region', { name: '保存人设' })
+    expect(within(persona).getByTestId('assistant-context-bar')).toHaveTextContent('已有的人设')
+    expect(persona.compareDocumentPosition(conversation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(card).getByRole('button', { name: '保存人设' })).toBeEnabled()
+    expect(within(card).getByRole('button', { name: '继续深入访谈' })).toBeEnabled()
+    expect(within(card).getByText('全自动视频剪辑').compareDocumentPosition(within(card).getByRole('button', { name: '保存人设' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.queryByRole('combobox', { name: '人设配置' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '进入人设模式' })).not.toBeInTheDocument()
-    fireEvent.click(within(sidebar).getByRole('button', { name: '继续深入访谈' }))
+    fireEvent.click(within(card).getByRole('button', { name: '继续深入访谈' }))
     expect(within(chat).getByRole('textbox', { name: '发送消息' })).toBeEnabled()
-    expect(within(sidebar).queryByRole('button', { name: '保存人设' })).not.toBeInTheDocument()
+    expect(within(conversation).queryByRole('button', { name: '保存人设' })).not.toBeInTheDocument()
   })
 
   it('synchronizes an active review persona change after selecting a work', async () => {
