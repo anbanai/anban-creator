@@ -99,6 +99,12 @@ type TaskImageOperationsConfig struct {
 	UnderstandingModel    string
 	UnderstandingTimeout  time.Duration
 	PublicBaseURL         string
+	// MaxImageEdge caps the long edge of an image before it is base64 encoded
+	// for the image-understanding route. Zero disables downscaling.
+	MaxImageEdge int
+	// ImageQuality is the JPEG quality used when the source has to be
+	// re-encoded. Zero selects the package default.
+	ImageQuality int
 }
 
 type taskImageOperationsImage interface {
@@ -695,7 +701,7 @@ func (s *TaskImageOperationsService) loadAnalysisSource(ctx context.Context, ima
 		if err != nil {
 			return "", fmt.Errorf("validate image file: %w", err)
 		}
-		return imageDataURL(mimeType, data), nil
+		return s.encodeAnalysisImage(data, mimeType), nil
 	}
 	if !strings.HasPrefix(imageURL, "https://") {
 		return "", errors.New("image_url must be an HTTPS URL")
@@ -712,7 +718,35 @@ func (s *TaskImageOperationsService) loadAnalysisSource(ctx context.Context, ima
 	if err != nil {
 		return "", fmt.Errorf("validate downloaded image: %w", err)
 	}
-	return imageDataURL(mimeType, data), nil
+	return s.encodeAnalysisImage(data, mimeType), nil
+}
+
+// encodeAnalysisImage downscales the validated source before base64 encoding.
+// The provider request is dominated by the encoded image, so an image that
+// already fits the edge budget is sent untouched and a failed downscale falls
+// back to the original bytes instead of failing the analysis.
+func (s *TaskImageOperationsService) encodeAnalysisImage(data []byte, mimeType string) string {
+	prepared, err := appimage.DownscaleForVision(data, mimeType, appimage.VisionDownscaleOptions{
+		MaxEdge: s.config.MaxImageEdge,
+		Quality: s.config.ImageQuality,
+	})
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn().Err(err).Int("image_bytes", len(data)).Str("image_type", mimeType).
+				Msg("image understanding downscale failed; sending the original image")
+		}
+		return imageDataURL(mimeType, data)
+	}
+	if prepared.Changed && s.logger != nil {
+		s.logger.Debug().
+			Int("image_bytes_before", len(data)).
+			Int("image_bytes_after", len(prepared.Data)).
+			Int("image_width", prepared.Width).
+			Int("image_height", prepared.Height).
+			Str("image_type_after", prepared.MIMEType).
+			Msg("image understanding source downscaled")
+	}
+	return imageDataURL(prepared.MIMEType, prepared.Data)
 }
 
 func imageDataURL(mimeType string, data []byte) string {

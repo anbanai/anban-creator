@@ -878,9 +878,26 @@ type RouteConfig struct {
 	Timeout  time.Duration `yaml:"timeout"`
 }
 
+// DefaultMaxImageEdge is the long-edge cap applied to images sent to a vision
+// model when a route does not configure model_routes.*.max_image_edge.
+const DefaultMaxImageEdge = 1600
+
+// DefaultImageQuality is the JPEG quality used when a route does not configure
+// model_routes.*.image_quality.
+const DefaultImageQuality = 85
+
 type UnderstandingRouteConfig struct {
 	RouteConfig  `yaml:",inline"`
 	RequireUsage bool `yaml:"require_usage"`
+	// MaxImageEdge caps the long edge of an image before it is base64 encoded
+	// for the vision model. A nil value selects DefaultMaxImageEdge; an explicit
+	// zero disables downscaling.
+	MaxImageEdge *int `yaml:"max_image_edge"`
+	// ImageQuality is the JPEG quality used when the image has to be re-encoded.
+	// A nil value selects DefaultImageQuality. Resolution and quality trade
+	// different costs: the edge drives image tokens and prefill time, quality
+	// drives encoded bytes and small-text legibility.
+	ImageQuality *int `yaml:"image_quality"`
 }
 
 type VideoUnderstandingRouteConfig struct {
@@ -965,6 +982,8 @@ type UnderstandingRuntimeConfig struct {
 	ProviderKey  string
 	Timeout      time.Duration
 	RequireUsage bool
+	MaxImageEdge int
+	ImageQuality int
 }
 
 type VideoUnderstandingRuntimeConfig struct {
@@ -1999,10 +2018,19 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 		if err != nil {
 			return err
 		}
+		maxImageEdge := DefaultMaxImageEdge
+		if c.ModelRoutes.ImageUnderstanding.MaxImageEdge != nil {
+			maxImageEdge = *c.ModelRoutes.ImageUnderstanding.MaxImageEdge
+		}
+		imageQuality := DefaultImageQuality
+		if c.ModelRoutes.ImageUnderstanding.ImageQuality != nil {
+			imageQuality = *c.ModelRoutes.ImageUnderstanding.ImageQuality
+		}
 		c.ImageUnderstanding = UnderstandingRuntimeConfig{
 			BaseURL: p.BaseURL, Key: p.APIKey, Model: c.ModelRoutes.ImageUnderstanding.Model,
 			Provider: providerKind(c.ModelRoutes.ImageUnderstanding.Provider), ProviderKey: c.ModelRoutes.ImageUnderstanding.Provider,
 			Timeout: c.ModelRoutes.ImageUnderstanding.Timeout, RequireUsage: c.ModelRoutes.ImageUnderstanding.RequireUsage,
+			MaxImageEdge: maxImageEdge, ImageQuality: imageQuality,
 		}
 	}
 	if c.ModelRoutes.VideoUnderstanding.Model != "" || c.ModelRoutes.VideoUnderstanding.Provider != "" {
@@ -2518,6 +2546,16 @@ func (c *Config) Validate() error {
 	if c.ModelRoutes.ImageUnderstanding.Model != "" || c.ModelRoutes.ImageUnderstanding.Provider != "" {
 		if c.ModelRoutes.ImageUnderstanding.Timeout <= 0 {
 			errs = append(errs, "model_routes.image_understanding.timeout must be positive")
+		}
+		if edge := c.ModelRoutes.ImageUnderstanding.MaxImageEdge; edge != nil {
+			if *edge < 0 || *edge > 8192 || (*edge > 0 && *edge < 256) {
+				errs = append(errs, "model_routes.image_understanding.max_image_edge must be 0 or between 256 and 8192")
+			}
+		}
+		if quality := c.ModelRoutes.ImageUnderstanding.ImageQuality; quality != nil {
+			if *quality < 1 || *quality > 100 {
+				errs = append(errs, "model_routes.image_understanding.image_quality must be between 1 and 100")
+			}
 		}
 	}
 	if c.ModelRoutes.VideoUnderstanding.Model != "" || c.ModelRoutes.VideoUnderstanding.Provider != "" {
