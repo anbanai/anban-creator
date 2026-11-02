@@ -152,6 +152,7 @@ export interface AgentPackArtifactStage {
   trigger: string;
   required?: string[];
   terminal?: boolean;
+  required_on_final?: boolean;
 }
 
 export interface AgentPack {

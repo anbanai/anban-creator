@@ -1,6 +1,7 @@
 package agentpack
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -95,6 +96,55 @@ tagging:
 	}
 	if operation, ok := catalog.BillingOperation("demo-task"); !ok || operation != "task.demo" {
 		t.Fatalf("BillingOperation = %q, %v", operation, ok)
+	}
+}
+
+func TestArtifactStageRequiredOnFinalSerializesToCatalogJSON(t *testing.T) {
+	root := writePackFixture(t, `
+id: demo-pack
+version: 1.0.0
+kind: plugin
+display_name: Demo Pack
+description: Demo plugin workflow
+agent:
+  name: demo
+  claude_source: agent.claude.md
+  codex_source: agent.codex.toml
+  skills: [demo-skill]
+  max_turns: 60
+runtime:
+  profile: demo
+  adapter: standard
+surfaces: [plugin]
+artifacts:
+  - {role: final_video, path: output/final.mp4, mime_type: video/mp4, required: true}
+  - {role: explainer_input_assessment, path: output/explainer-input-assessment.json, mime_type: application/json, required: false}
+  - {role: semantic_master, path: output/semantic-master.json, mime_type: application/json, required: false}
+artifact_stages:
+  - id: explainer_preflight
+    trigger: output/explainer-input-assessment.json
+    required: [output/explainer-input-assessment.json, output/semantic-master.json]
+    required_on_final: true
+  - id: final_delivery
+    trigger: output/final.mp4
+    terminal: true
+`)
+
+	catalog, err := LoadCatalog(root)
+	if err != nil {
+		t.Fatalf("LoadCatalog: %v", err)
+	}
+	pack, ok := catalog.Pack("demo-pack")
+	if !ok || len(pack.ArtifactStages) != 2 || !pack.ArtifactStages[0].RequiredOnFinal {
+		t.Fatalf("artifact stages = %#v", pack.ArtifactStages)
+	}
+
+	encoded, err := json.Marshal(pack)
+	if err != nil {
+		t.Fatalf("marshal catalog pack: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"required_on_final":true`) {
+		t.Fatalf("catalog JSON omitted required_on_final: %s", encoded)
 	}
 }
 

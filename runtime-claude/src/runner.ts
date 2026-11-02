@@ -579,7 +579,9 @@ function createSeednoteProgressStopHook(
 function blockedStopOutput(validation: Exclude<ArtifactValidationResult, { ok: true }>): HookJSONOutput {
   const additionalContext = validation.reason === "missing_artifacts"
     ? `Managed completion gate is blocked. Create or repair these required artifacts: ${validation.missing.join(", ")}.`
-    : `Managed completion gate is blocked because failure state ${validation.path} exists. Resolve the recorded failure before stopping.`;
+    : validation.reason === "invalid_artifacts"
+      ? `Managed completion gate is blocked because evidence artifacts are invalid: ${validation.invalid.map((entry) => `${entry.path} (${entry.errors.join("; ")})`).join(", ")}. Repair the evidence and rerun affected validation.`
+      : `Managed completion gate is blocked because failure state ${validation.path} exists. Resolve the recorded failure before stopping.`;
   return {
     decision: "block",
     reason: additionalContext,

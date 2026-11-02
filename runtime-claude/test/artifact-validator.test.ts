@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -81,11 +82,71 @@ const talkingHeadPack: AgentPack = {
   ],
 };
 
+const explainerPack: AgentPack = {
+  ...talkingHeadPack,
+  id: "talking-head-explainer",
+  artifacts: [
+    { role: "final", path: "output/final.mp4", required: true },
+    { role: "explainer_input_assessment", path: "output/explainer-input-assessment.json", required: false },
+    { role: "semantic_master", path: "output/semantic-master.json", required: false },
+    { role: "explanation_rehearsal", path: "output/explanation-rehearsal.json", required: false },
+  ],
+  artifact_stages: [
+    {
+      id: "explainer_preflight",
+      trigger: "output/explainer-input-assessment.json",
+      required: [
+        "output/explainer-input-assessment.json",
+        "output/semantic-master.json",
+        "output/explanation-plan.json",
+        "output/explanation-rehearsal.json",
+        "output/platform-variant-plan.json",
+        "output/retention-experiment-plan.json",
+        "output/independent-validation-plan.json",
+        "output/independent-validation.json",
+      ],
+      required_on_final: true,
+    },
+    { id: "final_delivery", trigger: "output/final.mp4", terminal: true },
+  ],
+} as AgentPack;
+
 async function workspace(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "anban-progress-artifacts-"));
   roots.push(root);
   await mkdir(join(root, "output"), { recursive: true });
   return root;
+}
+
+const semanticMaster = {
+  core_claims: ["A"], evidence: ["B"], explanation_order: ["C"], primary_hook: "D",
+  spoken_semantics: ["E"], visual_anchors: ["F"], conclusion: "G", qualifications: ["H"],
+};
+
+function stableHash(value: unknown): string {
+  const sort = (current: unknown): unknown => Array.isArray(current)
+    ? current.map(sort)
+    : current && typeof current === "object"
+      ? Object.fromEntries(Object.keys(current as Record<string, unknown>).sort().map((key) => [key, sort((current as Record<string, unknown>)[key])]))
+      : current;
+  return createHash("sha256").update(JSON.stringify(sort(value))).digest("hex");
+}
+
+async function writeExplainerEvidence(root: string, overrides: Record<string, unknown> = {}): Promise<void> {
+  const hash = stableHash(semanticMaster);
+  const envelope = (extra: Record<string, unknown>) => ({ schema_version: "1.0.0", status: "ready", source: "talking-head-montage", workflow: "talking-head-explainer", data_at: "2026-11-02T00:00:00Z", missing: [], evidence_paths: [], ...extra });
+  await writeFile(join(root, "output", "explainer-input-assessment.json"), JSON.stringify(envelope({ inputs: [] })));
+  await writeFile(join(root, "output", "semantic-master.json"), JSON.stringify(envelope({ semantic_master: semanticMaster, revision_id: "rev-1", content_sha256: hash })));
+  for (const path of [
+    "explanation-plan.json",
+    "retention-experiment-plan.json",
+    "independent-validation-plan.json",
+    "independent-validation.json",
+  ]) {
+    await writeFile(join(root, "output", path), JSON.stringify(envelope({ revision_id: "rev-1", semantic_master_sha256: hash })));
+  }
+  await writeFile(join(root, "output", "platform-variant-plan.json"), JSON.stringify(envelope({ master_revision_id: "rev-1", semantic_master_sha256: hash, platforms: [] })));
+  await writeFile(join(root, "output", "explanation-rehearsal.json"), JSON.stringify(envelope({ revision_id: "rev-1", semantic_master_sha256: hash, rehearsal_mode: "still_frames", units: [{ required: true, passed: true }], collision_checks: [], decision: "proceed", expensive_generation_allowed: true, ...overrides })));
 }
 
 describe("artifact validation", () => {
@@ -240,5 +301,210 @@ describe("artifact validation", () => {
     await writeFile(join(root, "output", "visual-plan.json"), "{}");
 
     expect(await validateFinalArtifacts(talkingHeadPack, root)).toEqual({ ok: true });
+  });
+
+  test("keeps triggered explainer gates required when final delivery exists", async () => {
+    const root = await workspace();
+    await writeFile(join(root, "output", "final.mp4"), "final");
+    await writeFile(join(root, "output", "explainer-input-assessment.json"), "{}");
+    await writeFile(join(root, "output", "semantic-master.json"), "{}");
+
+    expect(await validateFinalArtifacts(explainerPack, root)).toEqual({
+      ok: false,
+      reason: "missing_artifacts",
+      missing: [
+        "output/explanation-plan.json",
+        "output/explanation-rehearsal.json",
+        "output/platform-variant-plan.json",
+        "output/retention-experiment-plan.json",
+        "output/independent-validation-plan.json",
+        "output/independent-validation.json",
+      ],
+    });
+  });
+
+  test("rejects malformed explainer JSON instead of accepting file presence", async () => {
+    const root = await workspace();
+    await writeFile(join(root, "output", "final.mp4"), "final");
+    await writeExplainerEvidence(root);
+    await writeFile(join(root, "output", "platform-variant-plan.json"), "{}");
+    const result = await validateFinalArtifacts(explainerPack, root);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("invalid_artifacts");
+  });
+
+  test("accepts explainer evidence when the primary rehearsal passes", async () => {
+    const root = await workspace();
+    await writeFile(join(root, "output", "final.mp4"), "final");
+    await writeExplainerEvidence(root);
+    expect(await validateFinalArtifacts(explainerPack, root)).toEqual({ ok: true });
+  });
+
+  test("rejects a required explainer artifact marked failed", async () => {
+    const root = await workspace();
+    await writeFile(join(root, "output", "final.mp4"), "final");
+    await writeExplainerEvidence(root);
+    const planPath = join(root, "output", "explanation-plan.json");
+    const plan = JSON.parse(await readFile(planPath, "utf8")) as Record<string, unknown>;
+    plan.status = "failed";
+    await writeFile(planPath, JSON.stringify(plan));
+
+    const result = await validateFinalArtifacts(explainerPack, root);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("invalid_artifacts");
+      if (result.reason === "invalid_artifacts") {
+        expect(result.invalid).toContainEqual(expect.objectContaining({
+          path: "output/explanation-plan.json",
+          errors: expect.arrayContaining(["explainer artifacts cannot have status failed"]),
+        }));
+      }
+    }
+  });
+
+  test("rejects stale master bindings in each plan and validation artifact", async () => {
+    const stalePaths = [
+      "output/explanation-plan.json",
+      "output/retention-experiment-plan.json",
+      "output/independent-validation-plan.json",
+      "output/independent-validation.json",
+    ];
+    for (const stalePath of stalePaths) {
+      const root = await workspace();
+      await writeFile(join(root, "output", "final.mp4"), "final");
+      await writeExplainerEvidence(root);
+
+      const updatedMaster = { ...semanticMaster, core_claims: ["updated claim"] };
+      const updatedHash = stableHash(updatedMaster);
+      const masterEnvelope = JSON.parse(await readFile(join(root, "output", "semantic-master.json"), "utf8")) as Record<string, unknown>;
+      masterEnvelope.semantic_master = updatedMaster;
+      masterEnvelope.revision_id = "rev-2";
+      masterEnvelope.content_sha256 = updatedHash;
+      await writeFile(join(root, "output", "semantic-master.json"), JSON.stringify(masterEnvelope));
+
+      for (const path of [
+        "output/explanation-plan.json",
+        "output/explanation-rehearsal.json",
+        "output/platform-variant-plan.json",
+        "output/retention-experiment-plan.json",
+        "output/independent-validation-plan.json",
+        "output/independent-validation.json",
+      ]) {
+        if (path === stalePath) continue;
+        const filePath = join(root, path);
+        const evidence = JSON.parse(await readFile(filePath, "utf8")) as Record<string, unknown>;
+        evidence.revision_id = "rev-2";
+        evidence.master_revision_id = "rev-2";
+        evidence.semantic_master_sha256 = updatedHash;
+        await writeFile(filePath, JSON.stringify(evidence));
+      }
+
+      const result = await validateFinalArtifacts(explainerPack, root);
+      expect(result.ok, stalePath).toBe(false);
+      if (!result.ok) {
+        expect(result.reason, stalePath).toBe("invalid_artifacts");
+        if (result.reason === "invalid_artifacts") {
+          expect(result.invalid.some((entry) => entry.path === stalePath), stalePath).toBe(true);
+        }
+      }
+    }
+  });
+
+  test("accepts an applied and reviewed low-cost fallback without permitting expensive generation", async () => {
+    const root = await workspace();
+    await writeFile(join(root, "output", "final.mp4"), "final");
+    await writeFile(join(root, "output", "fallback-walkthrough.md"), "Static comparison walkthrough passed.");
+    await writeExplainerEvidence(root, {
+      units: [{
+        required: true,
+        passed: false,
+        applied_fallback: {
+          method: "static_comparison",
+          applied: true,
+          description: "Replace the confusing motion graphic with a two-column comparison.",
+          walkthrough_result: "passed",
+          evidence_paths: ["output/fallback-walkthrough.md"],
+        },
+      }],
+      decision: "fallback",
+      expensive_generation_allowed: false,
+    });
+
+    expect(await validateFinalArtifacts(explainerPack, root)).toEqual({ ok: true });
+  });
+
+  test("rejects fallback delivery when the fallback is missing, unapplied, unreviewed, or unsupported by evidence", async () => {
+    const cases: Array<{ name: string; unit: Record<string, unknown>; evidence?: boolean }> = [
+      { name: "missing fallback", unit: { required: true, passed: false } },
+      {
+        name: "not applied",
+        unit: { required: true, passed: false, applied_fallback: { method: "talking_head", applied: false, description: "Use the presenter.", walkthrough_result: "passed", evidence_paths: ["output/fallback-walkthrough.md"] } },
+        evidence: true,
+      },
+      {
+        name: "failed fallback walkthrough",
+        unit: { required: true, passed: false, applied_fallback: { method: "simple_graphic", applied: true, description: "Use a simpler diagram.", walkthrough_result: "failed", evidence_paths: ["output/fallback-walkthrough.md"] } },
+        evidence: true,
+      },
+      {
+        name: "missing evidence file",
+        unit: { required: true, passed: false, applied_fallback: { method: "static_comparison", applied: true, description: "Use a static comparison.", walkthrough_result: "passed", evidence_paths: ["output/missing-fallback-evidence.md"] } },
+      },
+      {
+        name: "invalid evidence path",
+        unit: { required: true, passed: false, applied_fallback: { method: "other", applied: true, description: "Use a low-risk replacement.", walkthrough_result: "passed", evidence_paths: ["fallback-walkthrough.md"] } },
+        evidence: true,
+      },
+    ];
+
+    for (const scenario of cases) {
+      const root = await workspace();
+      await writeFile(join(root, "output", "final.mp4"), "final");
+      if (scenario.evidence) await writeFile(join(root, "output", "fallback-walkthrough.md"), "Fallback preview.");
+      await writeExplainerEvidence(root, {
+        units: [scenario.unit],
+        decision: "fallback",
+        expensive_generation_allowed: false,
+      });
+      const result = await validateFinalArtifacts(explainerPack, root);
+      expect(result.ok, scenario.name).toBe(false);
+      if (!result.ok) expect(result.reason, scenario.name).toBe("invalid_artifacts");
+    }
+  });
+
+  test("rejects inconsistent rehearsal decisions and generation permissions", async () => {
+    const cases = [
+      { decision: "proceed", expensive_generation_allowed: false, units: [{ required: true, passed: true }] },
+      { decision: "proceed", expensive_generation_allowed: true, units: [{ required: true, passed: false }] },
+      { decision: "fallback", expensive_generation_allowed: true, units: [{ required: true, passed: true }] },
+      { decision: "fallback", expensive_generation_allowed: false, units: [{ required: true, passed: true }] },
+      { decision: "blocked", expensive_generation_allowed: false, units: [{ required: true, passed: false }] },
+    ];
+    for (const scenario of cases) {
+      const root = await workspace();
+      await writeFile(join(root, "output", "final.mp4"), "final");
+      await writeExplainerEvidence(root, scenario);
+      const result = await validateFinalArtifacts(explainerPack, root);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe("invalid_artifacts");
+    }
+  });
+
+  test("does not activate explainer-only final gates for ordinary talking-head tasks", async () => {
+    const root = await workspace();
+    await writeFile(join(root, "output", "final.mp4"), "final");
+
+    expect(await validateFinalArtifacts(explainerPack, root)).toEqual({ ok: true });
+  });
+
+  test("does not treat an explainer preflight as final completion", async () => {
+    const root = await workspace();
+    await writeExplainerEvidence(root);
+
+    expect(await validateFinalArtifacts(explainerPack, root)).toEqual({
+      ok: false,
+      reason: "missing_artifacts",
+      missing: ["output/final.mp4"],
+    });
   });
 });
