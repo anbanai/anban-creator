@@ -58,7 +58,7 @@ func (s *AssistantInteractionService) StageDraftForInteraction(ctx context.Conte
 	if in.ModeID == AssistantModeCreation {
 		issues, validationErr := validateInteractionCreation(in.Payload)
 		if validationErr != nil {
-			return InteractionStageResult{}, s.creationErrorWithSnapshot(ctx, userID, interaction, creationDraftError(InteractionErrorDraftInvalid, nil))
+			return InteractionStageResult{}, s.creationErrorWithSnapshot(ctx, userID, interaction, NormalizeInteractionError(validationErr))
 		}
 		in.Ready = in.Ready && len(issues) == 0
 	}
