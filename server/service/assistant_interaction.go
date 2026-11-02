@@ -139,9 +139,8 @@ func (s *AssistantInteractionService) CreateOrResume(ctx context.Context, userID
 			if err := json.Unmarshal(previous.Result, &receipt); err != nil || strings.TrimSpace(receipt.InteractionID) == "" {
 				return InteractionSnapshot{}, errors.Join(ErrInteractivePersistence, err)
 			}
-			// Replaying a create request must still repair a missing runtime
-			// binding, while completed interactions remain terminal and simply
-			// return their durable snapshot.
+			// A replay observes the current durable state, including conversations
+			// ended by a Server restart.
 			return s.Snapshot(ctx, userID, receipt.InteractionID)
 		} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
 			return InteractionSnapshot{}, errors.Join(ErrInteractivePersistence, findErr)
@@ -170,6 +169,9 @@ func (s *AssistantInteractionService) CreateOrResume(ctx context.Context, userID
 		}
 		if interaction.Lifecycle == model.AssistantInteractionCompleted || interaction.Lifecycle == model.AssistantInteractionAbandoned {
 			return s.snapshotWithDrafts(ctx, userID, interaction)
+		}
+		if err := s.endRestartedInteractionLocked(ctx, userID, interaction); err != nil {
+			return InteractionSnapshot{}, err
 		}
 		if in.PrepareOnly {
 			return s.snapshotWithDrafts(ctx, userID, interaction)
@@ -235,6 +237,9 @@ func (s *AssistantInteractionService) CreateOrResume(ctx context.Context, userID
 			return InteractionSnapshot{}, errors.Join(ErrInteractivePersistence, createErr)
 		}
 	}
+	if err := s.endRestartedInteractionLocked(ctx, userID, interaction); err != nil {
+		return InteractionSnapshot{}, err
+	}
 	if in.PrepareOnly || interaction.Lifecycle == model.AssistantInteractionPrepared {
 		s.refreshCapabilityMode(interaction)
 		return s.snapshotWithDrafts(ctx, userID, interaction)
@@ -262,9 +267,25 @@ func (s *AssistantInteractionService) Snapshot(ctx context.Context, userID, inte
 	if interaction.Lifecycle == model.AssistantInteractionPrepared {
 		return s.snapshotWithDrafts(ctx, userID, interaction)
 	}
-	// A ready draft is a durable confirmation boundary. It must remain
-	// readable even when the runtime binding is stale or cannot be replaced;
-	// confirmation is handled entirely by CommitInteraction. This also repairs
+	if s.runtimeFor(interaction.ID, interaction.Generation) == nil {
+		lock := s.lockFor(interactionID)
+		lock.Lock()
+		current, lookupErr := s.repo.AssistantInteractions().FindByIDForUser(ctx, userID, interactionID)
+		if lookupErr == nil {
+			lookupErr = s.endRestartedInteractionLocked(ctx, userID, current)
+		}
+		lock.Unlock()
+		if lookupErr != nil {
+			var ended *InteractionError
+			if errors.As(lookupErr, &ended) && ended.Snapshot != nil {
+				return *ended.Snapshot, nil
+			}
+			return InteractionSnapshot{}, lookupErr
+		}
+		interaction = current
+	}
+	// A ready draft is a durable confirmation boundary while its conversation
+	// is active; confirmation is handled by CommitInteraction. This also repairs
 	// the small window where the draft transaction committed but the ready event
 	// or lifecycle update did not.
 	if drafts, draftErr := s.repo.AssistantInteractions().ListDrafts(ctx, userID, interaction.ID); draftErr == nil {
@@ -432,7 +453,7 @@ func (s *AssistantInteractionService) snapshotWithDrafts(ctx context.Context, us
 			}
 		}
 	}
-	if snapshot.CommitResult == nil && snapshot.RecoveryErrorCode == "" {
+	if snapshot.Lifecycle != model.AssistantInteractionAbandoned && snapshot.CommitResult == nil && snapshot.RecoveryErrorCode == "" {
 		if _, attemptErr := s.repo.AssistantInteractions().FindLatestCommandOutcomeUnknown(ctx, interaction.ID); attemptErr == nil {
 			snapshot.RecoveryErrorCode = InteractionErrorCommandOutcomeUnknown
 			snapshot.AvailableActions = []string{"retry_with_new_attempt", "restart"}
@@ -567,9 +588,52 @@ func (s *AssistantInteractionService) EnsureRuntime(ctx context.Context, userID,
 	return s.ensureRuntimeLocked(ctx, userID, interaction)
 }
 
+// A durable binding without its process-local handle belongs to a previous
+// Server process. End it instead of creating a runtime that cannot answer its
+// old questions. Accepted commit receipts remain the authority for task results.
+func (s *AssistantInteractionService) endRestartedInteractionLocked(ctx context.Context, userID string, interaction *model.AssistantInteraction) error {
+	if interactionRuntimeTerminalError(interaction.Lifecycle) != nil || interaction.Lifecycle == model.AssistantInteractionPrepared || s.runtimeFor(interaction.ID, interaction.Generation) != nil {
+		return nil
+	}
+	binding, err := s.repo.AssistantInteractions().FindCurrentRuntime(ctx, interaction.ID, interaction.Generation)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	snapshot, err := s.snapshotWithDrafts(ctx, userID, interaction)
+	if err != nil {
+		return err
+	}
+	if snapshot.CommitResult != nil {
+		return NewInteractionError(InteractionErrorCommitAlreadyApplied, 409, "任务已创建，请查看任务", "view_task", "restart").WithSnapshot(snapshot)
+	}
+	if snapshot.RecoveryErrorCode == InteractionErrorCommitReconciliationRequired {
+		return NewInteractionError(InteractionErrorCommitReconciliationRequired, 409, "创建结果需要核对，请查看任务状态", "view_task", "reconcile_commit").WithSnapshot(snapshot)
+	}
+	now := s.clock()
+	if err := s.repo.AssistantInteractions().UpdateLifecycle(ctx, interaction.ID, model.AssistantInteractionAbandoned, now); err != nil {
+		return err
+	}
+	if err := s.repo.AssistantInteractions().CloseRuntime(ctx, binding.ID, now); err != nil {
+		return err
+	}
+	interaction.Lifecycle = model.AssistantInteractionAbandoned
+	snapshot, err = s.snapshotWithDrafts(ctx, userID, interaction)
+	if err != nil {
+		return err
+	}
+	s.metrics.observeRecovery("server_restart", "ended")
+	return NewInteractionError(InteractionErrorRestartRequired, 410, "服务已更新或重启，当前对话已结束，请重新开始", "restart").WithSnapshot(snapshot)
+}
+
 func (s *AssistantInteractionService) ensureRuntimeLocked(ctx context.Context, userID string, interaction *model.AssistantInteraction) (RuntimeBindingView, error) {
 	if terminalErr := interactionRuntimeTerminalError(interaction.Lifecycle); terminalErr != nil {
 		return RuntimeBindingView{}, terminalErr
+	}
+	if err := s.endRestartedInteractionLocked(ctx, userID, interaction); err != nil {
+		return RuntimeBindingView{}, err
 	}
 	// Expiry fences the runtime generation, not the durable conversation. A
 	// replacement must receive a fresh lease before its MCP handshake starts.
@@ -592,27 +656,6 @@ func (s *AssistantInteractionService) ensureRuntimeLocked(ctx context.Context, u
 			}
 			return RuntimeBindingView{InteractionID: interaction.ID, Generation: interaction.Generation, RuntimeStatus: current.Status, RuntimeID: current.RuntimeID, LogicalSessionID: logicalSessionID, runtime: runtime}, nil
 		}
-		// A binding loaded from the database without an in-process runtime is a
-		// stale binding left by a Server restart. Replace it before accepting a
-		// command so an old logical session can never be used as authority.
-		now := s.clock()
-		_ = s.repo.AssistantInteractions().CloseRuntime(ctx, current.ID, now)
-		s.clearModeSessions(interaction.ID, interaction.Generation)
-		expiresAt := now.Add(interactionRuntimeTTL)
-		if ok, casErr := s.repo.AssistantInteractions().CompareAndSwapGeneration(ctx, interaction.ID, interaction.Generation, interaction.Generation+1, now, expiresAt); casErr != nil || !ok {
-			if casErr != nil {
-				return RuntimeBindingView{}, casErr
-			}
-			return RuntimeBindingView{}, NewInteractionError(InteractionErrorGenerationChanged, 409, "对话状态已更新，请加载最新内容", "reload_snapshot")
-		}
-		s.metrics.observeGenerationReplacement()
-		s.metrics.observeRecovery("server_restart", "replaced")
-		interaction.Generation++
-		interaction.ExpiresAt = expiresAt
-		_ = s.repo.AssistantInteractions().UpdateLifecycle(ctx, interaction.ID, model.AssistantInteractionReconnecting, now)
-		// The old binding has been fenced and the next generation must follow
-		// the normal runtime creation path below.
-		err = gorm.ErrRecordNotFound
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return RuntimeBindingView{}, err
@@ -793,7 +836,7 @@ func interactionRuntimeTerminalError(lifecycle string) *InteractionError {
 	case model.AssistantInteractionCompleted:
 		return NewInteractionError(InteractionErrorRestartRequired, 409, "当前对话已完成，请查看已创建的任务", "view_task", "restart")
 	case model.AssistantInteractionAbandoned:
-		return NewInteractionError(InteractionErrorRestartRequired, 410, "当前对话已结束，已保留可恢复内容", "restore_draft", "restart")
+		return NewInteractionError(InteractionErrorRestartRequired, 410, "当前对话已结束，请重新开始", "restart")
 	default:
 		return nil
 	}
@@ -1053,6 +1096,9 @@ func (s *AssistantInteractionService) snapshotFromInteraction(value *model.Assis
 	}
 	if value.Lifecycle == model.AssistantInteractionCompleted {
 		actions = []string{"view_task", "restart"}
+	}
+	if value.Lifecycle == model.AssistantInteractionAbandoned {
+		actions = []string{"restart"}
 	}
 	runtimeStatus := InteractionRuntimeRunning
 	if value.Lifecycle == model.AssistantInteractionPrepared {

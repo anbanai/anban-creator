@@ -12,21 +12,18 @@ import (
 
 func TestAssistantInteractionRecoversExpiredRuntimeLease(t *testing.T) {
 	for _, tc := range []struct {
-		name          string
-		age           time.Duration
-		entry         string
-		liveRuntime   bool
-		serverRestart bool
+		name        string
+		age         time.Duration
+		entry       string
+		liveRuntime bool
 	}{
 		{name: "unexpired", age: 23 * time.Hour},
-		{name: "unexpired_server_restart", age: 23 * time.Hour, liveRuntime: true, serverRestart: true},
 		{name: "expired_without_binding", age: 25 * time.Hour},
 		{name: "expired_create_replay", age: 25 * time.Hour, entry: "replay"},
 		{name: "expired_explicit_resume", age: 25 * time.Hour, entry: "resume"},
 		{name: "expired_snapshot", age: 25 * time.Hour, entry: "snapshot"},
 		{name: "expired_live_runtime", age: 25 * time.Hour, liveRuntime: true},
 		{name: "expiry_boundary", age: 24 * time.Hour, liveRuntime: true},
-		{name: "expired_server_restart", age: 25 * time.Hour, liveRuntime: true, serverRestart: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -61,9 +58,6 @@ func TestAssistantInteractionRecoversExpiredRuntimeLease(t *testing.T) {
 					t.Fatalf("expired credential accepted before recovery: %v", err)
 				}
 			}
-			if tc.serverRestart {
-				svc = NewAssistantInteractionService(svc.repo, factory, svc.clock)
-			}
 			svc.factory = factory
 			var recovered InteractionSnapshot
 			switch tc.entry {
@@ -82,7 +76,7 @@ func TestAssistantInteractionRecoversExpiredRuntimeLease(t *testing.T) {
 			}
 			wantGeneration := original.Generation
 			wantExpiry := createdAt.Add(24 * time.Hour)
-			if tc.age >= 24*time.Hour || tc.serverRestart {
+			if tc.age >= 24*time.Hour {
 				wantGeneration++
 				wantExpiry = svc.clock().Add(24 * time.Hour)
 			}

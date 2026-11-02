@@ -2,9 +2,9 @@
   "packs": [
     {
       "id": "ecommerce",
-      "version": "2.0.5",
+      "version": "2.1.0",
       "kind": "plugin",
-      "display_name": "电商素材",
+      "display_name": "电商设计",
       "description": "基于产品图片生成完整电商文案和视觉素材包。",
       "agent": {
         "name": "ecommerce",
@@ -83,6 +83,12 @@
           "required": false
         },
         {
+          "role": "quality_gate",
+          "path": "output/quality-gate.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
           "role": "manifest",
           "path": "output/manifest.json",
           "mime_type": "application/json",
@@ -111,6 +117,11 @@
         {
           "role": "copywriting",
           "path": "output/copywriting.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "quality_gate",
+          "path": "output/quality-gate.md",
           "mime_type": "text/markdown"
         },
         {
@@ -159,7 +170,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "fdf9f245858f58297e6b3a1671b7f35277af71e3ff30105961e8ec4ae2629325"
+      "digest": "1743bf1c32e79dfa7f969c874fbdc6961842c4693a0a0fbf0ed988ce518d6696"
     },
     {
       "id": "content-planning",
@@ -1301,7 +1312,7 @@
     },
     {
       "id": "creation-planner",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "kind": "managed",
       "display_name": "创作模式",
       "description": "通过持续对话澄清本次作品需求，并在用户确认后交给 Server 创建正式创作任务。",
@@ -1334,7 +1345,7 @@
         "interactive-creation-clarification"
       ],
       "ui": {},
-      "digest": "3fdb532f1cc5d0fd72a25de99c0ed469a387784b18471f1c2a07c429041f2b13"
+      "digest": "d294e9227bba2ed2212a998ae0067a9aee7905d3ca20c6eb8dde862505a59bcc"
     },
     {
       "id": "feedback-analysis",
@@ -2042,7 +2053,7 @@
     },
     {
       "id": "postmortem-review",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "kind": "managed",
       "display_name": "复盘模式",
       "description": "围绕已完成作品和只读分析证据进行交互式复盘，形成等待独立数据验证的画像改进候选。",
@@ -2075,7 +2086,7 @@
         "interactive-postmortem-review"
       ],
       "ui": {},
-      "digest": "320efb3e8e3f9666f02ca66e0ca4f1186e2e4b162070b51c802e01ceac8c7624"
+      "digest": "b5bada558611fab13cacb14af2ffd0c7be36c0f8fde52dbdc31f6f863d033ac6"
     },
     {
       "id": "profile-analysis",
@@ -3261,7 +3272,7 @@
     },
     {
       "id": "talking-head-montage",
-      "version": "1.2.2",
+      "version": "1.3.0",
       "kind": "plugin",
       "display_name": "口播 Montage 制作",
       "description": "以 OpenMontage hybrid 为主引擎，完成真人口播、生成视频素材、图片素材、图形动效、字幕与分章节 BGM 的本地制作与文件审核，并在流程最后一步生成封面。",
@@ -3273,6 +3284,7 @@
           "content-tagging",
           "short-video-cover",
           "talking-head-visual-focus",
+          "talking-head-explainer",
           "video-bgm-design",
           "video-production-qc",
           "video-subtitle-design"
@@ -3290,12 +3302,58 @@
       ],
       "features": [
         "talking-head",
+        "explainable-knowledge-editing",
+        "semantic-master-variants",
+        "retention-experiments",
+        "independent-validation",
         "generated-video-inserts",
         "image-inserts",
         "motion-graphics",
         "automatic-review-loop"
       ],
       "artifacts": [
+        {
+          "role": "explainer_input_assessment",
+          "path": "output/explainer-input-assessment.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "explanation_plan",
+          "path": "output/explanation-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "platform_variant_plan",
+          "path": "output/platform-variant-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "retention_experiment_plan",
+          "path": "output/retention-experiment-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "independent_validation_plan",
+          "path": "output/independent-validation-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "independent_validation",
+          "path": "output/independent-validation.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "retention_results",
+          "path": "output/retention-results.json",
+          "mime_type": "application/json",
+          "required": false
+        },
         {
           "role": "rough_cut",
           "path": "output/rough-cut.mp4",
@@ -3700,7 +3758,7 @@
       "ui": {
         "renderer": "custom:talking-head-montage"
       },
-      "digest": "182edd94ad4d1d3983b8de9235535caa8eaec67c87f58afbf30a72e7b0727a7e"
+      "digest": "dc3a168ccbb3b41083609a0378086a4a5b586740408d27ce7e69f068c87d768c"
     },
     {
       "id": "topic-radar",
@@ -5060,7 +5118,7 @@
     },
     {
       "id": "viral-ip-video-editor",
-      "version": "1.2.2",
+      "version": "1.3.0",
       "kind": "plugin",
       "display_name": "爆款 IP 视频剪辑",
       "description": "基于 Montage 运行时处理真人 IP 口播素材，完成留存导向的剪辑规划、制作指导和成片质量复核；字幕与 BGM 各自按独立方法论制作（BGM 可按章节换曲），封面在流程最后一步生成。",
@@ -5074,6 +5132,7 @@
           "short-video-cover",
           "talking-head-composition",
           "talking-head-visual-focus",
+          "talking-head-explainer",
           "video-bgm-design",
           "video-production-qc",
           "video-subtitle-design",
@@ -5095,11 +5154,57 @@
       "features": [
         "viral-ip-video-editing",
         "retention-editing",
+        "explainable-knowledge-editing",
+        "semantic-master-variants",
+        "retention-experiments",
+        "independent-validation",
         "source-assets",
         "montage-runtime",
         "audio-silence-detection"
       ],
       "artifacts": [
+        {
+          "role": "explainer_input_assessment",
+          "path": "output/explainer-input-assessment.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "explanation_plan",
+          "path": "output/explanation-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "platform_variant_plan",
+          "path": "output/platform-variant-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "retention_experiment_plan",
+          "path": "output/retention-experiment-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "independent_validation_plan",
+          "path": "output/independent-validation-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "independent_validation",
+          "path": "output/independent-validation.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "retention_results",
+          "path": "output/retention-results.json",
+          "mime_type": "application/json",
+          "required": false
+        },
         {
           "role": "project_brief",
           "path": "output/project_brief.md",
@@ -5420,7 +5525,7 @@
         }
       ],
       "ui": {},
-      "digest": "73db1eb48ed0d234d41e0d9cb36d341790ed54cbdbeb78c767c402875517915a"
+      "digest": "abdb4e34f494ca4d42a94e517a6a16a2d7a0b6a032e61e7a159e0fe4c98df065"
     },
     {
       "id": "wechat-article",

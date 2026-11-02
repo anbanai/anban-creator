@@ -64,6 +64,9 @@ export function assistantInteractionReducer(state: AssistantInteractionState, ac
         const released = newer && currentDraft?.confirmation_state === 'confirmed'
         if (state.status === 'completed' || state.errorCode === 'assistant_commit_reconciliation_required' && latestDraft?.confirmation_state !== 'confirmed' && !released || creationDraftRegresses(currentDraft, latestDraft, newer)) return state
       }
+      if (snapshot.lifecycle === 'abandoned' && !snapshot.commit_result && snapshot.recovery_error_code !== 'assistant_commit_reconciliation_required') {
+        return { ...state, interactionId: snapshot.interaction_id, generation: snapshot.generation, stateSequence: sequence, status: 'restart_required', availableActions: ['restart'], drafts: [], errorCode: 'assistant_interaction_restart_required' }
+      }
       const readyDraft = snapshot.mode_id === 'creation'
         ? latestDraft?.ready && latestDraft.confirmation_state === 'pending' && snapshot.available_actions.includes('confirm_draft')
         : (snapshot.drafts ?? []).some((draft) => draft.ready && draft.confirmation_state !== 'consumed') || snapshot.lifecycle === 'needs_confirmation'
@@ -129,7 +132,7 @@ export function assistantInteractionRecoveryLabel(state: AssistantInteractionSta
     case 'input_retryable': return '刚才的消息未送出，内容已保留'
     case 'draft_editable': return state.errorCode === 'assistant_creation_inputs_missing' ? '计划仍有必要信息待补充，可以继续讨论' : '计划尚未就绪，可以继续修改'
     case 'draft_retryable': return state.errorCode === 'assistant_draft_revision_conflict' ? '计划版本已更新，请恢复最新计划' : '计划已保留，可以重试暂存'
-    case 'restart_required': return state.errorCode === 'assistant_commit_reconciliation_required' ? '创建结果需要核对，请查看任务状态' : '连接已结束，计划仍然保留'
+    case 'restart_required': return state.errorCode === 'assistant_commit_reconciliation_required' ? '创建结果需要核对，请查看任务状态' : state.availableActions.includes('restore_draft') ? '连接已结束，计划仍然保留' : '当前对话已结束，请重新开始'
     case 'completed': return '已创建任务'
     default: return ''
   }

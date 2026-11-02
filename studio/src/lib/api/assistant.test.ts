@@ -9,6 +9,23 @@ vi.mock('@/lib/http-client', () => ({
 
 afterEach(() => vi.clearAllMocks())
 
+it('allows snapshot recovery to wait for runtime initialization', async () => {
+  vi.mocked(http.get).mockResolvedValue({ data: { data: { generation: 2 } } })
+  await assistantApi.getInteractionSnapshot('recovering-interaction')
+  expect(http.get).toHaveBeenCalledWith('/assistant/interactions/recovering-interaction', { timeout: 15 * 60 * 1000 })
+})
+
+it.each([false, true])('does not send an old question to a replacement runtime (explicit retry: %s)', async (forceNewAttempt) => {
+  const snapshot = { interaction_id: 'stale-question', generation: 3, lifecycle: 'active', available_actions: ['send_message'] }
+  vi.mocked(http.get).mockResolvedValue({ data: { data: snapshot } })
+  vi.mocked(http.post).mockResolvedValue({ data: { data: { accepted: true } } })
+
+  await expect(assistantApi.workspaceAnswer('stale-question', 'creation', 'old-call', [{ id: 'topic', selected: ['AI'] }], 2, forceNewAttempt)).rejects.toMatchObject({
+    response: { status: 409, data: { error_code: 'assistant_interaction_generation_changed', data: snapshot } },
+  })
+  expect(http.post).not.toHaveBeenCalled()
+})
+
 it('confirms the displayed draft without looking up or substituting a newer revision', async () => {
   vi.mocked(http.get).mockResolvedValue({ data: { data: { drafts: [{ draft_id: 'newer', revision: 9, ready: true }] } } })
   vi.mocked(http.post).mockResolvedValue({ data: { data: { status: 'created', task_id: 'task-1' } } })
@@ -159,9 +176,9 @@ it('reuses an answer attempt after an ambiguous request failure until acceptance
     .mockResolvedValueOnce({ data: { data: { accepted: true } } })
   const answers = [{ id: 'choice', selected: ['yes'] }]
 
-  await expect(assistantApi.workspaceAnswer('retry-interaction', 'profile', 'call-1', answers)).rejects.toThrow('request timed out')
-  await assistantApi.workspaceAnswer('retry-interaction', 'profile', 'call-1', answers)
-  await assistantApi.workspaceAnswer('retry-interaction', 'profile', 'call-1', answers)
+  await expect(assistantApi.workspaceAnswer('retry-interaction', 'profile', 'call-1', answers, 4)).rejects.toThrow('request timed out')
+  await assistantApi.workspaceAnswer('retry-interaction', 'profile', 'call-1', answers, 4)
+  await assistantApi.workspaceAnswer('retry-interaction', 'profile', 'call-1', answers, 4)
 
   const payloads = vi.mocked(http.post).mock.calls.map(([, payload]) => payload as { attempt_id: string })
   expect(payloads[0]?.attempt_id).toBe(payloads[1]?.attempt_id)
@@ -175,8 +192,8 @@ it('uses a new answer attempt only for an explicit resend decision', async () =>
     .mockResolvedValueOnce({ data: { data: { accepted: true } } })
   const answers = [{ id: 'choice', selected: ['yes'] }]
 
-  await expect(assistantApi.workspaceAnswer('explicit-retry', 'profile', 'call-1', answers)).rejects.toThrow('outcome unknown')
-  await assistantApi.workspaceAnswer('explicit-retry', 'profile', 'call-1', answers, true)
+  await expect(assistantApi.workspaceAnswer('explicit-retry', 'profile', 'call-1', answers, 4)).rejects.toThrow('outcome unknown')
+  await assistantApi.workspaceAnswer('explicit-retry', 'profile', 'call-1', answers, 4, true)
 
   const payloads = vi.mocked(http.post).mock.calls.map(([, payload]) => payload as { attempt_id: string })
   expect(payloads[0]?.attempt_id).not.toBe(payloads[1]?.attempt_id)

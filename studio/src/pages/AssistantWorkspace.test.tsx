@@ -6,6 +6,7 @@ import AssistantWorkspace from './AssistantWorkspace'
 import ProjectsPage from './ProjectsPage'
 import { createTestQueryClient } from '@/test/test-utils'
 import { mockProjects } from '@/test/mocks/handlers'
+import { AssistantInteractionStreamError } from '@/lib/api/interactive'
 import type { Project } from '@/types'
 import type { AssistantBootstrap, AssistantInteractionSnapshot, AssistantWorkspace as Workspace } from '@/lib/api/assistant'
 
@@ -38,6 +39,7 @@ const mocks = vi.hoisted(() => ({
   deliverMessage: () => {},
   existingConversation: false,
   streamEventsEnabled: true,
+  streamError: null as Error | null,
   streamEvents: [] as { event: string; id: string; data: string }[],
 }))
 
@@ -67,10 +69,11 @@ vi.mock('@/lib/api', async () => {
 
 vi.mock('@/lib/interactive-events', async () => ({
   ...await vi.importActual<typeof import('@/lib/interactive-events')>('@/lib/interactive-events'),
-  streamAssistantWorkspace: (workspaceId: string, _token: string, signal: AbortSignal, options?: { expectedSessionId?: string; onConnected?: () => void }) => (async function* () {
+  streamAssistantWorkspace: (workspaceId: string, _token: string, signal: AbortSignal, options?: { expectedSessionId?: string; onConnected?: () => void; onGenerationChanged?: (generation: number) => void }) => (async function* () {
     mocks.streamCalls(workspaceId, options)
     if (mocks.connectionGate) await mocks.connectionGate
     if (signal.aborted) return
+    if (mocks.streamError) throw mocks.streamError
     options?.onConnected?.()
     if (!mocks.existingConversation) await mocks.messageDelivered
     if (signal.aborted || !mocks.streamEventsEnabled) return
@@ -139,6 +142,46 @@ describe('AssistantWorkspace', () => {
     mocks.getInteractionSnapshot.mockResolvedValue(snapshot)
     return snapshot
   }
+
+  it('ends a restored conversation and returns home without waiting for cleanup', async () => {
+    const snapshot = restoreCreation()
+    mocks.streamEventsEnabled = false
+    mocks.getInteractionSnapshot.mockResolvedValue({ ...snapshot, lifecycle: 'abandoned', runtime_status: 'closed', available_actions: ['restart'], drafts: snapshot.drafts.map((draft) => ({ ...draft, ready: false })) })
+    mocks.closeWorkspace.mockReturnValue(new Promise(() => {}))
+    render(<QueryClientProvider client={createTestQueryClient()}><MemoryRouter initialEntries={['/assistant']}><Routes><Route path="/assistant" element={<AssistantWorkspace />} /><Route path="/" element={<div>首页</div>} /></Routes><LocationProbe /></MemoryRouter></QueryClientProvider>)
+    await screen.findByText('当前对话已结束，请重新开始')
+    expect(screen.queryByRole('button', { name: '开始创作' })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
+    expect(mocks.streamCalls).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '重新开始' }))
+    await screen.findByText('首页')
+    expect(sessionStorage.getItem('anban:assistant-workspace')).toBeNull()
+    expect(mocks.closeWorkspace).toHaveBeenCalledWith('workspace-1')
+  })
+
+  it('starts a fresh conversation from home after ending the previous one', async () => {
+    const snapshot = restoreCreation(false)
+    mocks.getInteractionSnapshot.mockResolvedValue({ ...snapshot, lifecycle: 'abandoned', runtime_status: 'closed', available_actions: ['restart'], drafts: [] })
+    mocks.createWorkspace.mockResolvedValue(preparedWorkspace({ id: 'new-workspace', mode_id: 'creation', project_id: 'project-1' }))
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: '重新开始' }))
+    expect(sessionStorage.getItem('anban:assistant-workspace')).toBeNull()
+    expect(screen.queryByText('已经讨论过的需求')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '新的文章需求' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('new-workspace', 'creation', expect.stringContaining('新的文章需求'), false, expect.any(Object)))
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:assistant-workspace') ?? '{}').workspace?.id).toBe('new-workspace'))
+  })
+
+  it('stops recovering when the interaction stream returns 410', async () => {
+    restoreCreation(false)
+    mocks.streamError = new AssistantInteractionStreamError(410)
+    renderPage()
+    await screen.findByText('当前对话已结束，请重新开始')
+    expect(screen.queryByText('正在恢复连接')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '恢复计划' })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
+  })
 
   it('renders incomplete recovered drafts and issues while keeping discussion editable', async () => {
     restoreCreation(false)
@@ -342,6 +385,7 @@ describe('AssistantWorkspace', () => {
     mocks.streamEvents = []
     mocks.connectionGate = null
     mocks.streamEventsEnabled = true
+    mocks.streamError = null
     mocks.messageDelivered = new Promise<void>((resolve) => { mocks.deliverMessage = resolve })
     sessionStorage.clear()
     mocks.projectsList.mockResolvedValue([])
@@ -1483,7 +1527,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.click(within(conversation).getByRole('radio', { name: '主题一' }))
     fireEvent.click(within(conversation).getByRole('button', { name: '提交回答' }))
 
-    await waitFor(() => expect(mocks.workspaceAnswer).toHaveBeenCalledWith('workspace-1', 'profile', 'call-1', [{ id: 'q1', selected: ['主题一'] }]))
+    await waitFor(() => expect(mocks.workspaceAnswer).toHaveBeenCalledWith('workspace-1', 'profile', 'call-1', [{ id: 'q1', selected: ['主题一'] }], 1))
     await waitFor(() => expect(within(conversation).queryByRole('heading', { name: '先确定作品主题？' })).not.toBeInTheDocument())
   })
 
@@ -1554,9 +1598,26 @@ describe('AssistantWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
 
     expect(await screen.findByText('问题已过期，请按页面提示恢复对话。')).toBeInTheDocument()
+    expect(screen.queryByText('正在恢复连接')).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
     expect(screen.getByRole('textbox', { name: '问题补充说明' })).toHaveValue('保留我的创作主题')
     expect(screen.getByRole('button', { name: '提交回答' })).toBeDisabled()
+  })
+
+  it('keeps a question from the replacement generation usable after its snapshot arrives', async () => {
+    mocks.streamEvents = [{ event: 'question.opened', id: 'new-question', data: JSON.stringify({ generation: 2, call_id: 'new-call', questions: [{ id: 'topic', question: '恢复后的新问题', options: [{ label: 'AI' }] }] }) }]
+    mocks.getInteractionSnapshot.mockResolvedValue({ ...preparedWorkspace().interaction_snapshot!, lifecycle: 'active', generation: 2, runtime_status: 'running' })
+    renderPage()
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '开始创作' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await screen.findByRole('heading', { name: '恢复后的新问题' })
+    await act(async () => mocks.streamCalls.mock.calls[0]?.[1].onGenerationChanged(2))
+
+    await waitFor(() => expect(mocks.streamCalls).toHaveBeenCalledTimes(2))
+    expect(screen.queryByText('问题已过期，请按页面提示恢复对话。')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: 'AI' }))
+    fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
+    await waitFor(() => expect(mocks.workspaceAnswer).toHaveBeenCalledWith('workspace-1', 'profile', 'new-call', [{ id: 'topic', selected: ['AI'] }], 2))
   })
 
   it('restores the attempted answer after refreshing a failed submission', async () => {
@@ -1598,7 +1659,7 @@ describe('AssistantWorkspace', () => {
     expect(screen.getByRole('button', { name: '提交回答' })).toBeDisabled()
     expect(screen.queryByText('已回答')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '仍然重试' }))
-    await waitFor(() => expect(mocks.workspaceAnswer).toHaveBeenLastCalledWith('workspace-1', 'profile', 'call-1', [{ id: 'q1', selected: [], custom: '保留不确定的回答' }], true))
+    await waitFor(() => expect(mocks.workspaceAnswer).toHaveBeenLastCalledWith('workspace-1', 'profile', 'call-1', [{ id: 'q1', selected: [], custom: '保留不确定的回答' }], 1, true))
     await waitFor(() => expect(screen.queryByRole('heading', { name: '补充作品主题' })).not.toBeInTheDocument())
   })
 
@@ -1612,7 +1673,7 @@ describe('AssistantWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
 
     expect(await screen.findByText('问题已过期，请按页面提示恢复对话。')).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '提交回答' })).toBeDisabled()
   })
 
@@ -1729,7 +1790,7 @@ describe('AssistantWorkspace', () => {
     expect(secondKey).toBe(firstKey)
   })
 
-  it('keeps the unsent message and retries the durable interaction after expiry', async () => {
+  it('keeps unsent input but requires restart after the conversation ends', async () => {
     const expired = Object.assign(new Error('expired'), { response: { data: { error_code: 'assistant_workspace_expired' } } })
     mocks.workspaceMessage.mockRejectedValueOnce(expired).mockResolvedValueOnce(undefined)
     renderPage()
@@ -1739,10 +1800,9 @@ describe('AssistantWorkspace', () => {
     await waitFor(() => expect(composer).toHaveValue('继续完善画像'))
     expect(screen.queryByText(/对话已过期/)).not.toBeInTheDocument()
     expect(screen.queryByText(/SSE connection failed/)).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(mocks.createWorkspace).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledTimes(2))
-    expect(mocks.workspaceMessage).toHaveBeenLastCalledWith('workspace-1', 'profile', '继续完善画像', false, expect.any(Object))
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '重新开始' })).toBeEnabled()
+    expect(mocks.workspaceMessage).toHaveBeenCalledTimes(1)
   })
 
   it('starts a conversation when the initial snapshot omits empty drafts', async () => {
@@ -1762,7 +1822,7 @@ describe('AssistantWorkspace', () => {
     expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('')
   })
 
-  it('preserves input and allows retry when a 410 recovery snapshot omits empty drafts', async () => {
+  it('preserves input and requires restart when a terminal response omits empty drafts', async () => {
     const snapshot = {
       interaction_id: 'workspace-1', mode_id: 'profile', lifecycle: 'active', generation: 1,
       runtime_status: 'expired', expires_at: '', last_activity_at: '', available_actions: ['send_message', 'restart'],
@@ -1775,10 +1835,8 @@ describe('AssistantWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
 
     await waitFor(() => expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('恢复这个需求'))
-    expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
-    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    expect(await screen.findByText('收到，我开始处理。')).toBeInTheDocument()
-    expect(screen.getByText('恢复这个需求')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '重新开始' })).toBeEnabled()
   })
 
   it('applies a recovery snapshot returned with a failed command', async () => {

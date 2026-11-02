@@ -165,8 +165,12 @@ func (h *AssistantHandler) InteractionEvents(c fiber.Ctx) error {
 	if h.interactionSvc == nil {
 		return Error(c, 503, "assistant unavailable")
 	}
-	if _, err := h.interactionSvc.Snapshot(c.Context(), uid, c.Params("id")); err != nil {
+	snapshot, err := h.interactionSvc.Snapshot(c.Context(), uid, c.Params("id"))
+	if err != nil {
 		return interactiveError(c, err)
+	}
+	if snapshot.Lifecycle == service.InteractionLifecycleAbandoned {
+		return interactiveError(c, service.NewInteractionError(service.InteractionErrorRestartRequired, 410, "当前对话已结束，请重新开始", "restart").WithSnapshot(snapshot))
 	}
 	after, _ := strconv.ParseUint(c.Get("Last-Event-ID"), 10, 64)
 	c.Set("Content-Type", "text/event-stream")

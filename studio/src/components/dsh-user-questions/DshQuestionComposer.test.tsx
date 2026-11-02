@@ -136,7 +136,7 @@ describe('DshQuestionComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
-    expect(screen.getByRole('button', { name: '展开问题卡片' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '展开问题卡片' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '提交回答' })).not.toBeInTheDocument()
   })
 
