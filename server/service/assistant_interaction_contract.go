@@ -21,11 +21,13 @@ const (
 )
 
 const (
+	InteractionLifecyclePrepared          = model.AssistantInteractionPrepared
 	InteractionLifecycleActive            = model.AssistantInteractionActive
 	InteractionLifecycleReconnecting      = model.AssistantInteractionReconnecting
 	InteractionLifecycleNeedsConfirmation = model.AssistantInteractionNeedsConfirmation
 	InteractionLifecycleCompleted         = model.AssistantInteractionCompleted
 	InteractionLifecycleAbandoned         = model.AssistantInteractionAbandoned
+	InteractionRuntimeNotStarted          = model.AssistantInteractionRuntimeNotStarted
 	InteractionRuntimeStarting            = model.AssistantInteractionRuntimeStarting
 	InteractionRuntimeRunning             = model.AssistantInteractionRuntimeRunning
 	InteractionRuntimeClosed              = model.AssistantInteractionRuntimeClosed
@@ -72,6 +74,7 @@ func interactionCreatePayloadDigest(input AssistantInteractionInput) string {
 		"resume_interaction_id": input.ResumeInteractionID,
 		"agent_id":              input.AgentID,
 		"intent":                input.Intent,
+		"prepare_only":          input.PrepareOnly,
 	})
 }
 

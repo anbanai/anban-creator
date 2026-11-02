@@ -128,7 +128,7 @@ func (r *assistantInteractionRepository) FindByID(ctx context.Context, id string
 }
 func (r *assistantInteractionRepository) FindByScopeForUpdate(ctx context.Context, userID, modeID, projectID, contentID string) (*model.AssistantInteraction, error) {
 	var value model.AssistantInteraction
-	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND project_id = ? AND content_id = ? AND closed_at IS NULL", userID, projectID, contentID).Where("lifecycle IN ?", []string{model.AssistantInteractionActive, model.AssistantInteractionReconnecting, model.AssistantInteractionNeedsConfirmation}).Order("updated_at DESC").First(&value).Error
+	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND project_id = ? AND content_id = ? AND closed_at IS NULL", userID, projectID, contentID).Where("lifecycle IN ?", []string{model.AssistantInteractionPrepared, model.AssistantInteractionActive, model.AssistantInteractionReconnecting, model.AssistantInteractionNeedsConfirmation}).Order("updated_at DESC").First(&value).Error
 	if err != nil {
 		return nil, err
 	}

@@ -18,6 +18,7 @@ type assistantInteractionCreateRequest struct {
 	ResumeInteractionID string `json:"resume_interaction_id,omitempty"`
 	AgentID             string `json:"agent_id,omitempty"`
 	Intent              string `json:"intent,omitempty"`
+	PrepareOnly         bool   `json:"prepare_only,omitempty"`
 }
 
 func (h *AssistantHandler) InteractionCreate(c fiber.Ctx) error {
@@ -32,7 +33,7 @@ func (h *AssistantHandler) InteractionCreate(c fiber.Ctx) error {
 	if err := decodeInteractiveJSON(c.Body(), &req); err != nil {
 		return Error(c, 400, "invalid request body")
 	}
-	snapshot, err := h.interactionSvc.CreateOrResume(c.Context(), uid, service.AssistantInteractionInput{ModeID: req.ModeID, ProjectID: req.ProjectID, ContentID: req.ContentID, ResumeInteractionID: req.ResumeInteractionID, AgentID: req.AgentID, Intent: req.Intent}, c.Get("Idempotency-Key"))
+	snapshot, err := h.interactionSvc.CreateOrResume(c.Context(), uid, service.AssistantInteractionInput{ModeID: req.ModeID, ProjectID: req.ProjectID, ContentID: req.ContentID, ResumeInteractionID: req.ResumeInteractionID, AgentID: req.AgentID, Intent: req.Intent, PrepareOnly: req.PrepareOnly}, c.Get("Idempotency-Key"))
 	if err != nil {
 		return interactiveError(c, err)
 	}
@@ -63,14 +64,17 @@ func (h *AssistantHandler) InteractionMessage(c fiber.Ctx) error {
 		return Error(c, 503, "assistant unavailable")
 	}
 	var req struct {
-		Generation      int64  `json:"generation"`
-		ClientMessageID string `json:"client_message_id"`
-		Text            string `json:"text"`
+		Generation      int64   `json:"generation"`
+		ClientMessageID string  `json:"client_message_id"`
+		Text            string  `json:"text"`
+		ModeID          *string `json:"mode_id,omitempty"`
+		ProjectID       *string `json:"project_id,omitempty"`
+		ContentID       *string `json:"content_id,omitempty"`
 	}
 	if err := decodeInteractiveJSON(c.Body(), &req); err != nil {
 		return Error(c, 400, "invalid request body")
 	}
-	err := h.interactionSvc.SendMessage(c.Context(), uid, c.Params("id"), service.InteractionMessageInput{Generation: req.Generation, ClientMessageID: req.ClientMessageID, Text: req.Text})
+	err := h.interactionSvc.SendMessage(c.Context(), uid, c.Params("id"), service.InteractionMessageInput{Generation: req.Generation, ClientMessageID: req.ClientMessageID, Text: req.Text, ModeID: req.ModeID, ProjectID: req.ProjectID, ContentID: req.ContentID})
 	if err != nil {
 		return interactiveError(c, err)
 	}
@@ -151,6 +155,11 @@ func (h *AssistantHandler) InteractionEvents(c fiber.Ctx) error {
 	c.Set("Connection", "keep-alive")
 	c.Abandon()
 	return c.SendStreamWriter(func(w *bufio.Writer) {
+		// An empty prepared interaction has no events yet. Flush a comment so
+		// the client can establish SSE before submitting the first message.
+		if _, err := w.WriteString(": connected\n\n"); err != nil || w.Flush() != nil {
+			return
+		}
 		ticker := time.NewTicker(750 * time.Millisecond)
 		defer ticker.Stop()
 		for {
