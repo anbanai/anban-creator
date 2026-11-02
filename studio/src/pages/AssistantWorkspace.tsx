@@ -378,13 +378,13 @@ export default function AssistantWorkspace() {
   const applyInteractionSnapshot = (snapshot: AssistantInteractionSnapshot) => {
     setInteractionSnapshot(snapshot)
     setInteractionSnapshotReady(true)
-    setWorkspace((current) => current ? { ...current, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, generation: snapshot.generation, runtime_status: snapshot.runtime_status, lifecycle: snapshot.lifecycle, expires_at: snapshot.expires_at } : current)
+    setWorkspace((current) => current ? { ...current, id: snapshot.interaction_id, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, generation: snapshot.generation, runtime_status: snapshot.runtime_status, lifecycle: snapshot.lifecycle, expires_at: snapshot.expires_at } : current)
     setMode(snapshot.mode_id)
     setProjectId(snapshot.project_id ?? '')
     setContentId(snapshot.content_id ?? '')
     setDraftByMode(draftsFromSnapshot(snapshot))
     dispatchInteraction({ type: 'snapshot', snapshot })
-    setConversationPhase(snapshot.lifecycle === 'prepared' ? 'prepared' : 'active')
+    setConversationPhase((current) => current === 'active' || snapshot.lifecycle !== 'prepared' ? 'active' : 'prepared')
   }
 
   useEffect(() => {
@@ -558,16 +558,16 @@ export default function AssistantWorkspace() {
     if (preparePromiseRef.current) return preparePromiseRef.current
     const resetVersion = workspaceResetVersion.current
     prepareAttemptedRef.current = true
-    prepareRequestRef.current ??= {
-      request: {
-        mode_id: mode,
-        ...(selectedProject ? { project_id: selectedProject.id } : {}),
-        ...(selectedWork ? { content_id: selectedWork.id } : {}),
-        prepare_only: true,
-      },
-      key: crypto.randomUUID(),
+    const request = {
+      mode_id: mode,
+      ...(selectedProject ? { project_id: selectedProject.id } : {}),
+      ...(selectedWork ? { content_id: selectedWork.id } : {}),
+      prepare_only: true,
     }
-    const { request, key } = prepareRequestRef.current
+    if (!prepareRequestRef.current || JSON.stringify(prepareRequestRef.current.request) !== JSON.stringify(request)) {
+      prepareRequestRef.current = { request, key: crypto.randomUUID() }
+    }
+    const { key } = prepareRequestRef.current
     const promise = api.assistant.createWorkspace(request, key).then((preparedWorkspace) => {
       if (workspaceResetVersion.current !== resetVersion) return preparedWorkspace
       workspaceHandedOff.current = false
@@ -612,18 +612,18 @@ export default function AssistantWorkspace() {
     dispatchInteraction({ type: 'error', code: 'assistant_interaction_restart_required', availableActions: ['restart'] })
   }
 
-  const refreshInteractionSnapshot = async () => {
-    if (!workspace) return
+  const refreshInteractionSnapshot = async (workspaceID = workspace?.id) => {
+    if (!workspaceID) return
     const resetVersion = workspaceResetVersion.current
     try {
-      const snapshot = await api.assistant.getInteractionSnapshot(workspace.id)
+      const snapshot = await api.assistant.getInteractionSnapshot(workspaceID)
       if (workspaceResetVersion.current !== resetVersion) return
       setInteractionSnapshot(snapshot)
       setInteractionSnapshotReady(true)
       setWorkspace((current) => current ? { ...current, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, generation: snapshot.generation, runtime_status: snapshot.runtime_status, lifecycle: snapshot.lifecycle, expires_at: snapshot.expires_at } : current)
       setDraftByMode(draftsFromSnapshot(snapshot))
       dispatchInteraction({ type: 'snapshot', snapshot })
-      setError(null)
+      setError(snapshot.lifecycle === 'prepared' && lastSubmittedMessage.current ? '消息尚未发送，输入已保留，请重试。' : null)
       setStreamRevision((current) => current + 1)
     } catch (snapshotError) {
       if (workspaceResetVersion.current !== resetVersion) return
@@ -899,8 +899,21 @@ export default function AssistantWorkspace() {
     lastSubmittedMessage.current = text
     setComposer('')
     setMessagesByMode((current) => ({ ...current, [mode]: [...(current[mode] ?? []), { id: optimisticID, role: 'user', text: messageText, order }] }))
+    let currentWorkspace = workspace
     try {
-      let currentWorkspace = workspace ?? await prepareWorkspace()
+      currentWorkspace ??= await prepareWorkspace()
+      const messageContext = { mode_id: mode, ...(selectedProject ? { project_id: selectedProject.id } : { project_id: '' }), ...(selectedWork ? { content_id: selectedWork.id } : { content_id: '' }) }
+      if (currentWorkspace.lifecycle === 'prepared' && ((currentWorkspace.project_id ?? '') !== messageContext.project_id || (currentWorkspace.content_id ?? '') !== messageContext.content_id)) {
+        // Resolve the selected scope instead of moving another persona's interaction
+        // into a scope that may already have an active conversation.
+        currentWorkspace = await prepareWorkspace()
+        if (currentWorkspace.lifecycle === 'needs_confirmation') {
+          setMode(currentWorkspace.mode_id)
+          setComposer(text)
+          setMessagesByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).filter((message) => message.id !== optimisticID) }))
+          return
+        }
+      }
       if (currentWorkspace.lifecycle === 'prepared' && (!workspace || interactionSnapshotReady)) {
         // Do not let a failed network connection indefinitely block a durable message.
         let timeout: ReturnType<typeof setTimeout> | undefined
@@ -914,9 +927,9 @@ export default function AssistantWorkspace() {
         }
       }
       if (workspaceResetVersion.current !== resetVersion) return
+      setConversationPhase('active')
       dispatchInteraction({ type: 'clear_error' })
       setResponding(true)
-      const messageContext = { mode_id: mode, ...(selectedProject ? { project_id: selectedProject.id } : { project_id: '' }), ...(selectedWork ? { content_id: selectedWork.id } : { content_id: '' }) }
       if (prepareRequestRef.current && currentWorkspace.lifecycle !== 'prepared' && (currentWorkspace.mode_id !== mode || (currentWorkspace.project_id ?? '') !== messageContext.project_id || (currentWorkspace.content_id ?? '') !== messageContext.content_id)) {
         currentWorkspace = await api.assistant.switchWorkspaceMode(currentWorkspace.id, mode, { project_id: messageContext.project_id, content_id: messageContext.content_id })
       }
@@ -970,10 +983,10 @@ export default function AssistantWorkspace() {
         setError(assistantWorkspaceConflictMessage(errorCode, 'send') ?? '对话状态已变化，输入已保留，请重新建立对话后重试。')
       } else if (assistantWorkspaceHttpStatus(sendError) === 409 && errorCode !== 'assistant_command_outcome_unknown') {
         setError('对话状态刚刚发生变化，输入已保留，请稍后重试。')
-      } else if (workspace && !errorCode && (!status || status >= 500)) {
+      } else if (currentWorkspace && !errorCode && (!status || status >= 500)) {
         dispatchInteraction({ type: 'error', code: 'assistant_interaction_reconnecting' })
         setError('发送结果暂未确认，正在同步对话。输入已保留。')
-        void refreshInteractionSnapshot()
+        void refreshInteractionSnapshot(currentWorkspace.id)
       } else {
         setError(assistantInteractionErrorMessage(errorCode, sendError instanceof Error ? sendError.message : '消息发送失败'))
       }
