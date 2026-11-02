@@ -54,6 +54,23 @@ Own harness assets and directly necessary consuming contract tests only. Coordin
 
 Deliver task-3-report.md with both commit IDs, commands/results, and any unverified live-provider behavior.
 
+## User refinement during implementation
+
+The user additionally requested a more compact, cohesive creation summary card. Task 2 must reduce oversized spacing and scattered nested boxes, group direction fields and requirements/constraints into concise readable rows/lists, keep temporary overrides visible, and collapse inherited background/default settings. Verify desktop and narrow layouts without hiding core review content.
+
+### Task 4: Make the creation sidebar useful and restrained
+
+Own Studio task-sidebar components, TaskDetailPage integration, and directly related tests only. Execute after Task 2 review. Read AGENTS.md. User approved redesign and explicitly requested persona context, useful creation metadata, and credit consumption, without information overload.
+
+1. Replace the task detail sidebar's three generic tall blocks with a cohesive, compact reference panel. Keep other TaskContextSummary grid consumers unchanged. Use existing UI conventions and existing detail drawers/dialog; no new API/schema or generalized configuration engine.
+2. Show a small persona identity area (name/avatar where available), plus at most two useful short profile facts such as positioning and audience/style. Omit empty facts and raw profile JSON. Use current project/profile data and label it clearly as 当前人设; six-dimensional profile is not frozen in project_snapshot. Preserve a way to open the existing full persona dialog. If the project is unavailable, frozen project_name may identify the task's persona but must not claim current profile facts.
+3. Show a compact 本次创作 area with only populated useful metadata: human-readable content type and, where useful, image composition/ratio and supplied reference count. Avoid duplicating the main title/prompt/progress, manual creation boilerplate, empty style/zero-input placeholders, model/environment IDs, or runtime details. Prefer frozen task/project_snapshot values for creation settings; a present snapshot must not silently fall back to changed live project values. Keep details in the existing configuration/materials drawers.
+4. Latest user correction: keep billing simple. Only when task.status is completed, show one line 总消耗 X 积分 using the Server final total billing_total_credits (preserve zero; fallback billing_price_credits). Show no billing section during running/pending or other unfinished states, no estimate, no ongoing hint, no extra billing drilldown from this sidebar. Keep existing unrelated details unchanged; do not calculate a new bill. The Server total already accounts for charges/refunds.
+5. Add meaningful behavioral coverage for a running task, sparse/missing persona, changed current versus frozen settings, no empty metadata blocks, completed-only billing with zero total/fallback, and persona/configuration/material detail actions. Preserve task lifecycle/actions and loading behavior. Use existing normalization patterns and avoid fetching profile data solely to render empty placeholders.
+6. Run focused RED/GREEN, all Studio tests, and build. Controller will inspect desktop/narrow layouts using a local fixture with a running task and realistic persona/billing data.
+
+Deliver a local commit and task-4-report.md with changes, evidence, and limitations. Do not stage the controller's plan edits.
+
 ## Final integration
 
 - Inspect the full diff and task reports, then obtain an independent whole-branch review. Fix actionable findings and verify the changed surfaces again only where fixes or new concerns require it.
