@@ -157,7 +157,17 @@ export function streamAssistantInteraction(interactionId: string, token: string,
       let gapDetected = false
       try {
         while (true) {
-          const { done, value } = await reader.read()
+          let result: ReadableStreamReadResult<Uint8Array>
+          try {
+            result = await reader.read()
+          } catch (error) {
+            if (signal?.aborted) throw error
+            // A dropped connection can leave a partial frame. Replay it from
+            // the last complete event instead of advancing the cursor.
+            buffer = ''
+            break
+          }
+          const { done, value } = result
           if (done) break
           buffer += decoder.decode(value, { stream: true })
           const chunks = buffer.split('\n\n')

@@ -339,6 +339,7 @@ export default function AssistantWorkspace() {
   const [interactionState, dispatchInteraction] = useReducer(assistantInteractionReducer, initialAssistantInteractionState)
   const [, setInteractionSnapshot] = useState<AssistantInteractionSnapshot | null>(null)
   const [interactionSnapshotReady, setInteractionSnapshotReady] = useState(false)
+  const [streamRevision, setStreamRevision] = useState(0)
   const [sending, setSending] = useState(false)
   const [responding, setResponding] = useState(false)
   const [switching, setSwitching] = useState(false)
@@ -609,15 +610,19 @@ export default function AssistantWorkspace() {
 
   const refreshInteractionSnapshot = async () => {
     if (!workspace) return
+    const resetVersion = workspaceResetVersion.current
     try {
       const snapshot = await api.assistant.getInteractionSnapshot(workspace.id)
+      if (workspaceResetVersion.current !== resetVersion) return
       setInteractionSnapshot(snapshot)
       setInteractionSnapshotReady(true)
       setWorkspace((current) => current ? { ...current, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, generation: snapshot.generation, runtime_status: snapshot.runtime_status, lifecycle: snapshot.lifecycle, expires_at: snapshot.expires_at } : current)
       setDraftByMode(draftsFromSnapshot(snapshot))
       dispatchInteraction({ type: 'snapshot', snapshot })
       setError(null)
+      setStreamRevision((current) => current + 1)
     } catch (snapshotError) {
+      if (workspaceResetVersion.current !== resetVersion) return
       const recovered = assistantInteractionSnapshotFromError(snapshotError)
       if (recovered) {
         setInteractionSnapshotReady(true)
@@ -626,6 +631,7 @@ export default function AssistantWorkspace() {
         setDraftByMode(draftsFromSnapshot(recovered))
         dispatchInteraction({ type: 'snapshot', snapshot: recovered })
         setError(null)
+        setStreamRevision((current) => current + 1)
         return
       }
       setInteractionSnapshotReady(false)
@@ -824,7 +830,8 @@ export default function AssistantWorkspace() {
           if (streamError instanceof InteractiveStreamError && (streamError.status === 404 || streamError.status === 410)) {
             resetExpiredWorkspace(lastSubmittedMessage.current || undefined)
           } else {
-            setError(streamError instanceof Error ? assistantInteractionErrorMessage(undefined, streamError instanceof InteractiveStreamError ? '助手连接已中断，正在恢复。' : streamError.message) : '助手连接已中断，正在恢复。')
+            dispatchInteraction({ type: 'error', code: 'assistant_interaction_reconnecting' })
+            setError('助手连接已中断，可以恢复连接继续对话。')
           }
         }
       }
@@ -834,7 +841,7 @@ export default function AssistantWorkspace() {
       ready.resolve()
       if (sseReadyRef.current === ready) sseReadyRef.current = null
     }
-  }, [interactionSnapshotReady, token, workspace?.id, workspace?.generation])
+  }, [interactionSnapshotReady, streamRevision, token, workspace?.id, workspace?.generation])
 
   const sendMessage = async (override?: string, options?: { forceNewAttempt?: boolean }) => {
     const text = (override ?? composer).trim()
@@ -915,6 +922,7 @@ export default function AssistantWorkspace() {
       setComposer(text)
       setMessagesByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).filter((message) => message.id !== optimisticID) }))
       const errorCode = assistantWorkspaceErrorCode(sendError)
+      const status = assistantWorkspaceHttpStatus(sendError)
       if (errorCode === 'assistant_command_outcome_unknown') {
         uncertainRetryRef.current = () => { void sendMessage(text, { forceNewAttempt: true }) }
         setUncertainRetry({ kind: 'message', text })
@@ -933,6 +941,10 @@ export default function AssistantWorkspace() {
         setError(assistantWorkspaceConflictMessage(errorCode, 'send') ?? '对话状态已变化，输入已保留，请重新建立对话后重试。')
       } else if (assistantWorkspaceHttpStatus(sendError) === 409 && errorCode !== 'assistant_command_outcome_unknown') {
         setError('对话状态刚刚发生变化，输入已保留，请稍后重试。')
+      } else if (workspace && !errorCode && (!status || status >= 500)) {
+        dispatchInteraction({ type: 'error', code: 'assistant_interaction_reconnecting' })
+        setError('发送结果暂未确认，正在同步对话。输入已保留。')
+        void refreshInteractionSnapshot()
       } else {
         setError(assistantInteractionErrorMessage(errorCode, sendError instanceof Error ? sendError.message : '消息发送失败'))
       }
