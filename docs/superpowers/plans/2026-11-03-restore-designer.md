@@ -43,7 +43,7 @@
 - Generated records use states `generating`, `completed`, `failed`. Internal queued/claimed distinction may use start timestamps and an execution deadline; public API remains these three states.
 - Keep `NewDesignerService(db, cfg, store, logger)` and billing setters where compatible with existing patterns; expose a service recovery function wired to server lifecycle. Handler delegates generation admission/dispatch to service, not workflow composition.
 
-- [ ] **Step 1: Write regression tests and verify failure before restoration.**
+- [x] **Step 1: Write regression tests and verify failure before restoration.**
 
 Start with an actual database migration regression that can compile before the models return:
 
@@ -64,7 +64,7 @@ Add table-driven tests for non-admin API rejection, foreign project/reference/ma
 Add generation replay assertions against real database charge/record counts and a fake image provider call count.
 Use `httptest` for provider output and a memory/local test storage provider; do not make paid calls.
 
-- [ ] **Step 2: Restore persistence and remove destructive startup behavior.**
+- [x] **Step 2: Restore persistence and remove destructive startup behavior.**
 
 Use explicit historical files, never revert the entire deletion commit:
 
@@ -78,7 +78,7 @@ Wire the restored model structs into `AutoMigrate`, repository interfaces and tr
 Remove `MigrateDesignerRemoval` call and implementation. Replace removal-specific tests with preservation tests that insert a generation, run migration again and verify the same record/results remain.
 Add idempotent MySQL `CREATE TABLE IF NOT EXISTS` statements matching restored model columns and indexes; exercise structural equivalence using repository migration test conventions.
 
-- [ ] **Step 3: Restore service/handler with current contracts and durable lifecycle.**
+- [x] **Step 3: Restore service/handler with current contracts and durable lifecycle.**
 
 Read the complete historical files before selectively restoring:
 
@@ -96,7 +96,7 @@ Add `designer_reference` to current upload-purpose policy. Finalize uploads thro
 Enforce login/admin access for every Designer endpoint using the current user repository; preserve per-user result/history filtering even for admins.
 Wire service, recovery, handler and routes in current `main.go`/router without changing unrelated application initialization.
 
-- [ ] **Step 4: Verify the Server deliverable.**
+- [x] **Step 4: Verify the Server deliverable.**
 
 Run focused restored tests and the new tests, then:
 
@@ -109,7 +109,7 @@ go build -o /tmp/anban-designer-server .
 
 Cover success, reference generation, mask editing, repeated/concurrent admission/execution, insufficient funds, expired/mismatched quote, foreign ownership, invalid output/storage failure, provider timeout and restarted execution recovery. If useful historical tests rely on obsolete contracts, update fixtures and assertions to current behavior; do not keep stale configuration aliases for tests.
 
-- [ ] **Step 5: Self-review and commit only Task 1 files.**
+- [x] **Step 5: Self-review and commit only Task 1 files.**
 
 Run `git diff --check`, stage exact backend files and commit `feat(designer): restore server image workbench workflow`.
 Write a report with changed interfaces, test commands/results, failure-before-fix evidence, and any remaining limitations. Do not touch Studio files or modify the approved spec's scope.
@@ -127,7 +127,7 @@ Write a report with changed interfaces, test commands/results, failure-before-fi
 - Produces lazy `/designer` page guarded by `AdminRoute`, admin-only sidebar and command-palette entry, responsive workbench and current Web downloads.
 - Preserve Server ownership and current billing flows; client cancellation means stopping local waiting, not canceling/refunding an accepted server operation.
 
-- [ ] **Step 1: Write visible behavior tests and observe failure.**
+- [x] **Step 1: Write visible behavior tests and observe failure.**
 
 Update an existing admin sidebar test to expect the restored link; keep ordinary-user absence:
 
@@ -138,7 +138,7 @@ expect(screen.getByRole('link', { name: '设计师' })).toHaveAttribute('href', 
 Run `cd studio && npm exec --yes --package=bun -- bun run test -- src/components/layout/Sidebar.test.tsx` and record the missing-link failure.
 Restore historical page/component/API tests before implementation, adapting their fixtures to `generation_features`. Favor rendered interaction and request-payload assertions; remove source-text tests tied to the retired layout rather than duplicating private implementation.
 
-- [ ] **Step 2: Restore the old workbench and adapt it to current Studio.**
+- [x] **Step 2: Restore the old workbench and adapt it to current Studio.**
 
 Restore individual historical files after the failing tests, for example:
 
@@ -157,7 +157,7 @@ Maintain selected-generation state, history reload, input references and mask ex
 Key any persisted active-generation state by current user or clear it on identity change so accounts do not share active image state.
 Preserve one operation ID per attempted logical submission through quote/generate retries. Show unavailable price/capability, insufficient balance and upload/terminal errors without exposing internal provider details.
 
-- [ ] **Step 3: Verify interactive behavior, API and access boundaries.**
+- [x] **Step 3: Verify interactive behavior, API and access boundaries.**
 
 Tests must cover capability selection, normalized single quantity, submitting current fields, drag/drop reference registration, unsupported references, valid mask submission, history regeneration, preview/download, cancellation during quote/upload and state refresh after completion.
 Add a regression ensuring stopping wait after acceptance does not imply provider cancellation/refund and refresh can still recover the accepted operation.
@@ -171,7 +171,7 @@ npm exec --yes --package=bun -- bun run test
 npm exec --yes --package=bun -- bun run build
 ```
 
-- [ ] **Step 4: Self-review and commit only Task 2 files.**
+- [x] **Step 4: Self-review and commit only Task 2 files.**
 
 Run `git diff --check`, stage exact Studio files and commit `feat(designer): restore Studio image workbench`.
 Write the report with test counts, red/green evidence, changed API assumptions and UI checks. Do not push.
@@ -180,3 +180,67 @@ Write the report with test counts, red/green evidence, changed API assumptions a
 
 Controller runs complete `go test ./...` plus Go build and confirms Studio full tests/build from the current reviewed code, rerunning only when changes invalidate prior evidence. Inspect the actual rendered page at desktop/mobile sizes using a local mock API if live credentials are unavailable; exercise generation/history/edit behavior against that mock, clearly distinguishing it from a paid provider integration.
 Dispatch an independent whole-branch review against the approved spec. Fix actionable findings through the implementer and scoped re-review. Keep plan progress and rulings in the plan-owned SDD ledger. Report the final branch, tests, UI evidence and any real integration limitations.
+
+
+## 完成记录（2026-11-03）
+
+实现与独立复核完成，最后功能提交为 `bf00ccb2`。保留分支 `codex/restore-designer` 与原隔离工作区；未推送、合并或部署。
+
+| 阶段 | 提交 | 结果 |
+| --- | --- | --- |
+| Server 恢复及审查修复 | `eb931e86`、`7fd634a6`、`f83d1f8a` | 持久化、权限、单张生成、报价扣费、幂等执行、失败冲正、上传和恢复；任务审查通过。 |
+| Studio 恢复及交互修复 | `27b6b575`、`849d431d` | 管理员入口、工作台、参考图、蒙版、历史、预览下载；修复橡皮擦导出、空格输入、小屏工具栏；任务审查通过。 |
+| 前后端集成修复 | `0256233d` | 独立生成使用空项目值；内部媒体鉴权；精确授权当前用户已完成的存储结果；提交响应丢失时保留恢复标识。 |
+| 历史项目归属修复 | `bf00ccb2` | 从全部历史重新生成时恢复原项目，空项目记录保持独立；最终定向复核 Spec / Quality 均通过，无新增问题。 |
+
+### 最终自动验证
+
+所有命令在此工作区执行，Studio 使用 Bun。Go 在 `server/` 执行。
+
+| 命令 | 对应代码 | 结果 |
+| --- | --- | --- |
+| `go test -json ./...` | `0256233d`；后续无 Go 修改 | 退出码 0，38 个包通过，6 个无测试包，0 个失败事件。 |
+| `go build -o /tmp/anban-designer-final-server .` | 同上 | 退出码 0。 |
+| `npm exec --yes --package=bun -- bun run --cwd studio test -- src/pages/DesignerPage.reference-drop.test.tsx` | `bf00ccb2` | 32 个测试通过；修改前项目归属回归实际失败。 |
+| `npm exec --yes --package=bun -- bun run --cwd studio test` | `bf00ccb2` | 189 个文件、1,742 个测试通过，退出码 0。 |
+| `npm exec --yes --package=bun -- bun run --cwd studio build` | `bf00ccb2` | TypeScript 与 Vite 构建通过，退出码 0。 |
+| `git diff --check` | 完整恢复分支 | 通过。 |
+
+已通过真实服务/数据库路径的测试覆盖管理员与套餐边界、他人项目/参考图/蒙版拒绝、报价绑定、并发受理与执行认领、输出持久化、失败冲正、超时和重启恢复。独立生成请求由 Go 与 Studio 共用 JSON fixture 验证。非本地存储的媒体授权通过真实 FileHandler/Service 和 SQLite 验证，只有当前用户持久化且已完成的精确结果 key 获准读取。
+
+### 本地界面验收
+
+通过 CUA 在 Vite 与严格本地 mock API 下完成，使用仓库品牌 PNG 作为图片字节，未调用付费图片 Provider。
+
+- 管理员入口、能力/尺寸/质量与单张生成、报价/提交/轮询/完成、预览下载均可用。
+- 内部图片端点拒绝缺少 bearer token 的请求；画布、历史缩略图、预览和编辑器实际通过认证 blob 加载，下载字节与源 PNG 一致。
+- 提交被接受后故意断开响应（代理返回 502），刷新恢复同一任务和图片；日志仅有一次 generate POST，未重复生成。
+- 高质量、`2:3:2K`、webp、压缩 70、不透明背景，以及参考图/蒙版历史输入在重新生成时保留；界面提示可清除历史输入。
+- 从未选项目的全部历史恢复项目 A 后，选择器显示项目 A，quote 和 generate 都保留其项目 ID；空项目历史仍发送空 ID。
+- 参考图上传/注册、矩形蒙版与局部编辑通过；实际导出 PNG 检查确认选中区域 alpha 为 0，擦除及未选区域为不透明白色。
+- 编辑模式提示词 `A + 空格 + B` 得到 `A B`；停止等待后刷新仍查询原任务。
+- 390×844 下高级选项和清除按钮可操作，页面宽度与 scrollWidth 均为 390；临时 viewport 已恢复，验证服务和浏览器标签已关闭。
+
+截图与压缩验证材料保存在本次任务的本地可视化目录 `designer-restored.jpg`、`designer-mask.jpg`、`designer-mobile.jpg`、`designer-history.jpg`、`designer-project-history.jpg` 和 `designer-verification-evidence.tar.gz`。完整命令输出、失败/通过证据和审查报告已归档；仅清理本计划的临时 SDD 目录。
+
+### 验证边界与已知情况
+
+- 未进行真实付费 Provider、生产 OSS 或在线 MySQL 联调；MySQL 迁移以字段/索引结构与幂等建表约定验证。
+- 旧版本已经 DropTable 删除的数据无法通过本次代码恢复重建；新迁移保留仍存在的历史数据。
+- 当前查询 Handler 将数据库查询错误也映射为 404，因此刷新查询失败时保留操作标识，不自动重发生成。持久不存在的操作可能需要用户显式停止等待。
+- 中间一次全量 Go 和一次全量 Studio 运行失败；后续完整重跑通过。Studio 失败在未修改的 Dashboard 热点测试，原因未证实；未修改无关代码来掩盖失败。
+- 原有 macOS/libvips 链接目标、Vite native-config 和 vendor chunk 大小警告保留，不影响最终构建结果。
+
+### Rulings I made（按发生顺序保留的执行取舍）
+
+| 取舍 | 依据 | 判断错误时的代价 |
+| --- | --- | --- |
+| 直接采用子代理实施，不再询问流程选择。 | 用户明确指定 Superpowers 并批准方案；流程可逆。 | 若用户期望其他过程，会多出协调开销，功能范围未变。 |
+| 用 bash 和显式输出路径调用无执行权限的技能脚本。 | 避免修改共享安装文件。 | 错误路径可能遗漏审查材料；已验证产物。 |
+| 先观察行为测试失败，再复用历史代码。 | 恢复已知功能，避免无必要重写。 | 旧契约可能不兼容；已通过当前接口测试和独立审查校正。 |
+| 接受三项后端审查问题，完整保留高级参数和参考/蒙版历史上下文；MySQL 采用结构验证。 | 满足历史重用与安全错误输出，界面显式显示保留输入。 | 线上 MySQL 差异仍需部署环境验证。 |
+| 补齐并发/报价拒绝、超时和上传 finalization 的真实服务回归。 | 关键行为原先缺少直接覆盖。 | 增加测试维护成本，没有扩大产品功能。 |
+| 纯报价绑定测试修复后先定向验证，将全量运行留到集成阶段。 | 生产代码未变，最终完整检查仍执行。 | 隐藏回归会延后发现；最终全量已通过。 |
+| 保留分支/工作区，不另行询问合并或发布。 | 已批准范围明确排除推送、合并和部署。 | 功能尚未进入主线或生产环境。 |
+| 刷新 GET 返回 404 时保留恢复标识。 | 当前 Handler 不区分记录不存在与数据库错误，避免丢失已接受任务。 | 永久不存在的 ID 可能保留，需显式停止等待；不会自动付费重试。 |
+| 最后审查发现项目归属丢失后增加一次限定修复和复核。 | 完整历史重用属于已批准功能；完成用户任务优先于技能默认的一轮修复上限。 | 增加一次审查开销；仅一行生产修复及针对性测试，无功能扩展。 |
