@@ -100,5 +100,14 @@ describe('Studio nginx backend proxy contract', () => {
     expect(deployment).toContain(
       '- name: ARCHESTRA_PUBLIC_HOST\n              value: archestra.anbanai.com',
     )
+
+    // The Studio release owns the ALB host rule; no console edit is needed.
+    const ingress = deployment.match(/kind: Ingress([\s\S]*)$/)?.[0]
+    expect(ingress).toBeDefined()
+    expect(ingress).toContain('name: ${micro_service_name}-archestra')
+    expect(ingress).toContain('ingressClassName: alb')
+    expect(ingress).toContain('host: archestra.anbanai.com')
+    expect(ingress).toContain('name: ${micro_service_name}-svc')
+    expect(ingress).toContain('number: 8080')
   })
 })

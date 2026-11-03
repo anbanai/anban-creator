@@ -77,7 +77,10 @@ Archestra Web 由 Studio 镜像内的 nginx 按**主机名**反向代理，而�
   的 server 块，把整站代理到 `${ARCHESTRA_HOST}:${ARCHESTRA_PORT}`；本集群为
   `archestra-platform.anbanai-prod.svc.cluster.local:3000`，更换 namespace 时
   同步修改 `studio/Deployment.yaml`。
-- `studio/Deployment.yaml` 已设置 `ARCHESTRA_PUBLIC_HOST=archestra.anbanai.com`。
+- `studio/Deployment.yaml` 已设置 `ARCHESTRA_PUBLIC_HOST=archestra.anbanai.com`，
+  并包含 `creator-studio-web-archestra` Ingress：主机
+  `archestra.anbanai.com` → Studio Service `8080`，由同一次 Studio 流水线
+  `kubectl apply` 创建/更新，不再需要手动改 ALB 或 Ingress。
 - 访问地址：<https://archestra.anbanai.com>；`anbanai.com/archestra` 只做
   302 入口跳转。`*.anbanai.com` 证书已覆盖该主机名。
 
@@ -87,13 +90,17 @@ Archestra Web 由 Studio 镜像内的 nginx 按**主机名**反向代理，而�
 Studio 的 SPA fallback、`/api/`、`/mcp`、`/ws` 冲突，仅靠 nginx 前缀重写无法
 可靠修复。
 
-**还需要的集群侧配置**：
+**发布顺序**：
 
-1. ACK 负载均衡/Ingress 增加主机规则：`archestra.anbanai.com` → Studio
-   Service（`${micro_service_name}-svc`，当前为 `creator-studio-web-svc`）的
-   `8080` 端口。也可以直接指向同 namespace 的 `archestra-platform:3000`，
-   此时流量不经过 Studio nginx。DNS 的 `*.anbanai.com` 已解析到同一 SLB，
-   证书也已覆盖，无需额外申请。
+1. 直接发布 Studio 流水线（`creator.anbanai.com-prod`，构建
+   `deploy/docker/Dockerfile.studio`）。`studio/Deployment.yaml` 里的 Ingress
+   会创建/更新 `archestra.anbanai.com` 的 ALB 规则，不需要再进 ALB 控制台。
+   滚动期间旧 Pod 可能短暂返回 Studio 页面，等 rollout 完成即可。ACK 默认
+   IngressClass 是 `alb`（`kubectl get ingressclass` 可确认）；如果集群改过
+   名字，同步修改 Ingress 的 `ingressClassName`。如果现有 Studio Ingress
+   显式绑定了 `alb.ingress.kubernetes.io/load-balancer-id`，把同样的
+   annotation 补到新 Ingress 上，确保复用同一个 ALB；如果 443 没生效，把
+   现有 Ingress 的 `spec.tls` 或 `certificate-id` 注解同步过来。
 2. 设置 Archestra 的公开地址并重新执行部署脚本：
 
    ```bash
@@ -111,9 +118,10 @@ Studio 的 SPA fallback、`/api/`、`/mcp`、`/ws` 冲突，仅靠 nginx 前缀�
 管理员邮箱和密码从云效安全变量写入 `archestra-bootstrap` Secret。密码只在
 Archestra 首次创建用户时生效；之后修改该 Secret 不会重置已有账号密码。
 
-Archestra 自身仍未创建公网 Ingress，Service 保持 `ClusterIP`；对外入口复用
-Studio 的 nginx，见上一节。如果以后改走独立 Ingress，再在 values 覆盖中开启
-`archestra.ingress` 并配置 `ARCHESTRA_FRONTEND_URL`、`ARCHESTRA_API_BASE_URL`。
+Archestra 自身的 Service 保持 `ClusterIP`；公网入口由 Studio 清单里的 Ingress
+转发到 Studio nginx，再由 nginx 代理到 Archestra。如果以后改走 Archestra
+独立 Ingress，再在 values 覆盖中开启 `archestra.ingress` 并配置
+`ARCHESTRA_FRONTEND_URL`、`ARCHESTRA_API_BASE_URL`。
 
 正式环境建议切换到外部 PostgreSQL，并单独
 备份数据库、认证 Secret 和加密密钥。若后续切换到文件系统存储，必须先准备
