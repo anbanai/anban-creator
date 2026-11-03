@@ -162,7 +162,10 @@ func NewMCPHandler(apiKeySvc *service.APIKeyService, staticKey string, zlog *zer
 
 	// The SDK retains the initialize context across requests. Bind tool identity
 	// from the transport's verified credentials for each individual call.
-	mcServer.AddReceivingMiddleware(requestIdentityMiddleware)
+	// Middleware order is outer-to-inner. Tool-call logging is outermost so it
+	// also records calls rejected during identity validation; it reads the
+	// verified TokenInfo directly until the identity middleware attaches ctx.
+	mcServer.AddReceivingMiddleware(mcpToolCallLoggingMiddleware(zlog), requestIdentityMiddleware)
 
 	// Register all tools.
 	RegisterTools(mcServer)

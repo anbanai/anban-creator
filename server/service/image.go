@@ -437,7 +437,28 @@ func (s *ImageService) recordFailedImageProviderCost(ctx context.Context, taskID
 }
 
 func (s *ImageService) recordImageProviderCost(ctx context.Context, taskID string, result *ImageResult) {
-	if s == nil || s.providerCostSvc == nil || result == nil {
+	if s == nil || result == nil {
+		return
+	}
+	if result.Usage != nil {
+		// Keep input_tokens aligned with the LLM path: uncached input only.
+		// Image providers currently report zero cached tokens, but subtracting
+		// them here keeps the aggregate safe if that changes.
+		cachedInput := result.Usage.TextCachedInputTokens + result.Usage.ImageCachedInputTokens
+		inputTokens := result.Usage.TextInputTokens + result.Usage.ImageInputTokens - cachedInput
+		if inputTokens < 0 {
+			inputTokens = 0
+		}
+		RecordModelUsage(ctx, result.Model, srvconfig.TokenUsage{
+			InputTokens:       inputTokens,
+			CachedInputTokens: cachedInput,
+			OutputTokens:      result.Usage.ImageOutputTokens,
+			TotalTokens:       result.Usage.TotalTokens,
+		})
+	} else {
+		RecordModelUsage(ctx, result.Model, srvconfig.TokenUsage{})
+	}
+	if s.providerCostSvc == nil {
 		return
 	}
 	var usage *OpenAIImageUsage

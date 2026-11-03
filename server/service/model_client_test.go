@@ -308,3 +308,52 @@ func TestImageUnderstandingTraceIgnoresFailedRequestWrite(t *testing.T) {
 		t.Fatalf("successful request write was not recorded: %#v", diagnostics)
 	}
 }
+
+func TestImageUnderstandingCompletionRecordsToolUsage(t *testing.T) {
+	const successJSON = `{"id":"completion-1","model":"vision-response","choices":[{"index":0,"message":{"role":"assistant","content":"a blue cup"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(successJSON))
+	}))
+	defer server.Close()
+
+	tracker := NewToolUsage()
+	ctx := WithToolUsage(context.Background(), tracker)
+	client := NewOpenAILLMClient(server.URL, "fixture-api-key", "vision-route", time.Second).(*openaiLLMClient)
+	client.client.Chat.Completions.Options = append(client.client.Chat.Completions.Options, option.WithMaxRetries(0))
+	result, err := client.CompleteWithImageResult(ctx, "", "describe", "data:image/png;base64,eA==")
+	if err != nil {
+		t.Fatalf("completion: %v", err)
+	}
+	if result == nil || result.Model != "vision-response" {
+		t.Fatalf("completion = %#v, want provider model", result)
+	}
+	snapshot := tracker.Snapshot()
+	if snapshot.ProviderCalls != 1 || !snapshot.UsageReported || len(snapshot.Models) != 1 || snapshot.Models[0] != "vision-response" {
+		t.Fatalf("tool usage = %#v, want one vision-route call", snapshot)
+	}
+	if snapshot.InputTokens != 3 || snapshot.OutputTokens != 2 || snapshot.TotalTokens != 5 {
+		t.Fatalf("tool usage tokens = %#v, want input 3, output 2, total 5", snapshot)
+	}
+}
+
+func TestTextCompletionRecordsToolUsage(t *testing.T) {
+	const successJSON = `{"id":"completion-2","model":"text-response","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":4,"total_tokens":13}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(successJSON))
+	}))
+	defer server.Close()
+
+	tracker := NewToolUsage()
+	ctx := WithToolUsage(context.Background(), tracker)
+	client := NewOpenAILLMClient(server.URL, "fixture-api-key", "text-route", time.Second).(*openaiLLMClient)
+	client.client.Chat.Completions.Options = append(client.client.Chat.Completions.Options, option.WithMaxRetries(0))
+	if _, err := client.CompleteResult(ctx, "", "write"); err != nil {
+		t.Fatalf("completion: %v", err)
+	}
+	snapshot := tracker.Snapshot()
+	if snapshot.ProviderCalls != 1 || !snapshot.UsageReported || snapshot.InputTokens != 9 || snapshot.OutputTokens != 4 || snapshot.TotalTokens != 13 {
+		t.Fatalf("tool usage = %#v, want input 9, output 4, total 13", snapshot)
+	}
+}
