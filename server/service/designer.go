@@ -44,6 +44,17 @@ var ErrDesignerCapabilityAccessDenied = errors.New("designer capability access d
 // capability identifiers.
 var ErrDesignerCapabilityUnavailable = errors.New("designer capability unavailable")
 
+var ErrDesignerInvalidInput = errors.New("designer invalid input")
+
+type DesignerValidationError struct{ Message string }
+
+func (e *DesignerValidationError) Error() string        { return e.Message }
+func (e *DesignerValidationError) Is(target error) bool { return target == ErrDesignerInvalidInput }
+
+func designerInputError(format string, args ...any) error {
+	return &DesignerValidationError{Message: fmt.Sprintf(format, args...)}
+}
+
 var ErrDesignerReferenceUnsupported = errors.New("selected image capability does not support reference images")
 var ErrDesignerReferenceLimitExceeded = errors.New("selected image capability reference limit exceeded")
 
@@ -59,6 +70,11 @@ func (e *DesignerReferenceLimitError) Error() string {
 func (e *DesignerReferenceLimitError) Unwrap() error { return ErrDesignerReferenceLimitExceeded }
 
 const maxDesignerReferenceBytes int64 = 10 * 1024 * 1024
+
+const (
+	designerOutputUnavailableMessage = "图片已生成，但保存到作品库失败，请稍后重试"
+	designerGenericFailureMessage    = "图片生成失败，请稍后重试"
+)
 
 type DesignerService struct {
 	db              *gorm.DB
@@ -152,27 +168,32 @@ type DesignerGenerationQuote struct {
 }
 
 type DesignerGenerationPublic struct {
-	ID             string                        `json:"id"`
-	ProjectID      string                        `json:"project_id"`
-	Prompt         string                        `json:"prompt"`
-	RevisedPrompt  string                        `json:"revised_prompt,omitempty"`
-	CapabilityKey  string                        `json:"capability_key,omitempty"`
-	CapabilityName string                        `json:"capability_name,omitempty"`
-	Quality        string                        `json:"quality,omitempty"`
-	Size           string                        `json:"size,omitempty"`
-	N              int                           `json:"n"`
-	OutputFormat   string                        `json:"output_format,omitempty"`
-	Status         string                        `json:"status"`
-	Error          string                        `json:"error,omitempty"`
-	ErrorCode      string                        `json:"error_code,omitempty"`
-	Cost           int                           `json:"cost,omitempty"`
-	EstimatedCost  int                           `json:"estimated_cost,omitempty"`
-	FinalCost      int                           `json:"final_cost,omitempty"`
-	BillingMode    string                        `json:"billing_mode,omitempty"`
-	BillingStatus  string                        `json:"billing_status,omitempty"`
-	CreatedAt      time.Time                     `json:"created_at"`
-	UpdatedAt      time.Time                     `json:"updated_at"`
-	Results        []model.ImageGenerationResult `json:"results,omitempty"`
+	ID                string                        `json:"id"`
+	ProjectID         string                        `json:"project_id"`
+	Prompt            string                        `json:"prompt"`
+	RevisedPrompt     string                        `json:"revised_prompt,omitempty"`
+	CapabilityKey     string                        `json:"capability_key,omitempty"`
+	CapabilityName    string                        `json:"capability_name,omitempty"`
+	Quality           string                        `json:"quality,omitempty"`
+	Size              string                        `json:"size,omitempty"`
+	N                 int                           `json:"n"`
+	OutputFormat      string                        `json:"output_format,omitempty"`
+	OutputCompression int                           `json:"output_compression"`
+	Background        string                        `json:"background,omitempty"`
+	Watermark         bool                          `json:"watermark"`
+	ReferenceFileIDs  []string                      `json:"reference_file_ids,omitempty"`
+	MaskFileID        string                        `json:"mask_file_id,omitempty"`
+	Status            string                        `json:"status"`
+	Error             string                        `json:"error,omitempty"`
+	ErrorCode         string                        `json:"error_code,omitempty"`
+	Cost              int                           `json:"cost,omitempty"`
+	EstimatedCost     int                           `json:"estimated_cost,omitempty"`
+	FinalCost         int                           `json:"final_cost,omitempty"`
+	BillingMode       string                        `json:"billing_mode,omitempty"`
+	BillingStatus     string                        `json:"billing_status,omitempty"`
+	CreatedAt         time.Time                     `json:"created_at"`
+	UpdatedAt         time.Time                     `json:"updated_at"`
+	Results           []model.ImageGenerationResult `json:"results,omitempty"`
 }
 
 func (s *DesignerService) publicGeneration(gen *model.ImageGeneration) *DesignerGenerationPublic {
@@ -190,9 +211,13 @@ func (s *DesignerService) publicGeneration(gen *model.ImageGeneration) *Designer
 	if gen.Status == model.ImageGenerationStatusCompleted && gen.BillingMode == "fixed_sku" {
 		finalCost = gen.Cost
 	}
+	var referenceFileIDs []string
+	_ = json.Unmarshal([]byte(gen.ReferenceFiles), &referenceFileIDs)
 	return &DesignerGenerationPublic{ID: gen.ID, ProjectID: gen.ProjectID, Prompt: gen.Prompt,
 		RevisedPrompt: gen.RevisedPrompt, CapabilityKey: capKey, CapabilityName: capName,
 		Quality: gen.Quality, Size: gen.Size, N: gen.N, OutputFormat: gen.OutputFormat,
+		OutputCompression: gen.OutputCompression, Background: gen.Background, Watermark: gen.Watermark,
+		ReferenceFileIDs: referenceFileIDs, MaskFileID: gen.MaskFileID,
 		Status: gen.Status, Error: gen.Error, ErrorCode: designerGenerationErrorCode(gen.Error), Cost: gen.Cost, EstimatedCost: gen.EstimatedCost,
 		FinalCost: finalCost, BillingMode: gen.BillingMode, BillingStatus: gen.BillingStatus,
 		CreatedAt: gen.CreatedAt, UpdatedAt: gen.UpdatedAt, Results: gen.Results}
@@ -226,24 +251,27 @@ func designerGenerationErrorCode(message string) string {
 	if strings.HasPrefix(strings.TrimSpace(message), "image_ratio_mismatch:") {
 		return "image_ratio_mismatch"
 	}
+	if message == designerOutputUnavailableMessage {
+		return "image_output_unavailable"
+	}
 	return ""
 }
 
 func (s *DesignerService) CreateGenerationQuote(ctx context.Context, userID string, req DesignerGenerateRequest) (*DesignerGenerationQuote, error) {
-	if s == nil || s.billingCatalog == nil {
-		return nil, fmt.Errorf("fixed-SKU designer billing is not configured")
-	}
 	if strings.TrimSpace(req.Prompt) == "" || strings.TrimSpace(req.CapabilityKey) == "" {
-		return nil, fmt.Errorf("prompt and capability_key are required")
+		return nil, designerInputError("prompt and capability_key are required")
 	}
 	if _, err := uuid.Parse(req.OperationID); err != nil {
-		return nil, fmt.Errorf("operation_id must be a UUID")
+		return nil, designerInputError("operation_id must be a UUID")
 	}
 	if req.N != 1 {
 		if req.N < 1 {
-			return nil, fmt.Errorf("n is required")
+			return nil, designerInputError("n is required")
 		}
-		return nil, fmt.Errorf("n must equal 1; batch designer SKUs are not configured")
+		return nil, designerInputError("n must equal 1; batch designer SKUs are not configured")
+	}
+	if s == nil || s.billingCatalog == nil {
+		return nil, fmt.Errorf("fixed-SKU designer billing is not configured")
 	}
 	_, route, err := s.authorizeDesignerCapability(ctx, userID, req.CapabilityKey)
 	if err != nil {
@@ -283,22 +311,22 @@ func (s *DesignerService) CreateGenerationQuote(ctx context.Context, userID stri
 // a generation record with "generating" status. Returns the generation ID.
 func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID string, req DesignerGenerateRequest) (*DesignerGenerationCreated, error) {
 	if req.Prompt == "" {
-		return nil, fmt.Errorf("prompt is required")
+		return nil, designerInputError("prompt is required")
 	}
 	if strings.TrimSpace(req.CapabilityKey) == "" {
-		return nil, fmt.Errorf("capability_key is required")
+		return nil, designerInputError("capability_key is required")
 	}
 	if strings.TrimSpace(req.QuoteID) == "" {
-		return nil, fmt.Errorf("quote_id is required")
+		return nil, designerInputError("quote_id is required")
 	}
 	if _, err := uuid.Parse(req.OperationID); err != nil {
-		return nil, fmt.Errorf("operation_id must be a UUID")
+		return nil, designerInputError("operation_id must be a UUID")
 	}
 	if req.N != 1 {
 		if req.N < 1 {
-			return nil, fmt.Errorf("n is required")
+			return nil, designerInputError("n is required")
 		}
-		return nil, fmt.Errorf("n must equal 1; batch designer SKUs are not configured")
+		return nil, designerInputError("n must equal 1; batch designer SKUs are not configured")
 	}
 	wantFingerprint := DesignerGenerationFingerprint(userID, req)
 	if req.RequestFingerprint != wantFingerprint {
@@ -533,23 +561,23 @@ type ImageGenerationFeatures = srvconfig.ImageGenerationFeatures
 
 func validateDesignerGenerateRequest(req DesignerGenerateRequest, caps ImageGenerationFeatures) error {
 	if strings.TrimSpace(req.Size) == "" {
-		return fmt.Errorf("size is required")
+		return designerInputError("size is required")
 	}
 	if req.N < 1 {
-		return fmt.Errorf("n is required")
+		return designerInputError("n is required")
 	}
 	if strings.TrimSpace(req.OutputFormat) == "" {
-		return fmt.Errorf("output_format is required")
+		return designerInputError("output_format is required")
 	}
 	if strings.TrimSpace(req.Quality) == "" {
-		return fmt.Errorf("quality is required")
+		return designerInputError("quality is required")
 	}
 	maxBatch := caps.MaxBatch
 	if maxBatch <= 0 {
 		maxBatch = 1
 	}
 	if req.N > maxBatch {
-		return fmt.Errorf("n exceeds provider max_batch %d", maxBatch)
+		return designerInputError("n exceeds provider max_batch %d", maxBatch)
 	}
 	if len(req.ReferenceFileIDs) > 0 {
 		if !caps.SupportsReference {
@@ -560,34 +588,34 @@ func validateDesignerGenerateRequest(req DesignerGenerateRequest, caps ImageGene
 		}
 	}
 	if req.MaskFileID != "" && !caps.SupportsMask {
-		return fmt.Errorf("selected provider does not support mask editing")
+		return designerInputError("selected provider does not support mask editing")
 	}
 	if len(caps.QualityLevels) > 0 && !stringInSet(req.Quality, caps.QualityLevels) {
-		return fmt.Errorf("quality %q is not supported by selected provider", req.Quality)
+		return designerInputError("quality is not supported by selected provider")
 	}
 	if len(caps.OutputFormats) > 0 && !stringInSet(req.OutputFormat, caps.OutputFormats) {
-		return fmt.Errorf("output_format %q is not supported by selected provider", req.OutputFormat)
+		return designerInputError("output_format is not supported by selected provider")
 	}
 	if len(caps.SizePresets) > 0 {
 		size := strings.TrimSpace(req.Size)
 		if !stringInSet(size, caps.SizePresets) {
-			return fmt.Errorf("size %q is not supported by selected provider", size)
+			return designerInputError("size is not supported by selected provider")
 		}
 	}
 	if req.OutputCompression > 0 && !caps.HasCompression {
-		return fmt.Errorf("selected provider does not support output compression")
+		return designerInputError("selected provider does not support output compression")
 	}
 	if req.OutputCompression < 0 || req.OutputCompression >= 100 {
-		return fmt.Errorf("output_compression must be between 0 and 99")
+		return designerInputError("output_compression must be between 0 and 99")
 	}
 	if req.Watermark != nil && *req.Watermark && !caps.Watermark {
-		return fmt.Errorf("selected provider does not support watermark")
+		return designerInputError("selected provider does not support watermark")
 	}
 	if req.Background != "" && !stringInSet(req.Background, []string{"auto", "transparent", "opaque"}) {
-		return fmt.Errorf("background is invalid")
+		return designerInputError("background is invalid")
 	}
 	if strings.TrimSpace(req.Background) != "" && !strings.EqualFold(req.Background, "auto") && !caps.HasBackground {
-		return fmt.Errorf("selected provider does not support background control")
+		return designerInputError("selected provider does not support background control")
 	}
 	return nil
 }
@@ -662,8 +690,8 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 
 	defer func() {
 		if r := recover(); r != nil {
-			s.logger.Error().Str("gen_id", genID).Any("panic", r).Msg("generation panicked")
-			fail("platform_error", fmt.Sprintf("internal error: %v", r))
+			s.logger.Error().Str("gen_id", genID).Msg("generation panicked")
+			fail("platform_error", designerGenericFailureMessage)
 		}
 	}()
 
@@ -748,7 +776,7 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 	result, err := providerInst.Generate(ctx, gen.Prompt, genOpts)
 	if err != nil {
 		s.recordDesignerProviderFailure(ctx, &gen)
-		s.logger.Error().Err(err).
+		s.logger.Error().
 			Str("gen_id", genID).
 			Str("user_id", gen.UserID).
 			Str("provider", provider).
@@ -768,7 +796,6 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 		Str("prompt_preview", truncate(gen.Prompt, 80)).
 		Str("result_type", result.ResponseType).
 		Int("image_count", len(result.Images)).
-		Str("url_preview", truncate(result.URL, 80)).
 		Dur("elapsed", time.Since(start)).
 		Msg("designer: image generation completed")
 
@@ -778,7 +805,8 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 	outputs, cleanupOutputs, materializeErr := materializeDesignerResultOutputs(ctx, result)
 	if materializeErr != nil {
 		s.recordDesignerProviderCost(ctx, &gen, result)
-		fail("platform_error", materializeErr.Error())
+		s.logger.Error().Str("gen_id", genID).Msg("designer output materialization failed")
+		fail("platform_error", designerOutputUnavailableMessage)
 		return
 	}
 	defer cleanupOutputs()
@@ -787,7 +815,12 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 	result.OutputWidth, result.OutputHeight = outputWidth, outputHeight
 	s.recordDesignerProviderCost(ctx, &gen, result)
 	if dimensionErr != nil {
-		fail("platform_error", dimensionErr.Error())
+		if strings.HasPrefix(dimensionErr.Error(), "image_ratio_mismatch:") {
+			fail("platform_error", dimensionErr.Error())
+		} else {
+			s.logger.Error().Str("gen_id", genID).Msg("designer output dimension inspection failed")
+			fail("platform_error", designerOutputUnavailableMessage)
+		}
 		return
 	}
 	var durableResults []model.ImageGenerationResult
@@ -1211,16 +1244,15 @@ func (s *DesignerService) GetGeneration(ctx context.Context, userID, generationI
 }
 
 func designerGenerationUserError(err error) string {
-	const fallback = "图片生成失败，请稍后重试"
 	if err == nil {
-		return fallback
+		return designerGenericFailureMessage
 	}
 
 	var genErr *image.GenerateError
 	if errors.As(err, &genErr) {
 		switch genErr.Code {
 		case "url_download_error":
-			return "图片已生成，但保存到作品库失败，请稍后重试"
+			return designerOutputUnavailableMessage
 		case "content_policy_violation":
 			return "提示词可能不符合内容安全要求，请调整后重试"
 		case "rate_limit", "server_error", "network_error":
@@ -1230,59 +1262,9 @@ func designerGenerationUserError(err error) string {
 		case "endpoint_protocol", "usage_required_missing":
 			return "图像能力配置异常，请联系管理员"
 		}
-		return sanitizeDesignerGenerationError(genErr.Message, fallback)
+		return designerGenericFailureMessage
 	}
-
-	return sanitizeDesignerGenerationError(err.Error(), fallback)
-}
-
-func sanitizeDesignerGenerationError(raw, fallback string) string {
-	msg := strings.TrimSpace(raw)
-	if msg == "" {
-		return fallback
-	}
-	lower := strings.ToLower(msg)
-
-	if strings.Contains(msg, "下载失败") || strings.Contains(msg, "下载图片失败") || strings.Contains(lower, "url_download_error") {
-		return "图片已生成，但保存到作品库失败，请稍后重试"
-	}
-	if strings.Contains(lower, "content policy") || strings.Contains(lower, "content_filter") ||
-		strings.Contains(msg, "敏感") || strings.Contains(msg, "审核") || strings.Contains(msg, "不合规") {
-		return "提示词可能不符合内容安全要求，请调整后重试"
-	}
-	if strings.Contains(lower, "api key") || strings.Contains(lower, "base url") || strings.Contains(lower, "endpoint") ||
-		strings.Contains(msg, "配置文件") || strings.Contains(msg, "配置异常") {
-		return "图像能力配置异常，请联系管理员"
-	}
-	if strings.Contains(lower, "rate limit") || strings.Contains(lower, "timeout") ||
-		strings.Contains(msg, "稍后重试") {
-		return "图片服务繁忙，请稍后重试"
-	}
-	if looksLikeInternalDesignerError(msg) {
-		return fallback
-	}
-
-	if i := strings.IndexAny(msg, "\r\n"); i >= 0 {
-		msg = strings.TrimSpace(msg[:i])
-	}
-	if len([]rune(msg)) > 120 {
-		return fallback
-	}
-	return msg
-}
-
-func looksLikeInternalDesignerError(msg string) bool {
-	lower := strings.ToLower(msg)
-	internalMarkers := []string{
-		"{\"level\"", "\"error\"", "<br/>", "revisedprompt", "http://", "https://",
-		"[openai]", "[gemini]", "[volcengine]", "stack trace", "panic:",
-	}
-	for _, marker := range internalMarkers {
-		if strings.Contains(lower, marker) {
-			return true
-		}
-	}
-	return false
+	return designerGenericFailureMessage
 }
 
 func (s *DesignerService) findDesignerConfigByID(id string) *config.ImageAPI {

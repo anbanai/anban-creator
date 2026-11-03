@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -8,6 +9,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -152,6 +155,185 @@ func TestDesignerRepeatedExecutionCallsProviderOnceAndSettlesOnce(t *testing.T) 
 	}
 }
 
+func TestDesignerAdmissionReplayAndConflictingOperation(t *testing.T) {
+	f := newDesignerFixedSKUFixture(t, 500)
+	req := f.request(t)
+	first, err := f.service.CreateGenerationRecord(context.Background(), f.userID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := f.service.CreateGenerationRecord(context.Background(), f.userID, req)
+	if err != nil || replay.GenerationID != first.GenerationID {
+		t.Fatalf("replay = %#v, err=%v", replay, err)
+	}
+	conflict := req
+	conflict.Prompt = "different work"
+	conflict.RequestFingerprint = DesignerGenerationFingerprint(f.userID, conflict)
+	if _, err := f.service.CreateGenerationRecord(context.Background(), f.userID, conflict); !errors.Is(err, ErrBillingConflict) {
+		t.Fatalf("conflicting replay error = %v", err)
+	}
+	var generations, charges int64
+	f.db.Model(&model.ImageGeneration{}).Where("id = ?", req.OperationID).Count(&generations)
+	f.db.Model(&model.BillingCharge{}).Where("resource_type = ? AND resource_id = ? AND charge_kind = ?", "image_generation", req.OperationID, model.BillingChargeKindOperation).Count(&charges)
+	if generations != 1 || charges != 1 {
+		t.Fatalf("generations=%d charges=%d, want 1 each", generations, charges)
+	}
+}
+
+func TestDesignerAdmissionRejectsExpiredAndMismatchedQuotesWithoutCharge(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*designerFixedSKUFixture, *DesignerGenerateRequest)
+	}{
+		{"expired", func(f *designerFixedSKUFixture, req *DesignerGenerateRequest) {
+			if err := f.db.Model(&model.BillingQuote{}).Where("id = ?", req.QuoteID).Update("expires_at", time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"fingerprint mismatch", func(_ *designerFixedSKUFixture, req *DesignerGenerateRequest) { req.RequestFingerprint = "different" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newDesignerFixedSKUFixture(t, 500)
+			req := f.request(t)
+			tc.mutate(f, &req)
+			_, err := f.service.CreateGenerationRecord(context.Background(), f.userID, req)
+			if tc.name == "expired" && !errors.Is(err, ErrBillingQuoteExpired) {
+				t.Fatalf("expired quote error = %v", err)
+			}
+			if tc.name == "fingerprint mismatch" && !errors.Is(err, ErrBillingQuoteMismatch) {
+				t.Fatalf("mismatched quote error = %v", err)
+			}
+			var generations, charges int64
+			f.db.Model(&model.ImageGeneration{}).Count(&generations)
+			f.db.Model(&model.BillingCharge{}).Where("charge_kind = ?", model.BillingChargeKindOperation).Count(&charges)
+			if generations != 0 || charges != 0 {
+				t.Fatalf("generations=%d charges=%d, want zero", generations, charges)
+			}
+		})
+	}
+}
+
+func TestDesignerConcurrentAdmissionChargesAndCreatesOnce(t *testing.T) {
+	f := newDesignerFixedSKUFixture(t, 500)
+	sqlDB, err := f.db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	req := f.request(t)
+	const workers = 6
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	results := make(chan error, workers)
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			created, err := f.service.CreateGenerationRecord(context.Background(), f.userID, req)
+			if err == nil && created.GenerationID != req.OperationID {
+				err = errors.New("wrong generation ID")
+			}
+			results <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	for err := range results {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var generations, charges int64
+	f.db.Model(&model.ImageGeneration{}).Where("id = ?", req.OperationID).Count(&generations)
+	f.db.Model(&model.BillingCharge{}).Where("resource_type = ? AND resource_id = ? AND charge_kind = ?", "image_generation", req.OperationID, model.BillingChargeKindOperation).Count(&charges)
+	if generations != 1 || charges != 1 {
+		t.Fatalf("generations=%d charges=%d, want 1 each", generations, charges)
+	}
+}
+
+func TestDesignerConcurrentExecutionCallsProviderOnce(t *testing.T) {
+	f := newDesignerFixedSKUFixture(t, 500)
+	req := f.request(t)
+	created, err := f.service.CreateGenerationRecord(context.Background(), f.userID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	f.service.providerFactory = func(*appconfig.ImageAPI, *zerolog.Logger) (appimage.Provider, error) {
+		return designerReferenceProvider{generate: func(*appimage.GenerateOptions) (*appimage.GenerateResult, error) {
+			calls.Add(1)
+			close(started)
+			<-release
+			return nil, errors.New("provider failed")
+		}}, nil
+	}
+	go func() { f.service.ExecuteGeneration(context.Background(), created.GenerationID); close(done) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first provider call did not start")
+	}
+	f.service.ExecuteGeneration(context.Background(), created.GenerationID)
+	close(release)
+	<-done
+	if calls.Load() != 1 {
+		t.Fatalf("provider calls = %d, want 1", calls.Load())
+	}
+	var charges, settlements int64
+	f.db.Model(&model.BillingCharge{}).Where("resource_type = ? AND resource_id = ? AND charge_kind = ?", "image_generation", req.OperationID, model.BillingChargeKindOperation).Count(&charges)
+	f.db.Model(&model.BillingSettlementOutbox{}).Where("resource_type = ? AND resource_id = ?", "image_generation", req.OperationID).Count(&settlements)
+	if charges != 1 || settlements != 1 {
+		t.Fatalf("charges=%d settlements=%d, want 1 each", charges, settlements)
+	}
+}
+
+type designerContextProvider struct{ generate func(context.Context) error }
+
+func (designerContextProvider) Name() string { return "context-test" }
+func (p designerContextProvider) Generate(ctx context.Context, _ string, _ *appimage.GenerateOptions) (*appimage.GenerateResult, error) {
+	return nil, p.generate(ctx)
+}
+func (designerContextProvider) Capabilities() *appimage.ProviderCapabilities {
+	return &appimage.ProviderCapabilities{}
+}
+
+func TestDesignerProviderObservesConfiguredExecutionTimeout(t *testing.T) {
+	f := newDesignerFixedSKUFixture(t, 500)
+	route := f.service.fullCfg.ModelRoutes.ImageGeneration.Capabilities["standard"]
+	route.Timeout = 40 * time.Millisecond
+	f.service.fullCfg.ModelRoutes.ImageGeneration.Capabilities["standard"] = route
+	req := f.request(t)
+	created, err := f.service.CreateGenerationRecord(context.Background(), f.userID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawDeadline atomic.Bool
+	f.service.providerFactory = func(*appconfig.ImageAPI, *zerolog.Logger) (appimage.Provider, error) {
+		return designerContextProvider{generate: func(ctx context.Context) error {
+			if _, ok := ctx.Deadline(); ok {
+				sawDeadline.Store(true)
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		}}, nil
+	}
+	started := time.Now()
+	f.service.ExecuteGeneration(context.Background(), created.GenerationID)
+	if !sawDeadline.Load() || time.Since(started) > time.Second {
+		t.Fatalf("provider timeout not observed, deadline=%v elapsed=%s", sawDeadline.Load(), time.Since(started))
+	}
+	var gen model.ImageGeneration
+	if err := f.db.First(&gen, "id = ?", req.OperationID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if gen.Status != model.ImageGenerationStatusFailed || gen.ExecutionDeadline == nil {
+		t.Fatalf("generation = %#v", gen)
+	}
+}
+
 func TestDesignerRecoveryExpiresStartedGenerationWithoutProviderReplay(t *testing.T) {
 	f := newDesignerFixedSKUFixture(t, 500)
 	req := f.request(t)
@@ -284,6 +466,206 @@ func TestDesignerLateResultCannotCompleteFailedGeneration(t *testing.T) {
 	f.db.Model(&model.ImageGenerationResult{}).Where("generation_id = ?", created.GenerationID).Count(&results)
 	if results != 0 {
 		t.Fatalf("late result rows = %d, want 0", results)
+	}
+}
+
+func TestDesignerOutputFailureHidesSourceLocations(t *testing.T) {
+	closed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	closedURL := closed.URL
+	closed.Close()
+	for _, tc := range []struct{ name, source, secret string }{
+		{"missing local file", "/private/anban-secret/generated.png", "anban-secret"},
+		{"signed remote URL", closedURL + "/generated.png?signature=credential-secret", "credential-secret"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newDesignerFixedSKUFixture(t, 500)
+			req := f.request(t)
+			created, err := f.service.CreateGenerationRecord(context.Background(), f.userID, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.service.providerFactory = func(*appconfig.ImageAPI, *zerolog.Logger) (appimage.Provider, error) {
+				return &fakeImageProvider{result: &appimage.GenerateResult{URL: tc.source, ProviderRequestID: "redacted-output"}}, nil
+			}
+			f.service.ExecuteGeneration(context.Background(), created.GenerationID)
+			public, err := f.service.GetGeneration(context.Background(), f.userID, created.GenerationID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if public.Status != model.ImageGenerationStatusFailed || public.ErrorCode != "image_output_unavailable" || strings.Contains(public.Error, tc.secret) || strings.Contains(public.Error, tc.source) {
+				t.Fatalf("public failure = %#v", public)
+			}
+			var persisted model.ImageGeneration
+			if err := f.db.First(&persisted, "id = ?", created.GenerationID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(persisted.Error, tc.secret) {
+				t.Fatalf("persisted error leaked source: %q", persisted.Error)
+			}
+		})
+	}
+}
+
+func TestDesignerProviderPanicHidesPanicPayload(t *testing.T) {
+	f := newDesignerFixedSKUFixture(t, 500)
+	req := f.request(t)
+	created, err := f.service.CreateGenerationRecord(context.Background(), f.userID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.service.providerFactory = func(*appconfig.ImageAPI, *zerolog.Logger) (appimage.Provider, error) {
+		return designerReferenceProvider{generate: func(*appimage.GenerateOptions) (*appimage.GenerateResult, error) {
+			panic("https://provider.test/result?signature=panic-secret")
+		}}, nil
+	}
+	f.service.ExecuteGeneration(context.Background(), created.GenerationID)
+	public, err := f.service.GetGeneration(context.Background(), f.userID, created.GenerationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if public.Status != model.ImageGenerationStatusFailed || strings.Contains(public.Error, "panic-secret") || strings.Contains(public.Error, "provider.test") {
+		t.Fatalf("public panic failure = %#v", public)
+	}
+}
+
+func TestDesignerHistoryRetainsAdvancedOptionsAndEditInputs(t *testing.T) {
+	f := newDesignerFixedSKUFixture(t, 500)
+	route := f.service.fullCfg.ModelRoutes.ImageGeneration.Capabilities["standard"]
+	route.GenerationFeatures.SupportsReference = true
+	route.GenerationFeatures.SupportsMask = true
+	route.GenerationFeatures.MaxReferenceImages = 2
+	route.GenerationFeatures.HasCompression = true
+	route.GenerationFeatures.HasBackground = true
+	route.GenerationFeatures.Watermark = true
+	f.service.fullCfg.ModelRoutes.ImageGeneration.Capabilities["standard"] = route
+	refID, err := f.service.UploadReference(context.Background(), f.userID, "reference.png", "image/png", taskImagePNG(4, 4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	maskID, err := f.service.UploadReference(context.Background(), f.userID, "mask.png", "image/png", taskImagePNG(4, 4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled := true
+	req := DesignerGenerateRequest{OperationID: uuid.NewString(), ProjectID: f.projectID, Prompt: "retouch", CapabilityKey: "standard", Quality: "auto", Size: "1:1", N: 1, OutputFormat: "png", OutputCompression: 67, Background: "transparent", Watermark: &enabled, ReferenceFileIDs: []string{refID}, MaskFileID: maskID}
+	quote, err := f.service.CreateGenerationQuote(context.Background(), f.userID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.QuoteID, req.RequestFingerprint = quote.QuoteID, quote.RequestFingerprint
+	if _, err := f.service.CreateGenerationRecord(context.Background(), f.userID, req); err != nil {
+		t.Fatal(err)
+	}
+	for _, public := range []DesignerGenerationPublic{func() DesignerGenerationPublic {
+		v, err := f.service.GetGeneration(context.Background(), f.userID, req.OperationID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return *v
+	}(), func() DesignerGenerationPublic {
+		rows, _, err := f.service.GetHistory(context.Background(), f.userID, f.projectID, 1, 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 1 {
+			t.Fatalf("history rows = %d", len(rows))
+		}
+		return rows[0]
+	}()} {
+		if public.OutputCompression != 67 || public.Background != "transparent" || !public.Watermark || public.MaskFileID != maskID || len(public.ReferenceFileIDs) != 1 || public.ReferenceFileIDs[0] != refID {
+			t.Fatalf("restored options = %#v", public)
+		}
+	}
+}
+
+func TestDesignerReferenceAndMaskGenerationDeliversStoredResult(t *testing.T) {
+	f := newDesignerFixedSKUFixture(t, 500)
+	route := f.service.fullCfg.ModelRoutes.ImageGeneration.Capabilities["standard"]
+	route.GenerationFeatures.SupportsReference = true
+	route.GenerationFeatures.SupportsMask = true
+	route.GenerationFeatures.MaxReferenceImages = 2
+	f.service.fullCfg.ModelRoutes.ImageGeneration.Capabilities["standard"] = route
+	input := taskImagePNG(4, 4)
+	refID, err := f.service.UploadReference(context.Background(), f.userID, "reference.png", "image/png", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	maskID, err := f.service.UploadReference(context.Background(), f.userID, "mask.png", "image/png", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := DesignerGenerateRequest{OperationID: uuid.NewString(), ProjectID: f.projectID, Prompt: "edit", CapabilityKey: "standard", Quality: "auto", Size: "1:1", N: 1, OutputFormat: "png", ReferenceFileIDs: []string{refID}, MaskFileID: maskID}
+	quote, err := f.service.CreateGenerationQuote(context.Background(), f.userID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.QuoteID, req.RequestFingerprint = quote.QuoteID, quote.RequestFingerprint
+	if _, err := f.service.CreateGenerationRecord(context.Background(), f.userID, req); err != nil {
+		t.Fatal(err)
+	}
+	outputPath := t.TempDir() + "/edited.png"
+	if err := os.WriteFile(outputPath, input, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.service.providerFactory = func(*appconfig.ImageAPI, *zerolog.Logger) (appimage.Provider, error) {
+		return designerReferenceProvider{generate: func(opts *appimage.GenerateOptions) (*appimage.GenerateResult, error) {
+			if len(opts.RefImagePaths) != 1 || opts.MaskPath == "" {
+				t.Fatalf("missing edit inputs: %#v", opts)
+			}
+			refBytes, err := os.ReadFile(opts.RefImagePaths[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			maskBytes, err := os.ReadFile(opts.MaskPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(refBytes, input) || !bytes.Equal(maskBytes, input) {
+				t.Fatal("provider received wrong edit bytes")
+			}
+			return &appimage.GenerateResult{URL: outputPath, ProviderRequestID: "mask-edit", ResponseType: "file"}, nil
+		}}, nil
+	}
+	f.service.ExecuteGeneration(context.Background(), req.OperationID)
+	public, err := f.service.GetGeneration(context.Background(), f.userID, req.OperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if public.Status != model.ImageGenerationStatusCompleted || len(public.Results) != 1 || public.Results[0].FileID == "" || public.Results[0].ImageURL == "" || public.Results[0].Width != 4 || public.Results[0].Height != 4 {
+		t.Fatalf("delivered edit = %#v", public)
+	}
+}
+
+func TestDesignerQuoteAndAdmissionRejectForeignMask(t *testing.T) {
+	f := newDesignerFixedSKUFixture(t, 500)
+	route := f.service.fullCfg.ModelRoutes.ImageGeneration.Capabilities["standard"]
+	route.GenerationFeatures.SupportsReference = true
+	route.GenerationFeatures.SupportsMask = true
+	route.GenerationFeatures.MaxReferenceImages = 1
+	f.service.fullCfg.ModelRoutes.ImageGeneration.Capabilities["standard"] = route
+	input := taskImagePNG(4, 4)
+	refID, err := f.service.UploadReference(context.Background(), f.userID, "reference.png", "image/png", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherID := uuid.NewString()
+	maskID, err := f.service.UploadReference(context.Background(), otherID, "mask.png", "image/png", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := f.request(t)
+	req.ReferenceFileIDs = []string{refID}
+	req.MaskFileID = maskID
+	req.RequestFingerprint = DesignerGenerationFingerprint(f.userID, req)
+	if _, err := f.service.CreateGenerationQuote(context.Background(), f.userID, req); !errors.Is(err, ErrDesignerReferenceInvalid) {
+		t.Fatalf("foreign mask quote error = %v", err)
+	}
+	if _, err := f.service.CreateGenerationRecord(context.Background(), f.userID, req); !errors.Is(err, ErrDesignerReferenceInvalid) {
+		t.Fatalf("foreign mask admission error = %v", err)
+	}
+	var count int64
+	if err := f.db.Model(&model.ImageGeneration{}).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("generations after rejected mask = %d, %v", count, err)
 	}
 }
 
