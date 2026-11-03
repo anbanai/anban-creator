@@ -62,12 +62,23 @@ redis:
   db: ${ANBAN_REDIS_DB:-0}
 
 trends:
+  # Which provider backs the existing list_trends MCP tool.
+  # default keeps the current public trend sources; redfox uses the Server
+  # RedFox credential below and requires api_key to be set.
   provider: "${ANBAN_TRENDS_PROVIDER:-default}"
   ttl: 10m
   timeout: 8s
   redfox:
+    # RedFox API endpoint used by the Server-side trend provider. This is
+    # used only for list_trends when trends.provider=redfox.
     endpoint: "${ANBAN_REDFOX_ENDPOINT:-https://redfox.hk/story/api/hotKeyword/list}"
+    # Server credential for list_trends. Required only when provider=redfox.
+    # Keep it separate from agent_api_key; it is never injected into Agents.
     api_key: "${ANBAN_REDFOX_API_KEY:-}"
+    # Agent credential for the read-only RedFox research MCP Skill used by
+    # article, Seednote, viral-analysis, and content-research runtimes.
+    # It is injected only into those declared research tasks and is not used
+    # by list_trends. Keep it separate from api_key.
     agent_api_key: "${ANBAN_REDFOX_AGENT_API_KEY:-}"
     timeout: 15s
 
@@ -94,28 +105,46 @@ wechat_open_platform:
   token_encryption_key: "${ANBAN_WECHAT_TOKEN_ENCRYPTION_KEY}"
 
 storage:
+  # Original media objects and OSS AI content-awareness indexes use this same
+  # Bucket. A separate Bucket is optional and requires separate Server code.
+  # AI content awareness only works with OSS; local storage cannot be used for
+  # semantic video search.
   provider: "oss"
-  endpoint: "${ANBAN_OSS_ENDPOINT}"
+  # Use the endpoint of the same region as the Bucket, for example:
+  # https://oss-cn-hangzhou.aliyuncs.com
+  endpoint: "${ANBAN_OSS_ENDPOINT:-https://oss-cn-hangzhou.aliyuncs.com}"
+  # Use a dedicated RAM user/role for the Server. Never commit real secrets.
   access_key_id: "${ANBAN_OSS_ACCESS_KEY_ID}"
   access_key_secret: "${ANBAN_OSS_ACCESS_KEY_SECRET}"
-  bucket_name: "anbancreator"
-  region: "cn-chengdu"
+  bucket_name: "${ANBAN_OSS_BUCKET_NAME:-anbancreator-prod}"
+  region: "${ANBAN_OSS_REGION:-cn-hangzhou}"
   # Optional public CDN/OSS custom domain only, e.g. "cdn.example.com".
   # Leave empty to return default https://{bucket}.{endpoint}/... OSS URLs.
   # Do not point this at the Studio/API domain or the /api/v1/files proxy.
-  custom_domain: "${ANBAN_OSS_CDN_DOMAIN}"
-  sts_role_arn: "${ANBAN_OSS_STS_ROLE_ARN}"
+  custom_domain: "${ANBAN_OSS_CDN_DOMAIN:-}"
+  # Required only when browsers upload directly with short-lived STS tokens.
+  sts_role_arn: "${ANBAN_OSS_STS_ROLE_ARN:-}"
   sts_session_name: "anban-direct-upload"
-  sts_endpoint: "${ANBAN_OSS_STS_ENDPOINT}"
+  sts_endpoint: "${ANBAN_OSS_STS_ENDPOINT:-}"
   direct_upload_expires_seconds: 900
+  # Ignored while provider=oss; retained for local development fallback.
   local_data_dir: "./data/files"
-  # Requires OSS Bucket 数据索引-向量检索 and video content awareness.
-  # The bucket role must include AliyunMetaQueryDefaultRole.
+
+  # Before enabling this block, configure the same OSS Bucket:
+  # 1. Data Index -> Vector Search
+  # 2. Video content awareness
+  # 3. RAM authorization including AliyunMetaQueryDefaultRole
+  # Do not use the broad assets/users/ prefix in production if this Bucket also
+  # contains video-edit, montage, Hypit, or other direct-upload objects. Use a
+  # media-library-only prefix or ObjectTag rule after the Server key/tag change.
+  # The Server's OSS identity also needs access to the Bucket and MetaQuery.
   ai_content_awareness:
-    enabled: false
-    video_enabled: false
-    query_timeout: 10s
-    max_results: 20
+    # Keep disabled until the OSS filter rule is restricted to media-library
+    # videos; enabling this scans matching existing and newly uploaded videos.
+    enabled: ${ANBAN_OSS_AI_CONTENT_AWARENESS_ENABLED:-false}
+    video_enabled: ${ANBAN_OSS_VIDEO_CONTENT_AWARENESS_ENABLED:-false}
+    query_timeout: ${ANBAN_OSS_META_QUERY_TIMEOUT:-10s}
+    max_results: ${ANBAN_OSS_META_QUERY_MAX_RESULTS:-20}
 
 mcp:
   api_key: "${ANBAN_MCP_API_KEY}"
