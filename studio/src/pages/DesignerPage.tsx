@@ -743,6 +743,7 @@ export default function DesignerPage() {
           const capability = capabilityList.find((item) => item.id === generation.capability_key && item.enabled && item.priceAvailable === true)
           if (!capability) { toast.error('历史图像能力当前不可用'); return }
           handleCapabilityChange(capability.id)
+          setSelectedProjectId(generation.project_id || null)
           const features = capability.designerFeatures
           setSettings({
             quality: features.qualityLevels.includes(generation.quality ?? '') ? generation.quality! : features.qualityLevels[0] ?? 'auto',

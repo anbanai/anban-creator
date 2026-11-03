@@ -450,6 +450,30 @@ describe('Designer shared prompt composer', () => {
     }), expect.any(AbortSignal), expect.any(Function)))
   })
 
+  it.each([
+    { projectId: 'project-1', selection: '项目：品牌项目' },
+    { projectId: '', selection: '项目：未选择' },
+  ])('restores historical project "$projectId" from unfiltered history before regenerating', async ({ projectId, selection }) => {
+    vi.mocked(api.designer.getHistory).mockResolvedValue({
+      items: [{
+        id: 'history-project', project_id: projectId, prompt: '复用历史项目', capability_key: 'professional',
+        quality: 'auto', size: '1:1:2K', output_format: 'png', n: 1,
+        status: 'completed', created_at: '', updated_at: '',
+      }], total: 1, page: 1, page_size: 50,
+    })
+    render(<DesignerPage />)
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '项目：未选择' })).not.toBeDisabled())
+    fireEvent.click(screen.getAllByText('历史记录')[0])
+    await waitFor(() => expect(api.designer.getHistory).toHaveBeenCalledWith({ project_id: undefined, page_size: 50 }))
+    fireEvent.click(await screen.findByRole('button', { name: '重新生成' }))
+    expect(screen.getByRole('combobox', { name: selection })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(
+      expect.objectContaining({ project_id: projectId, prompt: '复用历史项目' }),
+      expect.any(AbortSignal), expect.any(Function),
+    ))
+  })
+
   it('restores advanced history settings with visible retained inputs and sends them again', async () => {
     vi.mocked(designerApi.getCapabilities).mockResolvedValue({ items: [provider({ hasCompression: true, hasBackground: true, watermark: true, outputFormats: ['png', 'webp'] })], defaultCapability: 'professional' })
     const generation = {
