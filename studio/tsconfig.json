@@ -4,14 +4,14 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
-    },
-      "exclude": [
-      "**/*.test.ts",
-      "**/*.test.tsx",
-      "node_modules",
-      "dist"
-    ]
+    }
   },
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "node_modules",
+    "dist"
+  ],
   "files": [],
   "references": [
     { "path": "./tsconfig.app.json" }
