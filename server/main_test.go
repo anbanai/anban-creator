@@ -701,3 +701,25 @@ func TestRequireRuntimeCleanupSchema(t *testing.T) {
 		}
 	}
 }
+
+func TestUploadSessionMediaPrefixSchemaReadiness(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := requireUploadSessionMediaPrefixSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("CREATE TABLE upload_sessions (id text primary key)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := requireUploadSessionMediaPrefixSchema(db); err == nil || !strings.Contains(err.Error(), "20261103_upload_session_media_prefix.sql") {
+		t.Fatalf("legacy schema: %v", err)
+	}
+	if err := db.Migrator().AddColumn(&model.UploadSession{}, "MediaLibraryPrefix"); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireUploadSessionMediaPrefixSchema(db); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -244,6 +244,13 @@ func TestFinalizedReferenceAssetsMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	sql := string(raw)
+	// Compare the current model with the entire migration chain, not just the
+	// original creation migration. Existing installations need the ALTER too.
+	prefixMigration, err := os.ReadFile("20261103_upload_session_media_prefix.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentSchemaSQL := sql + string(prefixMigration)
 	required := []string{
 		"CREATE TABLE `upload_sessions`",
 		"UNIQUE KEY `idx_upload_sessions_staging_key` (`staging_key`)",
@@ -295,7 +302,7 @@ func TestFinalizedReferenceAssetsMigration(t *testing.T) {
 			t.Fatalf("parse %T schema: %v", value, err)
 		}
 		for _, field := range stmt.Schema.Fields {
-			if field.DBName != "" && !strings.Contains(sql, "`"+field.DBName+"`") {
+			if field.DBName != "" && !strings.Contains(currentSchemaSQL, "`"+field.DBName+"`") {
 				t.Errorf("migration SQL missing %s.%s", stmt.Schema.Table, field.DBName)
 			}
 		}

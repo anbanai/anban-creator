@@ -137,6 +137,9 @@ func main() {
 		if err := requireAssistantInteractionSchema(mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database schema is not ready for homepage assistant interactions")
 		}
+		if err := requireUploadSessionMediaPrefixSchema(mysqlDB); err != nil {
+			log.Fatal().Err(err).Msg("database schema is not ready for configurable media-library paths")
+		}
 		if err := requireUserMediaSemanticSchema(mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database schema is not ready for OSS media semantic search")
 		}
@@ -578,6 +581,10 @@ func main() {
 	}
 	if repo != nil && store != nil && imageAnalysisSvc != nil {
 		userMediaLibrarySvc = service.NewUserMediaLibraryService(repo, store, imageAnalysisSvc)
+		if err := userMediaLibrarySvc.SetMediaLibraryPrefix(cfg.Storage.MediaLibraryPrefix); err != nil {
+			log.Fatal().Err(err).Msg("configure media-library prefix")
+		}
+		log.Info().Str("bucket", cfg.Storage.BucketName).Str("media_library_prefix", cfg.Storage.MediaLibraryPrefix).Bool("query_enabled", cfg.Storage.AIContentAwareness.Enabled).Bool("video_enabled", cfg.Storage.AIContentAwareness.VideoEnabled).Msg("media-library configuration; verify the same prefix and video content awareness in OSS")
 		userMediaLibrarySvc.SetSemanticSearch(mediaSemanticSearch)
 		userMediaLibrarySvc.SetLogger(log)
 	}
@@ -1536,6 +1543,17 @@ func requireUserMediaSemanticSchema(db *gorm.DB) error {
 		if !db.Migrator().HasColumn(&model.UserMediaAsset{}, column) {
 			return fmt.Errorf("existing database requires server/migrations/20261102_user_media_oss_semantic.sql before startup (missing user_media_assets.%s)", column)
 		}
+	}
+	return nil
+}
+
+// Existing databases apply the explicit migration before serving new uploads.
+func requireUploadSessionMediaPrefixSchema(db *gorm.DB) error {
+	if db == nil || !db.Migrator().HasTable(&model.UploadSession{}) {
+		return nil
+	}
+	if !db.Migrator().HasColumn(&model.UploadSession{}, "MediaLibraryPrefix") {
+		return fmt.Errorf("existing database requires server/migrations/20261103_upload_session_media_prefix.sql before startup (missing upload_sessions.media_library_prefix)")
 	}
 	return nil
 }

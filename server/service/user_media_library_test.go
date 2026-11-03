@@ -15,9 +15,15 @@ import (
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
-type semanticSearchFake struct{ results []storage.SemanticMediaResult }
+type semanticSearchFake struct {
+	results []storage.SemanticMediaResult
+	prefix  *string
+}
 
-func (f semanticSearchFake) Search(context.Context, string, string, string, int) ([]storage.SemanticMediaResult, error) {
+func (f semanticSearchFake) Search(_ context.Context, _ string, prefix string, _ string, _ int) ([]storage.SemanticMediaResult, error) {
+	if f.prefix != nil {
+		*f.prefix = prefix
+	}
 	return f.results, nil
 }
 func (f semanticSearchFake) Lookup(context.Context, string, string) (*storage.SemanticMediaResult, error) {
@@ -211,3 +217,21 @@ func TestValidateUserMediaAssetForCreationRequiresReadyActiveRow(t *testing.T) {
 }
 
 func userMediaStringPtr(value string) *string { return &value }
+
+func TestUserMediaSemanticSearchUsesConfiguredUserPrefix(t *testing.T) {
+	_, svc := newUserMediaLibraryTestService(t)
+	if err := svc.SetMediaLibraryPrefix("custom/library"); err != nil {
+		t.Fatal(err)
+	}
+	var prefix string
+	svc.SetSemanticSearch(semanticSearchFake{prefix: &prefix})
+	if _, err := svc.SearchCandidates(t.Context(), "user-1", "project-1", "coffee", "video", 8); err != nil {
+		t.Fatal(err)
+	}
+	if prefix != "custom/library/users/user-1/" {
+		t.Fatalf("search prefix = %q", prefix)
+	}
+	if err := svc.SetMediaLibraryPrefix("../"); err == nil {
+		t.Fatal("unsafe prefix accepted")
+	}
+}

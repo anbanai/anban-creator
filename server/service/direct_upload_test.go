@@ -753,6 +753,13 @@ func TestFinalizedUploadSessionKeyIsolatesMediaLibraryPrefix(t *testing.T) {
 	}
 }
 
+func TestFinalizedUploadSessionKeyUsesConfiguredMediaLibraryPrefix(t *testing.T) {
+	key, err := finalizedUploadSessionKey(&model.UploadSession{ID: "upload-1", UserID: "user-1", Purpose: DirectUploadPurposeMediaLibrary, FileName: "clip.mp4", MediaLibraryPrefix: "custom/library/"})
+	if err != nil || key != "custom/library/users/user-1/upload-1/clip.mp4" {
+		t.Fatalf("finalizedUploadSessionKey = %q, %v", key, err)
+	}
+}
+
 func TestPrepareDirectUploadAllowsMontageMedia(t *testing.T) {
 	store := &fakeDirectUploadStore{name: "oss"}
 	repo := &fakeUploadSessionRepo{}
@@ -1016,5 +1023,74 @@ func TestCleanupExpiredUploadSessionsReopensClaimWhenDeleteFails(t *testing.T) {
 	}
 	if found.Status != model.UploadSessionPending || found.CleanupClaimID != "" || found.CleanupClaimedAt != nil {
 		t.Fatalf("reopened upload session = %#v", found)
+	}
+}
+
+func TestMediaLibraryConfiguredPrefixSurvivesFinalizationAndURLResolution(t *testing.T) {
+	repo := newDirectUploadTestRepository(t)
+	store := &fakeDirectUploadStore{name: "oss", objects: map[string]*storage.ObjectInfo{}}
+	cfg := DirectUploadConfig{
+		Storage: config.StorageConfig{Provider: "oss", BucketName: "bucket", MediaLibraryPrefix: "custom/deep/library"},
+		CredentialIssuer: StaticUploadCredentialIssuer(func(context.Context, UploadCredentialRequest) (*UploadCredential, error) {
+			return &UploadCredential{AccessKeyID: "ak", AccessKeySecret: "sk", SecurityToken: "token", ExpiresAt: time.Now().Add(time.Hour)}, nil
+		}),
+	}
+	prepared, err := PrepareDirectUpload(t.Context(), store, repo.UploadSessions(), cfg, DirectUploadPrepareRequest{UserID: "user-1", Purpose: DirectUploadPurposeMediaLibrary, Filename: "clip.mp4", ContentType: "video/mp4", Size: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := repo.UploadSessions().FindByID(t.Context(), prepared.UploadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.MediaLibraryPrefix != "custom/deep/library/" {
+		t.Fatalf("persisted prefix = %q", session.MediaLibraryPrefix)
+	}
+	// Simulate a changed deployment after prepare. Finalization, retries and URL
+	// verification must use the persisted session, never today's config.
+	cfg.Storage.MediaLibraryPrefix = "another/library/"
+	store.objects[session.StagingKey] = &storage.ObjectInfo{Key: session.StagingKey, ContentType: "video/mp4", Size: 100, ETag: "etag"}
+	req := FinalizeUploadRequest{SessionID: session.ID, UserID: session.UserID, AllowedPurposes: []string{session.Purpose}}
+	asset, err := FinalizeUploadSession(t.Context(), store, repo, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "custom/deep/library/users/user-1/" + session.ID + "/clip.mp4"
+	if asset.StorageKey != want {
+		t.Fatalf("key = %q, want %q", asset.StorageKey, want)
+	}
+	retried, err := FinalizeUploadSession(t.Context(), store, repo, req)
+	if err != nil || retried.StorageKey != want {
+		t.Fatalf("retry = %#v, %v", retried, err)
+	}
+	rewrites, err := FinalizeUploadSessionURLs(t.Context(), store, repo, session.UserID, session.Purpose, []string{store.GetURL(want)}, time.Now())
+	if err != nil || rewrites[store.GetURL(want)] != store.GetURL(want) {
+		t.Fatalf("resolved = %#v, %v", rewrites, err)
+	}
+	if _, err := FinalizeUploadSessionURLs(t.Context(), store, repo, "foreign-user", session.Purpose, []string{store.GetURL(want)}, time.Now()); !errors.Is(err, ErrUploadSessionAccessDenied) {
+		t.Fatalf("foreign user error = %v", err)
+	}
+	forged := strings.Replace(want, "custom/deep/library/", "forged/library/", 1)
+	if _, err := FinalizeUploadSessionURLs(t.Context(), store, repo, session.UserID, session.Purpose, []string{store.GetURL(forged)}, time.Now()); !errors.Is(err, ErrUploadSessionAccessDenied) {
+		t.Fatalf("forged path error = %v", err)
+	}
+}
+
+func TestMediaLibraryCleanupRecoversConfiguredPrefix(t *testing.T) {
+	now := time.Now()
+	baseRepo := newDirectUploadTestRepository(t)
+	repo := &uploadSessionRepositoryOverride{Repository: baseRepo, uploadSessions: &failFirstTargetFingerprintRepository{UploadSessionRepository: baseRepo.UploadSessions(), fail: true}}
+	session := &model.UploadSession{ID: "media-recover", UserID: "user-1", Purpose: DirectUploadPurposeMediaLibrary, MediaLibraryPrefix: "custom/library/", StagingKey: "uploads/pending/user-1/media-recover/clip.mp4", FileName: "clip.mp4", ContentType: "video/mp4", Size: 100, Status: model.UploadSessionPending, ExpiresAt: now.Add(time.Hour)}
+	seedUploadSession(t, repo, session)
+	store := matchingUploadSessionStore(session)
+	if _, err := FinalizeUploadSession(t.Context(), store, repo, FinalizeUploadRequest{SessionID: session.ID, UserID: session.UserID, AllowedPurposes: []string{session.Purpose}, Now: now}); err == nil {
+		t.Fatal("expected failure after promotion")
+	}
+	if _, err := CleanupExpiredUploadSessions(t.Context(), store, baseRepo, now.Add(2*time.Hour), 10); err != nil {
+		t.Fatal(err)
+	}
+	asset, err := baseRepo.Assets().FindByID(t.Context(), session.ID)
+	if err != nil || asset.StorageKey != "custom/library/users/user-1/media-recover/clip.mp4" {
+		t.Fatalf("recovered asset = %#v, %v", asset, err)
 	}
 }

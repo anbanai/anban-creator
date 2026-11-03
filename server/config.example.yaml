@@ -139,14 +139,17 @@ storage:
   direct_upload_expires_seconds: 900
   # Ignored while provider=oss; retained for local development fallback.
   local_data_dir: "./data/files"
+  # Copy this exact value into the OSS content-awareness file-prefix filter.
+  # New objects: <media_library_prefix>users/<user_id>/<upload_id>/<filename>.
+  # Changing it does not move existing objects or configure OSS automatically.
+  media_library_prefix: "assets/media-library/"
 
   # Before enabling this block, configure the same OSS Bucket:
   # 1. Data Index -> Vector Search
   # 2. Video content awareness
   # 3. RAM authorization including AliyunMetaQueryDefaultRole
-  # Do not use the broad assets/users/ prefix in production if this Bucket also
-  # contains video-edit, montage, Hypit, or other direct-upload objects. Use a
-  # media-library-only prefix or ObjectTag rule after the Server key/tag change.
+  # Set the OSS file-prefix filter to storage.media_library_prefix above.
+  # YAML configures Server paths/queries only, not OSS scanning or billing.
   # The Server's OSS identity also needs access to the Bucket and MetaQuery.
   ai_content_awareness:
     # Keep disabled until the OSS filter rule is restricted to media-library

@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
@@ -29,16 +30,26 @@ var (
 const userMediaPreviewTTL = 5 * 60
 
 type UserMediaLibraryService struct {
-	repo     repository.Repository
-	store    storage.Provider
-	analysis *ImageAnalysisService
-	semantic storage.MediaSemanticSearch
-	logger   *zerolog.Logger
-	now      func() time.Time
+	repo               repository.Repository
+	store              storage.Provider
+	analysis           *ImageAnalysisService
+	mediaLibraryPrefix string
+	semantic           storage.MediaSemanticSearch
+	logger             *zerolog.Logger
+	now                func() time.Time
 }
 
 func NewUserMediaLibraryService(repo repository.Repository, store storage.Provider, analysis *ImageAnalysisService) *UserMediaLibraryService {
-	return &UserMediaLibraryService{repo: repo, store: store, analysis: analysis, now: time.Now}
+	return &UserMediaLibraryService{repo: repo, store: store, analysis: analysis, now: time.Now, mediaLibraryPrefix: config.DefaultMediaLibraryPrefix}
+}
+
+func (s *UserMediaLibraryService) SetMediaLibraryPrefix(prefix string) error {
+	normalized, err := config.NormalizeMediaLibraryPrefix(prefix)
+	if err != nil {
+		return err
+	}
+	s.mediaLibraryPrefix = normalized
+	return nil
 }
 
 func (s *UserMediaLibraryService) SetSemanticSearch(search storage.MediaSemanticSearch) {
@@ -279,7 +290,7 @@ func (s *UserMediaLibraryService) SearchCandidates(ctx context.Context, userID, 
 		if s.semantic == nil {
 			return nil, errors.New("OSS semantic search is not configured")
 		}
-		results, err := s.semantic.Search(ctx, strings.TrimSpace(query), mediaLibraryStoragePrefix+"/"+strings.TrimSpace(userID)+"/", "video", limit)
+		results, err := s.semantic.Search(ctx, strings.TrimSpace(query), s.mediaLibraryPrefix+"users/"+strings.TrimSpace(userID)+"/", "video", limit)
 		if err != nil {
 			return nil, err
 		}

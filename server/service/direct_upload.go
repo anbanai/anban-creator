@@ -49,7 +49,7 @@ const (
 	taskArtifactCleanupRetryDelay = 30 * time.Minute
 )
 
-const mediaLibraryStoragePrefix = "assets/media-library/users"
+const mediaLibraryStoragePrefix = config.DefaultMediaLibraryPrefix + "users"
 
 var (
 	ErrUploadSessionNotFound      = model.ErrUploadSessionNotFound
@@ -199,6 +199,14 @@ func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo re
 	if !ok {
 		return nil, fmt.Errorf("unsupported upload purpose %q", purpose)
 	}
+	var mediaPrefix string
+	if purpose == DirectUploadPurposeMediaLibrary {
+		var err error
+		mediaPrefix, err = config.NormalizeMediaLibraryPrefix(cfg.Storage.MediaLibraryPrefix)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if req.Size <= 0 {
 		return nil, fmt.Errorf("file size is required")
 	}
@@ -288,6 +296,7 @@ func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo re
 		Status:      model.UploadSessionPending,
 		ExpiresAt:   expiresAt,
 	}
+	session.MediaLibraryPrefix = mediaPrefix
 	if err := repo.Create(ctx, session); err != nil {
 		return nil, fmt.Errorf("record upload session: %w", err)
 	}
@@ -610,7 +619,11 @@ func finalizedUploadSessionKey(session *model.UploadSession) (string, error) {
 		return "", errors.New("upload session identity is invalid")
 	}
 	if session.Purpose == DirectUploadPurposeMediaLibrary {
-		return path.Join(mediaLibraryStoragePrefix, userID, sessionID, fileName), nil
+		prefix, err := config.NormalizeMediaLibraryPrefix(session.MediaLibraryPrefix)
+		if err != nil {
+			return "", err
+		}
+		return path.Join(prefix, "users", userID, sessionID, fileName), nil
 	}
 	return path.Join("assets/users", userID, sessionID, fileName), nil
 }
@@ -771,7 +784,7 @@ func uploadSessionKeyFromURL(raw string) (string, bool) {
 		return "", false
 	}
 	key = strings.TrimPrefix(key, "/")
-	if path.Clean(key) != key || (!strings.HasPrefix(key, "uploads/pending/") && !strings.HasPrefix(key, "assets/users/") && !strings.HasPrefix(key, mediaLibraryStoragePrefix+"/")) {
+	if path.Clean(key) != key || uploadSessionIDFromKey(key) == "" {
 		return "", false
 	}
 	return key, true
@@ -785,8 +798,13 @@ func uploadSessionIDFromKey(key string) string {
 	if parts[0] == "uploads" && parts[1] == "pending" || parts[0] == "assets" && parts[1] == "users" {
 		return parts[3]
 	}
-	if len(parts) >= 6 && parts[0] == "assets" && parts[1] == "media-library" && parts[2] == "users" {
-		return parts[4]
+	// Custom media-library prefixes may have any depth. This only extracts a
+	// candidate session ID; callers must verify owner, purpose and exact asset key.
+	if len(parts) >= 5 && parts[len(parts)-4] == "users" {
+		prefix := strings.Join(parts[:len(parts)-4], "/") + "/"
+		if normalized, err := config.NormalizeMediaLibraryPrefix(prefix); err == nil && normalized == prefix {
+			return parts[len(parts)-2]
+		}
 	}
 	return ""
 }

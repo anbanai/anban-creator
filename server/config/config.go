@@ -1099,6 +1099,7 @@ type StorageConfig struct {
 	STSEndpoint                string                   `yaml:"sts_endpoint"`                  // Optional STS endpoint override
 	DirectUploadExpiresSeconds int                      `yaml:"direct_upload_expires_seconds"` // Default 900
 	LocalDataDir               string                   `yaml:"local_data_dir"`                // Default "./data/files"
+	MediaLibraryPrefix         string                   `yaml:"media_library_prefix"`
 	AIContentAwareness         AIContentAwarenessConfig `yaml:"ai_content_awareness"`
 }
 
@@ -1906,6 +1907,9 @@ func (c *Config) applyDefaults() {
 	if c.Storage.LocalDataDir == "" {
 		c.Storage.LocalDataDir = "./data/files"
 	}
+	if prefix, err := NormalizeMediaLibraryPrefix(c.Storage.MediaLibraryPrefix); err == nil {
+		c.Storage.MediaLibraryPrefix = prefix
+	}
 	c.Storage.AIContentAwareness.ApplyDefaults()
 	if c.Claude.ProjectMemory.RootDir == "" {
 		c.Claude.ProjectMemory.RootDir = "/app/data/project-memory"
@@ -2617,6 +2621,9 @@ func (c *Config) Validate() error {
 		if err := validateStorageCustomDomain(c.Storage.CustomDomain); err != nil {
 			errs = append(errs, err.Error())
 		}
+	}
+	if _, err := NormalizeMediaLibraryPrefix(c.Storage.MediaLibraryPrefix); err != nil {
+		errs = append(errs, err.Error())
 	}
 	if c.Storage.AIContentAwareness.Enabled && c.Storage.Provider != "oss" {
 		errs = append(errs, "storage.ai_content_awareness requires storage.provider to be \"oss\"")
