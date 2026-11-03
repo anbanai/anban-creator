@@ -63,6 +63,20 @@ describe('AssistantDraftSummary', () => {
     expect(screen.queryByText('target_audience')).not.toBeInTheDocument()
   })
 
+  it('keeps requirements, constraints and overrides visible while collapsing inherited context and execution defaults', () => {
+    render(<AssistantDraftSummary mode="creation" draft={{ revision: 2, payload: { plan: {
+      goal: '发布春茶教程', requirements: ['列出三种水温', '保留用户给出的价格'], constraints: ['不夸大健康功效'],
+      expected_result: '一篇可直接复查的文章', assets: [{ file_name: '春茶照片.jpg', url: 'https://example.com/tea.jpg' }],
+      missing_inputs: ['活动日期'], agent_decisions: ['由助手决定配图顺序'], temporary_overrides: ['本次用清单结构'],
+      profile_context: ['沿用亲切语气'], execution_profile: 'effective',
+    } } }} />)
+    for (const text of ['列出三种水温', '保留用户给出的价格', '不夸大健康功效', '一篇可直接复查的文章', '春茶照片.jpg', '活动日期', '由助手决定配图顺序', '本次用清单结构']) expect(screen.getByText(text)).toBeVisible()
+    expect(screen.getByText('沿用亲切语气')).not.toBeVisible()
+    expect(screen.getByText('性价比')).not.toBeVisible()
+    expect(screen.getByText('沿用的人设信息').closest('details')).not.toHaveAttribute('open')
+    expect(screen.getByText('执行设置').closest('details')).not.toHaveAttribute('open')
+  })
+
   it('shows review recommendations, their evidence and limits without exposing raw JSON', () => {
     render(<AssistantDraftSummary mode="review" draft={{ revision: 1, payload: { review: {
       summary: '具体示例更容易理解', confidence: 'medium', limitations: '只有一件作品',

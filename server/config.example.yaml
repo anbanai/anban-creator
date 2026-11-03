@@ -75,12 +75,22 @@ trends:
     # Server credential for list_trends. Required only when provider=redfox.
     # Keep it separate from agent_api_key; it is never injected into Agents.
     api_key: "${ANBAN_REDFOX_API_KEY:-}"
-    # Agent credential for the read-only RedFox research MCP Skill used by
-    # article, Seednote, viral-analysis, and content-research runtimes.
-    # It is injected only into those declared research tasks and is not used
-    # by list_trends. Keep it separate from api_key.
-    agent_api_key: "${ANBAN_REDFOX_AGENT_API_KEY:-}"
     timeout: 15s
+
+# Agent 运行时环境。每个业务 Agent 单独配置 env；只有对应 Agent 执行时才会注入。
+# 公众号文章、公众号图文、Seednote 和内容研究可按需填写 RedFox key。
+wechat-article:
+  env:
+    REDFOX_API_KEY: "${ANBAN_REDFOX_AGENT_WECHAT_ARTICLE_API_KEY:-}"
+wechat-picture:
+  env:
+    REDFOX_API_KEY: "${ANBAN_REDFOX_AGENT_WECHAT_PICTURE_API_KEY:-}"
+seednote:
+  env:
+    REDFOX_API_KEY: "${ANBAN_REDFOX_AGENT_SEEDNOTE_API_KEY:-}"
+content-planning:
+  env:
+    REDFOX_API_KEY: "${ANBAN_REDFOX_AGENT_CONTENT_PLANNING_API_KEY:-}"
 
 jwt:
   secret_key: "${ANBAN_JWT_SECRET_KEY}"

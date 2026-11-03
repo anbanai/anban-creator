@@ -1,6 +1,6 @@
 import type { AssistantBlockingIssue, AssistantInteractionCommitResult, AssistantInteractionDraftReceipt, AssistantInteractionSnapshot } from '@/lib/api/assistant'
 
-export type AssistantInteractionStatus = 'connecting' | 'prepared' | 'reconnecting' | 'needs_confirmation' | 'input_retryable' | 'command_uncertain' | 'draft_retryable' | 'draft_editable' | 'restart_required' | 'completed'
+export type AssistantInteractionStatus = 'connecting' | 'prepared' | 'reconnecting' | 'needs_confirmation' | 'input_retryable' | 'operation_failed' | 'command_uncertain' | 'draft_retryable' | 'draft_editable' | 'restart_required' | 'completed'
 
 export interface AssistantInteractionState {
   interactionId?: string
@@ -22,7 +22,7 @@ export type AssistantInteractionAction =
   | { type: 'message'; message: { id: string; role: 'user' | 'assistant'; text: string } }
   | { type: 'draft_ready'; draft: AssistantInteractionDraftReceipt }
   | { type: 'generation_changed'; generation: number }
-  | { type: 'error'; code: string; availableActions?: string[]; blockingIssues?: AssistantBlockingIssue[] }
+  | { type: 'error'; code: string; operation?: 'message' | 'switch'; availableActions?: string[]; blockingIssues?: AssistantBlockingIssue[] }
   | { type: 'clear_error' }
   | { type: 'commit_result'; result: AssistantInteractionCommitResult }
   | { type: 'restart' }
@@ -108,7 +108,7 @@ export function assistantInteractionReducer(state: AssistantInteractionState, ac
         const confirmable = state.drafts.some((draft) => draft.mode_id === 'creation' && draft.ready && draft.confirmation_state === 'pending') && state.availableActions.includes('confirm_draft')
         return { ...state, status: confirmable ? 'needs_confirmation' : 'draft_editable', availableActions: confirmable ? state.availableActions : action.availableActions ?? ['continue_editing', 'send_message'], errorCode: action.code, blockingIssues: action.blockingIssues }
       }
-      const status: AssistantInteractionStatus = action.code === 'assistant_draft_saved_retryable' || action.code === 'assistant_draft_revision_conflict' ? 'draft_retryable' : action.code === 'assistant_command_outcome_unknown' ? 'command_uncertain' : action.code === 'assistant_interaction_restart_required' || action.code === 'assistant_commit_reconciliation_required' ? 'restart_required' : action.code === 'assistant_interaction_reconnecting' || action.code === 'assistant_interaction_generation_changed' ? 'reconnecting' : action.code === 'assistant_commit_already_applied' ? 'completed' : 'input_retryable'
+      const status: AssistantInteractionStatus = action.code === 'assistant_draft_saved_retryable' || action.code === 'assistant_draft_revision_conflict' ? 'draft_retryable' : action.code === 'assistant_command_outcome_unknown' ? 'command_uncertain' : action.code === 'assistant_interaction_restart_required' || action.code === 'assistant_commit_reconciliation_required' ? 'restart_required' : action.code === 'assistant_interaction_reconnecting' || action.code === 'assistant_interaction_generation_changed' ? 'reconnecting' : action.code === 'assistant_commit_already_applied' ? 'completed' : action.operation === 'message' || action.code === 'assistant_message_not_accepted' ? 'input_retryable' : 'operation_failed'
       const availableActions = action.availableActions ?? (action.code === 'assistant_commit_reconciliation_required' ? ['view_task', 'reconcile_commit'] : action.code === 'assistant_command_outcome_unknown' ? ['retry_with_new_attempt', 'restart'] : action.code === 'assistant_interaction_generation_changed' || action.code === 'assistant_interaction_reconnecting' ? ['reload_snapshot'] : action.code === 'assistant_draft_revision_conflict' ? ['reload_snapshot', 'restore_draft'] : action.code === 'assistant_draft_saved_retryable' ? ['retry_stage', 'restore_draft'] : state.availableActions)
       return { ...state, status, availableActions, errorCode: action.code }
     }
@@ -128,6 +128,7 @@ export function assistantInteractionRecoveryLabel(state: AssistantInteractionSta
     case 'reconnecting': return '正在恢复连接'
     case 'command_uncertain': return '上一条操作的结果无法确认，重新提交可能重复执行'
     case 'needs_confirmation': return '计划已准备好，请确认'
+    case 'operation_failed': return '刚才的操作未完成，请重试'
     case 'input_retryable': return '刚才的消息未送出，内容已保留'
     case 'draft_editable': return state.errorCode === 'assistant_creation_inputs_missing' ? '计划仍有必要信息待补充，可以继续讨论' : '计划尚未就绪，可以继续修改'
     case 'draft_retryable': return state.errorCode === 'assistant_draft_revision_conflict' ? '计划版本已更新，请恢复最新计划' : '计划已保留，可以重试暂存'

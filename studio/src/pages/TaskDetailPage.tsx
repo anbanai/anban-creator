@@ -21,7 +21,7 @@ import WechatAnalyticsPanel from '@/components/tasks/WechatAnalyticsPanel'
 import ChannelsAnalyticsPanel from '@/components/tasks/ChannelsAnalyticsPanel'
 import { TaskExecutionRail } from '@/components/tasks/TaskExecutionRail'
 import { TaskDeliverablesPanel } from '@/components/tasks/TaskDeliverablesPanel'
-import { TaskContextSummary } from '@/components/tasks/TaskContextSummary'
+import { TaskCreationSidebar } from '@/components/tasks/TaskCreationSidebar'
 import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDetailsSheet'
 import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
 import { ImageCapabilityDisplay } from '@/components/ImageCapabilityDisplay'
@@ -812,12 +812,11 @@ export default function TaskDetailPage() {
         </div>
 
         <aside className="min-w-0" aria-label="作品辅助信息">
-          <TaskContextSummary
-            compact
-            layout="sidebar"
+          <TaskCreationSidebar
             task={task}
             project={project}
-            files={deliveredFiles}
+            profile={projectProfile}
+            onOpenPersona={() => setShowProjectDialog(true)}
             onOpenTab={openTaskDetails}
           />
         </aside>
