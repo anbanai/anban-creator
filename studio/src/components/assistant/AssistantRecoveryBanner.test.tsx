@@ -29,3 +29,10 @@ it('offers only a homepage restart for an ended conversation', () => {
   expect(screen.getByRole('button', { name: '重新开始' })).toBeEnabled()
   expect(screen.queryByRole('button', { name: '恢复计划' })).not.toBeInTheDocument()
 })
+
+it('does not invent an unsent message for a context operation failure', () => {
+  const state = assistantInteractionReducer(initialAssistantInteractionState, { type: 'error', code: 'assistant_workspace_context_mismatch' })
+  render(<AssistantRecoveryBanner state={state} onRetry={vi.fn()} />)
+  expect(screen.queryByText('刚才的消息未送出，内容已保留')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '重试发送' })).not.toBeInTheDocument()
+})

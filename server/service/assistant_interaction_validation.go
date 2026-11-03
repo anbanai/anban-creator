@@ -3,6 +3,10 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -13,7 +17,7 @@ import (
 func validateInteractionCreation(payload json.RawMessage) ([]InteractionBlockingIssue, error) {
 	plan, err := decodeAssistantCreationPlanFields(payload)
 	if err != nil {
-		return nil, creationDraftError(InteractionErrorDraftInvalid, nil)
+		return nil, creationDraftError(InteractionErrorDraftInvalid, []InteractionBlockingIssue{creationPlanDecodeIssue(err)})
 	}
 	issues := make([]InteractionBlockingIssue, 0)
 	for _, field := range []struct{ name, value string }{
@@ -71,7 +75,7 @@ func interactionDraftView(draft *model.AssistantInteractionDraft, eligible bool)
 	if draft.ModeID == AssistantModeCreation {
 		issues, err := validateInteractionCreation(draft.Payload)
 		if err != nil {
-			issues = []InteractionBlockingIssue{{Code: "invalid", Field: "plan", Message: "创作计划格式不正确，请重新整理"}}
+			issues = NormalizeInteractionError(err).BlockingIssues
 		}
 		view.BlockingIssues = issues
 		view.Ready = view.Ready && len(issues) == 0 && eligible && draft.ConfirmationState == model.AssistantInteractionDraftPending
@@ -91,4 +95,58 @@ func (s *AssistantInteractionService) creationErrorWithSnapshot(ctx context.Cont
 		structured.WithSnapshot(snapshot)
 	}
 	return structured
+}
+
+// Keep decoder diagnostics useful without serializing scalar values or Go type names.
+func creationPlanDecodeIssue(err error) InteractionBlockingIssue {
+	issue := InteractionBlockingIssue{Code: "invalid", Field: "plan", Message: "invalid plan object"}
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) {
+		issue.Field = creationPlanDiagnosticField("plan", typeErr.Field)
+		expected := typeErr.Type.Kind().String()
+		switch typeErr.Type.Kind() {
+		case reflect.Slice, reflect.Array:
+			expected = "array"
+		case reflect.Struct, reflect.Map:
+			expected = "object"
+		case reflect.Int, reflect.Int64, reflect.Float64:
+			expected = "number"
+		}
+		received := strings.SplitN(typeErr.Value, " ", 2)[0]
+		switch received {
+		case "array", "object", "string", "number", "bool", "null":
+		default:
+			received = "value"
+		}
+		issue.Message = fmt.Sprintf("expected %s; received %s", expected, received)
+		return issue
+	}
+	var syntaxErr *json.SyntaxError
+	if errors.As(err, &syntaxErr) {
+		issue.Message = "invalid JSON"
+		return issue
+	}
+	for _, unknown := range []struct{ marker, prefix string }{{"json: unknown field ", "plan"}, {"unknown assistant draft field ", "payload"}} {
+		if _, suffix, found := strings.Cut(err.Error(), unknown.marker); found {
+			field, decodeErr := strconv.Unquote(suffix)
+			if decodeErr == nil {
+				issue.Field = creationPlanDiagnosticField(unknown.prefix, field)
+				issue.Message = "unknown field"
+			}
+			return issue
+		}
+	}
+	return issue
+}
+
+func creationPlanDiagnosticField(prefix, field string) string {
+	if field == "" || len(field) > 128 {
+		return prefix
+	}
+	for _, char := range field {
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && char != '_' && char != '.' {
+			return prefix
+		}
+	}
+	return prefix + "." + field
 }

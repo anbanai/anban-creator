@@ -807,11 +807,15 @@ func main() {
 			planHandler.SetRepository(repo)
 		}
 	}
+	// Use one signal-derived lifecycle for runtime reconciliation and server shutdown.
+	signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithCancel(signalCtx)
+	defer cancel()
+
 	var assistantInteractionFactory service.RuntimeFactory
+	var cleanupInteractiveOrphans func(context.Context) error
 	interactiveSvc := service.NewInteractiveService(repo)
-	if projectSvc != nil {
-		interactiveSvc.SetProjectService(projectSvc)
-	}
 	if cfg.Dsh.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Dsh.Executor), "container") {
 		route := cfg.Dsh.Routes[cfg.Dsh.Route]
 		dshFactory := service.ContainerRuntimeFactory{
@@ -820,23 +824,7 @@ func main() {
 			BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL,
 		}
 		assistantInteractionFactory = dshFactory
-		runtimeReady := true
-		if err := dshFactory.CleanupOrphans(context.Background()); err != nil {
-			log.Warn().Err(err).Msg("failed to clean orphaned interactive DSH containers")
-			runtimeReady = false
-		}
-		if repo == nil || repo.AssistantSessions() == nil {
-			log.Error().Msg("cannot recover Assistant sessions without durable session storage")
-			runtimeReady = false
-		} else if err := repo.AssistantSessions().InterruptActive(context.Background(), time.Now().UTC()); err != nil {
-			log.Error().Err(err).Msg("failed to recover interrupted Assistant sessions")
-			runtimeReady = false
-		}
-		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, dshFactory)
-		if projectSvc != nil {
-			interactiveSvc.SetProjectService(projectSvc)
-		}
-		interactiveSvc.SetEnabled(runtimeReady)
+		cleanupInteractiveOrphans = dshFactory.CleanupOrphans
 	} else if cfg.Dsh.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Dsh.Executor), "kubernetes") {
 		restConfig, err := rest.InClusterConfig()
 		if err != nil {
@@ -853,23 +841,7 @@ func main() {
 			BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL, Logger: log,
 		}
 		assistantInteractionFactory = dshFactory
-		runtimeReady := true
-		if err := dshFactory.CleanupOrphans(context.Background()); err != nil {
-			log.Warn().Err(err).Msg("failed to clean orphaned interactive DSH jobs")
-			runtimeReady = false
-		}
-		if repo == nil || repo.AssistantSessions() == nil {
-			log.Error().Msg("cannot recover Assistant sessions without durable session storage")
-			runtimeReady = false
-		} else if err := repo.AssistantSessions().InterruptActive(context.Background(), time.Now().UTC()); err != nil {
-			log.Error().Err(err).Msg("failed to recover interrupted Assistant sessions")
-			runtimeReady = false
-		}
-		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, dshFactory)
-		if projectSvc != nil {
-			interactiveSvc.SetProjectService(projectSvc)
-		}
-		interactiveSvc.SetEnabled(runtimeReady)
+		cleanupInteractiveOrphans = dshFactory.CleanupOrphans
 	} else if cfg.Dsh.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Dsh.Executor), "process") && strings.TrimSpace(cfg.Dsh.BridgeCommand) != "" {
 		route := cfg.Dsh.Routes[cfg.Dsh.Route]
 		execFactory := service.ExecRuntimeFactory{
@@ -885,27 +857,33 @@ func main() {
 			MCPURL:   cfg.Dsh.MCPURL,
 		}
 		assistantInteractionFactory = execFactory
-		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, execFactory)
-		if projectSvc != nil {
-			interactiveSvc.SetProjectService(projectSvc)
-		}
-		runtimeReady := repo != nil && repo.AssistantSessions() != nil
-		if runtimeReady {
-			if err := repo.AssistantSessions().InterruptActive(context.Background(), time.Now().UTC()); err != nil {
-				log.Error().Err(err).Msg("failed to recover interrupted Assistant sessions")
-				runtimeReady = false
+	}
+	if assistantInteractionFactory != nil {
+		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, assistantInteractionFactory)
+		var recoverSessions func(context.Context) error
+		if repo != nil && repo.AssistantSessions() != nil {
+			recoverSessions = func(ctx context.Context) error {
+				return repo.AssistantSessions().InterruptActive(ctx, time.Now().UTC())
 			}
-		} else {
-			log.Error().Msg("cannot recover Assistant sessions without durable session storage")
 		}
-		interactiveSvc.SetEnabled(runtimeReady)
+		readyFactory, startupErr := initializeInteractiveRuntime(ctx, interactiveSvc, assistantInteractionFactory, cleanupInteractiveOrphans, recoverSessions, nil)
+		assistantInteractionFactory = readyFactory
+		if startupErr != nil {
+			log.Error().Err(startupErr).Msg("interactive startup initialization incomplete")
+		}
 	} else if repo != nil && repo.AssistantSessions() != nil {
 		// No runtime branch owns startup recovery in this configuration. Release
 		// durable Assistant leases so a disabled or unsupported executor cannot
 		// strand sessions across a restart.
-		if err := repo.AssistantSessions().InterruptActive(context.Background(), time.Now().UTC()); err != nil {
+		if err := repo.AssistantSessions().InterruptActive(ctx, time.Now().UTC()); err != nil {
 			log.Error().Err(err).Msg("failed to recover interrupted Assistant sessions")
 		}
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	if projectSvc != nil {
+		interactiveSvc.SetProjectService(projectSvc)
 	}
 	interactiveSvc.SetTaskService(taskSvc)
 	// Apply authorization policy after selecting the runtime-backed service so
@@ -1026,12 +1004,6 @@ func main() {
 		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log, mcp.WithExecutionAuthentication(executionTokens, taskSvc), mcp.WithInteractiveAuthentication(interactiveSvc), mcp.WithInteractionAuthentication(assistantInteractionSvc))
 		log.Info().Msg("MCP handler initialized (no tools, services unavailable)")
 	}
-
-	// Use one signal-derived lifecycle for runtime reconciliation and server shutdown.
-	signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-	ctx, cancel := context.WithCancel(signalCtx)
-	defer cancel()
 
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
