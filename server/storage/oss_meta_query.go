@@ -104,7 +104,7 @@ func (p *OSSMetaQueryProvider) Lookup(ctx context.Context, objectKey, mediaType 
 		return nil, err
 	}
 	mode := "basic"
-	result, err := p.client.DoMetaQuery(ctx, &ossv2.DoMetaQueryRequest{Bucket: ossv2.Ptr(p.bucket), Mode: &mode, MetaQuery: &ossv2.MetaQuery{MaxResults: ossv2.Ptr(int64(1)), MediaTypes: &ossv2.MetaQueryMediaTypes{MediaTypes: []string{mediaType}}, SimpleQuery: &simple}})
+	result, err := p.client.DoMetaQuery(ctx, &ossv2.DoMetaQueryRequest{Bucket: ossv2.Ptr(p.bucket), Mode: &mode, MetaQuery: &ossv2.MetaQuery{MaxResults: ossv2.Ptr(int64(1)), Query: &simple, MediaTypes: &ossv2.MetaQueryMediaTypes{MediaTypes: []string{mediaType}}}})
 	if err != nil {
 		return nil, fmt.Errorf("OSS semantic lookup: %w", err)
 	}
