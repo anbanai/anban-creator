@@ -70,6 +70,7 @@ type Services struct {
 	AIEntryHandler                      *handler.AIEntryHandler
 	FeedbackHandler                     *handler.FeedbackHandler
 	ImageCapabilityHandler              *handler.ImageCapabilityHandler
+	DesignerHandler                     *handler.DesignerHandler
 	HypitCapabilityHandler              *handler.HypitCapabilityHandler
 	MontageCapabilityHandler            *handler.MontageCapabilityHandler
 	LocalLifeCapabilityHandler          *handler.LocalLifeCapabilityHandler
@@ -607,6 +608,16 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.ImageCapabilityHandler != nil {
 		apiV1.Get("/image-capabilities", svc.ImageCapabilityHandler.List)
+	}
+	if svc.DesignerHandler != nil {
+		designer := apiV1.Group("/designer")
+		designer.Post("/quote", svc.DesignerHandler.Quote)
+		designer.Post("/generate", svc.DesignerHandler.Generate)
+		designer.Post("/register-reference", svc.DesignerHandler.RegisterReference)
+		designer.Post("/upload-reference", svc.DesignerHandler.UploadReference)
+		designer.Post("/upload-reference-from-url", svc.DesignerHandler.UploadReferenceFromURL)
+		designer.Get("/history", svc.DesignerHandler.GetHistory)
+		designer.Get("/generations/:id", svc.DesignerHandler.GetGeneration)
 	}
 	if svc.HypitCapabilityHandler != nil {
 		apiV1.Get("/hypit-capabilities", svc.HypitCapabilityHandler.List)

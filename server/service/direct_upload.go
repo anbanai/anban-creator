@@ -24,6 +24,7 @@ import (
 
 const (
 	DirectUploadPurposeProjectReference         = "project_reference"
+	DirectUploadPurposeDesignerReference        = "designer_reference"
 	DirectUploadPurposeProjectPortraitReference = "project_portrait_reference"
 	DirectUploadPurposeTemplateThumbnail        = "template_thumbnail"
 	DirectUploadPurposeTaskReference            = "task_reference"
@@ -162,6 +163,7 @@ type directUploadPurposePolicy struct {
 
 var directUploadPolicies = map[string]directUploadPurposePolicy{
 	DirectUploadPurposeProjectReference:         {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
+	DirectUploadPurposeDesignerReference:        {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeProjectPortraitReference: {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeTemplateThumbnail:        {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeTaskReference:            {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},

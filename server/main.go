@@ -183,9 +183,6 @@ func main() {
 		if err := service.MigrateTaskLifecycle(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate task lifecycle schema")
 		}
-		if err := service.MigrateDesignerRemoval(context.Background(), mysqlDB, log); err != nil {
-			log.Fatal().Err(err).Msg("failed to remove Designer schema")
-		}
 		if err := service.MigrateTemplatePrompt(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate canonical template prompts")
 		}
@@ -678,6 +675,8 @@ func main() {
 	var aiEntryHandler *handler.AIEntryHandler
 	var feedbackHandler *handler.FeedbackHandler
 	var imageCapabilityHandler *handler.ImageCapabilityHandler
+	var designerHandler *handler.DesignerHandler
+	var designerSvc *service.DesignerService
 	var montageCapabilityHandler *handler.MontageCapabilityHandler
 	var localLifeCapabilityHandler *handler.LocalLifeCapabilityHandler
 	var templateHandler *handler.TemplateHandler
@@ -812,6 +811,14 @@ func main() {
 		imageCatalog = fixedBilling.Catalog
 	}
 	imageCapabilityHandler = handler.NewImageCapabilityHandler(cfg.ModelRoutes.ImageGeneration, repo, imageCatalog, log)
+	if repo != nil && store != nil && fixedBilling != nil {
+		designerSvc = service.NewDesignerService(mysqlDB, cfg, store, log)
+		designerSvc.SetBillingCatalogService(fixedBilling.Catalog)
+		designerSvc.SetBillingWalletService(fixedBilling.Wallet)
+		designerSvc.SetProviderCostService(fixedBilling.Cost)
+		designerHandler = handler.NewDesignerHandler(designerSvc, log)
+		designerHandler.SetDirectUploadDependencies(repo, store)
+	}
 	hypitCapabilityHandler := handler.NewHypitCapabilityHandler(hypitCapabilitySvc)
 	hypitCapabilityHandler.SetTaskService(taskSvc)
 	montageCapabilityHandler = handler.NewMontageCapabilityHandler(montageCapabilitySvc)
@@ -834,6 +841,9 @@ func main() {
 	defer stop()
 	ctx, cancel := context.WithCancel(signalCtx)
 	defer cancel()
+	if designerSvc != nil {
+		go startDesignerRecovery(ctx, designerSvc, log)
+	}
 
 	var assistantInteractionFactory service.RuntimeFactory
 	var cleanupInteractiveOrphans func(context.Context) error
@@ -1149,6 +1159,7 @@ func main() {
 		AIEntryHandler:                      aiEntryHandler,
 		FeedbackHandler:                     feedbackHandler,
 		ImageCapabilityHandler:              imageCapabilityHandler,
+		DesignerHandler:                     designerHandler,
 		MontageCapabilityHandler:            montageCapabilityHandler,
 		LocalLifeCapabilityHandler:          localLifeCapabilityHandler,
 		HypitCapabilityHandler:              hypitCapabilityHandler,
@@ -1925,6 +1936,25 @@ func startImageAnalysisRecovery(ctx context.Context, analyses *service.ImageAnal
 	run := func() {
 		if err := analyses.Recover(ctx, 100); err != nil && ctx.Err() == nil {
 			log.Error().Err(err).Msg("image analysis recovery failed")
+		}
+	}
+	run()
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
+	}
+}
+
+func startDesignerRecovery(ctx context.Context, designer *service.DesignerService, log *zerolog.Logger) {
+	run := func() {
+		if err := designer.RecoverGenerations(ctx); err != nil && ctx.Err() == nil {
+			log.Error().Err(err).Msg("designer generation recovery failed")
 		}
 	}
 	run()
