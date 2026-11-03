@@ -1,3 +1,4 @@
+import { isAxiosError } from 'axios'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { PaintbrushIcon, SendIcon, WalletCardsIcon, XIcon } from 'lucide-react'
@@ -159,7 +160,7 @@ export default function DesignerPage() {
     : { ...settings, n: effectiveQuantity }
   const maxReferenceImages = maxReferenceImagesForCapability(effectiveCapability)
   const referenceCapacity = maxReferenceImages
-  const projectID = selectedProjectId ?? 'default'
+  const projectID = selectedProjectId ?? ''
   const attachmentPolicy = useMemo<AttachmentAdmissionPolicy>(() => ({
     allowedTypes: ['image'],
     maxCount: editingImage ? 0 : referenceCapacity,
@@ -410,8 +411,13 @@ export default function DesignerPage() {
     const pending = { ...request, operation_id: operationId }
     pendingRequestRef.current = pending
     setRetryAvailable(false)
+    let admissionStarted = false
     try {
-      const result = await designerApi.generate(pending, attempt.signal)
+      const result = await designerApi.generate(pending, attempt.signal, (id) => {
+        attempt.signal.throwIfAborted()
+        admissionStarted = true
+        saveActiveGeneration(userId, id)
+      })
       // Even a late accepted response must remain recoverable after stopping local waiting.
       if (isGenerationAttemptActive(attempt) || !loadActiveGeneration(userId)) {
         saveActiveGeneration(userId, result.generation_id)
@@ -422,7 +428,15 @@ export default function DesignerPage() {
       }
       return result
     } catch (error) {
-      if (isGenerationAttemptActive(attempt)) setRetryAvailable(true)
+      const status = isAxiosError(error) ? error.response?.status : undefined
+      const rejected = admissionStarted && status !== undefined && status >= 400 && status < 500 && status !== 408
+      if (rejected && loadActiveGeneration(userId)?.generationId === operationId) {
+        clearActiveGeneration(userId)
+      }
+      if (isGenerationAttemptActive(attempt)) {
+        if (rejected) pendingRequestRef.current = null
+        setRetryAvailable(!rejected)
+      }
       throw error
     }
   }, [isGenerationAttemptActive, userId])

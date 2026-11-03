@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -965,5 +966,43 @@ func TestDesignerExecuteGenerationDownloadsRemoteResultOnceForValidationAndPersi
 	public, err := f.service.GetGeneration(context.Background(), f.userID, created.GenerationID)
 	if err != nil || public.FinalCost != 500 || len(public.Results) != 1 || public.Results[0].ImageURL == "" {
 		t.Fatalf("public generation = %#v err=%v", public, err)
+	}
+}
+
+func TestDesignerStudioStandalonePayloadQuoteAdmissionAndHistory(t *testing.T) {
+	f := newDesignerFixedSKUFixture(t, 5000)
+	data, err := os.ReadFile("testdata/designer-standalone-request.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req DesignerGenerateRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		t.Fatal(err)
+	}
+	req.OperationID = uuid.NewString()
+	quote, err := f.service.CreateGenerationQuote(t.Context(), f.userID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.QuoteID = quote.QuoteID
+	req.RequestFingerprint = quote.RequestFingerprint
+	created, err := f.service.CreateGenerationRecord(t.Context(), f.userID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generation, err := f.service.GetGeneration(t.Context(), f.userID, created.GenerationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if generation.ProjectID != "" {
+		t.Fatalf("project = %q", generation.ProjectID)
+	}
+	rows, total, err := f.service.GetHistory(t.Context(), f.userID, "", 1, 50)
+	if err != nil || total != 1 || len(rows) != 1 || rows[0].ID != generation.ID {
+		t.Fatalf("history=%v total=%d err=%v", rows, total, err)
+	}
+	rows, total, err = f.service.GetHistory(t.Context(), f.userID, f.projectID, 1, 50)
+	if err != nil || total != 0 || len(rows) != 0 {
+		t.Fatalf("filtered history=%v total=%d err=%v", rows, total, err)
 	}
 }

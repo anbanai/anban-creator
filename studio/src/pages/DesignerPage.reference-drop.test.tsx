@@ -1,3 +1,6 @@
+import { AxiosError, CanceledError } from 'axios'
+import http from '@/lib/http-client'
+import standaloneRequest from '../../../server/service/testdata/designer-standalone-request.json'
 import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { act, fireEvent, render as testingRender, screen, waitFor, within } from '@testing-library/react'
 import { QueryClientProvider, useQuery } from '@tanstack/react-query'
@@ -154,6 +157,94 @@ describe('Designer shared prompt composer', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('sends the shared Server standalone quote/admission payload when no project is selected', async () => {
+    vi.mocked(designerApi.getCapabilities).mockResolvedValue({
+      items: [{ ...provider({ defaultSize: '1:1', sizePresets: ['1:1'] }), id: 'standard' }], defaultCapability: 'standard',
+    })
+    render(<DesignerPage />)
+    fireEvent.change(await screen.findByLabelText('Designer prompt'), { target: { value: standaloneRequest.prompt } })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining(standaloneRequest), expect.any(AbortSignal), expect.any(Function)))
+  })
+
+  it.each(['network loss', 'abort'] as const)('recovers the same server-accepted operation after %s and remount', async (mode) => {
+    const actual = await vi.importActual<typeof import('@/lib/api/designer')>('@/lib/api/designer')
+    vi.mocked(designerApi.generate).mockImplementationOnce(actual.designerApi.generate)
+    let operation = ''
+    let savedAtAdmission: string | null = null
+    let admissions = 0
+    const adapter = http.defaults.adapter
+    http.defaults.adapter = async (config) => {
+      if (config.url === '/designer/quote') return { config, status: 200, statusText: 'OK', headers: {}, data: { data: { quote_id: 'q', request_fingerprint: 'f' } } }
+      admissions++
+      operation = JSON.parse(config.data).operation_id
+      savedAtAdmission = sessionStorage.getItem('designer_active_generation:user-1')
+      if (mode === 'network loss') throw new AxiosError('response lost', 'ERR_NETWORK', config)
+      return new Promise((_resolve, reject) => config.signal?.addEventListener?.('abort', () => reject(new CanceledError('response aborted', config)), { once: true }))
+    }
+    try {
+      const view = render(<DesignerPage />)
+      fireEvent.change(await screen.findByLabelText('Designer prompt'), { target: { value: 'accepted but response lost' } })
+      fireEvent.click(screen.getByRole('button', { name: '生成' }))
+      await waitFor(() => expect(admissions).toBe(1))
+      expect(savedAtAdmission).toContain(operation)
+      if (mode === 'abort') fireEvent.click(screen.getByRole('button', { name: '停止等待' }))
+      await act(async () => {})
+      expect(sessionStorage.getItem('designer_active_generation:user-1')).toContain(operation)
+      view.unmount()
+      vi.mocked(designerApi.getGeneration).mockResolvedValueOnce({ id: operation, project_id: '', prompt: 'accepted', n: 1, status: 'completed', created_at: '', updated_at: '' })
+      render(<DesignerPage />)
+      await waitFor(() => expect(designerApi.getGeneration).toHaveBeenCalledWith(operation, expect.any(AbortSignal)))
+      await waitFor(() => expect(sessionStorage.getItem('designer_active_generation:user-1')).toBeNull())
+      expect(admissions).toBe(1)
+    } finally { http.defaults.adapter = adapter }
+  })
+
+  it('preserves uncertain identity when reconciliation fails, including a server 404', async () => {
+    sessionStorage.setItem('designer_active_generation:user-1', JSON.stringify({ generationId: 'unaccepted', startedAt: Date.now() }))
+    vi.mocked(designerApi.getGeneration).mockRejectedValueOnce(new AxiosError('not found', 'ERR_BAD_REQUEST', undefined, undefined, { status: 404, data: {}, statusText: 'Not Found', headers: {}, config: {} as never }))
+    render(<DesignerPage />)
+    await waitFor(() => expect(designerApi.getGeneration).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByText('已停止等待；已受理的任务仍会继续处理，可在历史记录或刷新后查看结果')).toBeInTheDocument())
+    expect(sessionStorage.getItem('designer_active_generation:user-1')).toContain('unaccepted')
+    expect(designerApi.generate).not.toHaveBeenCalled()
+  })
+
+  it('clears recovery after a definitive admission rejection', async () => {
+    const actual = await vi.importActual<typeof import('@/lib/api/designer')>('@/lib/api/designer')
+    vi.mocked(designerApi.generate).mockImplementationOnce(actual.designerApi.generate)
+    vi.spyOn(http, 'post').mockImplementation(async (path, _payload, config) => {
+      if (path === '/designer/quote') return { data: { data: { quote_id: 'q', request_fingerprint: 'f' } } }
+      throw new AxiosError('insufficient funds', 'ERR_BAD_REQUEST', undefined, undefined, { status: 402, data: {}, statusText: 'Payment Required', headers: {}, config: config as never })
+    })
+    const view = render(<DesignerPage />)
+    fireEvent.change(await screen.findByLabelText('Designer prompt'), { target: { value: 'rejected' } })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(sessionStorage.getItem('designer_active_generation:user-1')).toBeNull()
+    view.unmount()
+    render(<DesignerPage />)
+    await act(async () => {})
+    expect(designerApi.getGeneration).not.toHaveBeenCalled()
+  })
+
+  it('does not save or admit a canceled quote even when its response arrives late', async () => {
+    const actual = await vi.importActual<typeof import('@/lib/api/designer')>('@/lib/api/designer')
+    vi.mocked(designerApi.generate).mockImplementationOnce(actual.designerApi.generate)
+    const quote = deferred<never>()
+    const post = vi.spyOn(http, 'post').mockReturnValueOnce(quote.promise)
+    render(<DesignerPage />)
+    fireEvent.change(await screen.findByLabelText('Designer prompt'), { target: { value: 'cancel quote' } })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await waitFor(() => expect(post).toHaveBeenCalledOnce())
+    fireEvent.click(screen.getByRole('button', { name: '停止等待' }))
+    quote.resolve({ data: { data: { quote_id: 'q', request_fingerprint: 'f' } } } as never)
+    await act(async () => {})
+    expect(post).toHaveBeenCalledOnce()
+    expect(sessionStorage.getItem('designer_active_generation:user-1')).toBeNull()
   })
 
   it('registers a dropped reference and sends its owned file identity', async () => {
@@ -166,7 +257,7 @@ describe('Designer shared prompt composer', () => {
     await waitFor(() => expect(screen.getAllByText('dropped.png').length).toBeGreaterThan(0))
     fireEvent.change(prompt, { target: { value: '使用拖入参考图' } })
     fireEvent.click(screen.getByRole('button', { name: '生成' }))
-    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({ reference_file_ids: ['registered:upload:dropped.png'] }), expect.any(AbortSignal)))
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({ reference_file_ids: ['registered:upload:dropped.png'] }), expect.any(AbortSignal), expect.any(Function)))
   })
 
   it('offers a retry with the same operation after an ambiguous response', async () => {
@@ -190,6 +281,7 @@ describe('Designer shared prompt composer', () => {
     expect(uploadToOSS).toHaveBeenNthCalledWith(1, expect.objectContaining({ purpose: 'designer_reference', file: first }))
     expect(designerApi.registerReference).not.toHaveBeenCalled()
     expect(designerApi.generate).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('designer_active_generation:user-1')).toBeNull()
 
     fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '生成海报' } })
     fireEvent.click(screen.getByRole('button', { name: '生成' }))
@@ -199,9 +291,9 @@ describe('Designer shared prompt composer', () => {
       'upload:first.png', 'upload:second.png',
     ])
     expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({
-      project_id: 'default',
+      project_id: '',
       reference_file_ids: ['registered:upload:first.png', 'registered:upload:second.png'],
-    }), expect.any(AbortSignal))
+    }), expect.any(AbortSignal), expect.any(Function))
     await waitFor(() => expect(screen.getByLabelText('Designer prompt')).toHaveValue(''))
   })
 
@@ -211,7 +303,7 @@ describe('Designer shared prompt composer', () => {
     await addFiles(Array.from({ length: 6 }, (_, index) => image(`reference-${index}.png`, index)))
     fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: 'six references' } })
     fireEvent.click(screen.getByRole('button', { name: '生成' }))
-    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({ reference_file_ids: Array.from({ length: 6 }, (_, index) => `registered:upload:reference-${index}.png`) }), expect.any(AbortSignal)))
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({ reference_file_ids: Array.from({ length: 6 }, (_, index) => `registered:upload:reference-${index}.png`) }), expect.any(AbortSignal), expect.any(Function)))
   })
 
   it('retains the ordered prefix and aborts overflow uploads when provider capacity shrinks', async () => {
@@ -256,7 +348,7 @@ describe('Designer shared prompt composer', () => {
     fireEvent.click(screen.getByRole('button', { name: '生成' }))
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({
       reference_file_ids: ['registered:upload:first.png'],
-    }), expect.any(AbortSignal)))
+    }), expect.any(AbortSignal), expect.any(Function)))
   })
 
   it('clears references when the provider does not support them', async () => {
@@ -294,17 +386,17 @@ describe('Designer shared prompt composer', () => {
     fireEvent.click(screen.getByRole('button', { name: '生成' }))
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(
       expect.objectContaining({ project_id: 'project-1' }),
-      expect.any(AbortSignal),
+      expect.any(AbortSignal), expect.any(Function),
     ))
 
     fireEvent.click(screen.getAllByText('历史记录')[0])
     await waitFor(() => expect(api.designer.getHistory).toHaveBeenCalledWith({ project_id: 'project-1', page_size: 50 }))
   })
 
-  it('requests default-project history explicitly', async () => {
+  it('requests history without a project filter when no project is selected', async () => {
     render(<DesignerPage />)
     fireEvent.click((await screen.findAllByText('历史记录'))[0])
-    await waitFor(() => expect(api.designer.getHistory).toHaveBeenCalledWith({ project_id: 'default', page_size: 50 }))
+    await waitFor(() => expect(api.designer.getHistory).toHaveBeenCalledWith({ project_id: undefined, page_size: 50 }))
   })
 
   it('bounds submit to the new provider prefix before passive reconciliation', async () => {
@@ -338,7 +430,7 @@ describe('Designer shared prompt composer', () => {
 
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({
       reference_file_ids: ['registered:upload:first.png'],
-    }), expect.any(AbortSignal)))
+    }), expect.any(AbortSignal), expect.any(Function)))
   })
 
   it('uploads the edit mask to OSS and registers it before generating', async () => {
@@ -354,14 +446,14 @@ describe('Designer shared prompt composer', () => {
       signal: expect.any(AbortSignal),
     })))
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({
-      project_id: 'default', reference_file_ids: ['source-1'], mask_file_id: 'registered:upload:mask.png',
-    }), expect.any(AbortSignal)))
+      project_id: '', reference_file_ids: ['source-1'], mask_file_id: 'registered:upload:mask.png',
+    }), expect.any(AbortSignal), expect.any(Function)))
   })
 
   it('restores advanced history settings with visible retained inputs and sends them again', async () => {
     vi.mocked(designerApi.getCapabilities).mockResolvedValue({ items: [provider({ hasCompression: true, hasBackground: true, watermark: true, outputFormats: ['png', 'webp'] })], defaultCapability: 'professional' })
     const generation = {
-      id: 'history-1', project_id: 'default', prompt: '历史提示词', capability_key: 'professional',
+      id: 'history-1', project_id: '', prompt: '历史提示词', capability_key: 'professional',
       quality: 'auto', size: '1:1:2K', output_format: 'webp', output_compression: 75,
       background: 'opaque', watermark: true, reference_file_ids: ['retained-reference'], mask_file_id: 'retained-mask',
       n: 1, status: 'completed', created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
@@ -377,7 +469,7 @@ describe('Designer shared prompt composer', () => {
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({
       output_format: 'webp', output_compression: 75, background: 'opaque', watermark: true,
       reference_file_ids: ['retained-reference'], mask_file_id: 'retained-mask', n: 1,
-    }), expect.any(AbortSignal)))
+    }), expect.any(AbortSignal), expect.any(Function)))
   })
 
   it('stops local waiting without clearing recovery or promising cancellation or refund', async () => {
@@ -389,7 +481,7 @@ describe('Designer shared prompt composer', () => {
     expect(screen.getByText('已停止等待；已受理的任务仍会继续处理，可在历史记录或刷新后查看结果')).toBeInTheDocument()
     expect(sessionStorage.getItem('designer_active_generation:user-1')).toContain('generation-1')
     view.unmount()
-    vi.mocked(designerApi.getGeneration).mockResolvedValue({ id: 'generation-1', project_id: 'default', prompt: 'accepted image', n: 1, status: 'generating', created_at: '', updated_at: '' })
+    vi.mocked(designerApi.getGeneration).mockResolvedValue({ id: 'generation-1', project_id: '', prompt: 'accepted image', n: 1, status: 'generating', created_at: '', updated_at: '' })
     render(<DesignerPage />)
     await waitFor(() => expect(designerApi.getGeneration).toHaveBeenCalledWith('generation-1', expect.any(AbortSignal)))
   })
@@ -484,7 +576,7 @@ describe('Designer shared prompt composer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '停止等待' }))
     poll.resolve({
-      id: 'late-generation', user_id: 'user-1', project_id: 'default', prompt: '等待轮询',
+      id: 'late-generation', user_id: 'user-1', project_id: '', prompt: '等待轮询',
       capability_key: 'professional', capability_name: '专业增强', n: 1, status: 'completed',
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       results: [{ id: 1, generation_id: 'late-generation', image_url: 'https://example.com/late.png', index: 0 }],
@@ -503,7 +595,7 @@ describe('Designer shared prompt composer', () => {
   it('serializes polling and emits one terminal success notification', async () => {
     const firstPoll = deferred<ImageGeneration>()
     const completed = {
-      id: 'generation-1', user_id: 'user-1', project_id: 'default', prompt: '串行轮询',
+      id: 'generation-1', user_id: 'user-1', project_id: '', prompt: '串行轮询',
       capability_key: 'professional', capability_name: '专业增强', n: 1, status: 'completed' as const,
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       results: [{ id: 1, generation_id: 'generation-1', image_url: 'https://example.com/final.png', index: 0 }],
@@ -535,7 +627,7 @@ describe('Designer shared prompt composer', () => {
 
   it('finalizes a failed generation exactly once', async () => {
     vi.mocked(designerApi.getGeneration).mockResolvedValue({
-      id: 'generation-1', user_id: 'user-1', project_id: 'default', prompt: '失败轮询',
+      id: 'generation-1', user_id: 'user-1', project_id: '', prompt: '失败轮询',
       capability_key: 'professional', capability_name: '专业增强', n: 1, status: 'failed', error: '生成失败',
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     })
@@ -556,7 +648,7 @@ describe('Designer shared prompt composer', () => {
 
   it('continues polling beyond the former six-minute cap', async () => {
     vi.mocked(designerApi.getGeneration).mockResolvedValue({
-      id: 'generation-1', user_id: 'user-1', project_id: 'default', prompt: '超时轮询',
+      id: 'generation-1', user_id: 'user-1', project_id: '', prompt: '超时轮询',
       capability_key: 'professional', capability_name: '专业增强', n: 1, status: 'generating',
       created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     })
@@ -619,6 +711,7 @@ describe('Designer shared prompt composer', () => {
     mask.resolve(new File(['mask'], 'mask.png', { type: 'image/png' }))
     await act(async () => {})
     expect(designerApi.uploadReferenceFromUrl).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('designer_active_generation:user-1')).toBeNull()
   })
 
   it('aborts the edit mask OSS upload when generation is canceled', async () => {
@@ -645,5 +738,6 @@ describe('Designer shared prompt composer', () => {
 
     expect(designerApi.registerReference).not.toHaveBeenCalled()
     expect(designerApi.generate).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('designer_active_generation:user-1')).toBeNull()
   })
 })

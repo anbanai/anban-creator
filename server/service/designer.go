@@ -1145,6 +1145,20 @@ func validateDesignerReferenceMetadata(filename, contentType string, size int64)
 	return filename, contentType, nil
 }
 
+// CanReadGeneratedFile authorizes only persisted results of a completed generation
+// owned by the caller. A user-looking storage prefix alone grants no access.
+func (s *DesignerService) CanReadGeneratedFile(ctx context.Context, userID, key string) (bool, error) {
+	if s.db == nil || userID == "" || key == "" {
+		return false, nil
+	}
+	var count int64
+	err := s.db.WithContext(ctx).Model(&model.ImageGenerationResult{}).
+		Joins("JOIN image_generations ON image_generations.id = image_generation_results.generation_id").
+		Where("image_generation_results.file_id = ? AND image_generations.user_id = ? AND image_generations.status = ?", key, userID, model.ImageGenerationStatusCompleted).
+		Count(&count).Error
+	return count > 0, err
+}
+
 // UploadReferenceFromURL reuses a persisted user-owned storage object as a reference.
 func (s *DesignerService) UploadReferenceFromURL(ctx context.Context, userID, rawURL string) (string, error) {
 	if s.storage == nil || s.db == nil {
@@ -1157,12 +1171,13 @@ func (s *DesignerService) UploadReferenceFromURL(ctx context.Context, userID, ra
 	if !ok {
 		return "", ErrURLNotOwned
 	}
-	var count int64
-	if err := s.db.WithContext(ctx).Model(&model.ImageGenerationResult{}).
-		Joins("JOIN image_generations ON image_generations.id = image_generation_results.generation_id").
-		Where("image_generation_results.file_id = ? AND image_generations.user_id = ? AND image_generations.status = ?", key, userID, model.ImageGenerationStatusCompleted).
-		Count(&count).Error; err != nil {
+	owned, err := s.CanReadGeneratedFile(ctx, userID, key)
+	if err != nil {
 		return "", err
+	}
+	var count int64
+	if owned {
+		count = 1
 	}
 	if count == 0 {
 		if err := s.db.WithContext(ctx).Model(&model.DesignerReference{}).Where("storage_key = ? AND user_id = ?", key, userID).Count(&count).Error; err != nil {

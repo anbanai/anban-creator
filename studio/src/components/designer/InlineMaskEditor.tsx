@@ -3,6 +3,7 @@ import { ArrowLeft, Eraser, Paintbrush, RotateCcw, Square, Circle, ZoomIn, ZoomO
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import http from '@/lib/http-client'
+import { isInternalStorageUrl, normalizeStorageUrl } from '@/lib/storage-url'
 
 type ToolType = 'brush' | 'rect' | 'circle' | 'eraser'
 
@@ -126,8 +127,8 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
     }, [])
 
     // Load image via authenticated backend proxy when it's a remote OSS URL,
-    // to avoid CORS on <img crossOrigin="anonymous"> + canvas export. For
-    // same-origin / blob URLs, use them directly.
+    // to avoid CORS on <img crossOrigin="anonymous"> + canvas export.
+    // Internal storage uses the same authenticated path; blob/data URLs are local.
     useEffect(() => {
       let cancelled = false
       setImgError(false)
@@ -138,23 +139,29 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
         return
       }
 
-      if (imageUrl.startsWith('/files/') ||
-          imageUrl.startsWith('/api/v1/files/') ||
-          imageUrl.startsWith('blob:') ||
+      if (imageUrl.startsWith('blob:') ||
           imageUrl.startsWith('data:')) {
         setImgSrc(imageUrl)
         return
       }
 
-      let normalized = imageUrl
+      let normalized = normalizeStorageUrl(imageUrl)
       try {
         const u = new URL(imageUrl)
         // Strip protocol + host from any HTTP URL (default OSS, OSS custom
         // domain, etc.) and route through the backend /files/* proxy so we
         // get same-origin, JWT-authenticated bytes for the canvas.
-        normalized = '/files/' + decodeURIComponent(u.pathname).slice(1)
+        if (!isInternalStorageUrl(normalized)) {
+          normalized = '/files/' + decodeURIComponent(u.pathname).slice(1)
+        }
       } catch {
         // not a parseable URL — fall through and try as-is
+      }
+
+      if (!isInternalStorageUrl(normalized)) {
+        setImgError(true)
+        setImgSrc('')
+        return
       }
 
       http.get(normalized, { responseType: 'blob' })

@@ -1,3 +1,4 @@
+import { SignedImage } from '@/components/ui/SignedImage'
 import { Download, Maximize2, ImageIcon, Paintbrush } from 'lucide-react'
 import GeneratingAnimation from '@/components/designer/GeneratingAnimation'
 import type { GenerateImage } from '@/types/designer'
@@ -52,7 +53,7 @@ export default function DesignerCanvas({ images, isGenerating, canInpaint, onIma
           className="group relative overflow-hidden rounded-2xl bg-muted animate-scale-in ring-1 ring-border transition-all duration-300 hover:ring-primary/30 hover:shadow-2xl hover:shadow-black/20"
           style={{ animationDelay: `${i * 50}ms`, animationFillMode: 'backwards' }}
         >
-          <img
+          <SignedImage
             src={img.url}
             alt={`生成图片 ${i + 1}`}
             className="aspect-square w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"

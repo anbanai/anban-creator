@@ -1,3 +1,4 @@
+import { SignedImage } from '@/components/ui/SignedImage'
 import { useQuery } from '@tanstack/react-query'
 import { Clock, ImageIcon, RefreshCw } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -23,7 +24,7 @@ interface HistoryDrawerProps {
 export default function HistoryDrawer({ open, onOpenChange, onSelect, onRegenerate, selectedId, projectId }: HistoryDrawerProps) {
   const { data, isLoading } = useQuery({
     queryKey: ['designer', 'history', projectId],
-    queryFn: () => api.designer.getHistory({ project_id: projectId, page_size: 50 }),
+    queryFn: () => api.designer.getHistory({ project_id: projectId || undefined, page_size: 50 }),
     enabled: open,
   })
 
@@ -92,7 +93,7 @@ export default function HistoryDrawer({ open, onOpenChange, onSelect, onRegenera
                     >
                       <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/50">
                         {thumbnail ? (
-                          <img src={thumbnail} alt="" className="h-full w-full object-cover" />
+                          <SignedImage src={thumbnail} alt="" className="h-full w-full object-cover" />
                         ) : (
                           <ImageIcon className="h-4 w-4 text-muted-foreground" />
                         )}

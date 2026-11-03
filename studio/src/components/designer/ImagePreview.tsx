@@ -152,6 +152,7 @@ export default function ImagePreview({
         {/* Image stage */}
         <div className="flex min-h-0 flex-1 bg-black/60 p-4 md:p-8">
           <ImageViewerStage
+            authenticated
             src={current.url}
             alt="预览图片"
             index={currentIndex}

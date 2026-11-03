@@ -817,6 +817,9 @@ func main() {
 		designerSvc.SetBillingWalletService(fixedBilling.Wallet)
 		designerSvc.SetProviderCostService(fixedBilling.Cost)
 		designerHandler = handler.NewDesignerHandler(designerSvc, log)
+		if fileHandler != nil {
+			fileHandler.SetDesignerService(designerSvc)
+		}
 		designerHandler.SetDirectUploadDependencies(repo, store)
 	}
 	hypitCapabilityHandler := handler.NewHypitCapabilityHandler(hypitCapabilitySvc)

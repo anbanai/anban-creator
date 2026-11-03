@@ -40,7 +40,7 @@ export const designerApi = {
       defaultCapability: response.default_capability,
     })),
 
-  generate: async (req: GenerateRequest, signal?: AbortSignal) => {
+  generate: async (req: GenerateRequest, signal?: AbortSignal, onAdmitting?: (operationId: string) => void) => {
     const operation_id = req.operation_id ?? crypto.randomUUID()
     const quotedRequest = { ...req, n: 1, operation_id }
     const quote = await unwrap<GenerateQuote>(
@@ -52,6 +52,9 @@ export const designerApi = {
       quote_id: quote.quote_id,
       request_fingerprint: quote.request_fingerprint,
     }
+    // Quote/upload cancellation must not create a recoverable operation. Persist
+    // only at the admission boundary, before a response can be lost or aborted.
+    onAdmitting?.(operation_id)
     return unwrap<{ generation_id: string; status: string; price_credits: number }>(
       signal ? http.post('/designer/generate', generateRequest, { signal }) : http.post('/designer/generate', generateRequest),
     )
