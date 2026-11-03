@@ -191,6 +191,11 @@ func TestDesignerAdmissionRejectsExpiredAndMismatchedQuotesWithoutCharge(t *test
 			}
 		}},
 		{"fingerprint mismatch", func(_ *designerFixedSKUFixture, req *DesignerGenerateRequest) { req.RequestFingerprint = "different" }},
+		{"persisted quote for another request", func(f *designerFixedSKUFixture, req *DesignerGenerateRequest) {
+			req.Prompt = "different work"
+			req.OperationID = uuid.NewString()
+			req.RequestFingerprint = DesignerGenerationFingerprint(f.userID, *req)
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newDesignerFixedSKUFixture(t, 500)
@@ -200,7 +205,7 @@ func TestDesignerAdmissionRejectsExpiredAndMismatchedQuotesWithoutCharge(t *test
 			if tc.name == "expired" && !errors.Is(err, ErrBillingQuoteExpired) {
 				t.Fatalf("expired quote error = %v", err)
 			}
-			if tc.name == "fingerprint mismatch" && !errors.Is(err, ErrBillingQuoteMismatch) {
+			if tc.name != "expired" && !errors.Is(err, ErrBillingQuoteMismatch) {
 				t.Fatalf("mismatched quote error = %v", err)
 			}
 			var generations, charges int64
