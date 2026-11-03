@@ -75,7 +75,7 @@ docker build -f deploy/docker/Dockerfile.studio \
 docker push "$NEW_STUDIO_IMAGE"
 ```
 
-然后保持 `version_switch=base`，渲染并 apply 模板。Deployment 和 Service 的名字保持不变：
+然后保持 `version_switch=base`，渲染并 apply 模板。Deployment、Service 和 Ingress 的名字保持不变：
 
 ```bash
 export version_switch=base
@@ -83,6 +83,13 @@ envsubst < studio/Deployment.yaml > /tmp/studio-rendered.yaml
 kubectl apply -f /tmp/studio-rendered.yaml
 kubectl -n "$namespace" rollout status deployment/creator-studio-web-base --timeout=10m
 ```
+
+同一份清单里的 `creator-studio-web-archestra` Ingress 会把
+`archestra.anbanai.com` 路由到 Studio Service 的 `8080` 端口，由 ALB Ingress
+Controller 创建/更新转发规则，不需要再手动改 ALB 控制台。该 Ingress 通过
+`listen-ports: '[{"HTTPS": 443}]'` 只挂 HTTPS，复用 443 监听器上的
+`*.anbanai.com` 证书。完整接入说明见
+[archestra-integration.md](archestra-integration.md)。
 
 ## 已知边界
 

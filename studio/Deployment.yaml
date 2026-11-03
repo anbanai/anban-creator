@@ -30,9 +30,9 @@ spec:
               value: https
             - name: BACKEND_PORT
               value: "8443"
-            # Archestra Service. This cluster installs the release in
-            # anbanai-prod, not the deploy.sh default archestra namespace.
-            # nginx resolves this name at startup, so it must stay resolvable.
+            # Archestra web Service in anbanai-prod. nginx resolves this name
+            # at startup, so it must stay resolvable. See
+            # docs/archestra-integration.md.
             - name: ARCHESTRA_HOST
               value: archestra-platform.anbanai-prod.svc.cluster.local
             - name: ARCHESTRA_PORT
@@ -112,3 +112,35 @@ spec:
         target:
           type: Utilization
           averageUtilization: 80
+---
+# Archestra web entry. The Studio nginx server block for ARCHESTRA_PUBLIC_HOST
+# serves this host, so the backend stays on the Studio Service. ACK's default
+# ALB IngressClass is `alb`; a renamed IngressClass must be updated here.
+# TLS is terminated by the existing ALB 443 listener (*.anbanai.com).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  # Stable across blue/green releases: it always points at the Service.
+  name: ${micro_service_name}-archestra
+  namespace: ${namespace}
+  labels:
+    app: ${micro_service_name}
+  annotations:
+    # Attach the rule to the existing HTTPS listener only. The ALB already
+    # serves the *.anbanai.com certificate there; HTTP stays unrouted for
+    # this admin UI.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS": 443}]'
+spec:
+  ingressClassName: alb
+  rules:
+    # Keep this host in sync with ARCHESTRA_PUBLIC_HOST above.
+    - host: archestra.anbanai.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ${micro_service_name}-svc
+                port:
+                  number: 8080

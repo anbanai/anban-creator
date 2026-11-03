@@ -54,7 +54,8 @@ def release(documents, run=kubectl):
         return found[0]
 
     deployment, service, hpa = (one(k) for k in ('Deployment', 'Service', 'HorizontalPodAutoscaler'))
-    if len(documents) != 3:
+    ingress = [d for d in documents if d['kind'] == 'Ingress']
+    if len(ingress) > 1 or len(documents) != 3 + len(ingress):
         raise ValueError('Unexpected resources in Studio manifest')
     namespace = service['metadata']['namespace']
     if any(d['metadata']['namespace'] != namespace for d in documents):
@@ -107,6 +108,10 @@ def release(documents, run=kubectl):
     # resourceVersion on replace makes the final switch compare-and-swap: a parallel
     # release cannot silently overwrite another release's cutover.
     run([*ns, 'replace', '-f', '-'], json.dumps(updated))
+    if ingress:
+        # The Ingress points at the stable Service, so publish it only after
+        # traffic has switched to the new release.
+        run([*ns, 'apply', '-f', '-'], json.dumps(ingress[0]))
     print(f'Studio traffic switched to {name}; retain the previous Deployment for rollback.')
 
 
