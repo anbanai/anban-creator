@@ -343,30 +343,35 @@ Important sections:
 - WeChat auth and publishing settings
 - credits and invitation rules
 
-Docker Compose loads the root `.env` into the Server container and rejects a
-startup with any required value missing. Populate all required entries from
-`.env.example`: `ANBAN_BILLING_ADMIN_API_KEY`, a 32-byte or longer
-`ANBAN_AGENT_EXECUTION_TOKEN_SECRET`, `ANBAN_JWT_SECRET_KEY`, `ANBAN_OSS_ENDPOINT`,
+Docker Compose forwards the root `.env` into the Server container and rejects a
+startup when a required value is missing. Keep `.env` limited to credentials and
+machine-specific overrides: every non-secret default (agent images, DSH wiring,
+the OSS endpoint/bucket/region, provider base URLs, feature flags, and quotas)
+lives in `server/config.example.yaml` and must not be repeated in `.env`. Any
+`${VAR}` reference in `server/config.yaml` can still be overridden by exporting
+`VAR` or adding it to `.env`; an unset variable keeps the YAML default.
+
+Populate the required entries from `.env.example`: `ANBAN_BILLING_ADMIN_API_KEY`,
+a 32-byte or longer `ANBAN_AGENT_EXECUTION_TOKEN_SECRET`, `ANBAN_JWT_SECRET_KEY`,
 `ANBAN_OSS_ACCESS_KEY_ID`, and `ANBAN_OSS_ACCESS_KEY_SECRET`, plus
-`MOONSHOT_API_KEY` for the configured writing
-and understanding routes. The checked-in image routes also require
-`VOLCENGINE_ARK_API_KEY` and `WANGCAI_OPENAI_API_KEY`. Add any other provider and
-integration variables referenced by `server/config.yaml` directly to `.env`;
-the relevant optional feature remains unavailable until its credentials are
-configured.
+`MOONSHOT_API_KEY` for the configured writing and understanding routes. The
+checked-in image routes also require `VOLCENGINE_ARK_API_KEY` and
+`WANGCAI_OPENAI_API_KEY`. Add any other credential to `.env`; the related
+optional feature remains unavailable until it is configured.
 
 The application recognizes exactly three Agent product IDs: `effective`,
 `balanced`, and `quality`. Their provider, model, and Claude Code settings live
-only under each `claude.profiles.<id>.envs` map. The checked-in
-configuration uses DeepSeek, Zhipu, and Moonshot, so set
-`ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL` plus `ANBAN_DEEPSEEK_API_KEY`,
-`ANBAN_ZHIPU_ANTHROPIC_BASE_URL` plus `ANBAN_ZHIPU_API_KEY`, and
-`ANBAN_MOONSHOT_ANTHROPIC_BASE_URL` plus `ANBAN_MOONSHOT_API_KEY` before the
-Server starts. A configured profile must include its Base URL, Token, default
-model, and the Opus/Fable/Sonnet/Haiku model variables. The remaining Claude
-control variables are optional and may be removed to use provider defaults.
-Invalid or incomplete configured profiles fail closed; execution never falls
-back to another profile or model.
+only under each `claude.profiles.<id>.envs` map. The checked-in configuration
+uses DeepSeek, Zhipu, and Moonshot, so set `ANBAN_DEEPSEEK_API_KEY`,
+`ANBAN_ZHIPU_API_KEY`, and `ANBAN_MOONSHOT_API_KEY` before the Server starts.
+Their provider Base URLs keep the YAML defaults and can be overridden in
+`server/config.yaml` or through `ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL`,
+`ANBAN_MOONSHOT_ANTHROPIC_BASE_URL`, and `ANBAN_ZHIPU_ANTHROPIC_BASE_URL`. A
+configured profile must include its Base URL, Token, default model, and the
+Opus/Fable/Sonnet/Haiku model variables. The remaining Claude control variables
+are optional and may be removed to use provider defaults. Invalid or incomplete
+configured profiles fail closed; execution never falls back to another profile
+or model.
 
 Server-owned research is configured independently under capability-level
 `search.web`, `search.fetch`, and `search.images` routes. Enable web search with

@@ -52,7 +52,8 @@ func TestCreatorAgentImageNamingContract(t *testing.T) {
 
 	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
 	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
-	if err := validateCreatorAgentImageNaming(makefile, compose); err != nil {
+	configExample := readTextFile(t, filepath.Join(root, "server", "config.example.yaml"))
+	if err := validateCreatorAgentImageNaming(makefile, compose, configExample); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -62,77 +63,86 @@ func TestValidateCreatorAgentImageNamingRejectsDecoysAndLegacyValues(t *testing.
 	validCompose := `services:
 	  server:
 	    environment:
-	      ANBAN_AGENT_IMAGE_WECHAT_ARTICLE: "creator-agent-wechat-article:latest"
-	      ANBAN_AGENT_IMAGE_WECHAT_PICTURE: "creator-agent-wechat-picture:latest"
+	      ANBAN_AGENT_EXECUTOR: "docker"
+`
+	validConfigExample := `runtime_images:
+  wechat-article: "${ANBAN_AGENT_IMAGE_WECHAT_ARTICLE:-creator-agent-wechat-article:latest}"
+  wechat-picture: "${ANBAN_AGENT_IMAGE_WECHAT_PICTURE:-creator-agent-wechat-picture:latest}"
 `
 
 	for _, tc := range []struct {
-		name     string
-		makefile string
-		compose  string
+		name          string
+		makefile      string
+		compose       string
+		configExample string
 	}{
 		{
-			name:     "Make variable name decoy",
-			makefile: "LEGACY_AGENT_IMAGE := creator-agent-wechat-article:latest\n",
-			compose:  validCompose,
+			name:          "Make variable name decoy",
+			makefile:      "LEGACY_AGENT_IMAGE := creator-agent-wechat-article:latest\n",
+			compose:       validCompose,
+			configExample: validConfigExample,
 		},
 		{
-			name:     "commented Make assignment",
-			makefile: "# AGENT_IMAGE := creator-agent-wechat-article:latest\n",
-			compose:  validCompose,
+			name:          "commented Make assignment",
+			makefile:      "# AGENT_IMAGE := creator-agent-wechat-article:latest\n",
+			compose:       validCompose,
+			configExample: validConfigExample,
 		},
 		{
-			name:     "legacy Make identity remains",
-			makefile: validMakefile + "LEGACY_AGENT_IMAGE := anban-creator-agent:latest\n",
-			compose:  validCompose,
+			name:          "legacy Make identity remains",
+			makefile:      validMakefile + "LEGACY_AGENT_IMAGE := anban-creator-agent:latest\n",
+			compose:       validCompose,
+			configExample: validConfigExample,
 		},
 		{
-			name:     "retired short Make identity remains",
-			makefile: validMakefile + "LEGACY_AGENT_IMAGE := anban-agent:latest\n",
-			compose:  validCompose,
+			name:          "retired short Make identity remains",
+			makefile:      validMakefile + "LEGACY_AGENT_IMAGE := anban-agent:latest\n",
+			compose:       validCompose,
+			configExample: validConfigExample,
 		},
 		{
-			name:     "duplicate Make assignment overrides expected value",
-			makefile: validMakefile + "AGENT_IMAGE := wrong-agent:latest\n",
-			compose:  validCompose,
+			name:          "duplicate Make assignment overrides expected value",
+			makefile:      validMakefile + "WECHAT_ARTICLE_AGENT_IMAGE := wrong-agent:latest\n",
+			compose:       validCompose,
+			configExample: validConfigExample,
 		},
 		{
-			name:     "Compose image outside Server environment",
-			makefile: validMakefile,
-			compose: `services:
-	  server:
-	    image: creator-agent-wechat-article:latest
+			name:          "persistent Agent service remains",
+			makefile:      validMakefile,
+			compose:       validCompose + "  agent:\n    image: creator-agent-wechat-article:latest\n",
+			configExample: validConfigExample,
+		},
+		{
+			name:          "legacy Compose identity remains",
+			makefile:      validMakefile,
+			compose:       validCompose + "  old-agent:\n    image: anban-agent:latest\n",
+			configExample: validConfigExample,
+		},
+		{
+			name:          "duplicate runtime image overrides expected value",
+			makefile:      validMakefile,
+			compose:       validCompose,
+			configExample: validConfigExample + "  wechat-picture: \"${ANBAN_AGENT_IMAGE_WECHAT_PICTURE:-creator-agent-wechat-picture:latest}\"\n",
+		},
+		{
+			name:          "shared WeChat image identity",
+			makefile:      validMakefile,
+			compose:       validCompose,
+			configExample: `runtime_images:
+  wechat-article: "${ANBAN_AGENT_IMAGE_WECHAT_ARTICLE:-creator-agent-wechat-article:latest}"
+  wechat-picture: "${ANBAN_AGENT_IMAGE_WECHAT_PICTURE:-creator-agent-wechat-article:latest}"
 `,
-		},
-		{
-			name:     "persistent Agent service remains",
-			makefile: validMakefile,
-			compose: validCompose + `  agent:
-	    image: creator-agent-wechat-article:latest
-`,
-		},
-		{
-			name:     "legacy Compose identity remains",
-			makefile: validMakefile,
-			compose: validCompose + `  old-agent:
-	    image: anban-agent:latest
-`,
-		},
-		{
-			name:     "duplicate Compose environment overrides expected value",
-			makefile: validMakefile,
-			compose:  validCompose + "      ANBAN_AGENT_IMAGE_WECHAT_ARTICLE: \"wrong-agent:latest\"\n",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := validateCreatorAgentImageNaming(tc.makefile, tc.compose); err == nil {
+			if err := validateCreatorAgentImageNaming(tc.makefile, tc.compose, tc.configExample); err == nil {
 				t.Fatal("validateCreatorAgentImageNaming accepted an invalid runtime identity contract")
 			}
 		})
 	}
 }
 
-func validateCreatorAgentImageNaming(makefile, compose string) error {
+func validateCreatorAgentImageNaming(makefile, compose, configExample string) error {
 	if containsRetiredAgentIdentity(makefile) {
 		return fmt.Errorf("Makefile must not retain anban-creator-agent or anban-agent identities")
 	}
@@ -148,44 +158,20 @@ func validateCreatorAgentImageNaming(makefile, compose string) error {
 	if strings.Contains("\n"+compose, "\n  agent:\n") {
 		return fmt.Errorf("docker-compose.yml must not define a persistent agent service")
 	}
-	articleValues = composeEnvironmentAssignments(compose, "server", "ANBAN_AGENT_IMAGE_WECHAT_ARTICLE")
-	pictureValues = composeEnvironmentAssignments(compose, "server", "ANBAN_AGENT_IMAGE_WECHAT_PICTURE")
-	if len(articleValues) != 1 || articleValues[0] != `"creator-agent-wechat-article:latest"` || len(pictureValues) != 1 || pictureValues[0] != `"creator-agent-wechat-picture:latest"` {
-		return fmt.Errorf("docker-compose.yml must configure independent WeChat runtime images exactly once")
+
+	for _, image := range []struct {
+		variable string
+		tag      string
+	}{
+		{variable: "ANBAN_AGENT_IMAGE_WECHAT_ARTICLE", tag: "creator-agent-wechat-article:latest"},
+		{variable: "ANBAN_AGENT_IMAGE_WECHAT_PICTURE", tag: "creator-agent-wechat-picture:latest"},
+	} {
+		placeholder := fmt.Sprintf("${%s:-%s}", image.variable, image.tag)
+		if got := strings.Count(configExample, placeholder); got != 1 {
+			return fmt.Errorf("server/config.example.yaml must configure %s exactly once, found %d", image.variable, got)
+		}
 	}
 	return nil
-}
-
-func composeEnvironmentAssignments(text, service, variable string) []string {
-	lines := strings.Split(text, "\n")
-	inService := false
-	inEnvironment := false
-	var values []string
-	for _, line := range lines {
-		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") {
-			inService = line == "  "+service+":"
-			inEnvironment = false
-			continue
-		}
-		if !inService {
-			continue
-		}
-		if line == "    environment:" {
-			inEnvironment = true
-			continue
-		}
-		if inEnvironment && strings.HasPrefix(line, "    ") && !strings.HasPrefix(line, "      ") {
-			inEnvironment = false
-		}
-		if !inEnvironment {
-			continue
-		}
-		name, value, found := strings.Cut(strings.TrimSpace(line), ":")
-		if found && name == variable {
-			values = append(values, strings.TrimSpace(value))
-		}
-	}
-	return values
 }
 
 func TestDockerRuntimeContractRemovesPersistentHostExecutors(t *testing.T) {
@@ -1151,9 +1137,6 @@ func TestViralIPVideoEditorRuntimeProfileIsPackagedAndRegistered(t *testing.T) {
 			"docker build --platform linux/amd64 -f deploy/docker/Dockerfile.agent-viral-ip-video-editor",
 			"AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR",
 		},
-		"docker-compose.yml": {
-			"ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR: \"${ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR:-creator-agent-viral-ip-video-editor:latest}\"",
-		},
 		"server/config.example.yaml": {
 			"viral-ip-video-editor: \"${ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR:-creator-agent-viral-ip-video-editor:latest}\"",
 		},
@@ -1385,18 +1368,8 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 	root := repositoryRoot(t)
 	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
 	for _, want := range []string{
-		"ANBAN_AGENT_EXECUTOR: \"docker\"",
 		"ANBAN_CLAUDE_AGENT_SERVER_URL: \"http://server:8080\"",
 		"ANBAN_AGENT_EXECUTION_TOKEN_SECRET:",
-		"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE: \"creator-agent-wechat-article:latest\"",
-		"ANBAN_AGENT_IMAGE_WECHAT_PICTURE: \"creator-agent-wechat-picture:latest\"",
-		"ANBAN_AGENT_IMAGE_SEEDNOTE: \"creator-agent-seednote:latest\"",
-		"ANBAN_AGENT_IMAGE_MONTAGE: \"creator-agent-montage:latest\"",
-		"ANBAN_AGENT_IMAGE_VIDEO_EDIT: \"${ANBAN_AGENT_IMAGE_VIDEO_EDIT:-creator-agent-video-edit:latest}\"",
-		"ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR: \"${ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR:-creator-agent-talking-head-editor:latest}\"",
-		"ANBAN_AGENT_IMAGE_MOMENTS: \"creator-agent-moments:latest\"",
-		"ANBAN_AGENT_IMAGE_ECOMMERCE: \"creator-agent-ecommerce:latest\"",
-		"ANBAN_AGENT_DOCKER_NETWORK: \"creator-runtime-network\"",
 		"- /var/run/docker.sock:/var/run/docker.sock",
 		"group_add:\n      - \"${DOCKER_GID:-0}\"",
 		"anban-creator-network:\n    name: anban-creator-network\n    driver: bridge",
@@ -1417,10 +1390,20 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 		"ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE",
 		"ANBAN_CLAUDE_DOCKER_CONTAINER_NAME",
 		"ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR",
+		"ANBAN_AGENT_EXECUTOR",
+		"ANBAN_AGENT_IMAGE_",
+		"ANBAN_AGENT_DOCKER_NETWORK",
 	} {
 		if strings.Contains("\n"+compose, forbidden) {
 			t.Fatalf("docker-compose.yml retains obsolete managed runtime contract %q", forbidden)
 		}
+	}
+
+	// Agent images and Docker executor wiring have one source of truth:
+	// server/config.example.yaml for defaults and .env for local overrides.
+	envExample := readTextFile(t, filepath.Join(root, ".env.example"))
+	if !strings.Contains(envExample, "ANBAN_AGENT_EXECUTOR=docker") {
+		t.Fatal(".env.example must select the local Docker executor")
 	}
 
 	for _, configPath := range []string{"server/config.example.yaml"} {
@@ -1480,39 +1463,60 @@ func TestDockerRuntimeContract(t *testing.T) {
 			t.Fatal("docker-compose.yml has no server service")
 		}
 		for name, want := range map[string]string{
-			"ANBAN_AGENT_EXECUTOR":                    "docker",
-			"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":        "creator-agent-wechat-article:latest",
-			"ANBAN_AGENT_IMAGE_SEEDNOTE":              "creator-agent-seednote:latest",
-			"ANBAN_AGENT_IMAGE_MONTAGE":               "creator-agent-montage:latest",
-			"ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR": "${ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR:-creator-agent-viral-ip-video-editor:latest}",
-			"ANBAN_AGENT_IMAGE_VIDEO_EDIT":            "${ANBAN_AGENT_IMAGE_VIDEO_EDIT:-creator-agent-video-edit:latest}",
-			"ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR":   "${ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR:-creator-agent-talking-head-editor:latest}",
-			"VIDEO_EDIT_ELEVENLABS_API_KEY":           "${VIDEO_EDIT_ELEVENLABS_API_KEY:-}",
-			"VIDEO_USE_API_KEY":                       "${VIDEO_USE_API_KEY:-}",
-			"ANBAN_AGENT_IMAGE_MOMENTS":               "creator-agent-moments:latest",
-			"ANBAN_AGENT_IMAGE_ECOMMERCE":             "creator-agent-ecommerce:latest",
-			"ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS":      "${ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS:-creator-agent-profile-analysis:latest}",
-			"ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS":     "${ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS:-creator-agent-feedback-analysis:latest}",
-			"ANBAN_AGENT_IMAGE_TOPIC_RADAR":           "${ANBAN_AGENT_IMAGE_TOPIC_RADAR:-creator-agent-topic-radar:latest}",
-			"ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION":  "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}",
-			"ANBAN_AGENT_IMAGE_HYPIT":                 "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}",
-			"ANBAN_AGENT_DOCKER_NETWORK":              "creator-runtime-network",
-			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET":      "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET:?ANBAN_AGENT_EXECUTION_TOKEN_SECRET is required}",
-			"ANBAN_BILLING_ADMIN_API_KEY":             "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}",
-			"ANBAN_JWT_SECRET_KEY":                    "${ANBAN_JWT_SECRET_KEY:?ANBAN_JWT_SECRET_KEY is required}",
-			"ANBAN_OSS_ENDPOINT":                      "${ANBAN_OSS_ENDPOINT:?ANBAN_OSS_ENDPOINT is required}",
-			"ANBAN_OSS_ACCESS_KEY_ID":                 "${ANBAN_OSS_ACCESS_KEY_ID:?ANBAN_OSS_ACCESS_KEY_ID is required}",
-			"ANBAN_OSS_ACCESS_KEY_SECRET":             "${ANBAN_OSS_ACCESS_KEY_SECRET:?ANBAN_OSS_ACCESS_KEY_SECRET is required}",
-			"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL":       "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-}",
-			"ANBAN_DEEPSEEK_API_KEY":                  "${ANBAN_DEEPSEEK_API_KEY:?ANBAN_DEEPSEEK_API_KEY is required}",
-			"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":       "${ANBAN_MOONSHOT_ANTHROPIC_BASE_URL:-https://api.moonshot.cn/anthropic}",
-			"ANBAN_MOONSHOT_API_KEY":                  "${ANBAN_MOONSHOT_API_KEY:?ANBAN_MOONSHOT_API_KEY is required}",
-			"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":          "${ANBAN_ZHIPU_ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}",
-			"ANBAN_ZHIPU_API_KEY":                     "${ANBAN_ZHIPU_API_KEY:?ANBAN_ZHIPU_API_KEY is required}",
-			"MOONSHOT_API_KEY":                        "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}",
+			"ANBAN_DSH_BRIDGE_DIR":                   "/app/runtime-dsh",
+			"ANBAN_DSH_BRIDGE_PATCH":                 "/app/harness/dsh/project-creator.patch.yml",
+			"ANBAN_DSH_BRIDGE_MCP_URL":               "http://127.0.0.1:8080/mcp",
+			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET":     "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET:?ANBAN_AGENT_EXECUTION_TOKEN_SECRET is required}",
+			"ANBAN_BILLING_ADMIN_API_KEY":            "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}",
+			"ANBAN_JWT_SECRET_KEY":                   "${ANBAN_JWT_SECRET_KEY:?ANBAN_JWT_SECRET_KEY is required}",
+			"ANBAN_OSS_ACCESS_KEY_ID":                "${ANBAN_OSS_ACCESS_KEY_ID:?ANBAN_OSS_ACCESS_KEY_ID is required}",
+			"ANBAN_OSS_ACCESS_KEY_SECRET":            "${ANBAN_OSS_ACCESS_KEY_SECRET:?ANBAN_OSS_ACCESS_KEY_SECRET is required}",
+			"ANBAN_DEEPSEEK_API_KEY":                 "${ANBAN_DEEPSEEK_API_KEY:?ANBAN_DEEPSEEK_API_KEY is required}",
+			"ANBAN_MOONSHOT_API_KEY":                 "${ANBAN_MOONSHOT_API_KEY:?ANBAN_MOONSHOT_API_KEY is required}",
+			"ANBAN_ZHIPU_API_KEY":                    "${ANBAN_ZHIPU_API_KEY:?ANBAN_ZHIPU_API_KEY is required}",
+			"MOONSHOT_API_KEY":                       "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}",
 		} {
 			if got := server.Environment[name]; got != want {
 				t.Errorf("server environment %s = %q, want %q", name, got, want)
+			}
+		}
+		for _, duplicatedDefault := range []string{
+			"ANBAN_AGENT_EXECUTOR",
+			"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE",
+			"ANBAN_AGENT_IMAGE_WECHAT_PICTURE",
+			"ANBAN_AGENT_IMAGE_SEEDNOTE",
+			"ANBAN_AGENT_IMAGE_MONTAGE",
+			"ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR",
+			"ANBAN_AGENT_IMAGE_VIDEO_EDIT",
+			"ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR",
+			"ANBAN_AGENT_IMAGE_MOMENTS",
+			"ANBAN_AGENT_IMAGE_ECOMMERCE",
+			"ANBAN_AGENT_IMAGE_CONTENT_PLANNING",
+			"ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS",
+			"ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS",
+			"ANBAN_AGENT_IMAGE_TOPIC_RADAR",
+			"ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION",
+			"ANBAN_AGENT_IMAGE_HYPIT",
+			"ANBAN_AGENT_IMAGE_LOCAL_LIFE",
+			"ANBAN_AGENT_DOCKER_NETWORK",
+			"ANBAN_AGENT_PROJECT_MEMORY_VOLUME",
+			"ANBAN_DSH_EXECUTOR",
+			"ANBAN_DSH_IMAGE",
+			"ANBAN_DSH_NETWORK",
+			"ANBAN_DSH_PROJECT_MEMORY_VOLUME",
+			"ANBAN_DSH_SERVER_URL",
+			"ANBAN_OSS_ENDPOINT",
+			"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL",
+			"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL",
+			"ANBAN_ZHIPU_ANTHROPIC_BASE_URL",
+			"ANBAN_REDFOX_ENDPOINT",
+			"ANBAN_REDFOX_API_KEY",
+			"ANBAN_REDFOX_AGENT_API_KEY",
+			"VIDEO_EDIT_ELEVENLABS_API_KEY",
+			"VIDEO_USE_API_KEY",
+		} {
+			if _, exists := server.Environment[duplicatedDefault]; exists {
+				t.Errorf("docker-compose.yml repeats a server/config.yaml value for %s", duplicatedDefault)
 			}
 		}
 		for _, obsolete := range []string{"ANBAN_KIMI_API_KEY", "ANBAN_DOUBAO_AGENT_BASE_URL", "ANBAN_DOUBAO_AGENT_API_KEY"} {
@@ -1546,33 +1550,34 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_BILLING_ADMIN_API_KEY",
 			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET",
 			"ANBAN_AGENT_EXECUTOR",
-			"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE",
-			"ANBAN_AGENT_IMAGE_WECHAT_PICTURE",
-			"ANBAN_AGENT_IMAGE_SEEDNOTE",
-			"ANBAN_AGENT_IMAGE_MONTAGE",
-			"ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR",
-			"ANBAN_AGENT_IMAGE_VIDEO_EDIT",
-			"ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR",
-			"VIDEO_EDIT_ELEVENLABS_API_KEY",
-			"ANBAN_AGENT_IMAGE_MOMENTS",
-			"ANBAN_AGENT_IMAGE_ECOMMERCE",
 			"ANBAN_JWT_SECRET_KEY",
-			"ANBAN_OSS_ENDPOINT",
 			"ANBAN_OSS_ACCESS_KEY_ID",
 			"ANBAN_OSS_ACCESS_KEY_SECRET",
-			"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL",
 			"ANBAN_DEEPSEEK_API_KEY",
-			"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL",
+			"ANBAN_REDFOX_API_KEY",
+			"ANBAN_REDFOX_AGENT_API_KEY",
 			"ANBAN_MOONSHOT_API_KEY",
-			"ANBAN_ZHIPU_ANTHROPIC_BASE_URL",
 			"ANBAN_ZHIPU_API_KEY",
 			"MOONSHOT_API_KEY",
 			"VOLCENGINE_ARK_API_KEY",
 			"WANGCAI_OPENAI_BASE_URL",
 			"WANGCAI_OPENAI_API_KEY",
+			"VIDEO_EDIT_ELEVENLABS_API_KEY",
 		} {
 			if _, ok := dotenv[name]; !ok {
 				t.Errorf(".env.example missing required Server variable %s", name)
+			}
+		}
+
+		configBody := readTextFile(t, filepath.Join(root, "server", "config.example.yaml"))
+		yamlDefault := regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}`)
+		for _, match := range yamlDefault.FindAllStringSubmatch(configBody, -1) {
+			name, fallback := match[1], match[2]
+			if fallback == "" {
+				continue
+			}
+			if value, ok := dotenv[name]; ok && strings.TrimSpace(value) != "" {
+				t.Errorf(".env.example repeats the server/config.example.yaml default for %s (%q); keep the default only in YAML", name, value)
 			}
 		}
 

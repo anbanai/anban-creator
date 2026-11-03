@@ -146,8 +146,10 @@ Montage image. Set `VIRAL_IP_VIDEO_EDITOR_AGENT_IMAGE` for release-manifest
 generation; the ACK renderer maps `images["viral-ip-video-editor"]` to
 `ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR`.
 
-Local/Compose deployments provide `ANBAN_AGENT_IMAGE_VIDEO_EDIT` and
-`VIDEO_EDIT_ELEVENLABS_API_KEY` through `.env`. Kubernetes reads the Scribe key
+Local/Compose deployments take the `video-edit` image from
+`claude.runtime_images` in `server/config.yaml` (the YAML default matches the
+image built by `make docker-up`) and provide `VIDEO_EDIT_ELEVENLABS_API_KEY`
+through `.env`. Kubernetes reads the Scribe key
 from the optional `video-edit-elevenlabs` Secret's `api-key` entry; create that
 Secret in the Server namespace before dispatching video-edit tasks. The Server
 requires the credential even when a task uses the default subtitle mode.

@@ -14,7 +14,7 @@ func TestTopicRadarIndependentDeploymentContract(t *testing.T) {
 		"scripts/agent-runtime-release.sh":        {`"topic-radar=${AGENT_IMAGE_TOPIC_RADAR:?AGENT_IMAGE_TOPIC_RADAR must be set}"`},
 		"scripts/render-ack-server-deployment.sh": {`topic_radar_agent_image_repo=${topic_radar_agent_image_repo:-$(jq -r '.images["topic-radar"] // empty' "$manifest_path")}`, "export topic_radar_agent_image_repo"},
 		"server/Deployment.yaml":                  {"ANBAN_AGENT_IMAGE_TOPIC_RADAR", "${topic_radar_agent_image_repo}"},
-		"docker-compose.yml":                      {"ANBAN_AGENT_IMAGE_TOPIC_RADAR", "creator-agent-topic-radar:latest"},
+		"server/config.example.yaml":              {"ANBAN_AGENT_IMAGE_TOPIC_RADAR", "creator-agent-topic-radar:latest"},
 	}
 	for file, tokens := range contracts {
 		t.Run(file, func(t *testing.T) {
