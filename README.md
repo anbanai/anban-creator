@@ -234,6 +234,13 @@ The runtime bootstrap still compares the Server's embedded Catalog digest with
 the Catalog shipped in each Agent image; no Docker build argument or image label
 is required.
 
+Runtime contract versions are strict: the Server and every Agent image must ship
+the same contract version. A mismatched image fails bootstrap with HTTP 426
+`agent_runtime_upgrade_required` and the expected version in
+`X-Anban-Agent-Contract-Version-Expected`. Publish the Agent images and roll the
+Server in the same release so the mismatch window covers only in-flight
+dispatches.
+
 ## Quick Start
 
 ```bash

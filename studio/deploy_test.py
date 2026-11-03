@@ -125,6 +125,31 @@ class DeploymentTests(unittest.TestCase):
             deploy.release(resources(), cluster)
         self.assertFalse(any('create' in args for args, _ in cluster.calls))
 
+    def test_publishes_optional_ingress_only_after_traffic_switch(self):
+        docs = copy.deepcopy(resources())
+        docs.append({
+            'apiVersion': 'networking.k8s.io/v1',
+            'kind': 'Ingress',
+            'metadata': {'name': 'studio-archestra', 'namespace': 'test'},
+            'spec': {'ingressClassName': 'alb'},
+        })
+        cluster = Cluster()
+        deploy.release(docs, cluster)
+        switch = next(i for i, (args, _) in enumerate(cluster.calls) if 'replace' in args)
+        publish = next(i for i, (args, _) in enumerate(cluster.calls) if 'apply' in args)
+        self.assertLess(switch, publish)
+        self.assertEqual(json.loads(cluster.calls[publish][1])['metadata']['name'], 'studio-archestra')
+
+    def test_rejects_duplicate_ingresses(self):
+        ingress = {
+            'apiVersion': 'networking.k8s.io/v1',
+            'kind': 'Ingress',
+            'metadata': {'name': 'studio-archestra', 'namespace': 'test'},
+            'spec': {},
+        }
+        with self.assertRaises(ValueError):
+            deploy.release(copy.deepcopy(resources()) + [ingress, copy.deepcopy(ingress)], Cluster())
+
 
 if __name__ == '__main__':
     unittest.main()

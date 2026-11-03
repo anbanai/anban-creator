@@ -20,6 +20,15 @@ map $share_access_log $share_referrer_policy {
     0 "no-referrer";
 }
 
+# Archestra is a Next.js app: its HTML and client router emit root-absolute
+# URLs (/_next/..., /api/..., /chat), so it must own a whole hostname. Mounting
+# it under /archestra on this host would collide with the Studio SPA fallback,
+# /api/, /mcp, and /ws. This map keeps its /ws agent-run channel upgradeable.
+map $http_upgrade $archestra_connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
 server {
     listen 80;
     # Evaluate before routing so SPA redirects cannot reclassify /share/ as /index.html.
@@ -52,6 +61,12 @@ server {
         add_header Cache-Control "no-store, must-revalidate" always;
         add_header X-Robots-Tag $share_robots_tag always;
         add_header Referrer-Policy $share_referrer_policy always;
+    }
+
+    # Keep the short entry URL working even though Archestra cannot live under
+    # a sub-path: send it to the host served by the Archestra block below.
+    location ~ ^/archestra/?$ {
+        return 302 ${ARCHESTRA_PUBLIC_SCHEME}://${ARCHESTRA_PUBLIC_HOST}/;
     }
 
     # Static frontend with SPA routing fallback.
@@ -111,5 +126,36 @@ server {
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
         proxy_read_timeout 1h;
+    }
+}
+
+# Archestra web app on its own host. The Studio Ingress routes this hostname
+# here; see docs/archestra-integration.md. Requests arrive at the root path so
+# Next.js can resolve /_next, /api, /v1, /ws, and its client routes exactly as
+# it generated them.
+server {
+    listen 80;
+    server_name ${ARCHESTRA_PUBLIC_HOST};
+
+    # Archestra's Next.js proxy accepts application uploads up to 200 MB
+    # (experimental.proxyClientMaxBodySize), well above Studio's 25 MB limit.
+    client_max_body_size 200m;
+
+    location / {
+        proxy_pass http://${ARCHESTRA_HOST}:${ARCHESTRA_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto ${ARCHESTRA_PUBLIC_SCHEME};
+        proxy_set_header X-Forwarded-Host $host;
+        # Model output, agent events, and MCP traffic stream over SSE, and
+        # agent runs keep a WebSocket on /ws. Both need unbuffered proxying.
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $archestra_connection_upgrade;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
     }
 }

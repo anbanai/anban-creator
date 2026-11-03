@@ -82,6 +82,9 @@ trends:
 
 # Agent 运行时环境。每个业务 Agent 单独配置 env；只有对应 Agent 执行时才会注入。
 # 公众号文章、公众号图文、Seednote 和内容研究可按需填写 RedFox key。
+# Server 是唯一的下发方：键名必须匹配 [A-Z][A-Z0-9_]*，且不得使用运行时保留名
+# （ANBAN_/ANTHROPIC_/CLAUDE_/NODE_/LD_/PYTHON/GIT_/SSH_ 前缀，以及 PATH/HOME/TMPDIR 等
+# 进程级变量）。运行时不按任务类型或 Agent Pack 过滤这些值，只校验上述传输不变量。
 wechat-article:
   env:
     REDFOX_API_KEY: "${ANBAN_REDFOX_AGENT_WECHAT_ARTICLE_API_KEY:-}"

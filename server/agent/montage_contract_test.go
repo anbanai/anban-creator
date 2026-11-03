@@ -82,9 +82,6 @@ func TestMontageRuntimeManifestFilesAreWrittenWithoutSecrets(t *testing.T) {
 	task := &model.Task{Type: model.PlatformMontage}
 	opts := &ExecutionOptions{
 		Task: task,
-		MontageEnv: map[string]string{
-			"NEW_PROVIDER_TOKEN": "future-secret",
-		},
 		MontageToolPolicy: map[string]srvconfig.MontageToolCapabilityPolicy{
 			"video_generation": {Preferred: []string{"fal"}},
 		},
@@ -104,28 +101,6 @@ func TestMontageRuntimeManifestFilesAreWrittenWithoutSecrets(t *testing.T) {
 	defaults := readRepoFile(t, filepath.Join(workDir, "montage-pipeline-defaults.json"))
 	if !strings.Contains(defaults, "cinematic") || !strings.Contains(defaults, "budget_usd") {
 		t.Fatalf("montage-pipeline-defaults.json = %s, want configured defaults", defaults)
-	}
-	combined := policy + defaults
-	if strings.Contains(combined, "future-secret") {
-		t.Fatalf("runtime manifests leaked environment secret: %s", combined)
-	}
-}
-
-func TestMontageEnvForTaskAcceptsFutureKeysAndSkipsEmptyValues(t *testing.T) {
-	opts := &ExecutionOptions{
-		Task: &model.Task{Type: model.PlatformMontage},
-		MontageEnv: map[string]string{
-			"NEW_PROVIDER_TOKEN": "future-secret",
-			"EMPTY_PROVIDER_KEY": "",
-		},
-	}
-
-	got := montageEnvForTask(opts)
-	if got["NEW_PROVIDER_TOKEN"] != "future-secret" {
-		t.Fatalf("env = %#v, want future provider key", got)
-	}
-	if _, ok := got["EMPTY_PROVIDER_KEY"]; ok {
-		t.Fatalf("env = %#v, want empty value omitted", got)
 	}
 }
 

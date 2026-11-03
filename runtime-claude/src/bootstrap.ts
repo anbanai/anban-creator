@@ -1,4 +1,5 @@
 import { validateHypitEnvironment } from "./hypit.js";
+import { validateRuntimeEnvironment } from "./runtime-environment.js";
 import { createHash } from "node:crypto";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -20,7 +21,7 @@ const MAX_MODEL_USAGE_ALIASES = 128;
 const MAX_CLAUDE_ENV_VALUE_BYTES = 16 << 10;
 const MAX_CLAUDE_ENV_TOTAL_BYTES = 32 << 10;
 const DEFAULT_AGENT_PACK_CATALOG_PATH = "/anbanai/agent-pack-catalog.json";
-export const AGENT_RUNTIME_CONTRACT_VERSION = 7;
+export const AGENT_RUNTIME_CONTRACT_VERSION = 8;
 
 const BOOTSTRAP_RESPONSE_KEYS = [
   "execution_token", "execution_id", "task_id", "task_type", "agent_id", "channel", "task_kind", "project_id", "prompt",
@@ -345,8 +346,10 @@ export function validateBootstrapResponse(executionID: string, input: unknown): 
     const expected = `.anban-creator/resume/executions/${executionID}/latest.md`;
     if (data.resume_context_path !== expected) throw new Error("bootstrap resume context path is invalid");
   }
-  if (!["montage", "hypit", "video-edit"].includes(data.task_type) && Object.keys(data.env ?? {}).length > 0) throw new Error("bootstrap environment is only valid for Montage, Hypit, or video-edit tasks");
-  for (const [key, value] of Object.entries(data.env ?? {})) validateEnvironmentEntry(key, value, data.task_type === "hypit" ? "Hypit" : data.task_type === "video-edit" ? "video-edit" : "Montage");
+  // The Server decides which values an Agent receives; the runtime only
+  // enforces transport invariants. No task type or Pack identity participates
+  // in that decision, so a new Agent Pack never needs a runtime change.
+  if (data.env !== undefined) data.env = validateRuntimeEnvironment(data.env);
   if (data.task_type === "hypit") validateHypitEnvironment(data.env ?? {});
   preflightBootstrapFiles(data.files ?? [], data.task_type);
   return data;
@@ -660,10 +663,6 @@ function validateBootstrapDownloadURL(raw: string): void {
   let url: URL;
   try { url = new URL(raw); } catch { throw new Error("unsafe bootstrap download URL"); }
   if (url.protocol !== "https:" || url.username || url.password || url.hash || !url.hostname) throw new Error("unsafe bootstrap download URL");
-}
-
-function validateEnvironmentEntry(key: string, value: unknown, label: string): void {
-  if (!/^[A-Z_][A-Z0-9_]*$/.test(key) || !cleanString(value) || Buffer.byteLength(value) > 16 << 10) throw new Error(`bootstrap ${label} environment is invalid`);
 }
 
 function validProviderBaseURL(raw: unknown): boolean {

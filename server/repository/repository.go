@@ -24,6 +24,7 @@ type Repository interface {
 	Assets() AssetRepository
 	UserMediaAssets() UserMediaAssetRepository
 	ImageAnalyses() ImageAnalysisRepository
+	ImageGenerations() ImageGenerationRepository
 	Projects() ProjectRepository
 	ProjectProfileRevisions() ProjectProfileRevisionRepository
 	ProjectProfileStates() ProjectProfileStateRepository
@@ -97,6 +98,15 @@ type ImageAnalysisRepository interface {
 	Update(ctx context.Context, job *model.ImageAnalysisJob) error
 	ListRecoverable(ctx context.Context, now, queuedBefore time.Time, limit int) ([]*model.ImageAnalysisJob, error)
 	MarkEnqueued(ctx context.Context, id string, generation int64, at time.Time) (bool, error)
+}
+
+type ImageGenerationRepository interface {
+	Create(ctx context.Context, generation *model.ImageGeneration) error
+	FindByID(ctx context.Context, id string) (*model.ImageGeneration, error)
+	Claim(ctx context.Context, id string, startedAt, deadline time.Time) (bool, error)
+	MarkFailed(ctx context.Context, id, message string, completedAt time.Time) (bool, error)
+	Complete(ctx context.Context, id, revisedPrompt string, results []model.ImageGenerationResult, completedAt time.Time) (bool, error)
+	ListGenerating(ctx context.Context, limit int) ([]model.ImageGeneration, error)
 }
 
 // SessionRepository provides access to the login_sessions table.
@@ -752,6 +762,7 @@ type repository struct {
 	assets                      AssetRepository
 	userMediaAssets             UserMediaAssetRepository
 	imageAnalyses               ImageAnalysisRepository
+	imageGenerations            ImageGenerationRepository
 	projects                    ProjectRepository
 	projectProfileRevisions     ProjectProfileRevisionRepository
 	projectProfileStates        ProjectProfileStateRepository
@@ -813,6 +824,7 @@ func New(db *gorm.DB) Repository {
 	assets := newAssetRepository(db)
 	userMediaAssets := newUserMediaAssetRepository(db)
 	imageAnalyses := newImageAnalysisRepository(db)
+	imageGenerations := newImageGenerationRepository(db)
 	projects := newProjectRepository(db)
 	projectChannelConfigs := newProjectChannelConfigRepository(db)
 	apiKeys := newAPIKeyRepository(db)
@@ -868,6 +880,7 @@ func New(db *gorm.DB) Repository {
 		assets:                      assets,
 		userMediaAssets:             userMediaAssets,
 		imageAnalyses:               imageAnalyses,
+		imageGenerations:            imageGenerations,
 		projects:                    projects,
 		projectProfileRevisions:     newProjectProfileRevisionRepository(db),
 		projectProfileStates:        newProjectProfileStateRepository(db),
@@ -918,19 +931,20 @@ func New(db *gorm.DB) Repository {
 	}
 }
 
-func (r *repository) Users() UserRepository                     { return r.users }
-func (r *repository) Sessions() SessionRepository               { return r.sessions }
-func (r *repository) Plans() PlanRepository                     { return r.plans }
-func (r *repository) PlanEntries() PlanEntryRepository          { return r.planEntries }
-func (r *repository) Tasks() TaskRepository                     { return r.tasks }
-func (r *repository) TaskExecutions() TaskExecutionRepository   { return r.taskExecutions }
-func (r *repository) TaskFiles() TaskFileRepository             { return r.files }
-func (r *repository) TaskShares() TaskShareRepository           { return r.taskShares }
-func (r *repository) UploadSessions() UploadSessionRepository   { return r.uploadSessions }
-func (r *repository) Assets() AssetRepository                   { return r.assets }
-func (r *repository) UserMediaAssets() UserMediaAssetRepository { return r.userMediaAssets }
-func (r *repository) ImageAnalyses() ImageAnalysisRepository    { return r.imageAnalyses }
-func (r *repository) Projects() ProjectRepository               { return r.projects }
+func (r *repository) Users() UserRepository                       { return r.users }
+func (r *repository) Sessions() SessionRepository                 { return r.sessions }
+func (r *repository) Plans() PlanRepository                       { return r.plans }
+func (r *repository) PlanEntries() PlanEntryRepository            { return r.planEntries }
+func (r *repository) Tasks() TaskRepository                       { return r.tasks }
+func (r *repository) TaskExecutions() TaskExecutionRepository     { return r.taskExecutions }
+func (r *repository) TaskFiles() TaskFileRepository               { return r.files }
+func (r *repository) TaskShares() TaskShareRepository             { return r.taskShares }
+func (r *repository) UploadSessions() UploadSessionRepository     { return r.uploadSessions }
+func (r *repository) Assets() AssetRepository                     { return r.assets }
+func (r *repository) UserMediaAssets() UserMediaAssetRepository   { return r.userMediaAssets }
+func (r *repository) ImageAnalyses() ImageAnalysisRepository      { return r.imageAnalyses }
+func (r *repository) ImageGenerations() ImageGenerationRepository { return r.imageGenerations }
+func (r *repository) Projects() ProjectRepository                 { return r.projects }
 func (r *repository) ProjectProfileRevisions() ProjectProfileRevisionRepository {
 	return r.projectProfileRevisions
 }
@@ -1053,6 +1067,7 @@ type txRepository struct {
 	assets                      AssetRepository
 	userMediaAssets             UserMediaAssetRepository
 	imageAnalyses               ImageAnalysisRepository
+	imageGenerations            ImageGenerationRepository
 	projects                    ProjectRepository
 	projectProfileRevisions     ProjectProfileRevisionRepository
 	assistantCheckpoints        AssistantCheckpointRepository
@@ -1116,6 +1131,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		assets:                      newAssetRepository(tx),
 		userMediaAssets:             newUserMediaAssetRepository(tx),
 		imageAnalyses:               newImageAnalysisRepository(tx),
+		imageGenerations:            newImageGenerationRepository(tx),
 		projects:                    newProjectRepository(tx),
 		projectProfileRevisions:     newProjectProfileRevisionRepository(tx),
 		assistantCheckpoints:        newAssistantCheckpointRepository(tx),
@@ -1165,19 +1181,20 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 	}
 }
 
-func (r *txRepository) Users() UserRepository                     { return r.users }
-func (r *txRepository) Sessions() SessionRepository               { return r.sessions }
-func (r *txRepository) Plans() PlanRepository                     { return r.plans }
-func (r *txRepository) PlanEntries() PlanEntryRepository          { return r.planEntries }
-func (r *txRepository) Tasks() TaskRepository                     { return r.tasks }
-func (r *txRepository) TaskExecutions() TaskExecutionRepository   { return r.taskExecutions }
-func (r *txRepository) TaskFiles() TaskFileRepository             { return r.files }
-func (r *txRepository) TaskShares() TaskShareRepository           { return r.taskShares }
-func (r *txRepository) UploadSessions() UploadSessionRepository   { return r.uploadSessions }
-func (r *txRepository) Assets() AssetRepository                   { return r.assets }
-func (r *txRepository) UserMediaAssets() UserMediaAssetRepository { return r.userMediaAssets }
-func (r *txRepository) ImageAnalyses() ImageAnalysisRepository    { return r.imageAnalyses }
-func (r *txRepository) Projects() ProjectRepository               { return r.projects }
+func (r *txRepository) Users() UserRepository                       { return r.users }
+func (r *txRepository) Sessions() SessionRepository                 { return r.sessions }
+func (r *txRepository) Plans() PlanRepository                       { return r.plans }
+func (r *txRepository) PlanEntries() PlanEntryRepository            { return r.planEntries }
+func (r *txRepository) Tasks() TaskRepository                       { return r.tasks }
+func (r *txRepository) TaskExecutions() TaskExecutionRepository     { return r.taskExecutions }
+func (r *txRepository) TaskFiles() TaskFileRepository               { return r.files }
+func (r *txRepository) TaskShares() TaskShareRepository             { return r.taskShares }
+func (r *txRepository) UploadSessions() UploadSessionRepository     { return r.uploadSessions }
+func (r *txRepository) Assets() AssetRepository                     { return r.assets }
+func (r *txRepository) UserMediaAssets() UserMediaAssetRepository   { return r.userMediaAssets }
+func (r *txRepository) ImageAnalyses() ImageAnalysisRepository      { return r.imageAnalyses }
+func (r *txRepository) ImageGenerations() ImageGenerationRepository { return r.imageGenerations }
+func (r *txRepository) Projects() ProjectRepository                 { return r.projects }
 func (r *txRepository) ProjectProfileRevisions() ProjectProfileRevisionRepository {
 	return r.projectProfileRevisions
 }

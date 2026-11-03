@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 
 import { bootstrap, executionProfileFingerprint, preflightBootstrapFiles, readAgentPackCatalogWithDigest, resolveAgentPackForTaskType, validateAgentPackCatalog, validateAgentPackCatalogDigest, validateBootstrapResponse, type AgentPackCatalog, type BootstrapResponse } from "../src/bootstrap.js";
 import type { JobConfig } from "../src/config.js";
+import { buildQueryOptions } from "../src/runner.js";
 
 const tokenFor = (claims: Record<string, string>) => `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature`;
 
@@ -126,7 +127,7 @@ describe("validateBootstrapResponse", () => {
       };
       const catalogPath = new URL("../../harness/agent-pack-catalog.json", import.meta.url).pathname;
       await expect(bootstrap(config, "workload-token", undefined, catalogPath)).rejects.toThrow("HTTP 503");
-      expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("7");
+      expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("8");
       expect(request?.headers.get("X-Anban-Agent-Pack-Catalog-Digest")).toBe((await readAgentPackCatalogWithDigest(catalogPath)).digest);
       expect(request?.body).toBeNull();
     } finally {
@@ -223,6 +224,84 @@ describe("validateBootstrapResponse", () => {
       env: { ELEVENLABS_API_KEY: "server-managed-test-key" },
     });
     expect(validateBootstrapResponse("execution-1", response).env).toEqual({ ELEVENLABS_API_KEY: "server-managed-test-key" });
+  });
+
+  test.each([
+    ["wechat-article", "wechat-article", "content_generation"],
+    ["wechat-picture", "wechat-picture", "content_generation"],
+    ["seednote", "seednote", "content_generation"],
+    ["viral_analysis", "seednote", "viral_analysis"],
+    ["content-research", "content-planning", "content_research"],
+  ])("accepts Server-scoped research environment for %s", (taskType, agentID, taskKind) => {
+    const response = validResponse();
+    Object.assign(response, {
+      task_type: taskType, task_kind: taskKind, agent_id: agentID, channel: agentID,
+      agent_pack_id: agentID, runtime_profile: agentID, agent_flag: `anban:${agentID}`,
+      env: { REDFOX_API_KEY: "server-managed-redfox", REDFOX_API_BASE_URL: "https://redfox.example.test" },
+    });
+
+    expect(validateBootstrapResponse("execution-1", response).env).toEqual({
+      REDFOX_API_KEY: "server-managed-redfox", REDFOX_API_BASE_URL: "https://redfox.example.test",
+    });
+  });
+
+  test.each([
+    ["invalid name", { "INVALID-NAME": "value" }, "must match"],
+    ["oversized key", { ["K".repeat(256)]: "value" }, "must match"],
+    ["too many entries", Object.fromEntries(Array.from({ length: 129 }, (_, index) => [`KEY_${index}`, "value"])), "the limit is 128"],
+    ["reserved control-plane prefix", { ANBAN_EXECUTION_TOKEN: "forged" }, "reserved prefix"],
+    ["reserved model prefix", { ANTHROPIC_AUTH_TOKEN: "forged" }, "reserved prefix"],
+    ["reserved process key", { PATH: "/attacker/bin" }, "reserved for the runtime process"],
+    ["empty value", { REDFOX_API_KEY: "" }, "non-empty"],
+    ["padded value", { REDFOX_API_KEY: " key " }, "padded"],
+    ["non-string value", { REDFOX_API_KEY: 123 }, "non-empty"],
+    ["oversized value", { REDFOX_API_KEY: "x".repeat((16 << 10) + 1) }, "exceeds"],
+  ])("rejects a malformed Agent environment: %s", (_name, env, message) => {
+    const response = { ...validResponse(), env };
+    expect(() => validateBootstrapResponse("execution-1", response)).toThrow(message);
+  });
+
+  test("accepts Server-scoped credentials for any Agent Pack", () => {
+    for (const [taskType, taskKind, agentID] of [
+      ["wechat-article", "content_generation", "wechat-article"],
+      ["moments", "moments", "moments"],
+      ["ecommerce", "ecommerce", "ecommerce"],
+      ["talking-head-editor", "video_edit", "talking-head-editor"],
+    ] as const) {
+      const response = { ...validResponse(), task_type: taskType, task_kind: taskKind, agent_id: agentID, channel: agentID, agent_pack_id: agentID, runtime_profile: agentID, agent_flag: `anban:${agentID}`, env: { PROVIDER_TOKEN: "server-managed" } };
+      expect(validateBootstrapResponse("execution-1", response).env).toEqual({ PROVIDER_TOKEN: "server-managed" });
+    }
+  });
+
+  test("passes validated article research credentials through to the managed SDK options", async () => {
+    const response = validResponse();
+    const catalogPath = new URL("../../harness/agent-pack-catalog.json", import.meta.url).pathname;
+    const { catalog, digest } = await readAgentPackCatalogWithDigest(catalogPath);
+    const article = catalog.packs.find((pack) => pack.id === "wechat-article")!;
+    response.agent_pack_version = article.version;
+    response.agent_pack_digest = article.digest;
+    response.agent_pack_catalog_digest = digest;
+    response.env = { REDFOX_API_KEY: "server-managed-redfox", REDFOX_API_BASE_URL: "https://redfox.example.test" };
+
+    const data = validateBootstrapResponse("execution-1", response);
+    const pack = validateAgentPackCatalog(data, catalog);
+    const options = buildQueryOptions({ ...data, resolved_agent_pack: pack }, "/workspace");
+
+    expect(options.mcpServers?.redfox).toMatchObject({
+      type: "stdio",
+      env: { REDFOX_API_KEY: "server-managed-redfox", REDFOX_API_BASE_URL: "https://redfox.example.test" },
+    });
+    expect(options.env?.REDFOX_API_KEY).toBe("server-managed-redfox");
+
+    // Without Server credentials the research MCP is not mounted at all.
+    const withoutCredentials = validateBootstrapResponse("execution-1", {
+      ...validResponse(),
+      agent_pack_version: article.version,
+      agent_pack_digest: article.digest,
+      agent_pack_catalog_digest: digest,
+    });
+    const plainOptions = buildQueryOptions({ ...withoutCredentials, resolved_agent_pack: pack }, "/workspace");
+    expect(plainOptions.mcpServers?.redfox).toBeUndefined();
   });
 
   test("rejects malformed Agent Pack artifact contracts", () => {

@@ -577,26 +577,46 @@ func (c *AgentRuntimeEnvConfig) UnmarshalYAML(value *yaml.Node) error {
 }
 
 func (c AgentRuntimeEnvConfig) Validate(name string) error {
-	for key, value := range c.Env {
-		if key == "" || strings.ContainsAny(key, "=\x00") {
-			return fmt.Errorf("%s.env contains invalid key %q", name, key)
-		}
-		if strings.ContainsAny(value, "\x00\r\n") {
-			return fmt.Errorf("%s.env value for %q contains invalid control characters", name, key)
-		}
-	}
-	return nil
+	return model.ValidateRuntimeEnvironment(name+".env", model.NormalizeRuntimeEnvironment(c.Env))
 }
 
-// AgentRuntimeEnvs returns the configured environment by business Agent ID.
-// The returned map is used only during runtime bootstrap.
+// AgentRuntimeEnvs returns the configured environment for every managed Agent
+// Pack, keyed by Agent ID. The returned map is the single input of the runtime
+// bootstrap: the Server is the only authority on which credentials an Agent
+// receives, and the runtime only enforces transport invariants.
+//
+// A Pack without configuration is absent from the map. Unset operator values
+// are normalized away so an empty string never reaches the runtime.
 func (c Config) AgentRuntimeEnvs() map[string]map[string]string {
-	return map[string]map[string]string{
-		model.AgentIDArticle:         c.WechatArticle.Env,
-		model.AgentIDWechatPicture:   c.WechatPicture.Env,
-		model.AgentIDSeednote:        c.Seednote.Env,
-		model.AgentIDContentPlanning: c.ContentPlanning.Env,
+	envs := map[string]map[string]string{
+		model.AgentIDArticle:         model.NormalizeRuntimeEnvironment(c.WechatArticle.Env),
+		model.AgentIDWechatPicture:   model.NormalizeRuntimeEnvironment(c.WechatPicture.Env),
+		model.AgentIDSeednote:        model.NormalizeRuntimeEnvironment(c.Seednote.Env),
+		model.AgentIDContentPlanning: model.NormalizeRuntimeEnvironment(c.ContentPlanning.Env),
+		model.AgentIDMontage:         model.NormalizeRuntimeEnvironment(c.Montage.Env),
+		model.AgentIDHypit:           model.NormalizeRuntimeEnvironment(c.Hypit.Env),
+		model.AgentIDVideoEdit:       withRuntimeCredential(c.VideoEdit.Env, "ELEVENLABS_API_KEY", c.VideoEdit.ElevenLabsAPIKey),
+		model.AgentIDTalkingHeadEditor: withRuntimeCredential(
+			c.TalkingHeadEditor.Env, "ELEVENLABS_API_KEY", c.TalkingHeadEditor.VideoUseAPIKey,
+		),
 	}
+	for id, env := range envs {
+		if len(env) == 0 {
+			delete(envs, id)
+		}
+	}
+	return envs
+}
+
+// withRuntimeCredential composes a Pack environment from its section map plus a
+// dedicated credential field. The dedicated field wins because it is the
+// documented operator setting; both are normalized so unset values stay absent.
+func withRuntimeCredential(env map[string]string, key, value string) map[string]string {
+	composed := model.NormalizeRuntimeEnvironment(env)
+	if credential := strings.TrimSpace(value); credential != "" {
+		composed[key] = credential
+	}
+	return composed
 }
 
 type MontageConfig struct {
@@ -680,12 +700,7 @@ func (c TalkingHeadEditorConfig) Validate() error {
 	if err := input.Validate(c.MaxAssets, c.MaxDurationSeconds); err != nil {
 		return fmt.Errorf("talking_head_editor.default_policy: %w", err)
 	}
-	for key, value := range c.Env {
-		if key == "" || strings.ContainsAny(key, "=\x00") || strings.ContainsAny(value, "\x00\r\n") {
-			return fmt.Errorf("talking_head_editor.env contains invalid entry %q", key)
-		}
-	}
-	return nil
+	return model.ValidateRuntimeEnvironment("talking_head_editor.env", model.NormalizeRuntimeEnvironment(c.Env))
 }
 
 func (c TalkingHeadEditorConfig) DispatchReady() bool {
@@ -786,12 +801,7 @@ func (c VideoEditConfig) Validate() error {
 	if err := policyInput.Validate(0, c.MaxDurationSeconds); err != nil {
 		return fmt.Errorf("video_edit.default_policy: %w", err)
 	}
-	for key, value := range c.Env {
-		if key == "" || strings.ContainsAny(key, "=\x00") || strings.ContainsAny(value, "\x00\r\n") {
-			return fmt.Errorf("video_edit.env contains invalid entry %q", key)
-		}
-	}
-	return nil
+	return model.ValidateRuntimeEnvironment("video_edit.env", model.NormalizeRuntimeEnvironment(c.Env))
 }
 
 func (c VideoEditConfig) DispatchReady() bool {
@@ -886,15 +896,7 @@ func (c MontageConfig) Validate() error {
 	if !montageStringSliceContains(c.AllowedPipelines, c.DefaultPipeline) {
 		return fmt.Errorf("montage.default_pipeline must be in montage.allowed_pipelines")
 	}
-	for key, value := range c.Env {
-		if key == "" || strings.ContainsAny(key, "=\x00") {
-			return fmt.Errorf("montage.env contains invalid key %q", key)
-		}
-		if strings.ContainsRune(value, '\x00') {
-			return fmt.Errorf("montage.env value for %q contains a NUL byte", key)
-		}
-	}
-	return nil
+	return model.ValidateRuntimeEnvironment("montage.env", model.NormalizeRuntimeEnvironment(c.Env))
 }
 
 func (c MontageConfig) RedactedEnv() map[string]bool {
