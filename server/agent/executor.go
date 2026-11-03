@@ -183,10 +183,9 @@ type ExecutionOptions struct {
 	OnProgress     func(taskID string, message string) // callback for SSE
 	HeartbeatFunc  func(taskID string)                 // periodic heartbeat for stuck-task detection
 	LogWriter      *TaskLogWriter                      // optional per-task log file writer; nil = no log file
-	// Montage runtime configuration is only used for montage tasks. Env
-	// may contain secrets and must only be injected into the agent process env,
-	// never written to workspace files, MCP profile responses, or logs.
-	MontageEnv              map[string]string
+	// Montage runtime configuration. The Agent environment is resolved by the
+	// Server's bootstrap with the shared runtime environment contract; these
+	// fields only carry non-secret workspace manifests.
 	MontageToolPolicy       map[string]srvconfig.MontageToolCapabilityPolicy
 	MontagePipelineDefaults map[string]map[string]any
 }
@@ -340,20 +339,6 @@ func writeJSONFile(path string, value any) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
-}
-
-func montageEnvForTask(opts *ExecutionOptions) map[string]string {
-	if opts == nil || opts.Task == nil || !model.IsMontagePlatform(opts.Task.Type) {
-		return nil
-	}
-	env := make(map[string]string, len(opts.MontageEnv))
-	for key, value := range opts.MontageEnv {
-		if strings.TrimSpace(value) == "" {
-			continue
-		}
-		env[key] = value
-	}
-	return env
 }
 
 func CompactToolResultContent(content any) string {

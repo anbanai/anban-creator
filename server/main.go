@@ -384,7 +384,6 @@ func main() {
 		ImageAPIConfig:          defaultImageAPI,
 		MontageToolPolicy:       cfg.Montage.ToolPolicy,
 		MontagePipelineDefaults: cfg.Montage.PipelineDefaults,
-		MontageEnv:              cfg.Montage.Env,
 		VideoEdit:               cfg.VideoEdit,
 		TalkingHeadEditor:       cfg.TalkingHeadEditor,
 		AgentEnvs:               cfg.AgentRuntimeEnvs(),

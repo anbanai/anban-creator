@@ -1,4 +1,5 @@
 import { validateHypitEnvironment } from "./hypit.js";
+import { hasRedFoxCredentials, validateRuntimeEnvironment } from "./runtime-environment.js";
 import { spawn } from "node:child_process";
 
 import { query, type HookCallback, type HookJSONOutput, type ModelUsage, type Options, type SDKMessage, type SDKSystemMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -278,7 +279,7 @@ export async function runClaude(workspace: string, data: ResolvedBootstrapRespon
       const consumed = await consumeMessage(message, bestEffortProgress, logText, toolCalls, toolUseDiagnostics, cwd, serverURL, token, controller.signal, data.task_type, data.execution_profile.model_usage_aliases);
       logText = consumed.logText;
       if (message.type === "system" && message.subtype === "init") {
-        validateManagedInit(message, data.task_type);
+        validateManagedInit(message, data.task_type, hasRedFoxCredentials(data.env));
         initValidated = true;
       }
       if (consumed.terminal) {
@@ -415,7 +416,7 @@ export function buildQueryOptions(
       },
     } : undefined,
     canUseTool: async (toolName, input) => {
-      if (isManagedToolAllowed(data.task_type, toolName, input)) return { behavior: "allow" };
+      if (isManagedToolAllowed(data.task_type, toolName, input, hasRedFoxCredentials(data.env))) return { behavior: "allow" };
       return {
         behavior: "deny",
         message: `tool ${JSON.stringify(toolName)} is outside the managed Agent SDK allowlist for task type ${JSON.stringify(data.task_type)}`,
@@ -424,12 +425,15 @@ export function buildQueryOptions(
     plugins: [{ type: "local", path: pluginRoot, skipMcpDiscovery: true }],
     mcpServers: {
       anban: { type: "http", url: `${serverURL}/mcp`, headers: { Authorization: `Bearer ${token}` }, timeout: 900000 },
-      ...(redFoxResearchEnabled(data.task_type) ? {
+      ...(hasRedFoxCredentials(data.env) ? {
         redfox: {
           type: "stdio" as const,
           command: "node",
           args: ["/app/runtime-claude/dist/redfox-mcp.js"],
-          env: { REDFOX_API_KEY: data.env?.REDFOX_API_KEY ?? "" },
+          env: {
+            REDFOX_API_KEY: data.env?.REDFOX_API_KEY ?? "",
+            ...(data.env?.REDFOX_API_BASE_URL ? { REDFOX_API_BASE_URL: data.env.REDFOX_API_BASE_URL } : {}),
+          },
           timeout: 900000,
           alwaysLoad: true,
         },
@@ -688,30 +692,27 @@ const HYPIT_INHERITED_ENV_KEYS = new Set([
 
 export function buildExecutionEnvironment(
   processEnvironment: NodeJS.ProcessEnv,
-  data: Pick<BootstrapResponse, "task_type" | "env" | "project_id" | "task_id" | "execution_id" | "execution_profile">,
+  data: Pick<BootstrapResponse, "task_type" | "runtime_profile" | "env" | "project_id" | "task_id" | "execution_id" | "execution_profile">,
   _serverURL: string,
   _token: string,
   workspace = "/workspace",
 ): NodeJS.ProcessEnv {
-  const environment: NodeJS.ProcessEnv = data.task_type === "hypit"
+  // Hypit executes unmodified upstream code, so it inherits only the host
+  // variables its toolchain needs. Every other profile starts from the image
+  // environment with inherited credentials removed.
+  const environment: NodeJS.ProcessEnv = data.runtime_profile === "hypit"
     ? Object.fromEntries(Object.entries(processEnvironment).filter(([key]) => HYPIT_INHERITED_ENV_KEYS.has(key)))
     : { ...processEnvironment };
   for (const key of CLAUDE_ENVIRONMENT_KEYS_TO_UNSET) delete environment[key];
-  delete environment.REDFOX_API_BASE_URL;
+  // Inherited credentials and provider routing endpoints are never trusted:
+  // only the Server authorizes them, and authorized values are applied below.
   sanitizeCredentialEnvironment(environment);
-  if (["montage", "hypit", "video-edit"].includes(data.task_type)) {
-    if (data.task_type === "hypit") validateHypitEnvironment(data.env ?? {});
-    for (const [key, value] of Object.entries(data.env ?? {})) {
-      if (/^(?:ANBAN_|ANTHROPIC_|CLAUDE_)/.test(key) || ["PATH", "HOME", "NODE_OPTIONS", "LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH", "REDFOX_API_KEY"].includes(key)) continue;
-      environment[key] = value;
-    }
-  }
-  if (["wechat-article", "seednote", "viral_analysis", "content-research"].includes(data.task_type)) {
-    for (const key of ["REDFOX_API_KEY", "REDFOX_API_BASE_URL"] as const) {
-      const value = data.env?.[key];
-      if (typeof value === "string" && value.trim()) environment[key] = value;
-    }
-  }
+  // The Server is the only authority on which values an Agent receives. The
+  // contract validator enforces transport invariants and never gates on task
+  // type or Pack identity.
+  const agentEnvironment = validateRuntimeEnvironment(data.env ?? {});
+  if (data.runtime_profile === "hypit") validateHypitEnvironment(agentEnvironment);
+  Object.assign(environment, agentEnvironment);
   const managed: NodeJS.ProcessEnv = {
     ...environment,
     ANBAN_DEFAULT_PROJECT: data.project_id,
@@ -726,13 +727,16 @@ export function buildExecutionEnvironment(
   return managed;
 }
 
+const INHERITED_SECRET_KEY = /(?:TOKEN|API_KEY|SECRET|PASSWORD|CREDENTIAL)/i;
+const INHERITED_PROVIDER_ROUTING_KEY = /(?:^|_)(?:KEY|BASE_URL|ENDPOINT)$/;
+
 function sanitizeCredentialEnvironment(environment: NodeJS.ProcessEnv): void {
   for (const key of Object.keys(environment)) {
-    if (/(?:TOKEN|API_KEY|SECRET|PASSWORD|CREDENTIAL)/i.test(key) || key === "ANBAN_API_URL") delete environment[key];
+    if (INHERITED_SECRET_KEY.test(key) || INHERITED_PROVIDER_ROUTING_KEY.test(key) || key === "ANBAN_API_URL") delete environment[key];
   }
 }
 
-export function validateManagedInit(message: Pick<SDKSystemMessage, "type" | "subtype" | "mcp_servers" | "plugins" | "skills" | "tools">, taskType: string): void {
+export function validateManagedInit(message: Pick<SDKSystemMessage, "type" | "subtype" | "mcp_servers" | "plugins" | "skills" | "tools">, taskType: string, redfox: boolean): void {
   const managed = message.mcp_servers.find((server) => server.name === "anban");
   if (!managed || managed.status !== "connected") throw new Error(`managed MCP readiness failed: server "anban" is not connected`);
   if (!message.plugins.some((plugin) => plugin.name === "anban")) throw new Error("managed plugin readiness failed: plugin anban is not loaded");
@@ -740,9 +744,9 @@ export function validateManagedInit(message: Pick<SDKSystemMessage, "type" | "su
   for (const required of requiredMCPTools(taskType)) if (!tools.has(required)) throw new Error(`managed MCP readiness failed: server "anban" is missing required tool for ${taskType}: ${required}`);
   const skills = new Set(message.skills);
   for (const required of requiredSkills(taskType)) if (!skills.has(required)) throw new Error(`managed plugin readiness failed: skill ${required} is not loaded`);
-  if (redFoxResearchEnabled(taskType)) {
-    const redfox = message.mcp_servers.find((server) => server.name === "redfox");
-    if (!redfox || redfox.status !== "connected") throw new Error(`managed MCP readiness failed: server "redfox" is not connected`);
+  if (redfox) {
+    const server = message.mcp_servers.find((candidate) => candidate.name === "redfox");
+    if (!server || server.status !== "connected") throw new Error(`managed MCP readiness failed: server "redfox" is not connected`);
     const redfoxTools = new Set(message.tools.filter((tool) => tool.startsWith("mcp__redfox__")).map((tool) => tool.slice("mcp__redfox__".length)));
     if (!redfoxTools.has("redfox_research")) throw new Error("managed MCP readiness failed: server \"redfox\" is missing required tool: redfox_research");
   }
@@ -768,13 +772,13 @@ async function consumeMessage(message: SDKMessage, progress: Pick<BestEffortProg
   return { logText };
 }
 
-function isManagedToolAllowed(taskType: string, toolName: string, input: unknown): boolean {
+function isManagedToolAllowed(taskType: string, toolName: string, input: unknown, redfox: boolean): boolean {
   if (MANAGED_ALLOWED_TOOLS.includes(toolName)) return true;
   if (toolName.startsWith("mcp__anban__")) {
     const allowedMCPTools = MANAGED_ALLOWED_MCP_TOOLS[taskType];
     return allowedMCPTools?.has(toolName.slice("mcp__anban__".length)) ?? false;
   }
-  if (toolName === "mcp__redfox__redfox_research") return redFoxResearchEnabled(taskType);
+  if (toolName === "mcp__redfox__redfox_research") return redfox;
   if (toolName !== "Agent" || !managedParallelWorkersEnabled(taskType) || !isRecord(input)) return false;
   return input.subagent_type === MANAGED_READONLY_WORKER;
 }
@@ -1096,10 +1100,6 @@ function requiredMCPTools(taskType: string): string[] {
   if (taskType === "montage") return ["analyze_image", "analyze_video", "generate_image", "get_project_profile", "submit_agent_feedback"];
   if (taskType === "video-edit") return ["get_project_profile"];
   return [];
-}
-
-function redFoxResearchEnabled(taskType: string): boolean {
-  return taskType === "wechat-article" || taskType === "seednote" || taskType === "viral_analysis" || taskType === "content-research";
 }
 
 function toolBaseName(name: string): string { return name.startsWith("mcp__") ? name.split("__", 3)[2] ?? name : name; }

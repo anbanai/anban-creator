@@ -93,12 +93,14 @@ type AgentBootstrapConfig struct {
 	MontageToolPolicy       map[string]srvconfig.MontageToolCapabilityPolicy
 	MontagePipelineDefaults map[string]map[string]any
 	Hypit                   srvconfig.HypitConfig
-	MontageEnv              map[string]string
 	VideoEdit               srvconfig.VideoEditConfig
 	TalkingHeadEditor       srvconfig.TalkingHeadEditorConfig
-	AgentEnvs               map[string]map[string]string
-	Registry                *AgentProfileRegistry
-	ProjectMemory           ProjectMemoryReader
+	// AgentEnvs is the complete runtime environment per Agent Pack ID. The
+	// Server resolves every credential an Agent may receive into this map; the
+	// runtime never derives it from business identity.
+	AgentEnvs     map[string]map[string]string
+	Registry      *AgentProfileRegistry
+	ProjectMemory ProjectMemoryReader
 }
 
 type AgentBootstrapService struct {
@@ -647,6 +649,12 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	if !regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`).MatchString(pack.Agent.Name) {
 		return nil, fmt.Errorf("%w: Agent Pack %q has invalid agent name", ErrAgentBootstrapConflict, packID)
 	}
+	agentEnv := s.runtimeEnv(pack.ID)
+	if err := model.ValidateRuntimeEnvironment(pack.ID, agentEnv); err != nil {
+		// A configuration defect is not a transient dependency failure: surface
+		// it as a Server error so operators do not retry a task that cannot work.
+		return nil, fmt.Errorf("Agent Pack %q runtime environment is invalid: %w", pack.ID, err)
+	}
 	return &AgentBootstrapResponse{
 		ExecutionToken: token, ExecutionID: execution.ID, TaskID: task.ID, TaskType: bootstrapTaskType,
 		AgentID: execution.AgentID, Channel: execution.Channel, TaskKind: execution.TaskKind,
@@ -660,7 +668,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		},
 		AgentFlag:            "anban:" + pack.Agent.Name,
 		AgentMemoryDirectory: ".claude/agent-memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath,
-		Env: s.runtimeEnv(task), Files: files, ArtifactTransport: ArtifactTransport{Mode: s.artifactTransportMode()},
+		Env: agentEnv, Files: files, ArtifactTransport: ArtifactTransport{Mode: s.artifactTransportMode()},
 		recoveryImages: recoveryImages,
 	}, nil
 }
@@ -824,71 +832,16 @@ func (s *AgentBootstrapService) signedReferenceAssetURL(ctx context.Context, ass
 	return signed, nil
 }
 
-func (s *AgentBootstrapService) montageEnv(task *model.Task) map[string]string {
-	if task != nil && model.IsHypitPlatform(task.Type) {
-		env := map[string]string{}
-		for k, v := range s.cfg.Hypit.Env {
-			if v != "" {
-				env[k] = v
-			}
-		}
-		return env
-	}
-	if task == nil || !model.IsMontagePlatform(task.Type) {
+// runtimeEnv returns the frozen runtime environment for the resolved Agent
+// Pack. The Server is the only authority on which credentials an Agent
+// receives; the runtime enforces transport invariants, not business identity.
+//
+// Returning a copy keeps the bootstrap response immutable: downstream code
+// cannot mutate the configured map for later executions in the same process.
+func (s *AgentBootstrapService) runtimeEnv(packID string) map[string]string {
+	env := maps.Clone(s.cfg.AgentEnvs[packID])
+	if len(env) == 0 {
 		return nil
-	}
-	env := make(map[string]string, len(s.cfg.MontageEnv))
-	for key, value := range s.cfg.MontageEnv {
-		if strings.TrimSpace(value) != "" {
-			env[key] = value
-		}
-	}
-	return env
-}
-
-func (s *AgentBootstrapService) runtimeEnv(task *model.Task) map[string]string {
-	if task != nil && model.IsVideoEditPlatform(task.Type) {
-		env := make(map[string]string, len(s.cfg.VideoEdit.Env)+1)
-		for key, value := range s.cfg.VideoEdit.Env {
-			if strings.TrimSpace(value) != "" {
-				env[key] = value
-			}
-		}
-		if key := strings.TrimSpace(s.cfg.VideoEdit.ElevenLabsAPIKey); key != "" {
-			env["ELEVENLABS_API_KEY"] = key
-		}
-		return env
-	}
-	if task != nil && model.IsTalkingHeadEditorPlatform(task.Type) {
-		env := make(map[string]string, len(s.cfg.TalkingHeadEditor.Env)+1)
-		for key, value := range s.cfg.TalkingHeadEditor.Env {
-			if strings.TrimSpace(value) != "" {
-				env[key] = value
-			}
-		}
-		if key := strings.TrimSpace(s.cfg.TalkingHeadEditor.VideoUseAPIKey); key != "" {
-			env["ELEVENLABS_API_KEY"] = key
-		}
-		return env
-	}
-	env := s.montageEnv(task)
-	if task != nil && len(s.cfg.AgentEnvs) > 0 {
-		agentID := strings.TrimSpace(task.AgentID)
-		if agentID == "" {
-			agentID = serveragent.TaskTypeToAgent(task.Type)
-		}
-		agentEnv := s.cfg.AgentEnvs[agentID]
-		if len(agentEnv) == 0 {
-			return env
-		}
-		if env == nil {
-			env = make(map[string]string)
-		}
-		for key, value := range agentEnv {
-			if strings.TrimSpace(value) != "" {
-				env[key] = value
-			}
-		}
 	}
 	return env
 }

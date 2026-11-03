@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path"
 	"slices"
 	"strings"
@@ -1321,7 +1322,6 @@ func TestValidateBootstrapFilesReservesTotalRuntimeBudgetForInlineFiles(t *testi
 
 func TestBuildMontageBootstrapFiles(t *testing.T) {
 	svc := &AgentBootstrapService{cfg: AgentBootstrapConfig{
-		MontageEnv:              map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"},
 		MontageToolPolicy:       map[string]config.MontageToolCapabilityPolicy{},
 		MontagePipelineDefaults: map[string]map[string]any{},
 	}}
@@ -1338,76 +1338,69 @@ func TestBuildMontageBootstrapFiles(t *testing.T) {
 			t.Fatalf("missing %s", path)
 		}
 	}
-	if got := svc.montageEnv(&model.Task{Type: model.PlatformMontage}); got["NEW_PROVIDER_TOKEN"] != "future-secret" {
-		t.Fatalf("Montage env = %#v, want future provider key", got)
-	}
-	if got := svc.montageEnv(&model.Task{Type: model.TaskTypeWechatArticle}); len(got) != 0 {
-		t.Fatalf("article env = %#v, want empty", got)
-	}
 }
 
-func TestRuntimeEnvScopesVideoEditScribeCredential(t *testing.T) {
-	svc := &AgentBootstrapService{cfg: AgentBootstrapConfig{
-		VideoEdit: config.VideoEditConfig{
-			ElevenLabsAPIKey: "server-managed-scribe-key",
-			Env:              map[string]string{"VIDEO_EDIT_OPTION": "enabled"},
-		},
-		MontageEnv: map[string]string{"MONTAGE_PROVIDER_KEY": "montage-only-key"},
-	}}
-	videoEditEnv := svc.runtimeEnv(&model.Task{Type: model.PlatformVideoEdit})
-	if videoEditEnv["ELEVENLABS_API_KEY"] != "server-managed-scribe-key" || videoEditEnv["VIDEO_EDIT_OPTION"] != "enabled" {
-		t.Fatalf("video-edit runtime env = %#v, want only its configured environment", videoEditEnv)
-	}
-	if _, exists := videoEditEnv["MONTAGE_PROVIDER_KEY"]; exists {
-		t.Fatalf("video-edit env contains Montage credential: %#v", videoEditEnv)
-	}
-	for _, taskType := range []string{model.PlatformMontage, model.TaskTypeWechatArticle} {
-		if got := svc.runtimeEnv(&model.Task{Type: taskType}); got["ELEVENLABS_API_KEY"] != "" {
-			t.Fatalf("%s runtime env leaked Scribe credential: %#v", taskType, got)
-		}
-	}
-}
-
-func TestRuntimeEnvScopesRedFoxCredentialToResearchTasks(t *testing.T) {
+func TestRuntimeEnvIsScopedToTheResolvedAgentPack(t *testing.T) {
 	svc := &AgentBootstrapService{cfg: AgentBootstrapConfig{AgentEnvs: map[string]map[string]string{
-		model.AgentIDArticle:         {"REDFOX_API_KEY": "agent-redfox-key", "REDFOX_API_BASE_URL": "https://redfox.example.test"},
-		model.AgentIDWechatPicture:   {"REDFOX_API_KEY": "agent-redfox-key", "REDFOX_API_BASE_URL": "https://redfox.example.test"},
-		model.AgentIDSeednote:        {"REDFOX_API_KEY": "agent-redfox-key", "REDFOX_API_BASE_URL": "https://redfox.example.test"},
-		model.AgentIDContentPlanning: {"REDFOX_API_KEY": "agent-redfox-key", "REDFOX_API_BASE_URL": "https://redfox.example.test"},
+		model.AgentIDArticle: {"REDFOX_API_KEY": "article-key"},
+		model.AgentIDMontage: {"FAL_KEY": "montage-key"},
 	}}}
-	for _, taskType := range []string{model.TaskTypeWechatArticle, model.TaskTypeWechatPicture, model.PlatformSeednote, model.TaskTypeContentResearch} {
-		got := svc.runtimeEnv(&model.Task{Type: taskType})
-		if got["REDFOX_API_KEY"] != "agent-redfox-key" || got["REDFOX_API_BASE_URL"] != "https://redfox.example.test" {
-			t.Fatalf("%s runtime env = %#v", taskType, got)
-		}
+	if got := svc.runtimeEnv(model.AgentIDArticle); !maps.Equal(got, map[string]string{"REDFOX_API_KEY": "article-key"}) {
+		t.Fatalf("article env = %#v", got)
 	}
-	for _, taskType := range []string{model.PlatformMontage, model.PlatformVideoEdit, model.TaskTypeTopicDigest} {
-		if got := svc.runtimeEnv(&model.Task{Type: taskType}); got["REDFOX_API_KEY"] != "" {
-			t.Fatalf("%s leaked RedFox credential: %#v", taskType, got)
-		}
+	if got := svc.runtimeEnv(model.AgentIDMontage); !maps.Equal(got, map[string]string{"FAL_KEY": "montage-key"}) {
+		t.Fatalf("montage env = %#v", got)
+	}
+	if got := svc.runtimeEnv(model.AgentIDSeednote); got != nil {
+		t.Fatalf("unconfigured pack env = %#v, want nil", got)
+	}
+	// The bootstrap response must never alias the configured map.
+	article := svc.runtimeEnv(model.AgentIDArticle)
+	article["REDFOX_API_KEY"] = "mutated"
+	if got := svc.runtimeEnv(model.AgentIDArticle)["REDFOX_API_KEY"]; got != "article-key" {
+		t.Fatalf("configured env was mutated through the response: %q", got)
 	}
 }
 
-func TestRuntimeEnvMapsTalkingHeadTranscriptionCredentialToUpstreamVariable(t *testing.T) {
-	svc := &AgentBootstrapService{cfg: AgentBootstrapConfig{
-		TalkingHeadEditor: config.TalkingHeadEditorConfig{
-			VideoUseAPIKey: "server-managed-talking-head-scribe-key",
-			Env:            map[string]string{"TALKING_HEAD_OPTION": "enabled"},
+func TestBootstrapDeliversOnlyTheResolvedPackEnvironment(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{ID: "task-env", UserID: "user-1", ProjectID: "project-env", Type: model.PlatformSeednote}
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{
+		TokenTTL: time.Hour,
+		AgentEnvs: map[string]map[string]string{
+			model.AgentIDSeednote: {"REDFOX_API_KEY": "seednote-key"},
+			model.AgentIDMontage:  {"FAL_KEY": "montage-key"},
 		},
-		MontageEnv: map[string]string{"MONTAGE_PROVIDER_KEY": "montage-only-key"},
-	}}
-	got := svc.runtimeEnv(&model.Task{Type: model.PlatformTalkingHeadEditor})
-	if got["ELEVENLABS_API_KEY"] != "server-managed-talking-head-scribe-key" || got["TALKING_HEAD_OPTION"] != "enabled" {
-		t.Fatalf("talking-head runtime env = %#v, want upstream transcription credential and configured environment", got)
+	}, zerolog.Nop())
+
+	response, err := buildBootstrapTestResponse(t, svc, context.Background(), &model.TaskExecution{ID: "execution-env"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("buildResponse: %v", err)
 	}
-	if _, exists := got["VIDEO_USE_API_KEY"]; exists {
-		t.Fatalf("talking-head runtime env exposes an unused credential variable: %#v", got)
+	if !maps.Equal(response.Env, map[string]string{"REDFOX_API_KEY": "seednote-key"}) {
+		t.Fatalf("bootstrap env = %#v, want only the resolved Pack environment", response.Env)
 	}
-	if _, exists := got["MONTAGE_PROVIDER_KEY"]; exists {
-		t.Fatalf("talking-head runtime env contains Montage credential: %#v", got)
+}
+
+func TestBootstrapRejectsUnsafeConfiguredEnvironment(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := svc.runtimeEnv(&model.Task{Type: model.PlatformMontage}); got["ELEVENLABS_API_KEY"] != "" {
-		t.Fatalf("Montage runtime env leaked talking-head transcription credential: %#v", got)
+	task := &model.Task{ID: "task-env", UserID: "user-1", ProjectID: "project-env", Type: model.PlatformSeednote}
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{
+		TokenTTL:  time.Hour,
+		AgentEnvs: map[string]map[string]string{model.AgentIDSeednote: {"PATH": "/attacker/bin"}},
+	}, zerolog.Nop())
+
+	_, err = buildBootstrapTestResponse(t, svc, context.Background(), &model.TaskExecution{ID: "execution-env"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
+	if err == nil || !strings.Contains(err.Error(), "runtime environment is invalid") {
+		t.Fatalf("buildResponse error = %v, want a runtime environment configuration error", err)
 	}
 }
 
