@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net/url"
 	"path"
 	"path/filepath"
 	"reflect"
@@ -97,8 +96,7 @@ type AgentBootstrapConfig struct {
 	MontageEnv              map[string]string
 	VideoEdit               srvconfig.VideoEditConfig
 	TalkingHeadEditor       srvconfig.TalkingHeadEditorConfig
-	RedFoxAgentAPIKey       string
-	RedFoxAgentEndpoint     string
+	AgentEnvs               map[string]map[string]string
 	Registry                *AgentProfileRegistry
 	ProjectMemory           ProjectMemoryReader
 }
@@ -874,33 +872,25 @@ func (s *AgentBootstrapService) runtimeEnv(task *model.Task) map[string]string {
 		return env
 	}
 	env := s.montageEnv(task)
-	if task != nil && isRedFoxResearchTask(task.Type) && strings.TrimSpace(s.cfg.RedFoxAgentAPIKey) != "" {
+	if task != nil && len(s.cfg.AgentEnvs) > 0 {
+		agentID := strings.TrimSpace(task.AgentID)
+		if agentID == "" {
+			agentID = serveragent.TaskTypeToAgent(task.Type)
+		}
+		agentEnv := s.cfg.AgentEnvs[agentID]
+		if len(agentEnv) == 0 {
+			return env
+		}
 		if env == nil {
 			env = make(map[string]string)
 		}
-		env["REDFOX_API_KEY"] = strings.TrimSpace(s.cfg.RedFoxAgentAPIKey)
-		if baseURL := redFoxBaseURL(s.cfg.RedFoxAgentEndpoint); baseURL != "" {
-			env["REDFOX_API_BASE_URL"] = baseURL
+		for key, value := range agentEnv {
+			if strings.TrimSpace(value) != "" {
+				env[key] = value
+			}
 		}
 	}
 	return env
-}
-
-func redFoxBaseURL(endpoint string) string {
-	parsed, err := url.Parse(strings.TrimSpace(endpoint))
-	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil {
-		return ""
-	}
-	return parsed.Scheme + "://" + parsed.Host
-}
-
-func isRedFoxResearchTask(taskType string) bool {
-	switch taskType {
-	case model.TaskTypeWechatArticle, model.PlatformSeednote, model.TaskTypeViralAnalysis, model.TaskTypeContentResearch:
-		return true
-	default:
-		return false
-	}
 }
 
 // buildTopicRadarFiles materializes the frozen Topic Radar task input the

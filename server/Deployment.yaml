@@ -240,11 +240,29 @@ spec:
                   name: anban-agent-profile-providers
                   key: redfox-api-key
                   optional: true
-            - name: ANBAN_REDFOX_AGENT_API_KEY
+            - name: ANBAN_REDFOX_AGENT_WECHAT_ARTICLE_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: anban-agent-profile-providers
-                  key: redfox-agent-api-key
+                  key: redfox-agent-wechat-article-api-key
+                  optional: true
+            - name: ANBAN_REDFOX_AGENT_WECHAT_PICTURE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anban-agent-profile-providers
+                  key: redfox-agent-wechat-picture-api-key
+                  optional: true
+            - name: ANBAN_REDFOX_AGENT_SEEDNOTE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anban-agent-profile-providers
+                  key: redfox-agent-seednote-api-key
+                  optional: true
+            - name: ANBAN_REDFOX_AGENT_CONTENT_PLANNING_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anban-agent-profile-providers
+                  key: redfox-agent-content-planning-api-key
                   optional: true
             - name: ANBAN_AGENT_IMAGE_PULL_SECRET
               value: "${imagePullSecret}"

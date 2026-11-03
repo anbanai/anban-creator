@@ -37,6 +37,10 @@ type Config struct {
 	Storage            StorageConfig                   `yaml:"storage"`
 	MCP                MCPConfig                       `yaml:"mcp"`
 	Hypit              HypitConfig                     `yaml:"hypit"`
+	WechatArticle      AgentRuntimeEnvConfig           `yaml:"wechat-article"`
+	WechatPicture      AgentRuntimeEnvConfig           `yaml:"wechat-picture"`
+	Seednote           AgentRuntimeEnvConfig           `yaml:"seednote"`
+	ContentPlanning    AgentRuntimeEnvConfig           `yaml:"content-planning"`
 	Montage            MontageConfig                   `yaml:"montage"`
 	VideoEdit          VideoEditConfig                 `yaml:"video_edit"`
 	TalkingHeadEditor  TalkingHeadEditorConfig         `yaml:"talking_head_editor"`
@@ -407,10 +411,9 @@ type TrendsConfig struct {
 }
 
 type TrendsRedFoxConfig struct {
-	Endpoint    string        `yaml:"endpoint"`
-	APIKey      string        `yaml:"api_key" json:"-"`
-	AgentAPIKey string        `yaml:"agent_api_key" json:"-"`
-	Timeout     time.Duration `yaml:"timeout"`
+	Endpoint string        `yaml:"endpoint"`
+	APIKey   string        `yaml:"api_key" json:"-"`
+	Timeout  time.Duration `yaml:"timeout"`
 }
 
 // SearchConfig controls Server-owned search capabilities. Credentials are
@@ -556,6 +559,44 @@ type MCPConfig struct {
 
 type MCPToolTimeoutsConfig struct {
 	GenerateImage time.Duration `yaml:"generate_image"`
+}
+
+// AgentRuntimeEnvConfig contains environment variables for one business Agent.
+// Values are injected only into that Agent's runtime process and are never
+// exposed through MCP responses, task snapshots, logs, prompts, or artifacts.
+type AgentRuntimeEnvConfig struct {
+	Env map[string]string `yaml:"env" json:"-"`
+}
+
+func (c *AgentRuntimeEnvConfig) UnmarshalYAML(value *yaml.Node) error {
+	if err := validateYAMLMappingFields(value, "Agent runtime", map[string]bool{"env": true}); err != nil {
+		return err
+	}
+	type plain AgentRuntimeEnvConfig
+	return value.Decode((*plain)(c))
+}
+
+func (c AgentRuntimeEnvConfig) Validate(name string) error {
+	for key, value := range c.Env {
+		if key == "" || strings.ContainsAny(key, "=\x00") {
+			return fmt.Errorf("%s.env contains invalid key %q", name, key)
+		}
+		if strings.ContainsAny(value, "\x00\r\n") {
+			return fmt.Errorf("%s.env value for %q contains invalid control characters", name, key)
+		}
+	}
+	return nil
+}
+
+// AgentRuntimeEnvs returns the configured environment by business Agent ID.
+// The returned map is used only during runtime bootstrap.
+func (c Config) AgentRuntimeEnvs() map[string]map[string]string {
+	return map[string]map[string]string{
+		model.AgentIDArticle:         c.WechatArticle.Env,
+		model.AgentIDWechatPicture:   c.WechatPicture.Env,
+		model.AgentIDSeednote:        c.Seednote.Env,
+		model.AgentIDContentPlanning: c.ContentPlanning.Env,
+	}
 }
 
 type MontageConfig struct {
@@ -1553,11 +1594,14 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"model_routes":         true,
 		"billing_runtime":      true,
 		"claude":               true,
+		"wechat-article":       true,
+		"wechat-picture":       true,
+		"seednote":             true,
+		"content-planning":     true,
 		"cors":                 true,
 		"asynq":                true,
 		"email":                true,
 		"invitation":           true,
-		"seednote":             true,
 		"worldtree":            true,
 		"ilink":                true,
 		"trends":               true,
@@ -1595,6 +1639,13 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 						return fmt.Errorf("deprecated config key model_routes.image_generation.%s.size; image size is a business workflow rule, not a model route setting", routeName)
 					}
 				}
+			}
+		}
+	}
+	if trends, ok := top["trends"].(map[string]any); ok {
+		if redfox, ok := trends["redfox"].(map[string]any); ok {
+			if _, ok := redfox["agent_api_key"]; ok {
+				return fmt.Errorf("deprecated config key trends.redfox.agent_api_key; configure the relevant Agent env block")
 			}
 		}
 	}
@@ -2418,6 +2469,16 @@ func (c *Config) Validate() error {
 		}
 		if c.Trends.RedFox.Timeout <= 0 {
 			errs = append(errs, "trends.redfox.timeout must be positive when trends.provider is redfox")
+		}
+	}
+	for name, env := range map[string]AgentRuntimeEnvConfig{
+		"wechat-article":   c.WechatArticle,
+		"wechat-picture":   c.WechatPicture,
+		"seednote":         c.Seednote,
+		"content-planning": c.ContentPlanning,
+	} {
+		if err := env.Validate(name); err != nil {
+			errs = append(errs, err.Error())
 		}
 	}
 	// Capability-level configuration is the current contract. Keep validation
