@@ -732,6 +732,27 @@ func TestPrepareDirectUploadMediaLibraryAcceptsOnlyImagesAndVideosWithinAttachme
 	}
 }
 
+func TestFinalizedUploadSessionKeyIsolatesMediaLibraryPrefix(t *testing.T) {
+	tests := []struct {
+		name, purpose, want string
+	}{
+		{name: "media library", purpose: DirectUploadPurposeMediaLibrary, want: "assets/media-library/users/user-1/upload-1/clip.mp4"},
+		{name: "video editing", purpose: DirectUploadPurposeVideoEditAsset, want: "assets/users/user-1/upload-1/clip.mp4"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key, err := finalizedUploadSessionKey(&model.UploadSession{ID: "upload-1", UserID: "user-1", Purpose: tt.purpose, FileName: "clip.mp4"})
+			if err != nil || key != tt.want {
+				t.Fatalf("finalizedUploadSessionKey = %q, %v, want %q", key, err, tt.want)
+			}
+			parsed, ok := uploadSessionKeyFromURL("https://cdn.example/" + key)
+			if !ok || parsed != key || uploadSessionIDFromKey(parsed) != "upload-1" {
+				t.Fatalf("media key parsing = %q, %v", parsed, ok)
+			}
+		})
+	}
+}
+
 func TestPrepareDirectUploadAllowsMontageMedia(t *testing.T) {
 	store := &fakeDirectUploadStore{name: "oss"}
 	repo := &fakeUploadSessionRepo{}

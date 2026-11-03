@@ -22,7 +22,7 @@ func TestOSSMetaQuerySemanticSearchUsesVideoAndUserPrefix(t *testing.T) {
 		body = string(data)
 		mode = r.URL.Query().Get("mode")
 		w.Header().Set("Content-Type", "application/xml")
-		_, _ = io.WriteString(w, `<MetaQuery><Files><File><Filename>assets/users/user-1/a.mp4</Filename><Size>12</Size><ETag>"etag"</ETag><FileModifiedTime>2026-10-31T12:00:00Z</FileModifiedTime><Insights><Video><Caption>店员制作咖啡</Caption><Description>视频展示店员在吧台制作咖啡的过程。</Description></Video></Insights></File></Files></MetaQuery>`)
+		_, _ = io.WriteString(w, `<MetaQuery><Files><File><Filename>assets/media-library/users/user-1/a.mp4</Filename><Size>12</Size><ETag>"etag"</ETag><FileModifiedTime>2026-10-31T12:00:00Z</FileModifiedTime><Insights><Video><Caption>店员制作咖啡</Caption><Description>视频展示店员在吧台制作咖啡的过程。</Description></Video></Insights></File></Files></MetaQuery>`)
 	}))
 	defer srv.Close()
 
@@ -33,14 +33,14 @@ func TestOSSMetaQuerySemanticSearchUsesVideoAndUserPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := provider.Search(context.Background(), "有人制作咖啡", "assets/users/user-1/", "video", 4)
+	got, err := provider.Search(context.Background(), "有人制作咖啡", "assets/media-library/users/user-1/", "video", 4)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].ObjectKey != "assets/users/user-1/a.mp4" || got[0].Summary != "店员制作咖啡" || got[0].Description == "" {
+	if len(got) != 1 || got[0].ObjectKey != "assets/media-library/users/user-1/a.mp4" || got[0].Summary != "店员制作咖啡" || got[0].Description == "" {
 		t.Fatalf("results = %#v", got)
 	}
-	if mode != "semantic" || !strings.Contains(body, "<MediaType>video</MediaType>") || !strings.Contains(body, "assets/users/user-1/") {
+	if mode != "semantic" || !strings.Contains(body, "<MediaType>video</MediaType>") || !strings.Contains(body, "assets/media-library/users/user-1/") {
 		t.Fatalf("request body = %s", body)
 	}
 }
@@ -55,15 +55,36 @@ func TestOSSMetaQueryLookupReturnsPendingWhenObjectIsNotIndexed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = provider.Lookup(context.Background(), "assets/users/user-1/a.mp4", "video")
+	_, err = provider.Lookup(context.Background(), "assets/media-library/users/user-1/a.mp4", "video")
 	if !errors.Is(err, ErrSemanticIndexPending) {
 		t.Fatalf("lookup error = %v, want pending", err)
 	}
 }
 
+func TestOSSMetaQueryLookupRequiresVideoInsights(t *testing.T) {
+	var mode string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mode = r.URL.Query().Get("mode")
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = io.WriteString(w, `<MetaQuery><Files><File><Filename>assets/media-library/users/user-1/a.mp4</Filename><Size>12</Size></File></Files></MetaQuery>`)
+	}))
+	defer srv.Close()
+	provider, err := NewOSSMetaQueryProvider(config.StorageConfig{Endpoint: srv.URL, AccessKeyID: "ak", AccessKeySecret: "sk", BucketName: "bucket", AIContentAwareness: config.AIContentAwarenessConfig{Enabled: true, VideoEnabled: true}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = provider.Lookup(context.Background(), "assets/media-library/users/user-1/a.mp4", "video")
+	if !errors.Is(err, ErrSemanticIndexPending) {
+		t.Fatalf("lookup error = %v, want pending until video insights are available", err)
+	}
+	if mode != "basic" {
+		t.Fatalf("lookup mode = %q, want basic exact metadata query", mode)
+	}
+}
+
 func TestMapMetaQueryFilesFallsBackToVideoCaption(t *testing.T) {
 	caption := "店员制作咖啡"
-	key := "assets/users/user-1/a.mp4"
+	key := "assets/media-library/users/user-1/a.mp4"
 	got := mapMetaQueryFiles([]ossv2.MetaQueryFile{{Filename: &key, Insights: &ossv2.MetaQueryFileInsights{Video: &ossv2.MetaQueryFileInsightsVideo{Caption: &caption}}}})
 	if len(got) != 1 || got[0].Summary != caption || got[0].Description != caption {
 		t.Fatalf("mapped caption-only result = %#v", got)

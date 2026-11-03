@@ -49,6 +49,8 @@ const (
 	taskArtifactCleanupRetryDelay = 30 * time.Minute
 )
 
+const mediaLibraryStoragePrefix = "assets/media-library/users"
+
 var (
 	ErrUploadSessionNotFound      = model.ErrUploadSessionNotFound
 	ErrUploadSessionInvalidURL    = errors.New("upload session URL is invalid")
@@ -607,6 +609,9 @@ func finalizedUploadSessionKey(session *model.UploadSession) (string, error) {
 	if userID == "" || sessionID == "" || fileName == "" || fileName == "." || fileName == "/" || path.Base(userID) != userID || path.Base(sessionID) != sessionID || fileName != session.FileName {
 		return "", errors.New("upload session identity is invalid")
 	}
+	if session.Purpose == DirectUploadPurposeMediaLibrary {
+		return path.Join(mediaLibraryStoragePrefix, userID, sessionID, fileName), nil
+	}
 	return path.Join("assets/users", userID, sessionID, fileName), nil
 }
 
@@ -766,7 +771,7 @@ func uploadSessionKeyFromURL(raw string) (string, bool) {
 		return "", false
 	}
 	key = strings.TrimPrefix(key, "/")
-	if path.Clean(key) != key || (!strings.HasPrefix(key, "uploads/pending/") && !strings.HasPrefix(key, "assets/users/")) {
+	if path.Clean(key) != key || (!strings.HasPrefix(key, "uploads/pending/") && !strings.HasPrefix(key, "assets/users/") && !strings.HasPrefix(key, mediaLibraryStoragePrefix+"/")) {
 		return "", false
 	}
 	return key, true
@@ -779,6 +784,9 @@ func uploadSessionIDFromKey(key string) string {
 	}
 	if parts[0] == "uploads" && parts[1] == "pending" || parts[0] == "assets" && parts[1] == "users" {
 		return parts[3]
+	}
+	if len(parts) >= 6 && parts[0] == "assets" && parts[1] == "media-library" && parts[2] == "users" {
+		return parts[4]
 	}
 	return ""
 }

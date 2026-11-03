@@ -103,13 +103,16 @@ func (p *OSSMetaQueryProvider) Lookup(ctx context.Context, objectKey, mediaType 
 	if err != nil {
 		return nil, err
 	}
-	mode := "semantic"
+	mode := "basic"
 	result, err := p.client.DoMetaQuery(ctx, &ossv2.DoMetaQueryRequest{Bucket: ossv2.Ptr(p.bucket), Mode: &mode, MetaQuery: &ossv2.MetaQuery{MaxResults: ossv2.Ptr(int64(1)), MediaTypes: &ossv2.MetaQueryMediaTypes{MediaTypes: []string{mediaType}}, SimpleQuery: &simple}})
 	if err != nil {
 		return nil, fmt.Errorf("OSS semantic lookup: %w", err)
 	}
 	mapped := mapMetaQueryFiles(result.Files)
 	if len(mapped) == 0 {
+		return nil, ErrSemanticIndexPending
+	}
+	if mediaType == "video" && strings.TrimSpace(mapped[0].Summary) == "" && strings.TrimSpace(mapped[0].Description) == "" {
 		return nil, ErrSemanticIndexPending
 	}
 	return &mapped[0], nil

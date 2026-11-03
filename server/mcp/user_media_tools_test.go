@@ -104,7 +104,7 @@ func TestSearchUserMediaAssetsReturnsSemanticVideoContract(t *testing.T) {
 	}
 	repo := repository.New(db)
 	assetID := uuid.NewString()
-	if err := repo.Assets().Create(t.Context(), &model.Asset{ID: assetID, UserID: "user-1", Purpose: service.DirectUploadPurposeMediaLibrary, StorageKey: "assets/users/user-1/coffee.mp4", FileName: "coffee.mp4", ContentType: "video/mp4", Size: 1, ETag: "coffee"}); err != nil {
+	if err := repo.Assets().Create(t.Context(), &model.Asset{ID: assetID, UserID: "user-1", Purpose: service.DirectUploadPurposeMediaLibrary, StorageKey: "assets/media-library/users/user-1/coffee.mp4", FileName: "coffee.mp4", ContentType: "video/mp4", Size: 1, ETag: "coffee"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.UserMediaAssets().Create(t.Context(), &model.UserMediaAsset{ID: "media-1", UserID: "user-1", AssetID: assetID, MediaType: "video", Status: model.UserMediaAssetStatusAvailable}); err != nil {
@@ -112,7 +112,7 @@ func TestSearchUserMediaAssetsReturnsSemanticVideoContract(t *testing.T) {
 	}
 	old := svcs
 	svc := service.NewUserMediaLibraryService(repo, userMediaMCPStorage{}, nil)
-	svc.SetSemanticSearch(userMediaMCPSemantic{results: []storage.SemanticMediaResult{{ObjectKey: "assets/users/user-1/coffee.mp4", Summary: "店员制作咖啡", Description: "视频展示店员在吧台制作咖啡的过程。"}}})
+	svc.SetSemanticSearch(userMediaMCPSemantic{results: []storage.SemanticMediaResult{{ObjectKey: "assets/media-library/users/user-1/coffee.mp4", Summary: "店员制作咖啡", Description: "视频展示店员在吧台制作咖啡的过程。"}}})
 	svcs = &Services{UserMediaSvc: svc}
 	t.Cleanup(func() { svcs = old })
 	ctx := withMCPExecutionIdentity(context.Background(), "user-1", "project-1", "task-1", "execution-1")

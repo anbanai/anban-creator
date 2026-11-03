@@ -80,7 +80,7 @@ func TestUserMediaLibrarySemanticVideoSearchFiltersOwnershipAndRanksProject(t *t
 	ctx := context.Background()
 	makeVideo := func(userID, id, projectID, purpose, status string) {
 		assetID := uuid.NewString()
-		if err := repo.Assets().Create(ctx, &model.Asset{ID: assetID, UserID: userID, Purpose: purpose, StorageKey: "assets/users/" + userID + "/" + id + ".mp4", FileName: id + ".mp4", ContentType: "video/mp4", Size: 12, ETag: id}); err != nil {
+		if err := repo.Assets().Create(ctx, &model.Asset{ID: assetID, UserID: userID, Purpose: purpose, StorageKey: mediaLibraryStoragePrefix + "/" + userID + "/" + id + ".mp4", FileName: id + ".mp4", ContentType: "video/mp4", Size: 12, ETag: id}); err != nil {
 			t.Fatal(err)
 		}
 		if err := repo.UserMediaAssets().Create(ctx, &model.UserMediaAsset{ID: id, UserID: userID, AssetID: assetID, ProjectID: projectID, MediaType: "video", Status: status}); err != nil {
@@ -93,11 +93,11 @@ func TestUserMediaLibrarySemanticVideoSearchFiltersOwnershipAndRanksProject(t *t
 	makeVideo("user-2", "foreign", "project-1", DirectUploadPurposeMediaLibrary, model.UserMediaAssetStatusAvailable)
 	makeVideo("user-1", "wrong-purpose", "project-1", "article_image", model.UserMediaAssetStatusAvailable)
 	svc.SetSemanticSearch(semanticSearchFake{results: []storage.SemanticMediaResult{
-		{ObjectKey: "assets/users/user-1/other.mp4", Summary: "其他", Description: "其他视频"},
-		{ObjectKey: "assets/users/user-1/same.mp4", Summary: "咖啡", Description: "制作咖啡"},
-		{ObjectKey: "assets/users/user-1/queued.mp4"},
-		{ObjectKey: "assets/users/user-2/foreign.mp4"},
-		{ObjectKey: "assets/users/user-1/wrong-purpose.mp4"},
+		{ObjectKey: mediaLibraryStoragePrefix + "/user-1/other.mp4", Summary: "其他", Description: "其他视频"},
+		{ObjectKey: mediaLibraryStoragePrefix + "/user-1/same.mp4", Summary: "咖啡", Description: "制作咖啡"},
+		{ObjectKey: mediaLibraryStoragePrefix + "/user-1/queued.mp4"},
+		{ObjectKey: mediaLibraryStoragePrefix + "/user-2/foreign.mp4"},
+		{ObjectKey: mediaLibraryStoragePrefix + "/user-1/wrong-purpose.mp4"},
 	}})
 	items, err := svc.SearchCandidates(ctx, "user-1", "project-1", "咖啡", "video", 10)
 	if err != nil {

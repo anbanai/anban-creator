@@ -279,7 +279,7 @@ func (s *UserMediaLibraryService) SearchCandidates(ctx context.Context, userID, 
 		if s.semantic == nil {
 			return nil, errors.New("OSS semantic search is not configured")
 		}
-		results, err := s.semantic.Search(ctx, strings.TrimSpace(query), "assets/users/"+strings.TrimSpace(userID)+"/", "video", limit)
+		results, err := s.semantic.Search(ctx, strings.TrimSpace(query), mediaLibraryStoragePrefix+"/"+strings.TrimSpace(userID)+"/", "video", limit)
 		if err != nil {
 			return nil, err
 		}
