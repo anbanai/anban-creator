@@ -137,7 +137,7 @@ describe('GlobalCommandPalette actions', () => {
     expect(await screen.findByText('模板库')).toBeInTheDocument()
     expect(await screen.findByText('时间线')).toBeInTheDocument()
     expect(screen.getByText('g l')).toBeInTheDocument()
-    expect(screen.queryByText('设计师')).not.toBeInTheDocument()
+    expect(await screen.findByText('设计师')).toBeInTheDocument()
     expect(screen.queryByText('Claude Code')).not.toBeInTheDocument()
     expect(screen.queryByText('Codex')).not.toBeInTheDocument()
     expect(await screen.findByText('插件')).toBeInTheDocument()

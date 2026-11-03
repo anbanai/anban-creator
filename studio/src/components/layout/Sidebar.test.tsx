@@ -108,7 +108,7 @@ describe('Sidebar', () => {
     renderSidebar()
     expect(screen.getByRole('link', { name: '模板库' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '时间线' })).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: '设计师' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '设计师' })).toHaveAttribute('href', '/designer')
     expect(screen.getByRole('link', { name: '插件' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument()
     expect(screen.queryByText('平台与设置')).not.toBeInTheDocument()

@@ -71,5 +71,5 @@ export interface AttachmentRejection {
 }
 
 export type PromptAttachmentAdapter =
-  | { mode: 'direct'; purpose?: 'ai_entry_attachment' }
+  | { mode: 'direct'; purpose?: 'ai_entry_attachment' | 'designer_reference' }
   | { mode: 'local'; purpose?: never }
