@@ -1,3 +1,4 @@
+import { SignedImage } from '@/components/ui/SignedImage'
 import { useEffect, useState } from 'react'
 import {
   ChevronLeftIcon,
@@ -29,6 +30,7 @@ export interface ImageViewerStageProps {
   onNext?: () => void
   onError?: () => void
   lightbox?: boolean
+  authenticated?: boolean
 }
 
 function IconButton({
@@ -68,7 +70,9 @@ export function ImageViewerStage({
   onNext,
   onError,
   lightbox = false,
+  authenticated = false,
 }: ImageViewerStageProps) {
+  const Image = authenticated ? SignedImage : 'img'
   const [zoom, setZoom] = useState(FIT_ZOOM)
 
   useEffect(() => {
@@ -85,7 +89,7 @@ export function ImageViewerStage({
       className={`relative flex min-h-0 w-full flex-1 flex-col ${lightbox ? 'gap-0' : 'gap-3'}`}
     >
       <div className={`relative flex min-h-64 flex-1 items-center justify-center overflow-auto sm:min-h-80 ${lightbox ? 'bg-transparent p-6' : 'rounded-md bg-muted/40 p-4'}`}>
-        <img
+        <Image
           src={src}
           alt={alt}
           onError={onError}

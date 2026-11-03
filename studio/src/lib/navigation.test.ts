@@ -48,6 +48,7 @@ describe('navigation IA', () => {
 
   it('defines administrator navigation in approved order', () => {
     expect(adminNavItems.map((item) => item.label)).toEqual([
+      '设计师',
       '模板库',
       '充值管理',
     ])
@@ -69,6 +70,7 @@ describe('navigation IA', () => {
       '/media-assets',
       '/trends',
       '/topic-radar',
+      '/designer',
       '/templates',
       '/admin/billing',
     ])

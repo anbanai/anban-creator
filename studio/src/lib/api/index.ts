@@ -1,3 +1,4 @@
+import { designerApi } from './designer'
 import { authApi } from './auth'
 import { plansApi } from './plans'
 import { tasksApi } from './tasks'
@@ -37,6 +38,7 @@ import { articleAssetsApi } from './article-assets'
 import { userMediaApi } from './user-media'
 
 export const api = {
+  designer: designerApi,
   auth: authApi,
   plans: plansApi,
   tasks: tasksApi,

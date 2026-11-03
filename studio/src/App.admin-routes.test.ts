@@ -29,17 +29,12 @@ describe('administrator routes', () => {
     },
   )
 
-  it.each(['timeline', 'templates', 'admin/billing'])(
+  it.each(['timeline', 'designer', 'templates', 'admin/billing'])(
     'protects /%s with AdminRoute',
     (path) => {
       expect(routeDefinition(path)).toContain('<AdminRoute>')
     },
   )
-
-  it('does not expose the removed Designer route', () => {
-    expect(source).not.toContain('path="designer"')
-    expect(source).not.toContain('DesignerPage')
-  })
 
   it('keeps plugin installation public and settings available to signed-in users', () => {
     expect(routeDefinition('/plugins')).not.toContain('<ProtectedRoute>')

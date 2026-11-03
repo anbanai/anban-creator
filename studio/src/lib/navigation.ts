@@ -45,6 +45,7 @@ export const workspaceNavItems: NavItem[] = [
 ]
 
 export const adminNavItems: NavItem[] = [
+  { to: '/designer', label: '设计师', icon: ImageIcon, adminOnly: true },
   { to: '/templates', label: '模板库', icon: LayoutGrid, adminOnly: true },
   { to: '/admin/billing', label: '充值管理', icon: Coins, adminOnly: true },
 ]

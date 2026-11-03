@@ -34,6 +34,7 @@ const BillingPage = lazyWithRecovery(() => import('@/pages/BillingPage'))
 const AdminBillingPage = lazyWithRecovery(() => import('@/pages/AdminBillingPage'))
 const UsagePage = lazyWithRecovery(() => import('@/pages/UsagePage'))
 const SettingsPage = lazyWithRecovery(() => import('@/pages/SettingsPage'))
+const DesignerPage = lazyWithRecovery(() => import('@/pages/DesignerPage'))
 const TemplatesPage = lazyWithRecovery(() => import('@/pages/TemplatesPage'))
 const PluginsPage = lazyWithRecovery(() => import('@/pages/PluginsPage'))
 const ContentAssetsPage = lazyWithRecovery(() => import('@/pages/ContentAssetsPage'))
@@ -191,6 +192,7 @@ function AppRoutes() {
           <Route path="tasks" element={<LazyPage component={TasksPage} />} />
           <Route path="tasks/new" element={<LazyPage component={TaskCreatePage} />} />
           <Route path="tasks/:id" element={<LazyPage component={TaskDetailPage} />} />
+          <Route path="designer" element={<AdminRoute><LazyPage component={DesignerPage} /></AdminRoute>} />
           <Route
             path="templates"
             element={(

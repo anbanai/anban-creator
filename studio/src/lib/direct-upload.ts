@@ -2,6 +2,7 @@ import http from '@/lib/http-client'
 import type { InputAttachment, InputAttachmentType } from '@/types/input-attachment'
 
 export type DirectUploadPurpose =
+  | 'designer_reference'
   | 'project_reference'
   | 'project_portrait_reference'
   | 'template_thumbnail'
