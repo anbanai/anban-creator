@@ -88,7 +88,8 @@ kubectl -n "$namespace" rollout status deployment/creator-studio-web-base --time
 `archestra.anbanai.com` 路由到 Studio Service 的 `8080` 端口，由 ALB Ingress
 Controller 创建/更新转发规则，不需要再手动改 ALB 控制台。该 Ingress 通过
 `listen-ports: '[{"HTTPS": 443}]'` 只挂 HTTPS，复用 443 监听器上的
-`*.anbanai.com` 证书。
+`*.anbanai.com` 证书。完整接入说明见
+[archestra-integration.md](archestra-integration.md)。
 
 ## 已知边界
 

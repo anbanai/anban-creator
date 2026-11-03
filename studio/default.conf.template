@@ -129,10 +129,10 @@ server {
     }
 }
 
-# Archestra web app on its own host. The ingress/ALB must route this hostname
-# here (or straight to the Archestra Service); see deploy/archestra/README.md.
-# Requests arrive at the root path so Next.js can resolve /_next, /api, /v1,
-# /ws, and its client routes exactly as it generated them.
+# Archestra web app on its own host. The Studio Ingress routes this hostname
+# here; see docs/archestra-integration.md. Requests arrive at the root path so
+# Next.js can resolve /_next, /api, /v1, /ws, and its client routes exactly as
+# it generated them.
 server {
     listen 80;
     server_name ${ARCHESTRA_PUBLIC_HOST};
