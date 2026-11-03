@@ -414,9 +414,11 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
 
       ctx.fillStyle = '#ffffff'
       ctx.fillRect(0, 0, w, h)
-      ctx.globalCompositeOperation = 'destination-out'
 
       for (const stroke of strokesRef.current) {
+        ctx.globalCompositeOperation = stroke.type === 'eraser' ? 'source-over' : 'destination-out'
+        ctx.strokeStyle = stroke.type === 'eraser' ? '#ffffff' : '#000000'
+        ctx.fillStyle = ctx.strokeStyle
         if (!isShapeStroke(stroke)) {
           const points = stroke.points
           if (points.length === 0) continue
@@ -426,8 +428,6 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
             ctx.shadowColor = 'rgba(0, 0, 0, 1)'
           }
 
-          ctx.strokeStyle = '#000000'
-          ctx.fillStyle = '#000000'
           paintBrushStroke(ctx, points)
           ctx.shadowBlur = 0
         } else {
@@ -467,6 +467,7 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
       function handleKey(e: KeyboardEvent) {
         if (e.key === 'Escape') onClose()
         if (e.key === ' ') {
+          if (e.target instanceof Element && e.target.closest('input, textarea, [contenteditable]:not([contenteditable="false"])')) return
           e.preventDefault()
           setSpaceHeld(true)
         }
@@ -487,7 +488,7 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
     return (
       <div className="relative flex h-full flex-col">
         {/* Top toolbar */}
-        <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between">
+        <div className="relative z-10 flex shrink-0 flex-wrap items-center justify-between gap-2 px-3 pt-3 md:absolute md:top-3 md:left-3 md:right-3 md:px-0 md:pt-0">
           <Button
             variant="ghost"
             size="sm"
@@ -498,7 +499,7 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
             返回
           </Button>
 
-          <div className="flex items-center gap-1.5 rounded-xl border border-border/70 bg-card/90 px-2 py-1.5 shadow-sm">
+          <div className="flex max-w-full flex-wrap items-center gap-1.5 rounded-xl border border-border/70 bg-card/90 px-2 py-1.5 shadow-sm">
             <Button
               variant="ghost"
               size="icon-sm"
@@ -597,7 +598,7 @@ const InlineMaskEditor = forwardRef<InlineMaskEditorHandle, InlineMaskEditorProp
         </div>
 
         {/* Image + Canvas */}
-        <div className="flex flex-1 items-center justify-center overflow-hidden p-4 pt-14">
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4 pt-3 md:pt-14">
           <div
             className="relative"
             style={{
