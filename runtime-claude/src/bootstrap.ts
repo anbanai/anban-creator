@@ -345,8 +345,9 @@ export function validateBootstrapResponse(executionID: string, input: unknown): 
     const expected = `.anban-creator/resume/executions/${executionID}/latest.md`;
     if (data.resume_context_path !== expected) throw new Error("bootstrap resume context path is invalid");
   }
-  if (!["montage", "hypit", "video-edit"].includes(data.task_type) && Object.keys(data.env ?? {}).length > 0) throw new Error("bootstrap environment is only valid for Montage, Hypit, or video-edit tasks");
-  for (const [key, value] of Object.entries(data.env ?? {})) validateEnvironmentEntry(key, value, data.task_type === "hypit" ? "Hypit" : data.task_type === "video-edit" ? "video-edit" : "Montage");
+  // The Server scopes environment variables to each Agent; the runner controls
+  // which validated entries may enter the SDK and its MCP processes.
+  for (const [key, value] of Object.entries(data.env ?? {})) validateEnvironmentEntry(key, value, data.task_type);
   if (data.task_type === "hypit") validateHypitEnvironment(data.env ?? {});
   preflightBootstrapFiles(data.files ?? [], data.task_type);
   return data;
