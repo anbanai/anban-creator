@@ -114,7 +114,9 @@ func (c *openaiLLMClient) CompleteResult(ctx context.Context, systemPrompt, user
 	if len(resp.Choices) == 0 {
 		return nil, fmt.Errorf("llm returned no choices (model=%s, resp_id=%s, resp_model=%s)", c.model, resp.ID, resp.Model)
 	}
-	return &LLMResult{Text: resp.Choices[0].Message.Content, Model: responseModel(resp.Model, c.model), Usage: chatCompletionUsage(resp.Usage)}, nil
+	result := &LLMResult{Text: resp.Choices[0].Message.Content, Model: responseModel(resp.Model, c.model), Usage: chatCompletionUsage(resp.Usage)}
+	RecordModelUsage(ctx, result.Model, result.Usage)
+	return result, nil
 }
 
 func (c *openaiLLMClient) CompleteWithImage(ctx context.Context, systemPrompt, userPrompt, imageURL string) (string, error) {
@@ -162,7 +164,9 @@ func (c *openaiLLMClient) CompleteWithImageResult(ctx context.Context, systemPro
 	if len(resp.Choices) == 0 {
 		return nil, newImageUnderstandingProviderError(errors.New("llm returned no choices"), httpResponse, trace.diagnostics(started, timeoutSource))
 	}
-	return &LLMResult{Text: resp.Choices[0].Message.Content, Model: responseModel(resp.Model, c.model), Usage: chatCompletionUsage(resp.Usage)}, nil
+	result := &LLMResult{Text: resp.Choices[0].Message.Content, Model: responseModel(resp.Model, c.model), Usage: chatCompletionUsage(resp.Usage)}
+	RecordModelUsage(ctx, result.Model, result.Usage)
+	return result, nil
 }
 
 // imageUnderstandingTimeoutSource reports which deadline ends a vision call so
@@ -320,7 +324,9 @@ func (c *openaiLLMClient) CompleteWithVideoURLResult(ctx context.Context, system
 	if len(resp.Choices) == 0 {
 		return nil, fmt.Errorf("llm returned no choices (model=%s, resp_id=%s, resp_model=%s)", c.model, resp.ID, resp.Model)
 	}
-	return &LLMResult{Text: resp.Choices[0].Message.Content, Model: responseModel(resp.Model, c.model), Usage: chatCompletionUsage(resp.Usage)}, nil
+	result := &LLMResult{Text: resp.Choices[0].Message.Content, Model: responseModel(resp.Model, c.model), Usage: chatCompletionUsage(resp.Usage)}
+	RecordModelUsage(ctx, result.Model, result.Usage)
+	return result, nil
 }
 
 func responseModel(respModel, fallback string) string {
