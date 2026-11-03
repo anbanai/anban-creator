@@ -38,7 +38,7 @@ SERVER_CONFIG := server/config.yaml
 DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null || stat -L -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)
 
 .PHONY: all clean distclean test help lint fmt vet deps ci coverage \
-        server-build server-run server-dev server-test git-sync-setup humanizer-update creative-references-check creative-references-update ecommerce-upstream-check ecommerce-upstream-update \
+        server-build server-run server-dev server-test server-config-check git-sync-setup humanizer-update creative-references-check creative-references-update ecommerce-upstream-check ecommerce-upstream-update \
         agent-pack-new agent-pack-generate agent-pack-check \
         runtime-claude-install runtime-claude-test runtime-claude-build \
         runtime-dsh-install runtime-dsh-test runtime-dsh-build \
@@ -145,15 +145,18 @@ server-build:
 	@go -C server build -o ../$(BINDIR)/$(BINARY) .
 	@echo "Server build complete: $(BINDIR)/$(BINARY)"
 
+# Fail early when the local config is missing instead of letting Docker create
+# a directory for the bind mount.
+server-config-check:
+	@test -f $(SERVER_CONFIG) || { echo "missing $(SERVER_CONFIG); run: cp server/config.example.yaml server/config.yaml (then fill required values)"; exit 1; }
+
 # Build and run the server
-server-run: server-build
-	@set -a; [ ! -f .env ] || . ./.env; set +a; \
-		./$(BINDIR)/$(BINARY) -config $(SERVER_CONFIG)
+server-run: server-config-check server-build
+	@./$(BINDIR)/$(BINARY) -config $(SERVER_CONFIG)
 
 # Run the server via go run (development)
-server-dev:
-	@set -a; [ ! -f .env ] || . ./.env; set +a; \
-		cd server && go run . -config config.yaml
+server-dev: server-config-check
+	@cd server && go run . -config config.yaml
 
 # Run server tests
 server-test:
@@ -216,7 +219,7 @@ docker-agent-build-check: agent-pack-check
 # start the Compose services. Runtime containers are launched on demand by the
 # Server and are not Compose services; rebuilding the Server here keeps its
 # embedded Agent Pack Catalog aligned with the images just built.
-docker-up: docker-server-image docker-dsh-runtime-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-talking-head-editor-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-topic-radar-agent-image docker-whiteboard-animation-agent-image
+docker-up: server-config-check docker-server-image docker-dsh-runtime-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-talking-head-editor-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-topic-radar-agent-image docker-whiteboard-animation-agent-image
 	@DOCKER_GID="$(DOCKER_SOCKET_GID)" docker compose up -d
 
 # Stop infrastructure services

@@ -96,33 +96,18 @@ services:
         condition: service_healthy
       sidecar-ilink:
         condition: service_started
-    # Compose forwards the root .env so every ${...} reference in
-    # server/config.yaml can be supplied, and keeps deployment wiring plus
-    # required-value guards in this block. Non-secret defaults (agent images,
-    # DSH runtime wiring, OSS endpoint, provider base URLs) live only in
-    # server/config.example.yaml and must not be repeated here.
-    env_file:
-      - .env
+    # The Server reads /app/conf/config.yaml, mounted from the gitignored
+    # server/config.yaml. Kubernetes injects ${...} placeholders from Secrets;
+    # Compose only supplies service discovery and the local Docker executor.
+    # Do not restate server/config.yaml defaults here.
     environment:
       ANBAN_DATABASE_DSN: "root:${MYSQL_ROOT_PASSWORD:-anban_creator_dev}@tcp(mysql:3306)/anban_creator?charset=utf8mb4&parseTime=True&loc=Local"
       ANBAN_REDIS_ADDR: "redis:6379"
-      ANBAN_BILLING_ADMIN_API_KEY: "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}"
-      ANBAN_JWT_SECRET_KEY: "${ANBAN_JWT_SECRET_KEY:?ANBAN_JWT_SECRET_KEY is required}"
-      ANBAN_OSS_ACCESS_KEY_ID: "${ANBAN_OSS_ACCESS_KEY_ID:?ANBAN_OSS_ACCESS_KEY_ID is required}"
-      ANBAN_OSS_ACCESS_KEY_SECRET: "${ANBAN_OSS_ACCESS_KEY_SECRET:?ANBAN_OSS_ACCESS_KEY_SECRET is required}"
-      ANBAN_DEEPSEEK_API_KEY: "${ANBAN_DEEPSEEK_API_KEY:?ANBAN_DEEPSEEK_API_KEY is required}"
       ANBAN_DSH_BRIDGE_DIR: "/app/runtime-dsh"
       ANBAN_DSH_BRIDGE_PATCH: "/app/harness/dsh/project-creator.patch.yml"
       ANBAN_DSH_BRIDGE_MCP_URL: "http://127.0.0.1:8080/mcp"
-      ANBAN_MOONSHOT_API_KEY: "${ANBAN_MOONSHOT_API_KEY:?ANBAN_MOONSHOT_API_KEY is required}"
-      ANBAN_ZHIPU_API_KEY: "${ANBAN_ZHIPU_API_KEY:?ANBAN_ZHIPU_API_KEY is required}"
-      MOONSHOT_API_KEY: "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}"
       ANBAN_CLAUDE_AGENT_SERVER_URL: "http://server:8080"
-      ANBAN_AGENT_EXECUTION_TOKEN_SECRET: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET:?ANBAN_AGENT_EXECUTION_TOKEN_SECRET is required}"
-      ANBAN_REDFOX_AGENT_WECHAT_ARTICLE_API_KEY: "${ANBAN_REDFOX_AGENT_WECHAT_ARTICLE_API_KEY:-}"
-      ANBAN_REDFOX_AGENT_WECHAT_PICTURE_API_KEY: "${ANBAN_REDFOX_AGENT_WECHAT_PICTURE_API_KEY:-}"
-      ANBAN_REDFOX_AGENT_SEEDNOTE_API_KEY: "${ANBAN_REDFOX_AGENT_SEEDNOTE_API_KEY:-}"
-      ANBAN_REDFOX_AGENT_CONTENT_PLANNING_API_KEY: "${ANBAN_REDFOX_AGENT_CONTENT_PLANNING_API_KEY:-}"
+      ANBAN_AGENT_EXECUTOR: "docker"
       # ilink WeChat assistant channel. Uses the compose service name, not localhost.
       ANBAN_ILINK_ENABLED: "true"
       ANBAN_ILINK_BASE_URL: "http://sidecar-ilink:18070"

@@ -125,9 +125,9 @@ func TestValidateCreatorAgentImageNamingRejectsDecoysAndLegacyValues(t *testing.
 			configExample: validConfigExample + "  wechat-picture: \"${ANBAN_AGENT_IMAGE_WECHAT_PICTURE:-creator-agent-wechat-picture:latest}\"\n",
 		},
 		{
-			name:          "shared WeChat image identity",
-			makefile:      validMakefile,
-			compose:       validCompose,
+			name:     "shared WeChat image identity",
+			makefile: validMakefile,
+			compose:  validCompose,
 			configExample: `runtime_images:
   wechat-article: "${ANBAN_AGENT_IMAGE_WECHAT_ARTICLE:-creator-agent-wechat-article:latest}"
   wechat-picture: "${ANBAN_AGENT_IMAGE_WECHAT_PICTURE:-creator-agent-wechat-article:latest}"
@@ -519,24 +519,22 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 	}
 }
 
-func TestServerComposeInjectsBillingAdminKeyAndDocumentsIt(t *testing.T) {
+func TestBillingAdminKeyIsDocumentedWithoutLocalEnvFile(t *testing.T) {
 	root := repositoryRoot(t)
-	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
-	if !strings.Contains(compose, `ANBAN_BILLING_ADMIN_API_KEY: "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}"`) {
-		t.Fatal("docker-compose server must require and inject ANBAN_BILLING_ADMIN_API_KEY")
-	}
-	envExample := readTextFile(t, filepath.Join(root, ".env.example"))
-	if !strings.Contains(envExample, "ANBAN_BILLING_ADMIN_API_KEY=") {
-		t.Fatal(".env.example must declare ANBAN_BILLING_ADMIN_API_KEY without a secret value")
+	configExample := readTextFile(t, filepath.Join(root, "server", "config.example.yaml"))
+	if !strings.Contains(configExample, `admin_api_key: "${ANBAN_BILLING_ADMIN_API_KEY}"`) {
+		t.Fatal("server/config.example.yaml must document billing_runtime.admin_api_key")
 	}
 	readme := readTextFile(t, filepath.Join(root, "README.md"))
 	if !strings.Contains(readme, "ANBAN_BILLING_ADMIN_API_KEY") {
-		t.Fatal("README must document the required billing admin key for Docker Compose")
+		t.Fatal("README must document the required billing admin key")
 	}
 	for _, path := range []string{filepath.Join(root, ".gitignore"), filepath.Join(root, ".dockerignore")} {
 		body := readTextFile(t, path)
-		if !strings.Contains("\n"+body+"\n", "\n.env\n") {
-			t.Fatalf("%s must exclude the root .env secret file", path)
+		for _, secretPath := range []string{".env", "server/config.yaml"} {
+			if !strings.Contains("\n"+body+"\n", "\n"+secretPath+"\n") {
+				t.Fatalf("%s must exclude local secret file %s", path, secretPath)
+			}
 		}
 	}
 }
@@ -1369,7 +1367,7 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
 	for _, want := range []string{
 		"ANBAN_CLAUDE_AGENT_SERVER_URL: \"http://server:8080\"",
-		"ANBAN_AGENT_EXECUTION_TOKEN_SECRET:",
+		"ANBAN_AGENT_EXECUTOR: \"docker\"",
 		"- /var/run/docker.sock:/var/run/docker.sock",
 		"group_add:\n      - \"${DOCKER_GID:-0}\"",
 		"anban-creator-network:\n    name: anban-creator-network\n    driver: bridge",
@@ -1390,7 +1388,6 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 		"ANBAN_CLAUDE_DOCKER_MONTAGE_IMAGE",
 		"ANBAN_CLAUDE_DOCKER_CONTAINER_NAME",
 		"ANBAN_CLAUDE_DOCKER_WORKSPACE_DIR",
-		"ANBAN_AGENT_EXECUTOR",
 		"ANBAN_AGENT_IMAGE_",
 		"ANBAN_AGENT_DOCKER_NETWORK",
 	} {
@@ -1399,13 +1396,8 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 		}
 	}
 
-	// Agent images and Docker executor wiring have one source of truth:
-	// server/config.example.yaml for defaults and .env for local overrides.
-	envExample := readTextFile(t, filepath.Join(root, ".env.example"))
-	if !strings.Contains(envExample, "ANBAN_AGENT_EXECUTOR=docker") {
-		t.Fatal(".env.example must select the local Docker executor")
-	}
-
+	// Compose declares the local executor; agent images keep their single source
+	// of defaults in server/config.example.yaml.
 	for _, configPath := range []string{"server/config.example.yaml"} {
 		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(configPath)))
 		for _, want := range []string{
@@ -1430,7 +1422,7 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 
 	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
 	for _, want := range []string{
-		"docker-up: docker-server-image docker-dsh-runtime-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-talking-head-editor-agent-image docker-moments-agent-image docker-ecommerce-agent-image",
+		"docker-up: server-config-check docker-server-image docker-dsh-runtime-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-viral-ip-video-editor-agent-image docker-video-edit-agent-image docker-talking-head-editor-agent-image docker-moments-agent-image docker-ecommerce-agent-image",
 		"DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null || stat -L -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)",
 		"DOCKER_GID=\"$(DOCKER_SOCKET_GID)\" docker compose up -d",
 	} {
@@ -1463,25 +1455,24 @@ func TestDockerRuntimeContract(t *testing.T) {
 			t.Fatal("docker-compose.yml has no server service")
 		}
 		for name, want := range map[string]string{
-			"ANBAN_DSH_BRIDGE_DIR":                   "/app/runtime-dsh",
-			"ANBAN_DSH_BRIDGE_PATCH":                 "/app/harness/dsh/project-creator.patch.yml",
-			"ANBAN_DSH_BRIDGE_MCP_URL":               "http://127.0.0.1:8080/mcp",
-			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET":     "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET:?ANBAN_AGENT_EXECUTION_TOKEN_SECRET is required}",
-			"ANBAN_BILLING_ADMIN_API_KEY":            "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}",
-			"ANBAN_JWT_SECRET_KEY":                   "${ANBAN_JWT_SECRET_KEY:?ANBAN_JWT_SECRET_KEY is required}",
-			"ANBAN_OSS_ACCESS_KEY_ID":                "${ANBAN_OSS_ACCESS_KEY_ID:?ANBAN_OSS_ACCESS_KEY_ID is required}",
-			"ANBAN_OSS_ACCESS_KEY_SECRET":            "${ANBAN_OSS_ACCESS_KEY_SECRET:?ANBAN_OSS_ACCESS_KEY_SECRET is required}",
-			"ANBAN_DEEPSEEK_API_KEY":                 "${ANBAN_DEEPSEEK_API_KEY:?ANBAN_DEEPSEEK_API_KEY is required}",
-			"ANBAN_MOONSHOT_API_KEY":                 "${ANBAN_MOONSHOT_API_KEY:?ANBAN_MOONSHOT_API_KEY is required}",
-			"ANBAN_ZHIPU_API_KEY":                    "${ANBAN_ZHIPU_API_KEY:?ANBAN_ZHIPU_API_KEY is required}",
-			"MOONSHOT_API_KEY":                       "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}",
+			"ANBAN_DSH_BRIDGE_DIR":          "/app/runtime-dsh",
+			"ANBAN_DSH_BRIDGE_PATCH":        "/app/harness/dsh/project-creator.patch.yml",
+			"ANBAN_DSH_BRIDGE_MCP_URL":      "http://127.0.0.1:8080/mcp",
+			"ANBAN_AGENT_EXECUTOR":          "docker",
+			"ANBAN_CLAUDE_AGENT_SERVER_URL": "http://server:8080",
 		} {
 			if got := server.Environment[name]; got != want {
 				t.Errorf("server environment %s = %q, want %q", name, got, want)
 			}
 		}
 		for _, duplicatedDefault := range []string{
-			"ANBAN_AGENT_EXECUTOR",
+			"ANBAN_BILLING_ADMIN_API_KEY",
+			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET",
+			"ANBAN_JWT_SECRET_KEY",
+			"ANBAN_DEEPSEEK_API_KEY",
+			"ANBAN_MOONSHOT_API_KEY",
+			"ANBAN_ZHIPU_API_KEY",
+			"MOONSHOT_API_KEY",
 			"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE",
 			"ANBAN_AGENT_IMAGE_WECHAT_PICTURE",
 			"ANBAN_AGENT_IMAGE_SEEDNOTE",
@@ -1512,6 +1503,10 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_REDFOX_ENDPOINT",
 			"ANBAN_REDFOX_API_KEY",
 			"ANBAN_REDFOX_AGENT_API_KEY",
+			"ANBAN_REDFOX_AGENT_WECHAT_ARTICLE_API_KEY",
+			"ANBAN_REDFOX_AGENT_WECHAT_PICTURE_API_KEY",
+			"ANBAN_REDFOX_AGENT_SEEDNOTE_API_KEY",
+			"ANBAN_REDFOX_AGENT_CONTENT_PLANNING_API_KEY",
 			"VIDEO_EDIT_ELEVENLABS_API_KEY",
 			"VIDEO_USE_API_KEY",
 		} {
@@ -1527,8 +1522,8 @@ func TestDockerRuntimeContract(t *testing.T) {
 		if _, exists := compose.Services["agent"]; exists {
 			t.Fatal("docker-compose.yml must not define a persistent agent service")
 		}
-		if len(server.EnvFile) != 1 || server.EnvFile[0] != ".env" {
-			t.Fatalf("server env_file = %v, want root .env", server.EnvFile)
+		if len(server.EnvFile) != 0 {
+			t.Fatalf("server env_file = %v, want no local .env contract", server.EnvFile)
 		}
 		if !containsString(server.Volumes, "/var/run/docker.sock:/var/run/docker.sock") {
 			t.Fatalf("server volumes = %v, want Docker daemon socket", server.Volumes)
@@ -1545,44 +1540,26 @@ func TestDockerRuntimeContract(t *testing.T) {
 			}
 		}
 
-		dotenv := dotenvAssignments(readTextFile(t, filepath.Join(root, ".env.example")))
-		for _, name := range []string{
-			"ANBAN_BILLING_ADMIN_API_KEY",
-			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET",
-			"ANBAN_AGENT_EXECUTOR",
-			"ANBAN_JWT_SECRET_KEY",
-			"ANBAN_OSS_ACCESS_KEY_ID",
-			"ANBAN_OSS_ACCESS_KEY_SECRET",
-			"ANBAN_DEEPSEEK_API_KEY",
-			"ANBAN_REDFOX_API_KEY",
-			"ANBAN_REDFOX_AGENT_API_KEY",
-			"ANBAN_MOONSHOT_API_KEY",
-			"ANBAN_ZHIPU_API_KEY",
-			"MOONSHOT_API_KEY",
-			"VOLCENGINE_ARK_API_KEY",
-			"WANGCAI_OPENAI_BASE_URL",
-			"WANGCAI_OPENAI_API_KEY",
-			"VIDEO_EDIT_ELEVENLABS_API_KEY",
-		} {
-			if _, ok := dotenv[name]; !ok {
-				t.Errorf(".env.example missing required Server variable %s", name)
-			}
+		if _, err := os.Stat(filepath.Join(root, ".env.example")); !os.IsNotExist(err) {
+			t.Fatalf(".env.example must be removed; stat error = %v", err)
 		}
-
 		configBody := readTextFile(t, filepath.Join(root, "server", "config.example.yaml"))
-		yamlDefault := regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}`)
-		for _, match := range yamlDefault.FindAllStringSubmatch(configBody, -1) {
-			name, fallback := match[1], match[2]
-			if fallback == "" {
-				continue
-			}
-			if value, ok := dotenv[name]; ok && strings.TrimSpace(value) != "" {
-				t.Errorf(".env.example repeats the server/config.example.yaml default for %s (%q); keep the default only in YAML", name, value)
+		for _, placeholder := range []string{
+			`admin_api_key: "${ANBAN_BILLING_ADMIN_API_KEY}"`,
+			`secret_key: "${ANBAN_JWT_SECRET_KEY}"`,
+			`access_key_id: "${ANBAN_OSS_ACCESS_KEY_ID}"`,
+			`access_key_secret: "${ANBAN_OSS_ACCESS_KEY_SECRET}"`,
+		} {
+			if !strings.Contains(configBody, placeholder) {
+				t.Errorf("server/config.example.yaml missing %s", placeholder)
 			}
 		}
 
 		makefile := readTextFile(t, filepath.Join(root, "Makefile"))
-		for _, target := range []string{"server-run:", "server-dev:"} {
+		if !strings.Contains(makefile, "server-config-check:") {
+			t.Fatal("Makefile missing server-config-check target")
+		}
+		for _, target := range []string{"server-run:", "server-dev:", "docker-up:"} {
 			start := strings.Index(makefile, target)
 			if start < 0 {
 				t.Fatalf("Makefile missing %s", target)
@@ -1591,8 +1568,11 @@ func TestDockerRuntimeContract(t *testing.T) {
 			if next := strings.Index(body[len(target):], "\n\n"); next >= 0 {
 				body = body[:len(target)+next]
 			}
-			if !strings.Contains(body, ". ./.env") {
-				t.Errorf("Makefile %s does not load the documented root .env", target)
+			if !strings.Contains(body, "server-config-check") {
+				t.Errorf("Makefile %s does not depend on server-config-check", target)
+			}
+			if strings.Contains(body, ".env") {
+				t.Errorf("Makefile %s still references .env", target)
 			}
 		}
 	})
@@ -1713,21 +1693,6 @@ func TestDockerRuntimeContract(t *testing.T) {
 		}
 
 	})
-}
-
-func dotenvAssignments(body string) map[string]string {
-	assignments := make(map[string]string)
-	for _, line := range strings.Split(body, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		name, value, ok := strings.Cut(line, "=")
-		if ok {
-			assignments[strings.TrimSpace(name)] = value
-		}
-	}
-	return assignments
 }
 
 func TestNoStaleDockerfileReferences(t *testing.T) {

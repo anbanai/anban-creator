@@ -1,3 +1,6 @@
+# Copy this file to server/config.yaml (gitignored) for local and Compose runs,
+# then replace the ${VAR} placeholders you need with literal values. Kubernetes
+# keeps the placeholders: server/Deployment.yaml injects them from Secrets.
 server:
   port: 8080
   public_base_url: "${ANBAN_PUBLIC_BASE_URL:-https://creator.anbanai.com}"
@@ -104,8 +107,8 @@ wechat:
 # Optional WeChat Open Platform third-party app configuration. All five values
 # are required together; without them the project settings page hides QR binding.
 # In Kubernetes, populate the anban-wechat-open-platform Secret described in
-# docs/wechat-open-platform-setup.md. For local/Compose, set the same variables
-# in the Server container environment. Generate the encryption key with
+# docs/wechat-open-platform-setup.md. For local/Compose, fill these values in
+# server/config.yaml. Generate the encryption key with
 # `openssl rand -base64 32`; it accepts 32 raw bytes or base64-encoded 32 bytes.
 wechat_open_platform:
   component_app_id: "${ANBAN_WECHAT_COMPONENT_APP_ID}"
