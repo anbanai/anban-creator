@@ -50,7 +50,7 @@ storage:
 
 ## 已有对象与部署
 
-已有数据库必须在部署前执行 `server/migrations/20261103_upload_session_media_prefix.sql`；未迁移时 Server 启动检查会提示具体迁移文件并停止。全新数据库由 `model.AutoMigrate` 建表。新上传会话在准备时保存前缀，后续完成上传、重试、URL 校验和清理恢复都使用会话保存的值。已有无前缀字段的会话继续使用原来的 `assets/media-library/`，不会因新配置改写目标。
+已有数据库必须在部署前依次执行 `server/migrations/20261102_user_media_oss_semantic.sql`（语义字段与索引）和 `server/migrations/20261103_upload_session_media_prefix.sql`；未迁移时 Server 启动检查会提示具体迁移文件并停止。两个脚本都用 `information_schema` 守卫，在 MySQL 8 上可重复执行。全新数据库由 `model.AutoMigrate` 建表。新上传会话在准备时保存前缀，后续完成上传、重试、URL 校验和清理恢复都使用会话保存的值。已有无前缀字段的会话继续使用原来的 `assets/media-library/`，不会因新配置改写目标。
 
 修改前缀不会自动搬迁任何对象；语义搜索只查询当前配置的前缀。若历史素材位于 `assets/users/` 或另一旧前缀，必须先规划对象及相关素材/上传会话记录的一致性迁移，再切换前缀。仅修改 `assets.storage_key` 不足以保持上传会话校验一致。仍在上传的旧会话会完成到原前缀，也应纳入迁移计划。
 
