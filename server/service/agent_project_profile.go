@@ -440,7 +440,11 @@ func (s *AgentProjectProfileService) talkingHeadEditorProfile(project *model.Pro
 		"required_artifacts": []string{
 			"output/final.mp4",
 			"output/edit-decision-list.json",
+			"output/composition-lint.json",
 			"output/transcript.json",
+			"output/final-audio-transcript.json",
+			"output/audio-content-check.json",
+			"output/sync-evidence.json",
 			"output/edit-strategy.md",
 			"output/visual-plan.json",
 			"output/sfx-cues.json",

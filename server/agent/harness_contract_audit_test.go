@@ -115,7 +115,7 @@ func TestViralIPVideoEditorUsesAutoEditorForReviewedDeadAirCuts(t *testing.T) {
 		"source_end_frame",
 		"composition_start_frame",
 		"composition_end_frame",
-		"output/edit_decision_list.json",
+		"output/edit-decision-list.json",
 		"自然呼吸",
 		"recoverable_failure",
 	} {

@@ -3452,7 +3452,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "4761a7ba1e2dd4074df45f73d6cf38d4f69c7f99b580b359ee1b631e4f32ff27"
+      "digest": "fbd19d1732f4866255446067e538c9bf65337cda6f4ab8db363baf1f4dbd1f5c"
     },
     {
       "id": "talking-head-montage",
@@ -3463,6 +3463,7 @@
       "agent": {
         "name": "talking-head-montage",
         "skills": [
+          "talking-head-video-generation",
           "talking-head-composition",
           "talking-head-sound-design",
           "content-tagging",
@@ -3611,6 +3612,12 @@
           "required": true
         },
         {
+          "role": "generated_video_lint",
+          "path": "output/generated-video-lint.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
           "role": "asset_source_manifest",
           "path": "output/asset-source-manifest.json",
           "mime_type": "application/json",
@@ -3695,6 +3702,12 @@
           "required": true
         },
         {
+          "role": "final_audio_transcript",
+          "path": "output/final-audio-transcript.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
           "role": "sfx_cues",
           "path": "output/sfx-cues.json",
           "mime_type": "application/json",
@@ -3745,6 +3758,12 @@
         {
           "role": "sync_evidence",
           "path": "output/sync-evidence.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "audio_content_check",
+          "path": "output/audio-content-check.json",
           "mime_type": "application/json",
           "required": true
         },
@@ -3830,7 +3849,7 @@
           "role": "progress_state",
           "path": "output/progress-state.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         }
       ],
       "artifact_stages": [
@@ -3848,6 +3867,7 @@
             "output/asset-source-policy.json",
             "output/generated-video-manifest.json",
             "output/generated-video-review.json",
+            "output/generated-video-lint.json",
             "output/asset-source-manifest.json",
             "output/asset-ledger.json",
             "output/visual-plan.json",
@@ -3861,6 +3881,18 @@
         {
           "id": "final_delivery",
           "trigger": "output/final.mp4",
+          "required": [
+            "output/edit-decision-list.json",
+            "output/composition-lint.json",
+            "output/final-audio-transcript.json",
+            "output/audio-content-check.json",
+            "output/sync-evidence.json",
+            "output/quality-evidence.json",
+            "output/generated-video-manifest.json",
+            "output/generated-video-review.json",
+            "output/generated-video-lint.json",
+            "output/progress-state.json"
+          ],
           "terminal": true
         },
         {
@@ -3929,6 +3961,11 @@
           "role": "final_video",
           "path": "output/final.mp4",
           "mime_type": "video/mp4"
+        },
+        {
+          "role": "final_audio_transcript",
+          "path": "output/final-audio-transcript.json",
+          "mime_type": "application/json"
         },
         {
           "role": "final_picture",
@@ -4009,12 +4046,47 @@
           "role": "quality_evidence",
           "path": "output/quality-evidence.json",
           "mime_type": "application/json"
+        },
+        {
+          "role": "edit_decision_list",
+          "path": "output/edit-decision-list.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "generated_video_manifest",
+          "path": "output/generated-video-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "generated_video_review",
+          "path": "output/generated-video-review.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "generated_video_lint",
+          "path": "output/generated-video-lint.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "sync_evidence",
+          "path": "output/sync-evidence.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "audio_content_check",
+          "path": "output/audio-content-check.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json"
         }
       ],
       "ui": {
         "renderer": "custom:talking-head-montage"
       },
-      "digest": "7add76828957d176ff79a82aad451307391dbd5cbbfc2dfdd38484adb54def8b"
+      "digest": "a6a9631d07cda1e7866f60e2a4e3ed28347b21b3f52370c1f48a7bfde7dfce18"
     },
     {
       "id": "topic-radar",
@@ -5386,6 +5458,7 @@
           "montage",
           "portrait-cover-design",
           "short-video-cover",
+          "talking-head-video-generation",
           "talking-head-composition",
           "talking-head-visual-focus",
           "talking-head-explainer",
@@ -5411,6 +5484,7 @@
         "viral-ip-video-editing",
         "retention-editing",
         "explainable-knowledge-editing",
+        "generated-video-inserts",
         "semantic-master-variants",
         "retention-experiments",
         "independent-validation",
@@ -5553,7 +5627,7 @@
         },
         {
           "role": "edit_decision_list",
-          "path": "output/edit_decision_list.json",
+          "path": "output/edit-decision-list.json",
           "mime_type": "application/json",
           "required": false
         },
@@ -5572,6 +5646,24 @@
         {
           "role": "composition_lint",
           "path": "output/composition-lint.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "generated_video_manifest",
+          "path": "output/generated-video-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "generated_video_review",
+          "path": "output/generated-video-review.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "generated_video_lint",
+          "path": "output/generated-video-lint.json",
           "mime_type": "application/json",
           "required": true
         },
@@ -5777,7 +5869,7 @@
           "role": "progress_state",
           "path": "output/progress-state.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "quality_evidence",
@@ -5788,6 +5880,18 @@
         {
           "role": "sync_evidence",
           "path": "output/sync-evidence.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "audio_content_check",
+          "path": "output/audio-content-check.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "final_audio_transcript",
+          "path": "output/final-audio-transcript.json",
           "mime_type": "application/json",
           "required": true
         }
@@ -5811,6 +5915,23 @@
         {
           "id": "final_delivery",
           "trigger": "output/final.mp4",
+          "required": [
+            "output/edit-decision-list.json",
+            "output/composition-lint.json",
+            "output/generated-video-manifest.json",
+            "output/generated-video-review.json",
+            "output/generated-video-lint.json",
+            "output/final-audio-transcript.json",
+            "output/audio-content-check.json",
+            "output/sync-evidence.json",
+            "output/quality-evidence.json",
+            "output/progress-state.json",
+            "output/generated-video-manifest.json",
+            "output/generated-video-review.json",
+            "output/generated-video-lint.json",
+            "output/independent-validation-plan.json",
+            "output/independent-validation.json"
+          ],
           "terminal": true
         }
       ],
@@ -5926,6 +6047,26 @@
           "mime_type": "video/mp4"
         },
         {
+          "role": "generated_video_manifest",
+          "path": "output/generated-video-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "final_audio_transcript",
+          "path": "output/final-audio-transcript.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "generated_video_review",
+          "path": "output/generated-video-review.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "generated_video_lint",
+          "path": "output/generated-video-lint.json",
+          "mime_type": "application/json"
+        },
+        {
           "role": "cover",
           "path": "output/cover.png",
           "mime_type": "image/png"
@@ -5941,8 +6082,18 @@
           "mime_type": "application/json"
         },
         {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json"
+        },
+        {
           "role": "sync_evidence",
           "path": "output/sync-evidence.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "audio_content_check",
+          "path": "output/audio-content-check.json",
           "mime_type": "application/json"
         },
         {
@@ -5962,7 +6113,7 @@
         }
       ],
       "ui": {},
-      "digest": "632b2bb33a536c0eefd0b874fcf1d8b614ba4f0376769433f36885aa73edafd2"
+      "digest": "9170d0d3b1556ca7002b1b001d27c1347d97debc06c1f029020a01f1669e1805"
     },
     {
       "id": "wechat-article",
