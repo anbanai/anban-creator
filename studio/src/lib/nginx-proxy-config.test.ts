@@ -52,4 +52,53 @@ describe('Studio nginx backend proxy contract', () => {
     expect(mcpLocation).toContain('proxy_send_timeout 1h;')
     expect(mcpLocation).not.toContain('proxy_set_header Authorization')
   })
+
+  it('serves the Archestra web app on its own host instead of a sub-path', () => {
+    const template = readFileSync('default.conf.template', 'utf8')
+    const dockerfile = readFileSync('../deploy/docker/Dockerfile.studio', 'utf8')
+    const deployment = readFileSync('Deployment.yaml', 'utf8').replace(/\r\n/g, '\n')
+    const archestraServer = template.match(
+      /server_name \$\{ARCHESTRA_PUBLIC_HOST\};([\s\S]*?)\n\}/,
+    )?.[1]
+
+    // Next.js emits root-absolute URLs, so the proxy must own a hostname.
+    expect(archestraServer).toBeDefined()
+    expect(archestraServer).toContain(
+      'proxy_pass http://${ARCHESTRA_HOST}:${ARCHESTRA_PORT};',
+    )
+    expect(archestraServer).toContain('client_max_body_size 200m;')
+    expect(archestraServer).toContain('proxy_set_header Upgrade $http_upgrade;')
+    expect(archestraServer).toContain(
+      'proxy_set_header Connection $archestra_connection_upgrade;',
+    )
+    expect(archestraServer).toContain(
+      'proxy_set_header X-Forwarded-Proto ${ARCHESTRA_PUBLIC_SCHEME};',
+    )
+    expect(archestraServer).toContain('proxy_buffering off;')
+    expect(archestraServer).toContain('proxy_cache off;')
+    expect(archestraServer).toContain('proxy_read_timeout 1h;')
+    expect(archestraServer).toContain('proxy_send_timeout 1h;')
+
+    // /archestra remains an entry URL, but only as a redirect to that host.
+    expect(template).toContain('location ~ ^/archestra/?$ {')
+    expect(template).toContain(
+      'return 302 ${ARCHESTRA_PUBLIC_SCHEME}://${ARCHESTRA_PUBLIC_HOST}/;',
+    )
+
+    expect(dockerfile).toContain('ENV ARCHESTRA_HOST=127.0.0.1')
+    expect(dockerfile).toContain('ENV ARCHESTRA_PORT=3000')
+    expect(dockerfile).toContain('ENV ARCHESTRA_PUBLIC_SCHEME=http')
+    expect(dockerfile).toContain('ENV ARCHESTRA_PUBLIC_HOST=archestra.localhost')
+
+    expect(deployment).toContain(
+      '- name: ARCHESTRA_HOST\n              value: archestra-platform.anbanai-prod.svc.cluster.local',
+    )
+    expect(deployment).toContain('- name: ARCHESTRA_PORT\n              value: "3000"')
+    expect(deployment).toContain(
+      '- name: ARCHESTRA_PUBLIC_SCHEME\n              value: https',
+    )
+    expect(deployment).toContain(
+      '- name: ARCHESTRA_PUBLIC_HOST\n              value: archestra.anbanai.com',
+    )
+  })
 })

@@ -30,6 +30,17 @@ spec:
               value: https
             - name: BACKEND_PORT
               value: "8443"
+            # Archestra Service. This cluster installs the release in
+            # anbanai-prod, not the deploy.sh default archestra namespace.
+            # nginx resolves this name at startup, so it must stay resolvable.
+            - name: ARCHESTRA_HOST
+              value: archestra-platform.anbanai-prod.svc.cluster.local
+            - name: ARCHESTRA_PORT
+              value: "3000"
+            - name: ARCHESTRA_PUBLIC_SCHEME
+              value: https
+            - name: ARCHESTRA_PUBLIC_HOST
+              value: archestra.anbanai.com
             - name: aliyun_logs_log-${micro_service_name}-${version_switch}_logstore
               value: ${log_store}
             - name: aliyun_logs_log-${micro_service_name}-${version_switch}

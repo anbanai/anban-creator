@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import http from 'node:http'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,7 +14,9 @@ test('Nginx protects share routes after path normalization and SPA fallback', as
   try {
     await writeFile(join(directory, 'upstream.conf'), 'server { listen 8081; access_log off; location / { default_type application/json; return 200 \'{"ok":true}\'; } }\n')
     docker('run', '-d', '--rm', '--pull=never', '--name', name, '-p', '127.0.0.1::80',
-      '-e', 'BACKEND_SCHEME=http', '-e', 'BACKEND_HOST=127.0.0.1', '-e', 'BACKEND_PORT=8081', '-e', 'NGINX_ENVSUBST_FILTER=BACKEND_',
+      '-e', 'BACKEND_SCHEME=http', '-e', 'BACKEND_HOST=127.0.0.1', '-e', 'BACKEND_PORT=8081',
+      '-e', 'ARCHESTRA_HOST=127.0.0.1', '-e', 'ARCHESTRA_PORT=8081', '-e', 'ARCHESTRA_PUBLIC_SCHEME=http', '-e', 'ARCHESTRA_PUBLIC_HOST=archestra.test',
+      '-e', 'NGINX_ENVSUBST_FILTER=BACKEND_|ARCHESTRA_',
       '-v', `${fileURLToPath(new URL('../default.conf.template', import.meta.url))}:/etc/nginx/templates/default.conf.template:ro`,
       '-v', `${join(directory, 'upstream.conf')}:/etc/nginx/conf.d/upstream.conf:ro`, 'nginx:1.24-alpine')
     const address = docker('port', name, '80/tcp').trim()
@@ -55,6 +58,23 @@ test('Nginx protects share routes after path normalization and SPA fallback', as
     assert.equal(ordinary.status, 200)
     assert.equal(ordinary.headers.get('x-robots-tag'), null)
     await ordinary.text()
+
+    // The Archestra host must reach the Archestra upstream, while /archestra on
+    // the Studio host only redirects there (Next.js needs a root path).
+    const archestraResponse = await new Promise((resolve, reject) => {
+      const request = http.request(`${base}/`, { headers: { Host: 'archestra.test' } }, resolve)
+      request.on('error', reject)
+      request.end()
+    })
+    assert.equal(archestraResponse.statusCode, 200)
+    let archestraBody = ''
+    for await (const chunk of archestraResponse) archestraBody += chunk
+    assert.deepEqual(JSON.parse(archestraBody), { ok: true })
+
+    const redirect = await fetch(`${base}/archestra`, { redirect: 'manual' })
+    assert.equal(redirect.status, 302)
+    assert.equal(redirect.headers.get('location'), 'http://archestra.test/')
+
     const logs = docker('logs', name)
     assert.match(logs, /GET \/plugins\?ordinary-log-control=1 HTTP\/1.1/, 'ordinary requests must remain logged')
     assert.doesNotMatch(logs, /private-share-/, 'normalized share paths must never expose tokens in access logs')

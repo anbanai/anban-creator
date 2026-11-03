@@ -45,6 +45,14 @@ ENV BACKEND_HOST=server
 ENV BACKEND_SCHEME=http
 ENV BACKEND_PORT=8080
 
+# Archestra web app upstream. The loopback default lets a local image start
+# without an Archestra service; ACK points these at the Archestra Service and
+# the public hostname it is served on.
+ENV ARCHESTRA_HOST=127.0.0.1
+ENV ARCHESTRA_PORT=3000
+ENV ARCHESTRA_PUBLIC_SCHEME=http
+ENV ARCHESTRA_PUBLIC_HOST=archestra.localhost
+
 # nginx config reverse-proxies /api (incl. SSE) and /ws to the backend.
 COPY studio/default.conf.template /etc/nginx/templates/default.conf.template
 
