@@ -3537,13 +3537,13 @@
           "role": "independent_validation_plan",
           "path": "output/independent-validation-plan.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "independent_validation",
           "path": "output/independent-validation.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "retention_results",
@@ -4086,7 +4086,7 @@
       "ui": {
         "renderer": "custom:talking-head-montage"
       },
-      "digest": "fdd5227241d4bd668bf0229dce8f9c19e622fb2f382a1f03a354d4dd974c74dc"
+      "digest": "815db567bbcde12aadb74a943661253b13a2c35607d4ecb1d328edeba465c379"
     },
     {
       "id": "topic-radar",
@@ -5533,13 +5533,13 @@
           "role": "independent_validation_plan",
           "path": "output/independent-validation-plan.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "independent_validation",
           "path": "output/independent-validation.json",
           "mime_type": "application/json",
-          "required": false
+          "required": true
         },
         {
           "role": "retention_results",
@@ -5926,9 +5926,6 @@
             "output/sync-evidence.json",
             "output/quality-evidence.json",
             "output/progress-state.json",
-            "output/generated-video-manifest.json",
-            "output/generated-video-review.json",
-            "output/generated-video-lint.json",
             "output/independent-validation-plan.json",
             "output/independent-validation.json"
           ],
@@ -6113,7 +6110,7 @@
         }
       ],
       "ui": {},
-      "digest": "b3443e99ce18c86a0036200001fa165d5497692d785a3e7f854e78a92dd691ab"
+      "digest": "7feeee339869aad8290657824f79d9849189247e74bd45193e3b6a5ff0f800ea"
     },
     {
       "id": "wechat-article",

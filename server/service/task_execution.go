@@ -112,7 +112,7 @@ func validateVideoEditCompletionArtifacts(task *model.Task, files []*model.TaskF
 }
 
 func validateTalkingHeadEditorCompletionArtifacts(task *model.Task, files []*model.TaskFile) agent.ArtifactValidation {
-	finalRequired := []string{"output/final.mp4", "output/edit-decision-list.json", "output/composition-lint.json", "output/transcript.json", "output/final-audio-transcript.json", "output/audio-content-check.json", "output/sync-evidence.json", "output/edit-strategy.md", "output/visual-plan.json", "output/sfx-cues.json", "output/bgm-plan.json", "output/audio-source-manifest.json", "output/delivery-manifest.json", "output/quality-evidence.json", "output/content-tags.json"}
+	finalRequired := []string{"output/final.mp4", "output/edit-decision-list.json", "output/composition-lint.json", "output/transcript.json", "output/final-audio-transcript.json", "output/audio-content-check.json", "output/sync-evidence.json", "output/generated-video-manifest.json", "output/generated-video-review.json", "output/generated-video-lint.json", "output/independent-validation-plan.json", "output/independent-validation.json", "output/progress-state.json", "output/edit-strategy.md", "output/visual-plan.json", "output/sfx-cues.json", "output/bgm-plan.json", "output/audio-source-manifest.json", "output/delivery-manifest.json", "output/quality-evidence.json", "output/content-tags.json"}
 	sampleRequired := []string{"output/rough-cut.mp4", "output/transcript.json", "output/edit-decision-list.json", "output/edit-strategy.md", "output/semantic-cut.mp4", "output/motion-sample.mp4", "output/visual-plan.json", "output/motion-review.json", "output/motion-source-manifest.json"}
 	present := map[string]bool{}
 	for _, file := range files {
