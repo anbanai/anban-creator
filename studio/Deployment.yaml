@@ -125,6 +125,11 @@ metadata:
   namespace: ${namespace}
   labels:
     app: ${micro_service_name}
+  annotations:
+    # Attach the rule to the existing HTTPS listener only. The ALB already
+    # serves the *.anbanai.com certificate there; HTTP stays unrouted for
+    # this admin UI.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS": 443}]'
 spec:
   ingressClassName: alb
   rules:

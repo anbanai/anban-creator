@@ -95,12 +95,13 @@ Studio 的 SPA fallback、`/api/`、`/mcp`、`/ws` 冲突，仅靠 nginx 前缀�
 1. 直接发布 Studio 流水线（`creator.anbanai.com-prod`，构建
    `deploy/docker/Dockerfile.studio`）。`studio/Deployment.yaml` 里的 Ingress
    会创建/更新 `archestra.anbanai.com` 的 ALB 规则，不需要再进 ALB 控制台。
-   滚动期间旧 Pod 可能短暂返回 Studio 页面，等 rollout 完成即可。ACK 默认
-   IngressClass 是 `alb`（`kubectl get ingressclass` 可确认）；如果集群改过
-   名字，同步修改 Ingress 的 `ingressClassName`。如果现有 Studio Ingress
-   显式绑定了 `alb.ingress.kubernetes.io/load-balancer-id`，把同样的
-   annotation 补到新 Ingress 上，确保复用同一个 ALB；如果 443 没生效，把
-   现有 Ingress 的 `spec.tls` 或 `certificate-id` 注解同步过来。
+   Ingress 通过 `listen-ports: '[{"HTTPS": 443}]'` 只挂 HTTPS，不暴露 HTTP；
+   443 监听器已有 `*.anbanai.com` 证书。滚动期间旧 Pod 可能短暂返回 Studio
+   页面，等 rollout 完成即可。ACK 默认 IngressClass 是 `alb`
+   （`kubectl get ingressclass` 可确认）；如果集群改过名字，同步修改 Ingress
+   的 `ingressClassName`。如果现有 Studio Ingress 显式绑定了
+   `alb.ingress.kubernetes.io/load-balancer-id`，把同样的 annotation 补到新
+   Ingress 上，确保复用同一个 ALB。
 2. 设置 Archestra 的公开地址并重新执行部署脚本：
 
    ```bash
