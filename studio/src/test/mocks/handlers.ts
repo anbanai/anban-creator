@@ -67,6 +67,17 @@ export const mockBillingTransactions: BillingTransactions = {
 export const mockMontageCapabilities: MontageCapabilityListResponse = {
   enabled: true,
   default_pipeline: 'cinematic',
+  default_output_profile: 'tiktok',
+  output_profiles: [
+    { key: 'youtube_landscape', display_name: 'YouTube 横版', width: 1920, height: 1080, aspect_ratio: '16:9' },
+    { key: 'youtube_4k', display_name: 'YouTube 4K', width: 3840, height: 2160, aspect_ratio: '16:9' },
+    { key: 'youtube_shorts', display_name: 'YouTube Shorts', width: 1080, height: 1920, aspect_ratio: '9:16' },
+    { key: 'instagram_reels', display_name: 'Instagram Reels', width: 1080, height: 1920, aspect_ratio: '9:16' },
+    { key: 'instagram_feed', display_name: 'Instagram Feed', width: 1080, height: 1080, aspect_ratio: '1:1' },
+    { key: 'tiktok', display_name: 'TikTok', width: 1080, height: 1920, aspect_ratio: '9:16' },
+    { key: 'linkedin', display_name: 'LinkedIn', width: 1920, height: 1080, aspect_ratio: '16:9' },
+    { key: 'cinematic', display_name: '电影宽银幕', width: 2560, height: 1080, aspect_ratio: '21:9' },
+  ],
   max_duration_seconds: 600,
   max_assets: 20,
   items: [

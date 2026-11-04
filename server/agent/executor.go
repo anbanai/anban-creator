@@ -66,6 +66,15 @@ func BuildUserPrompt(p UserPromptParams) string {
 		topic := p.Topic
 		if model.IsMontagePlatform(p.TaskType) {
 			topic = strings.ReplaceAll(strings.ReplaceAll(topic, "\r\n", "\n"), "\r", "\n")
+			lines := strings.Split(topic, "\n")
+			kept := lines[:0]
+			for _, line := range lines {
+				if strings.HasPrefix(strings.TrimSpace(line), "Video aspect ratio:") {
+					continue
+				}
+				kept = append(kept, line)
+			}
+			topic = strings.Join(kept, "\n")
 			topic = strings.ReplaceAll(topic, "\n", "\n> ")
 		}
 		base = fmt.Sprintf("Run the full %s creation workflow; create content about: %s", p.TaskType, topic)
@@ -78,7 +87,7 @@ func BuildUserPrompt(p UserPromptParams) string {
 		if p.HasReferenceImage {
 			materialReference = "Video material reference: " + TaskReferenceImagePath
 		}
-		base += "\n\nVideo aspect ratio: " + p.ImageRatio + "\n" + materialReference
+		base += "\n\n" + materialReference
 	}
 	if p.TaskID != "" || p.ProjectID != "" {
 		parts := make([]string, 0, 2)
@@ -287,12 +296,41 @@ func writeMontageInputJSON(workDir string, task *model.Task) error {
 		return nil
 	}
 	input := task.MontageInput.Data()
+	if err := validateFrozenMontageInput(input); err != nil {
+		return fmt.Errorf("invalid frozen montage input: %w", err)
+	}
 	data, err := json.MarshalIndent(input, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal montage input: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(workDir, "montage-input.json"), data, 0o644); err != nil {
 		return fmt.Errorf("write montage-input.json: %w", err)
+	}
+	return nil
+}
+
+func validateFrozenMontageInput(input model.MontageInput) error {
+	if !model.IsPinnedMontagePipeline(strings.TrimSpace(input.PipelineKey)) || strings.TrimSpace(input.PipelineKey) == "framework-smoke" {
+		return fmt.Errorf("pipeline_key is missing or not in the pinned catalog")
+	}
+	style := strings.TrimSpace(input.Preferences.PlaybookKey)
+	if !model.IsPinnedMontagePlaybook(style) {
+		return fmt.Errorf("playbook_key is not in the pinned catalog")
+	}
+	profile := input.OutputProfile
+	if profile == nil {
+		return fmt.Errorf("output_profile is required")
+	}
+	var known model.MontageOutputProfile
+	ok := false
+	for _, item := range model.PinnedMontageOutputProfiles() {
+		if item.Key == profile.Key {
+			known, ok = item, true
+			break
+		}
+	}
+	if !ok || input.OutputProfileKey != profile.Key || profile.Width != known.Width || profile.Height != known.Height || profile.AspectRatio != known.AspectRatio {
+		return fmt.Errorf("output_profile does not match a pinned profile")
 	}
 	return nil
 }

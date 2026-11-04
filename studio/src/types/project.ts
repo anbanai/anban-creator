@@ -152,6 +152,7 @@ export interface EcommerceProjectDefaults {
 
 export interface MontageProjectDefaults {
   default_pipeline?: string
+  output_profile_key?: string
   preferences?: MontagePreferences
   asset_guidance?: string
   delivery_targets?: string[]

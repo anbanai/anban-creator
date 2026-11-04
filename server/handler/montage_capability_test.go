@@ -54,8 +54,11 @@ func TestMontageCapabilityHandlerListReturnsPublicCatalog(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		t.Fatal(err)
 	}
-	if !envelope.Data.Enabled || envelope.Data.DefaultPipeline != "cinematic" || len(envelope.Data.Items) != 2 {
+	if !envelope.Data.Enabled || envelope.Data.DefaultPipeline != "cinematic" || len(envelope.Data.Items) != 13 || len(envelope.Data.Styles) == 0 || len(envelope.Data.OutputProfiles) != 8 || envelope.Data.DefaultOutputProfile != "tiktok" {
 		t.Fatalf("catalog = %#v", envelope.Data)
+	}
+	if envelope.Data.Items[7].Key != "framework-smoke" || envelope.Data.Items[7].Available {
+		t.Fatalf("internal framework pipeline must be visible but unavailable: %#v", envelope.Data.Items[7])
 	}
 	payload, err := json.Marshal(envelope.Data)
 	if err != nil {

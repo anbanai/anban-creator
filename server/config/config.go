@@ -853,7 +853,7 @@ func (c *MontageConfig) ApplyDefaults() {
 		c.DefaultPipeline = "cinematic"
 	}
 	if len(c.AllowedPipelines) == 0 {
-		c.AllowedPipelines = []string{"cinematic", "talking-head", "screen-demo", "clip-factory"}
+		c.AllowedPipelines = []string{"animated-explainer", "animation", "avatar-spokesperson", "character-animation", "cinematic", "clip-factory", "documentary-montage", "framework-smoke", "hybrid", "localization-dub", "podcast-repurpose", "screen-demo", "talking-head"}
 	}
 	if c.MaxDurationSeconds <= 0 {
 		c.MaxDurationSeconds = 600

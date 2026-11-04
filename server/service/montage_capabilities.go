@@ -107,14 +107,26 @@ type MontagePipelineCapability struct {
 	SourceRequirement          MontageSourceRequirement `json:"source_requirement"`
 	OutputMode                 MontageOutputMode        `json:"output_mode"`
 	RecommendedDurationSeconds int64                    `json:"recommended_duration_seconds"`
+	Available                  bool                     `json:"available"`
+	Stability                  string                   `json:"stability"`
+	AvailabilityReason         string                   `json:"availability_reason,omitempty"`
 }
 
 type MontageCapabilityCatalog struct {
-	Enabled            bool                        `json:"enabled"`
-	DefaultPipeline    string                      `json:"default_pipeline"`
-	MaxDurationSeconds int64                       `json:"max_duration_seconds"`
-	MaxAssets          int                         `json:"max_assets"`
-	Items              []MontagePipelineCapability `json:"items"`
+	Enabled              bool                         `json:"enabled"`
+	DefaultPipeline      string                       `json:"default_pipeline"`
+	MaxDurationSeconds   int64                        `json:"max_duration_seconds"`
+	MaxAssets            int                          `json:"max_assets"`
+	Items                []MontagePipelineCapability  `json:"items"`
+	Styles               []MontageStyleCapability     `json:"styles"`
+	OutputProfiles       []model.MontageOutputProfile `json:"output_profiles"`
+	DefaultOutputProfile string                       `json:"default_output_profile"`
+}
+
+type MontageStyleCapability struct {
+	Key         string `json:"key"`
+	DisplayName string `json:"display_name"`
+	Description string `json:"description"`
 }
 
 type MontageCapabilityService struct {
@@ -125,64 +137,93 @@ func NewMontageCapabilityService(cfg serverconfig.MontageConfig) *MontageCapabil
 	return &MontageCapabilityService{config: cfg}
 }
 
-var montagePipelineCapabilities = map[string]MontagePipelineCapability{
-	"cinematic": {
-		Key: "cinematic", DisplayName: "电影感制作", Description: "品牌片、预告片与情绪叙事",
-		BestFor:    []string{"品牌发布", "概念预告", "氛围短片"},
-		SourceHint: "可使用视频、图片，也可仅根据创意说明生成", OutputHint: "一条完整成片",
-		SourceRequirement: MontageSourceRequirementOptional, OutputMode: MontageOutputModeSingle, RecommendedDurationSeconds: 30,
-	},
-	"talking-head": {
-		Key: "talking-head", DisplayName: "口播精剪", Description: "人物讲解、访谈与课程内容",
-		BestFor:    []string{"人物口播", "课程讲解", "采访精剪"},
-		SourceHint: "需要一段包含人物讲话的原始视频", OutputHint: "一条带字幕的精剪视频",
-		SourceRequirement: MontageSourceRequirementVideo, OutputMode: MontageOutputModeSingle, RecommendedDurationSeconds: 60,
-	},
-	"screen-demo": {
-		Key: "screen-demo", DisplayName: "屏幕演示", Description: "产品教程、软件操作与终端流程",
-		BestFor:    []string{"产品演示", "使用教程", "终端操作"},
-		SourceHint: "可上传屏幕录制，或在说明中给出可复现的操作步骤", OutputHint: "一条清晰的演示视频",
-		SourceRequirement: MontageSourceRequirementOptional, OutputMode: MontageOutputModeSingle, RecommendedDurationSeconds: 60,
-	},
-	"clip-factory": {
-		Key: "clip-factory", DisplayName: "长视频拆条", Description: "从直播、播客或访谈中提炼短视频",
-		BestFor:    []string{"长视频拆条", "播客拆条", "访谈精选"},
-		SourceHint: "需要一段长视频或音频作为拆条来源", OutputHint: "多条可独立发布的短视频",
-		SourceRequirement: MontageSourceRequirementVideoOrAudio, OutputMode: MontageOutputModeMultiple, RecommendedDurationSeconds: 45,
-	},
+// These catalogs describe the YAML files shipped by the pinned OpenMontage
+// revision in deploy/docker/Dockerfile.agent-montage.
+var pinnedMontagePipelines = []MontagePipelineCapability{
+	{Key: "animated-explainer", DisplayName: "动画知识讲解", Description: "AI 生成画面、旁白和音乐的知识讲解", BestFor: []string{"知识科普", "教育讲解"}, SourceHint: "可从 brief 开始", OutputHint: "讲解视频", SourceRequirement: MontageSourceRequirementOptional, OutputMode: MontageOutputModeSingle, RecommendedDurationSeconds: 60, Stability: "production"},
+	{Key: "animation", DisplayName: "动画制作", Description: "图解、动态图形、文字动画与插画序列", BestFor: []string{"动画短片", "技术图解"}, SourceHint: "可从 brief 开始", OutputHint: "动画视频", SourceRequirement: MontageSourceRequirementOptional, OutputMode: MontageOutputModeSingle, RecommendedDurationSeconds: 60, Stability: "production"},
+	{Key: "avatar-spokesperson", DisplayName: "数字人讲解", Description: "以数字人讲解为主，搭配简洁辅助图形", BestFor: []string{"产品讲解", "品牌介绍"}, SourceHint: "提供讲解主题或脚本", OutputHint: "数字人讲解视频", SourceRequirement: MontageSourceRequirementOptional, OutputMode: MontageOutputModeSingle, RecommendedDurationSeconds: 60, Stability: "production"},
+	{Key: "character-animation", DisplayName: "角色动画", Description: "生成可复用角色与本地动画场景", BestFor: []string{"角色故事", "动画内容"}, SourceHint: "可提供角色参考素材", OutputHint: "角色动画视频", SourceRequirement: MontageSourceRequirementOptional, OutputMode: MontageOutputModeSingle, RecommendedDurationSeconds: 60, Stability: "beta"},
+	{Key: "cinematic", DisplayName: "电影感制作", Description: "情绪驱动的预告片、品牌片和蒙太奇", BestFor: []string{"品牌发布", "概念预告", "氛围短片"}, SourceHint: "适合已有视频、图片或创意说明", OutputHint: "一条完整成片", SourceRequirement: MontageSourceRequirementOptional, OutputMode: MontageOutputModeSingle, RecommendedDurationSeconds: 30, Stability: "production"},
+	{Key: "clip-factory", DisplayName: "长视频拆条", Description: "从长视频、直播或访谈制作多条短片", BestFor: []string{"直播拆条", "播客精选"}, SourceHint: "需要视频或音频素材", OutputHint: "多条短视频", SourceRequirement: MontageSourceRequirementVideoOrAudio, OutputMode: MontageOutputModeMultiple, RecommendedDurationSeconds: 45, Stability: "beta"},
+	{Key: "documentary-montage", DisplayName: "纪录片蒙太奇", Description: "检索真实影像素材并构建主题叙事", BestFor: []string{"人物故事", "品牌纪录"}, SourceHint: "可提供研究主题或实拍素材", OutputHint: "纪录片风格成片", SourceRequirement: MontageSourceRequirementOptional, OutputMode: MontageOutputModeSingle, RecommendedDurationSeconds: 90, Stability: "beta"},
+	{Key: "framework-smoke", DisplayName: "框架验证", Description: "用于内部验证流水线框架合同，不生成正式成片", BestFor: []string{"内部验证"}, SourceHint: "仅限开发验证", OutputHint: "验证产物", SourceRequirement: MontageSourceRequirementOptional, OutputMode: MontageOutputModeSingle, RecommendedDurationSeconds: 10, Stability: "beta", Available: false, AvailabilityReason: "仅供内部验证"},
+	{Key: "hybrid", DisplayName: "混合创作", Description: "结合实拍素材与图形、生成媒体或信息叠层", BestFor: []string{"综合创作", "产品与品牌内容"}, SourceHint: "支持视频、图片、音频与 brief", OutputHint: "完整创作成片", SourceRequirement: MontageSourceRequirementOptional, OutputMode: MontageOutputModeSingle, RecommendedDurationSeconds: 60, Stability: "production"},
+	{Key: "localization-dub", DisplayName: "本地化配音", Description: "翻译现有视频并生成字幕、配音或口型版本", BestFor: []string{"多语言版本", "配音本地化"}, SourceHint: "需要原始视频与目标语言说明", OutputHint: "本地化视频", SourceRequirement: MontageSourceRequirementVideo, OutputMode: MontageOutputModeSingle, RecommendedDurationSeconds: 60, Stability: "beta"},
+	{Key: "podcast-repurpose", DisplayName: "播客再创作", Description: "将播客音频转为字幕、金句和社交视频", BestFor: []string{"播客视频", "音频内容"}, SourceHint: "需要播客音频或视频", OutputHint: "视频内容与拆条", SourceRequirement: MontageSourceRequirementVideoOrAudio, OutputMode: MontageOutputModeMultiple, RecommendedDurationSeconds: 60, Stability: "beta"},
+	{Key: "screen-demo", DisplayName: "屏幕演示", Description: "屏幕录制讲解或模拟终端操作教程", BestFor: []string{"产品演示", "软件教程"}, SourceHint: "可上传录屏或描述操作步骤", OutputHint: "带重点标注的演示视频", SourceRequirement: MontageSourceRequirementOptional, OutputMode: MontageOutputModeSingle, RecommendedDurationSeconds: 60, Stability: "production"},
+	{Key: "talking-head", DisplayName: "口播精剪", Description: "转写人物讲话、剪辑停顿并整理字幕音频", BestFor: []string{"人物口播", "课程讲解", "采访精剪"}, SourceHint: "需要一段人物讲话视频", OutputHint: "带字幕的精剪视频", SourceRequirement: MontageSourceRequirementVideo, OutputMode: MontageOutputModeSingle, RecommendedDurationSeconds: 60, Stability: "beta"},
 }
 
-func customMontagePipelineCapability(key string) MontagePipelineCapability {
-	return MontagePipelineCapability{
-		Key: key, DisplayName: key, Description: "自定义视频工作流",
-		BestFor: []string{"团队自定义制作流程"}, SourceHint: "根据工作流要求添加图片、视频或音频素材",
-		OutputHint: "按自定义工作流生成视频", SourceRequirement: MontageSourceRequirementOptional,
-		OutputMode: MontageOutputModeSingle, RecommendedDurationSeconds: 30,
-	}
+var montageStyles = []MontageStyleCapability{
+	{Key: "anime-ghibli", DisplayName: "动画电影感", Description: "柔和手绘质感与叙事画面"},
+	{Key: "clean-professional", DisplayName: "专业简洁", Description: "清晰克制，适合企业与教育"},
+	{Key: "flat-motion-graphics", DisplayName: "扁平动态图形", Description: "明快图形与社交媒体节奏"},
+	{Key: "minimalist-diagram", DisplayName: "极简图解", Description: "用结构化图形讲清复杂概念"},
+	{Key: "premium-minimalist", DisplayName: "高端极简", Description: "留白、精炼文字与高级质感"},
 }
+
+var montageOutputProfiles = model.PinnedMontageOutputProfiles()
 
 func (s *MontageCapabilityService) Catalog() MontageCapabilityCatalog {
 	catalog := MontageCapabilityCatalog{
 		Enabled: s.config.Enabled, DefaultPipeline: strings.TrimSpace(s.config.DefaultPipeline),
 		MaxDurationSeconds: s.config.MaxDurationSeconds, MaxAssets: s.config.MaxAssets,
-		Items: []MontagePipelineCapability{},
+		Items: []MontagePipelineCapability{}, Styles: slices.Clone(montageStyles),
+		OutputProfiles: slices.Clone(montageOutputProfiles), DefaultOutputProfile: "tiktok",
 	}
 	if !s.config.Enabled {
 		return catalog
 	}
-	for _, rawKey := range s.config.AllowedPipelines {
-		key := strings.TrimSpace(rawKey)
-		if key == "" {
-			continue
-		}
-		item, ok := montagePipelineCapabilities[key]
-		if !ok {
-			item = customMontagePipelineCapability(key)
+	for _, item := range pinnedMontagePipelines {
+		if item.Key == "framework-smoke" {
+			item.Available = false
+			item.AvailabilityReason = "仅供内部验证"
+		} else {
+			item.Available = s.pipelineAllowed(item.Key)
+			if !item.Available {
+				item.AvailabilityReason = "当前服务未启用此模板"
+			}
 		}
 		item.BestFor = slices.Clone(item.BestFor)
 		catalog.Items = append(catalog.Items, item)
 	}
 	return catalog
+}
+
+func (s *MontageCapabilityService) pipelineAllowed(key string) bool {
+	if key == "" || key == "framework-smoke" {
+		return false
+	}
+	pinned := false
+	for _, item := range pinnedMontagePipelines {
+		if item.Key == key {
+			pinned = true
+			break
+		}
+	}
+	if !pinned {
+		return false
+	}
+	for _, allowed := range s.config.AllowedPipelines {
+		if strings.TrimSpace(allowed) == key {
+			return true
+		}
+	}
+	return false
+}
+
+func montageOutputProfile(key string) (model.MontageOutputProfile, bool) {
+	for _, profile := range montageOutputProfiles {
+		if profile.Key == key {
+			return profile, true
+		}
+	}
+	return model.MontageOutputProfile{}, false
+}
+
+func montageStyleExists(key string) bool {
+	return model.IsPinnedMontagePlaybook(key)
 }
 
 func (s *MontageCapabilityService) NormalizeAndValidateInput(input *model.MontageInput, defaults model.MontageDefaults) error {
@@ -194,14 +235,19 @@ func (s *MontageCapabilityService) NormalizeAndValidateInput(input *model.Montag
 	if input.PipelineKey == "" {
 		input.PipelineKey = strings.TrimSpace(defaults.DefaultPipeline)
 	}
+	input.OutputProfileKey = strings.TrimSpace(input.OutputProfileKey)
+	if input.OutputProfileKey == "" {
+		input.OutputProfileKey = strings.TrimSpace(defaults.OutputProfileKey)
+	}
+	input.Preferences.PlaybookKey = strings.TrimSpace(input.Preferences.PlaybookKey)
+	if input.Preferences.PlaybookKey == "" {
+		input.Preferences.PlaybookKey = strings.TrimSpace(defaults.Preferences.PlaybookKey)
+	}
 	if input.PipelineKey == "" {
 		input.PipelineKey = strings.TrimSpace(s.config.DefaultPipeline)
 	}
 	if input.Preferences.DurationSeconds == 0 {
 		input.Preferences.DurationSeconds = defaults.Preferences.DurationSeconds
-	}
-	if input.Preferences.Style == "" {
-		input.Preferences.Style = defaults.Preferences.Style
 	}
 	if input.Preferences.MusicPrompt == "" {
 		input.Preferences.MusicPrompt = defaults.Preferences.MusicPrompt
@@ -229,6 +275,17 @@ func (s *MontageCapabilityService) NormalizeAndValidateInput(input *model.Montag
 	if !allowed {
 		return fmt.Errorf("%w: pipeline_key %q is not allowed", ErrMontageInput, input.PipelineKey)
 	}
+	if !montageStyleExists(input.Preferences.PlaybookKey) {
+		return fmt.Errorf("%w: playbook_key %q is not available", ErrMontageInput, input.Preferences.PlaybookKey)
+	}
+	if input.OutputProfileKey == "" {
+		input.OutputProfileKey = "tiktok"
+	}
+	profile, ok := montageOutputProfile(input.OutputProfileKey)
+	if !ok {
+		return fmt.Errorf("%w: output_profile_key %q is not available", ErrMontageInput, input.OutputProfileKey)
+	}
+	input.OutputProfile = &profile
 	if input.Preferences.DurationSeconds < 1 || input.Preferences.DurationSeconds > s.config.MaxDurationSeconds {
 		return fmt.Errorf("%w: duration_seconds must be between 1 and %d", ErrMontageInput, s.config.MaxDurationSeconds)
 	}
@@ -250,6 +307,14 @@ func (s *MontageCapabilityService) ValidateProjectDefaults(defaults model.Montag
 		if _, allowed := s.pipeline(key); !allowed {
 			return fmt.Errorf("%w: default_pipeline %q is not allowed", ErrProjectMontageDefaults, key)
 		}
+	}
+	if defaults.OutputProfileKey != "" {
+		if _, ok := montageOutputProfile(defaults.OutputProfileKey); !ok {
+			return fmt.Errorf("%w: output_profile_key %q is not available", ErrProjectMontageDefaults, defaults.OutputProfileKey)
+		}
+	}
+	if !montageStyleExists(defaults.Preferences.PlaybookKey) {
+		return fmt.Errorf("%w: playbook_key %q is not available", ErrProjectMontageDefaults, defaults.Preferences.PlaybookKey)
 	}
 	duration := defaults.Preferences.DurationSeconds
 	if duration < 0 || duration > s.config.MaxDurationSeconds {
@@ -431,21 +496,20 @@ func montageSourceTaskFileTypeMatches(assetType, rawMIME string) bool {
 
 func (s *MontageCapabilityService) pipeline(key string) (MontagePipelineCapability, bool) {
 	key = strings.TrimSpace(key)
-	allowed := false
-	for _, rawKey := range s.config.AllowedPipelines {
-		if strings.TrimSpace(rawKey) == key {
-			allowed = true
-			break
+	if !s.pipelineAllowed(key) {
+		for _, item := range pinnedMontagePipelines {
+			if item.Key == key {
+				return item, false
+			}
+		}
+		return MontagePipelineCapability{}, false
+	}
+	for _, item := range pinnedMontagePipelines {
+		if item.Key == key {
+			return item, true
 		}
 	}
-	if !allowed {
-		return customMontagePipelineCapability(key), false
-	}
-	item, ok := montagePipelineCapabilities[key]
-	if !ok {
-		item = customMontagePipelineCapability(key)
-	}
-	return item, true
+	return MontagePipelineCapability{}, false
 }
 
 func validateMontageRequiredSources(requirement MontageSourceRequirement, assets []model.MontageAsset) error {

@@ -79,7 +79,8 @@ const fixtures = vi.hoisted(() => {
     image_ratio: '9:16',
     montage_defaults: {
       default_pipeline: 'cinematic',
-      preferences: { duration_seconds: 45, style: 'clean product film' },
+      output_profile_key: 'tiktok',
+      preferences: { duration_seconds: 45, playbook_key: 'clean-professional' },
       delivery_targets: ['final_video'],
     },
   } as Project
@@ -299,6 +300,18 @@ beforeEach(() => {
   vi.mocked(api.montageCapabilities.list).mockResolvedValue({
     enabled: true,
     default_pipeline: 'cinematic',
+    default_output_profile: 'tiktok',
+    output_profiles: [
+      { key: 'youtube_landscape', display_name: 'YouTube 横版', width: 1920, height: 1080, aspect_ratio: '16:9' },
+      { key: 'youtube_4k', display_name: 'YouTube 4K', width: 3840, height: 2160, aspect_ratio: '16:9' },
+      { key: 'youtube_shorts', display_name: 'YouTube Shorts', width: 1080, height: 1920, aspect_ratio: '9:16' },
+      { key: 'instagram_reels', display_name: 'Instagram Reels', width: 1080, height: 1920, aspect_ratio: '9:16' },
+      { key: 'instagram_feed', display_name: 'Instagram Feed', width: 1080, height: 1080, aspect_ratio: '1:1' },
+      { key: 'tiktok', display_name: 'TikTok', width: 1080, height: 1920, aspect_ratio: '9:16' },
+      { key: 'linkedin', display_name: 'LinkedIn', width: 1920, height: 1080, aspect_ratio: '16:9' },
+      { key: 'cinematic', display_name: '电影宽银幕', width: 2560, height: 1080, aspect_ratio: '21:9' },
+    ],
+    styles: [],
     max_duration_seconds: 600,
     max_assets: 20,
     items: [
@@ -1045,9 +1058,9 @@ describe('TaskFormDialog', () => {
 
     await selectProject(/剪辑人设/)
     expect(await within(dialog).findByRole('button', { name: /^创作参数：.*作品数量 1/ })).toBeInTheDocument()
+    expect(within(dialog).getByRole('group', { name: '成片画幅' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('radio', { name: /TikTok.*1080 × 1920/ })).toBeChecked()
     const montageParameters = await openTaskParameters(dialog)
-	  expect(within(montageParameters).getByRole('group', { name: '视频比例' })).toBeInTheDocument()
-	  expect(within(montageParameters).getByRole('button', { name: '9:16' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(montageParameters).getByLabelText('作品数量：1，当前能力上限')).toBeInTheDocument()
     expect(within(montageParameters).queryByRole('button', { name: '增加作品数量' })).not.toBeInTheDocument()
   })

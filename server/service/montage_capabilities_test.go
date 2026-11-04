@@ -16,7 +16,7 @@ func testMontageCapabilityService() *MontageCapabilityService {
 	return NewMontageCapabilityService(serverconfig.MontageConfig{
 		Enabled:            true,
 		DefaultPipeline:    "cinematic",
-		AllowedPipelines:   []string{"talking-head", "cinematic", "custom-launch", "screen-demo", "clip-factory"},
+		AllowedPipelines:   []string{"animated-explainer", "animation", "avatar-spokesperson", "character-animation", "cinematic", "clip-factory", "documentary-montage", "framework-smoke", "hybrid", "localization-dub", "podcast-repurpose", "screen-demo", "talking-head"},
 		MaxDurationSeconds: 600,
 		MaxAssets:          20,
 	})
@@ -44,29 +44,89 @@ func TestValidateMaterializableMontageSourceAssetScopesMediaLibraryAsset(t *test
 	}
 }
 
-func TestMontageCapabilityServiceCatalogUsesConfiguredOrderAndSafeFallbacks(t *testing.T) {
+func TestMontageCapabilityServiceCatalogExposesAllPinnedTemplates(t *testing.T) {
 	catalog := testMontageCapabilityService().Catalog()
 
 	if !catalog.Enabled || catalog.DefaultPipeline != "cinematic" || catalog.MaxDurationSeconds != 600 || catalog.MaxAssets != 20 {
 		t.Fatalf("catalog metadata = %#v", catalog)
 	}
-	if len(catalog.Items) != 5 {
-		t.Fatalf("catalog items = %d, want 5", len(catalog.Items))
+	wantKeys := model.PinnedMontagePipelineKeys()
+	if len(catalog.Items) != len(wantKeys) {
+		t.Fatalf("catalog items = %d, want %d", len(catalog.Items), len(wantKeys))
 	}
-	wantKeys := []string{"talking-head", "cinematic", "custom-launch", "screen-demo", "clip-factory"}
 	for i, want := range wantKeys {
 		if catalog.Items[i].Key != want {
 			t.Fatalf("catalog item %d key = %q, want %q", i, catalog.Items[i].Key, want)
 		}
 	}
-	if got := catalog.Items[0]; got.DisplayName != "口播精剪" || got.SourceRequirement != MontageSourceRequirementVideo || got.OutputMode != MontageOutputModeSingle {
+	if got := catalog.Items[12]; got.DisplayName != "口播精剪" || got.SourceRequirement != MontageSourceRequirementVideo || got.OutputMode != MontageOutputModeSingle {
 		t.Fatalf("talking-head capability = %#v", got)
 	}
-	if got := catalog.Items[2]; got.DisplayName != "custom-launch" || got.Description != "自定义视频工作流" || got.SourceRequirement != MontageSourceRequirementOptional {
-		t.Fatalf("custom capability = %#v", got)
-	}
-	if got := catalog.Items[4]; got.DisplayName != "长视频拆条" || got.SourceRequirement != MontageSourceRequirementVideoOrAudio || got.OutputMode != MontageOutputModeMultiple {
+	if got := catalog.Items[5]; got.DisplayName != "长视频拆条" || got.SourceRequirement != MontageSourceRequirementVideoOrAudio || got.OutputMode != MontageOutputModeMultiple {
 		t.Fatalf("clip-factory capability = %#v", got)
+	}
+	if catalog.Items[7].Available || catalog.Items[7].AvailabilityReason == "" {
+		t.Fatalf("framework-smoke must remain visible but unavailable: %#v", catalog.Items[7])
+	}
+}
+
+func TestMontageCapabilityServiceRejectsPinnedPipelineDisabledByConfig(t *testing.T) {
+	svc := NewMontageCapabilityService(serverconfig.MontageConfig{
+		Enabled: true, DefaultPipeline: "cinematic", AllowedPipelines: []string{"cinematic"},
+		MaxDurationSeconds: 600, MaxAssets: 20,
+	})
+	catalog := svc.Catalog()
+	var disabled bool
+	for _, item := range catalog.Items {
+		if item.Key == "hybrid" {
+			disabled = !item.Available
+		}
+	}
+	if !disabled {
+		t.Fatal("hybrid must be visible as unavailable when not enabled in config")
+	}
+	input := model.MontageInput{Brief: "test", PipelineKey: "hybrid"}
+	if err := svc.NormalizeAndValidateInput(&input, model.MontageDefaults{}); err == nil || !errors.Is(err, ErrMontageInput) {
+		t.Fatalf("NormalizeAndValidateInput error = %v, want ErrMontageInput", err)
+	}
+}
+
+func TestMontageCapabilityServiceCatalogExposesPinnedTemplatesStylesAndOutputProfiles(t *testing.T) {
+	catalog := testMontageCapabilityService().Catalog()
+	for _, key := range []string{"animated-explainer", "animation", "avatar-spokesperson", "character-animation", "documentary-montage", "hybrid", "localization-dub", "podcast-repurpose"} {
+		if _, ok := testMontageCapabilityService().pipeline(key); !ok {
+			t.Errorf("pinned pipeline %q is not available", key)
+		}
+	}
+	if len(catalog.Styles) != 5 || len(catalog.OutputProfiles) != 8 {
+		t.Fatalf("catalog styles/profiles = %d/%d, want 5/8", len(catalog.Styles), len(catalog.OutputProfiles))
+	}
+	input := model.MontageInput{Brief: "test", PipelineKey: "hybrid", OutputProfileKey: "youtube_shorts", Preferences: model.MontagePreferences{PlaybookKey: "flat-motion-graphics"}}
+	if err := testMontageCapabilityService().NormalizeAndValidateInput(&input, model.MontageDefaults{}); err != nil {
+		t.Fatalf("NormalizeAndValidateInput: %v", err)
+	}
+	if input.OutputProfile == nil || input.OutputProfile.AspectRatio != "9:16" || input.OutputProfile.Width != 1080 || input.OutputProfile.Height != 1920 {
+		t.Fatalf("resolved output profile = %#v", input.OutputProfile)
+	}
+}
+
+func TestMontageCapabilityServiceRejectsUnknownPinnedTemplateAndOutputProfile(t *testing.T) {
+	tests := []struct {
+		name  string
+		input model.MontageInput
+		want  string
+	}{
+		{name: "unknown pipeline", input: model.MontageInput{Brief: "x", PipelineKey: "user-pipeline"}, want: "pipeline_key"},
+		{name: "unknown style", input: model.MontageInput{Brief: "x", PipelineKey: "cinematic", Preferences: model.MontagePreferences{PlaybookKey: "custom-style"}}, want: "playbook_key"},
+		{name: "unknown output profile", input: model.MontageInput{Brief: "x", PipelineKey: "cinematic", OutputProfileKey: "custom-size"}, want: "output_profile_key"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := testMontageCapabilityService().NormalizeAndValidateInput(&tc.input, model.MontageDefaults{})
+			if err == nil || !errors.Is(err, ErrMontageInput) || !containsText(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want ErrMontageInput containing %q", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -105,7 +165,7 @@ func TestMontageCapabilityServiceNormalizesTaskInput(t *testing.T) {
 		DefaultPipeline: "talking-head",
 		Preferences: model.MontagePreferences{
 			DurationSeconds: 90,
-			Style:           "clean",
+			PlaybookKey:     "clean-professional",
 			SubtitleMode:    "burned_in",
 		},
 		DeliveryTargets: []string{"wechat"},
@@ -121,7 +181,7 @@ func TestMontageCapabilityServiceNormalizesTaskInput(t *testing.T) {
 	if input.Brief != "发布新品" || input.PipelineKey != "talking-head" {
 		t.Fatalf("normalized identity = %#v", input)
 	}
-	if input.Preferences.DurationSeconds != 90 || input.Preferences.Style != "clean" || input.Preferences.SubtitleMode != "burned_in" {
+	if input.Preferences.DurationSeconds != 90 || input.Preferences.PlaybookKey != "clean-professional" || input.Preferences.SubtitleMode != "burned_in" {
 		t.Fatalf("normalized preferences = %#v", input.Preferences)
 	}
 	if len(input.DeliveryTargets) != 1 || input.DeliveryTargets[0] != "wechat" {

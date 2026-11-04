@@ -40,6 +40,7 @@ import { getProjectCreationDefaults } from '@/lib/studio-ux'
 import { portraitSummary } from '@/lib/portrait-library'
 import { VideoEditProjectDefaultsPanel } from '@/components/video-edit/VideoEditProjectDefaultsPanel'
 import { TalkingHeadEditorProjectDefaultsPanel } from '@/components/talking-head-editor/TalkingHeadEditorProjectDefaultsPanel'
+import { MontageProjectDefaultsPanel } from '@/components/montage/MontageProjectDefaultsPanel'
 
 const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'hypit'])
 
@@ -63,6 +64,7 @@ const PROJECT_FORM_DEFAULTS: ProjectFormValues = {
   ecommerce_default_selected_modules: {},
   video_edit_defaults: {},
   talking_head_editor_defaults: {},
+  montage_defaults: { preferences: {}, delivery_targets: [] },
 }
 
 function projectToForm(project: Project): ProjectFormValues {
@@ -77,6 +79,11 @@ function projectToForm(project: Project): ProjectFormValues {
     portrait_reference_image: project.portrait_reference_image ?? null,
     video_edit_defaults: project.video_edit_defaults ?? {},
     talking_head_editor_defaults: project.talking_head_editor_defaults ?? {},
+    montage_defaults: {
+      ...project.montage_defaults,
+      preferences: project.montage_defaults?.preferences ?? {},
+      delivery_targets: project.montage_defaults?.delivery_targets ?? [],
+    },
   }
 }
 
@@ -414,6 +421,7 @@ export default function ProjectsPage() {
     }
     if ((values.agent_ids ?? []).includes('video-edit')) payload.video_edit_defaults = values.video_edit_defaults ?? {}
     if ((values.agent_ids ?? []).includes('talking-head-editor')) payload.talking_head_editor_defaults = values.talking_head_editor_defaults ?? {}
+    if ((values.agent_ids ?? []).includes('montage')) payload.montage_defaults = values.montage_defaults ?? {}
     if (!editingProject || form.formState.dirtyFields.visual_style) {
       payload.visual_style = values.visual_style?.trim() ?? ''
     }
@@ -577,6 +585,7 @@ export default function ProjectsPage() {
               {selectedAgentIDs.includes('talking-head-editor') && (
                 <TalkingHeadEditorProjectDefaultsPanel value={form.watch('talking_head_editor_defaults')} onChange={(value) => form.setValue('talking_head_editor_defaults', value, { shouldDirty: true, shouldValidate: true })} />
               )}
+              {selectedAgentIDs.includes('montage') && <MontageProjectDefaultsPanel form={form} />}
 
               {hasWechatPublishing && !editingProject && (
                 <section className="rounded-lg border border-[#07C160]/25 bg-[#07C160]/5 p-4" aria-labelledby="wechat-publishing-title">

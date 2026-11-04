@@ -453,7 +453,7 @@ montage:
   default_pipeline: "cinematic"
   # 允许 Studio/API 选择的 pipeline 白名单。新增上游 pipeline 后先做 adapter contract test，
   # 并确认所选 Montage Agent 镜像内的 pipeline_defs/<name>.yaml 存在。
-  allowed_pipelines: ["cinematic", "talking-head", "screen-demo", "clip-factory"]
+  allowed_pipelines: ["animated-explainer", "animation", "avatar-spokesperson", "character-animation", "cinematic", "clip-factory", "documentary-montage", "framework-smoke", "hybrid", "localization-dub", "podcast-repurpose", "screen-demo", "talking-head"]
   # 单个 Montage 任务允许的最长成片时长，单位秒。
   max_duration_seconds: 600
   # 单个 Montage 任务允许引用/上传的最大素材数量。

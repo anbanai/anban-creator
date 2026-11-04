@@ -449,7 +449,6 @@ func TestBootstrapBuildsMontagePromptFromFrozenTaskImageSettings(t *testing.T) {
 			imageRatio:        "9:16",
 			hasReferenceImage: true,
 			wantLines: []string{
-				"Video aspect ratio: 9:16",
 				"Video material reference: .anban-creator/task-reference.png",
 			},
 		},
@@ -457,7 +456,6 @@ func TestBootstrapBuildsMontagePromptFromFrozenTaskImageSettings(t *testing.T) {
 			name:       "no task material",
 			imageRatio: "16:9",
 			wantLines: []string{
-				"Video aspect ratio: 16:9",
 				"Video material reference: none",
 			},
 		},
