@@ -121,8 +121,8 @@ function SubmitBeforeProviderReconciliation() {
 }
 
 async function addFiles(files: File[]) {
-  await waitFor(() => expect(screen.getByRole('button', { name: '添加附件' })).not.toBeDisabled())
-  const input = screen.getByLabelText('选择附件文件')
+  await waitFor(() => expect(screen.getByRole('button', { name: '添加参考图' })).not.toBeDisabled())
+  const input = screen.getByLabelText('选择参考图')
   fireEvent.change(input, { target: { files } })
   await waitFor(() => expect(uploadToOSS).toHaveBeenCalledTimes(files.length))
   await waitFor(() => {
@@ -160,9 +160,19 @@ describe('Designer shared prompt composer', () => {
     vi.restoreAllMocks()
   })
 
+  it('places reference upload above image capability and outside the composer', async () => {
+    render(<DesignerPage />)
+    const addReference = await screen.findByRole('button', { name: '添加参考图' })
+    const settings = screen.getByRole('complementary', { name: '设计师设置' })
+    expect(settings).toContainElement(addReference)
+    const capability = await within(settings).findByRole('group', { name: '图像能力' })
+    expect(addReference.compareDocumentPosition(capability) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '添加附件' })).not.toBeInTheDocument()
+  })
+
   it('sends the shared Server standalone quote/admission payload when no project is selected', async () => {
     vi.mocked(designerApi.getCapabilities).mockResolvedValue({
-      items: [{ ...provider({ defaultSize: '1:1', sizePresets: ['1:1'] }), id: 'standard' }], defaultCapability: 'standard',
+      items: [{ ...provider({ defaultSize: '1:1:2K', sizePresets: ['1:1:2K'] }), id: 'standard' }], defaultCapability: 'standard',
     })
     render(<DesignerPage />)
     fireEvent.change(await screen.findByLabelText('Designer prompt'), { target: { value: standaloneRequest.prompt } })
@@ -250,7 +260,7 @@ describe('Designer shared prompt composer', () => {
   it('registers a dropped reference and sends its owned file identity', async () => {
     render(<DesignerPage />)
     const prompt = await screen.findByLabelText('Designer prompt')
-    await waitFor(() => expect(screen.getByRole('button', { name: '添加附件' })).not.toBeDisabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: '添加参考图' })).not.toBeDisabled())
     const composer = prompt.closest('[data-slot="agent-prompt-input"]')!
     fireEvent.drop(composer, { dataTransfer: { files: [image('dropped.png')], types: ['Files'] } })
     await waitFor(() => expect(uploadToOSS).toHaveBeenCalledTimes(1))
@@ -263,7 +273,7 @@ describe('Designer shared prompt composer', () => {
   it('fills a library prompt without removing an uploaded product reference', async () => {
     render(<DesignerPage />)
     const prompt = await screen.findByLabelText('Designer prompt')
-    await waitFor(() => expect(screen.getByRole('button', { name: '添加附件' })).not.toBeDisabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: '添加参考图' })).not.toBeDisabled())
     fireEvent.drop(prompt.closest('[data-slot="agent-prompt-input"]')!, {
       dataTransfer: { files: [image('product.png')], types: ['Files'] },
     })
@@ -342,8 +352,8 @@ describe('Designer shared prompt composer', () => {
         </QueryClientProvider>
       ),
     })
-    await waitFor(() => expect(screen.getByRole('button', { name: '添加附件' })).not.toBeDisabled())
-    fireEvent.change(screen.getByLabelText('选择附件文件'), {
+    await waitFor(() => expect(screen.getByRole('button', { name: '添加参考图' })).not.toBeDisabled())
+    fireEvent.change(screen.getByLabelText('选择参考图'), {
       target: { files: [image('first.png'), image('second.png', 2), image('third.png', 3)] },
     })
     await waitFor(() => expect(uploadToOSS).toHaveBeenCalledTimes(3))
@@ -377,20 +387,23 @@ describe('Designer shared prompt composer', () => {
     })
     render(<DesignerPage />)
     await screen.findByLabelText('Designer prompt')
-    expect(screen.getByRole('button', { name: '添加附件' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '添加参考图' })).toBeDisabled()
   })
 
-  it('keeps a single quantity even when capability advertises a larger batch', async () => {
-    vi.mocked(designerApi.getCapabilities).mockResolvedValue({ items: [provider({ maxBatch: 3 })], defaultCapability: 'professional' })
+  it('submits the selected count with single-image capabilities', async () => {
     render(<DesignerPage />)
-    await within(screen.getByRole('complementary', { name: '设计师设置' })).findByRole('group', { name: '创作参数' })
-    expect(screen.queryByRole('button', { name: '增加图片数量' })).not.toBeInTheDocument()
+    const quantity = await screen.findByRole('spinbutton', { name: '生成数量' })
+    expect(quantity).toHaveValue(1)
+    fireEvent.change(quantity, { target: { value: '4' } })
+    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '四张商品图' } })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({ n: 4 }), expect.any(AbortSignal), expect.any(Function)))
   })
 
   it('generates without a persona selector or loading personas', async () => {
     render(<DesignerPage />)
     const prompt = await screen.findByLabelText('Designer prompt')
-    await waitFor(() => expect(screen.getByRole('button', { name: '添加附件' })).not.toBeDisabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: '添加参考图' })).not.toBeDisabled())
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
     expect(api.projects.list).not.toHaveBeenCalled()
     const parameters = within(screen.getByRole('complementary', { name: '设计师设置' })).getByRole('group', { name: '创作参数' })
@@ -472,7 +485,7 @@ describe('Designer shared prompt composer', () => {
       }], total: 1, page: 1, page_size: 50,
     })
     render(<DesignerPage />)
-    await waitFor(() => expect(screen.getByRole('button', { name: '添加附件' })).not.toBeDisabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: '添加参考图' })).not.toBeDisabled())
     fireEvent.click(screen.getAllByText('历史记录')[0])
     await waitFor(() => expect(api.designer.getHistory).toHaveBeenCalledWith({ project_id: undefined, page_size: 50 }))
     fireEvent.click(await screen.findByRole('button', { name: '重新生成' }))
@@ -710,7 +723,7 @@ describe('Designer shared prompt composer', () => {
       'too-large.png',
       { type: 'image/png' },
     )
-    fireEvent.change(screen.getByLabelText('选择附件文件'), {
+    fireEvent.change(screen.getByLabelText('选择参考图'), {
       target: {
         files: [
           image('duplicate.png'),

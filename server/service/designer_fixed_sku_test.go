@@ -91,7 +91,7 @@ func newDesignerFixedSKUFixture(t *testing.T, paid int64) *designerFixedSKUFixtu
 	wallet := NewBillingWalletService(repo, &bundle, BillingWalletOptions{Now: func() time.Time { return now }})
 	cfg := &srvconfig.Config{
 		ModelRoutes: srvconfig.ModelRoutesConfig{ImageGeneration: srvconfig.ImageGenerationRoutesConfig{DefaultCapability: "standard", Capabilities: map[string]srvconfig.ImageGenerationRouteConfig{
-			"standard": {Enabled: true, Provider: "volcengine", Model: "image-v1", BaseURL: "https://images.example.com", APIKey: "secret", Alias: "Standard", MinTier: "free", BillingSKU: "image.standard", GenerationFeatures: ImageGenerationFeatures{MaxBatch: 1, DefaultSize: "1:1", SizePresets: []string{"1:1"}, QualityLevels: []string{"auto"}, OutputFormats: []string{"png"}}},
+			"standard": {Enabled: true, Provider: "volcengine", Model: "image-v1", BaseURL: "https://images.example.com", APIKey: "secret", Alias: "Standard", MinTier: "free", BillingSKU: "image.standard", GenerationFeatures: ImageGenerationFeatures{MaxBatch: 1, DefaultSize: "1:1:2K", SizePresets: []string{"1:1:2K"}, QualityLevels: []string{"auto"}, OutputFormats: []string{"png"}}},
 		}}},
 	}
 	logger := zerolog.New(io.Discard)
@@ -109,7 +109,7 @@ func (f *designerFixedSKUFixture) request(t *testing.T) DesignerGenerateRequest 
 	t.Helper()
 	req := DesignerGenerateRequest{
 		OperationID: uuid.NewString(), ProjectID: f.projectID, Prompt: "product poster",
-		CapabilityKey: "standard", Size: "1:1", Quality: "auto", N: 1, OutputFormat: "png",
+		CapabilityKey: "standard", Size: "1:1:2K", Quality: "auto", N: 1, OutputFormat: "png",
 	}
 	req.RequestFingerprint = DesignerGenerationFingerprint(f.userID, req)
 	quote, err := f.catalog.CreateQuote(context.Background(), QuoteRequest{
@@ -131,6 +131,31 @@ func TestDesignerQuoteRejectsForeignProject(t *testing.T) {
 	_, err := f.service.CreateGenerationQuote(context.Background(), f.userID, req)
 	if !errors.Is(err, ErrProjectNotFound) && !errors.Is(err, ErrProjectOwnedByUser) {
 		t.Fatalf("quote error = %v, want project ownership rejection", err)
+	}
+}
+
+func TestDesignerPortraitSizeCanBeQuotedAndSubmittedWithOldConfig(t *testing.T) {
+	f := newDesignerFixedSKUFixture(t, 500)
+	req := DesignerGenerateRequest{
+		OperationID: uuid.NewString(), Prompt: "product poster", CapabilityKey: "standard",
+		Size: "9:16:2K", Quality: "auto", N: 1, OutputFormat: "png",
+	}
+	quote, err := f.service.CreateGenerationQuote(t.Context(), f.userID, req)
+	if err != nil {
+		t.Fatalf("quote portrait size: %v", err)
+	}
+	req.QuoteID = quote.QuoteID
+	req.RequestFingerprint = quote.RequestFingerprint
+	created, err := f.service.CreateGenerationRecord(t.Context(), f.userID, req)
+	if err != nil {
+		t.Fatalf("submit portrait size: %v", err)
+	}
+	var gen model.ImageGeneration
+	if err := f.db.Where("id = ?", created.GenerationID).First(&gen).Error; err != nil {
+		t.Fatal(err)
+	}
+	if gen.Size != "9:16:2K" {
+		t.Fatalf("generation size = %q, want 9:16:2K", gen.Size)
 	}
 }
 
@@ -553,7 +578,7 @@ func TestDesignerHistoryRetainsAdvancedOptionsAndEditInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	enabled := true
-	req := DesignerGenerateRequest{OperationID: uuid.NewString(), ProjectID: f.projectID, Prompt: "retouch", CapabilityKey: "standard", Quality: "auto", Size: "1:1", N: 1, OutputFormat: "png", OutputCompression: 67, Background: "transparent", Watermark: &enabled, ReferenceFileIDs: []string{refID}, MaskFileID: maskID}
+	req := DesignerGenerateRequest{OperationID: uuid.NewString(), ProjectID: f.projectID, Prompt: "retouch", CapabilityKey: "standard", Quality: "auto", Size: "1:1:2K", N: 1, OutputFormat: "png", OutputCompression: 67, Background: "transparent", Watermark: &enabled, ReferenceFileIDs: []string{refID}, MaskFileID: maskID}
 	quote, err := f.service.CreateGenerationQuote(context.Background(), f.userID, req)
 	if err != nil {
 		t.Fatal(err)
@@ -600,7 +625,7 @@ func TestDesignerReferenceAndMaskGenerationDeliversStoredResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := DesignerGenerateRequest{OperationID: uuid.NewString(), ProjectID: f.projectID, Prompt: "edit", CapabilityKey: "standard", Quality: "auto", Size: "1:1", N: 1, OutputFormat: "png", ReferenceFileIDs: []string{refID}, MaskFileID: maskID}
+	req := DesignerGenerateRequest{OperationID: uuid.NewString(), ProjectID: f.projectID, Prompt: "edit", CapabilityKey: "standard", Quality: "auto", Size: "1:1:2K", N: 1, OutputFormat: "png", ReferenceFileIDs: []string{refID}, MaskFileID: maskID}
 	quote, err := f.service.CreateGenerationQuote(context.Background(), f.userID, req)
 	if err != nil {
 		t.Fatal(err)
@@ -702,7 +727,7 @@ func TestDesignerCreateGenerationQuoteRejectsMissingCount(t *testing.T) {
 	f := newDesignerFixedSKUFixture(t, 500)
 	req := DesignerGenerateRequest{
 		OperationID: uuid.NewString(), ProjectID: f.projectID, Prompt: "product poster",
-		CapabilityKey: "standard", Size: "1:1", Quality: "auto", OutputFormat: "png",
+		CapabilityKey: "standard", Size: "1:1:2K", Quality: "auto", OutputFormat: "png",
 	}
 	if _, err := f.service.CreateGenerationQuote(context.Background(), f.userID, req); err == nil || err.Error() != "n is required" {
 		t.Fatalf("error = %v, want n is required", err)
@@ -716,7 +741,7 @@ func TestDesignerCapabilityRejectsBillingSKURouteMismatch(t *testing.T) {
 	}
 	req := DesignerGenerateRequest{
 		OperationID: uuid.NewString(), ProjectID: f.projectID, Prompt: "product poster",
-		CapabilityKey: "standard", Size: "1:1", Quality: "auto", N: 1, OutputFormat: "png",
+		CapabilityKey: "standard", Size: "1:1:2K", Quality: "auto", N: 1, OutputFormat: "png",
 	}
 	req.RequestFingerprint = DesignerGenerationFingerprint(f.userID, req)
 	if _, err := f.service.CreateGenerationQuote(context.Background(), f.userID, req); err == nil || !strings.Contains(err.Error(), "want image.generate/image_generation.capabilities.standard") {
@@ -763,7 +788,7 @@ func TestDesignerCapabilityTierAuthorizationAppliesToQuoteAndGeneration(t *testi
 		MinTier: "enterprise", BillingSKU: "image.standard",
 		GenerationFeatures: ImageGenerationFeatures{MaxBatch: 1, QualityLevels: []string{"auto"}},
 	}
-	req := DesignerGenerateRequest{OperationID: uuid.NewString(), ProjectID: f.projectID, Prompt: "restricted", CapabilityKey: "standard", Size: "1:1", Quality: "auto", N: 1, OutputFormat: "png"}
+	req := DesignerGenerateRequest{OperationID: uuid.NewString(), ProjectID: f.projectID, Prompt: "restricted", CapabilityKey: "standard", Size: "1:1:2K", Quality: "auto", N: 1, OutputFormat: "png"}
 	req.RequestFingerprint = DesignerGenerationFingerprint(f.userID, req)
 	if _, err := f.service.CreateGenerationQuote(context.Background(), f.userID, req); !errors.Is(err, ErrDesignerCapabilityAccessDenied) {
 		t.Fatalf("free quote error = %v, want access denied", err)

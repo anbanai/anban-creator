@@ -273,8 +273,8 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 				t.Fatalf("enabled image capability %q exposes non-fixed generation size %q", key, preset)
 			}
 		}
-		if (key == "standard" || key == "professional") && !slices.Contains(capability.GenerationFeatures.SizePresets, "9:16:2K") {
-			t.Errorf("image capability %q must offer the 9:16:2K portrait preset", key)
+		if (key == "standard" || key == "professional") && !slices.Equal(capability.GenerationFeatures.SizePresets, []string{"1:1:2K", "3:4:2K", "4:3:2K", "16:9:2K", "9:16:2K"}) {
+			t.Errorf("image capability %q must offer the five common designer sizes", key)
 		}
 	}
 	expectedRuntimeControls := map[string]map[string]string{

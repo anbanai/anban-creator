@@ -24,7 +24,7 @@ function AdvancedSettings({ designerFeatures, settings, onSettingsChange }: Adva
   const showCompression = designerFeatures.hasCompression && (settings.outputFormat === 'jpeg' || settings.outputFormat === 'webp')
   if (!designerFeatures.watermark && !designerFeatures.hasBackground && !showCompression) return null
   return (
-    <div className="space-y-5 border-t border-border/60 pt-5">
+    <div className="space-y-3 border-t border-border/60 pt-3">
       {designerFeatures.watermark ? (
         <button
           type="button"
@@ -60,7 +60,7 @@ function AdvancedSettings({ designerFeatures, settings, onSettingsChange }: Adva
       ) : null}
 
       {designerFeatures.hasBackground ? (
-        <div className="space-y-2.5">
+        <div className="space-y-1.5">
           <p className="text-xs font-medium text-muted-foreground">背景</p>
           <ToggleGroup
             aria-label="背景"
@@ -71,9 +71,9 @@ function AdvancedSettings({ designerFeatures, settings, onSettingsChange }: Adva
             size="sm"
             className="grid w-full grid-cols-3 gap-1 rounded-lg bg-muted/70 p-1"
           >
-            <ToggleGroupItem value="auto" className="h-8 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">自动</ToggleGroupItem>
-            <ToggleGroupItem value="transparent" className="h-8 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">透明</ToggleGroupItem>
-            <ToggleGroupItem value="opaque" className="h-8 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">不透明</ToggleGroupItem>
+            <ToggleGroupItem value="auto" className="h-7 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">自动</ToggleGroupItem>
+            <ToggleGroupItem value="transparent" className="h-7 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">透明</ToggleGroupItem>
+            <ToggleGroupItem value="opaque" className="h-7 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">不透明</ToggleGroupItem>
           </ToggleGroup>
         </div>
       ) : null}
@@ -107,7 +107,7 @@ export default function DesignerToolbar({
     <>
       <div className="hidden w-[304px] shrink-0 p-3 md:block">
         <aside aria-label="设计师设置" className="flex h-full flex-col overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
-          <div className="flex shrink-0 items-center justify-between border-b border-border/60 p-4">
+          <div className="flex shrink-0 items-center justify-between border-b border-border/60 p-3">
             <div className="flex items-center gap-2.5">
               <div className="flex size-8 items-center justify-center rounded-xl bg-primary/8">
                 <Sparkles className="size-4 text-primary" />
@@ -124,7 +124,7 @@ export default function DesignerToolbar({
               <TooltipContent>{balanceError ? '积分余额暂不可用' : '积分余额'}</TooltipContent>
             </Tooltip>
           </div>
-          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-4">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
             {children}
             {!isMobile && <AdvancedSettings designerFeatures={designerFeatures} settings={settings} onSettingsChange={onSettingsChange} />}
           </div>
@@ -132,7 +132,7 @@ export default function DesignerToolbar({
             <button
               type="button"
               onClick={onHistoryToggle}
-              className="flex w-full items-center gap-2 rounded-lg bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="flex w-full items-center gap-2 rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <History className="h-3.5 w-3.5" />
               历史记录
@@ -145,7 +145,7 @@ export default function DesignerToolbar({
       <div className="flex shrink-0 items-center justify-between border-t border-border/50 bg-card/60 px-3 py-2 md:hidden">
         <details className="relative text-xs" onToggle={(event) => setMobileSettingsOpen(event.currentTarget.open)}>
           <summary className="cursor-pointer text-muted-foreground">创作参数</summary>
-          {mobileSettingsOpen && <div className="absolute left-0 top-6 z-20 max-h-[60dvh] w-[min(20rem,calc(100vw-1.5rem))] space-y-6 overflow-y-auto rounded-xl border bg-popover p-4 shadow-lg">
+          {mobileSettingsOpen && <div className="absolute left-0 top-6 z-20 max-h-[60dvh] w-[min(20rem,calc(100vw-1.5rem))] space-y-3 overflow-y-auto rounded-xl border bg-popover p-4 shadow-lg">
             {children}
             <AdvancedSettings designerFeatures={designerFeatures} settings={settings} onSettingsChange={onSettingsChange} />
           </div>}

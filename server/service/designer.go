@@ -559,6 +559,18 @@ func DesignerGenerationFingerprint(userID string, req DesignerGenerateRequest) s
 
 type ImageGenerationFeatures = srvconfig.ImageGenerationFeatures
 
+// DesignerGenerationFeatures keeps the built-in size choices identical in the
+// capability catalog and request validation, including with older deployment configs.
+func DesignerGenerationFeatures(key string, features ImageGenerationFeatures) ImageGenerationFeatures {
+	if key == "standard" || key == "professional" {
+		features.SizePresets = []string{"1:1:2K", "3:4:2K", "4:3:2K", "16:9:2K", "9:16:2K"}
+		if !stringInSet(features.DefaultSize, features.SizePresets) {
+			features.DefaultSize = features.SizePresets[0]
+		}
+	}
+	return features
+}
+
 func validateDesignerGenerateRequest(req DesignerGenerateRequest, caps ImageGenerationFeatures) error {
 	if strings.TrimSpace(req.Size) == "" {
 		return designerInputError("size is required")
@@ -634,7 +646,11 @@ func (s *DesignerService) designerRoute(id string) (srvconfig.ImageGenerationRou
 	if s.fullCfg == nil || s.fullCfg.ModelRoutes.ImageGeneration.Capabilities == nil {
 		return srvconfig.ImageGenerationRouteConfig{}, false
 	}
-	route, ok := s.fullCfg.ModelRoutes.ImageGeneration.Capabilities[strings.TrimSpace(id)]
+	id = strings.TrimSpace(id)
+	route, ok := s.fullCfg.ModelRoutes.ImageGeneration.Capabilities[id]
+	if ok {
+		route.GenerationFeatures = DesignerGenerationFeatures(id, route.GenerationFeatures)
+	}
 	return route, ok
 }
 
