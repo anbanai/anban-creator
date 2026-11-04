@@ -191,7 +191,7 @@ func TestDockerRuntimeSpecEmitsExplicitHTTPBootstrapTrustOnlyForHTTP(t *testing.
 		wantPolicy bool
 	}{
 		{name: "operator HTTP", serverURL: "http://creator-server:8080", wantPolicy: true},
-		{name: "HTTPS", serverURL: "https://creator-server:8443"},
+		{name: "HTTPS", serverURL: "https://creator.example.com"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			spec := buildDockerRuntimeSpec(dockerRuntimeConfig{

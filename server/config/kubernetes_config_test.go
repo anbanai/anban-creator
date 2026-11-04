@@ -177,9 +177,6 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 	if cfg.Dsh.KubernetesImagePullSecret != "acr-secret" {
 		t.Fatalf("DSH image pull secret = %q, want acr-secret", cfg.Dsh.KubernetesImagePullSecret)
 	}
-	if cfg.Claude.Kubernetes.ServerCASecret != "" {
-		t.Fatalf("server CA secret = %q, want no default certificate dependency", cfg.Claude.Kubernetes.ServerCASecret)
-	}
 	if cfg.Claude.Kubernetes.ProjectMemoryClaim != "creator-project-memory" {
 		t.Fatalf("project memory claim = %q, want creator-project-memory", cfg.Claude.Kubernetes.ProjectMemoryClaim)
 	}
@@ -340,8 +337,7 @@ func TestNewConfigRejectsRemovedPreStartRetryLimit(t *testing.T) {
 database:
   dsn: "dsn"
 server:
-  tls_cert_file: "/tls/tls.crt"
-  tls_key_file: "/tls/tls.key"
+  port: 8080
 jwt:
   secret_key: "secret"
 storage:
@@ -360,7 +356,7 @@ claude:
     viral-ip-video-editor: "registry.example.com/creator-agent-viral-ip-video-editor@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     whiteboard-animation: "registry.example.com/creator-agent-whiteboard-animation@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
   execution_token_secret: "0123456789abcdef0123456789abcdef"
-  agent_server_url: "https://creator-api-svc:8443"
+  agent_server_url: "http://creator-api-svc:8080"
   kubernetes:
     service_account: "creator-agent-runner"
     nas_storage_class: "nas-sc-creator"
@@ -421,16 +417,13 @@ func TestValidateKubernetesServerTransportWithoutLocalCertificates(t *testing.T)
 	for _, tc := range []struct {
 		name      string
 		serverURL string
-		caSecret  string
 	}{
 		{name: "internal HTTP", serverURL: "http://creator-api-svc:8080"},
 		{name: "Ingress HTTPS", serverURL: "https://creator.example.com"},
-		{name: "explicit private CA", serverURL: "https://creator.example.com", caSecret: "custom-ca"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := baseKubernetesConfigForTest()
 			cfg.Claude.AgentServerURL = tc.serverURL
-			cfg.Claude.Kubernetes.ServerCASecret = tc.caSecret
 			if err := cfg.Validate(); err != nil {
 				t.Fatalf("Validate() error = %v, want no local certificate requirement", err)
 			}
@@ -538,7 +531,7 @@ func TestValidateDshKubernetesUsesClaudeServiceAccount(t *testing.T) {
 	cfg.Dsh.KubernetesNamespace = "anbanai-prod"
 	cfg.Dsh.KubernetesProjectMemoryClaim = "creator-project-memory"
 	cfg.Dsh.KubernetesProjectMemoryMount = "/workspace/project"
-	cfg.Dsh.ServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+	cfg.Dsh.ServerURL = "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080"
 	cfg.Dsh.ServerInstanceID = "server-1"
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "claude.kubernetes.service_account is required when dsh.executor is kubernetes") {
 		t.Fatalf("Validate() error = %v, want Claude ServiceAccount requirement for DSH", err)
@@ -553,7 +546,7 @@ func TestValidateDshKubernetesRequiresClaudeNamespace(t *testing.T) {
 	cfg.Dsh.KubernetesNamespace = "other-namespace"
 	cfg.Dsh.KubernetesProjectMemoryClaim = "creator-project-memory"
 	cfg.Dsh.KubernetesProjectMemoryMount = "/workspace/project"
-	cfg.Dsh.ServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+	cfg.Dsh.ServerURL = "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080"
 	cfg.Dsh.ServerInstanceID = "server-1"
 
 	err := cfg.Validate()
@@ -570,7 +563,7 @@ func TestValidateDshKubernetesRejectsMalformedDigestImageReference(t *testing.T)
 	cfg.Dsh.KubernetesNamespace = "anbanai-prod"
 	cfg.Dsh.KubernetesProjectMemoryClaim = "creator-project-memory"
 	cfg.Dsh.KubernetesProjectMemoryMount = "/workspace/project"
-	cfg.Dsh.ServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+	cfg.Dsh.ServerURL = "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080"
 	cfg.Dsh.ServerInstanceID = "server-1"
 
 	err := cfg.Validate()
@@ -607,7 +600,7 @@ func TestValidateDshKubernetesAcceptsTaggedAndImmutableImageReferences(t *testin
 			cfg.Dsh.KubernetesNamespace = "anbanai-prod"
 			cfg.Dsh.KubernetesProjectMemoryClaim = "creator-project-memory"
 			cfg.Dsh.KubernetesProjectMemoryMount = "/workspace/project"
-			cfg.Dsh.ServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+			cfg.Dsh.ServerURL = "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080"
 			cfg.Dsh.ServerInstanceID = "server-1"
 
 			if err := cfg.Validate(); err != nil {
@@ -631,7 +624,7 @@ func TestValidateDshKubernetesRejectsMalformedAndWhitespaceImageReferences(t *te
 			cfg.Dsh.KubernetesNamespace = "anbanai-prod"
 			cfg.Dsh.KubernetesProjectMemoryClaim = "creator-project-memory"
 			cfg.Dsh.KubernetesProjectMemoryMount = "/workspace/project"
-			cfg.Dsh.ServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+			cfg.Dsh.ServerURL = "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080"
 			cfg.Dsh.ServerInstanceID = "server-1"
 
 			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "dsh.image must be a valid container image reference without whitespace") {
@@ -669,8 +662,8 @@ func TestValidateKubernetesAllowsZeroCompletionGrace(t *testing.T) {
 
 func TestAgentServerURLUsesConfiguredKubernetesServiceURL(t *testing.T) {
 	cfg := baseKubernetesConfigForTest()
-	cfg.Claude.AgentServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443/"
-	if got := cfg.AgentServerURL(); got != "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443" {
+	cfg.Claude.AgentServerURL = "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080/"
+	if got := cfg.AgentServerURL(); got != "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080" {
 		t.Fatalf("AgentServerURL() = %q", got)
 	}
 }
