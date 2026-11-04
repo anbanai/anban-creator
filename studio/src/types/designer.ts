@@ -32,6 +32,7 @@ export interface DesignerSettings {
   outputFormat: string
   compression: number
   background: string
+  backgroundOpacity?: number
   watermark: boolean
 }
 
@@ -46,6 +47,7 @@ export interface GenerateRequest {
   output_format: string
   output_compression?: number
   background?: string
+  background_opacity?: number
   reference_file_ids?: string[]
   mask_file_id?: string
   watermark?: boolean
@@ -85,6 +87,7 @@ export interface ImageGeneration {
   output_format?: string
   output_compression?: number
   background?: string
+  background_opacity?: number
   watermark?: boolean
   reference_file_ids?: string[]
   mask_file_id?: string

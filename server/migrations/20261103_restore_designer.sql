@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS `image_generations` (
   `output_format` varchar(16) NULL,
   `output_compression` bigint DEFAULT 0,
   `background` varchar(16) DEFAULT '',
+  `background_opacity` bigint NULL,
   `watermark` boolean DEFAULT false,
   `status` varchar(16) NOT NULL DEFAULT 'generating',
   `error` text NULL,

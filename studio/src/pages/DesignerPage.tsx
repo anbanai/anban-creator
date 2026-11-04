@@ -38,6 +38,7 @@ const DEFAULT_SETTINGS: DesignerSettings = {
   outputFormat: 'png',
   compression: 100,
   background: 'auto',
+  backgroundOpacity: 0,
   watermark: false,
 }
 
@@ -481,6 +482,7 @@ export default function DesignerPage() {
           output_format: settings.outputFormat,
           output_compression: effectiveDesignerFeatures?.hasCompression && settings.outputFormat !== 'png' && settings.compression < 100 ? settings.compression : undefined,
           background: effectiveDesignerFeatures?.hasBackground && settings.background !== 'auto' ? settings.background : undefined,
+          background_opacity: effectiveDesignerFeatures?.hasBackground && settings.background === 'transparent' ? settings.backgroundOpacity ?? 0 : undefined,
           reference_file_ids: referenceFileIDs.length > 0 ? referenceFileIDs : undefined,
           mask_file_id: effectiveDesignerFeatures?.supportsMask ? retainedInputs?.mask : undefined,
           watermark: effectiveDesignerFeatures?.watermark ? settings.watermark : undefined,
@@ -547,6 +549,7 @@ export default function DesignerPage() {
           output_format: settings.outputFormat,
           output_compression: effectiveDesignerFeatures?.hasCompression && settings.outputFormat !== 'png' && settings.compression < 100 ? settings.compression : undefined,
           background: effectiveDesignerFeatures?.hasBackground && settings.background !== 'auto' ? settings.background : undefined,
+          background_opacity: effectiveDesignerFeatures?.hasBackground && settings.background === 'transparent' ? settings.backgroundOpacity ?? 0 : undefined,
           reference_file_ids: [source.file_id],
           mask_file_id: mask.file_id,
           watermark: effectiveDesignerFeatures?.watermark ? settings.watermark : undefined,
@@ -608,7 +611,7 @@ export default function DesignerPage() {
         onSettingsChange={updateSettings}
         onHistoryToggle={() => setHistoryOpen(true)}
       >
-        {!editingImage && <DesignerReferences controller={attachmentController} capacity={referenceCapacity} disabled={isGenerating} onRejected={handleAttachmentRejected} onPreview={setPreviewImage} />}
+        {!editingImage && <DesignerReferences controller={attachmentController} capacity={referenceCapacity} disabled={isGenerating} onRejected={handleAttachmentRejected} />}
         {!editingImage ? (
           effectiveCapability ? (
             <DesignerGenerationToolbar
@@ -743,6 +746,7 @@ export default function DesignerPage() {
             outputFormat: features.outputFormats.includes(generation.output_format ?? '') ? generation.output_format! : features.outputFormats[0] ?? 'png',
             n: 1, compression: features.hasCompression ? generation.output_compression ?? 100 : 100,
             background: features.hasBackground ? generation.background || 'auto' : 'auto',
+            backgroundOpacity: generation.background_opacity ?? 0,
             watermark: features.watermark && (generation.watermark ?? false),
           })
           attachmentController.clear()

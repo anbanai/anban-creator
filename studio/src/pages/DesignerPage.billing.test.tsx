@@ -211,6 +211,24 @@ describe('Designer billing guidance', () => {
     await waitFor(() => expect(api.billing.wallet).toHaveBeenCalledTimes(2))
   })
 
+  it.each(['standard', 'professional'])('submits quality and background transparency in %s mode', async (id) => {
+    vi.mocked(designerApi.getCapabilities).mockResolvedValue({ items: [{ ...provider, id }], defaultCapability: id })
+    render(createElement(DesignerPage))
+    const settings = within(screen.getByRole('complementary', { name: '设计师设置' }))
+    const quality = await settings.findByRole('group', { name: '质量' })
+    expect(within(quality).getAllByRole('button').map((button) => button.textContent)).toEqual(['自动', '高', '中', '低'])
+    fireEvent.click(within(quality).getByRole('button', { name: '高' }))
+    fireEvent.click(settings.getByRole('button', { name: '透明' }))
+    const slider = settings.getByRole('group', { name: '背景透明度' })
+    const thumb = within(slider).getByRole('slider', { hidden: true })
+    fireEvent.keyDown(thumb, { key: 'Home' })
+    for (let step = 0; step < 35; step++) fireEvent.keyDown(thumb, { key: 'ArrowRight' })
+    expect(settings.getByText('35%')).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), { target: { value: '产品图' } })
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({ capability_key: id, quality: 'high', background: 'transparent', background_opacity: 65, output_format: 'png' }), expect.any(AbortSignal), expect.any(Function)))
+  })
+
   it('refreshes the wallet after an edit generation is accepted', async () => {
     window.sessionStorage.setItem('designer_active_generation:user-1', JSON.stringify({
       generationId: 'completed-generation',
