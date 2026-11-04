@@ -17,7 +17,7 @@ import (
 func baseKubernetesConfigForTest() Config {
 	claude := validClaudeConfigForTest()
 	claude.Executor = "kubernetes"
-	claude.AgentServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+	claude.AgentServerURL = "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080"
 	claude.ExecutionTokenSecret = "0123456789abcdef0123456789abcdef"
 	claude.RuntimeImages = RuntimeImages{
 		"wechat-article":                  "registry.example.com/creator-agent-wechat-article@sha256:" + strings.Repeat("a", 64),
@@ -42,7 +42,6 @@ func baseKubernetesConfigForTest() Config {
 		ResourceProfiles:   completeKubernetesResourceProfilesForTest(),
 	}
 	cfg := Config{
-		Server:   ServerConfig{TLSCertFile: "/tls/tls.crt", TLSKeyFile: "/tls/tls.key"},
 		Database: DatabaseConfig{DSN: "dsn"},
 		JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
 		Asynq:    AsynqConfig{ContentGenerateTimeout: time.Hour},
@@ -178,8 +177,8 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 	if cfg.Dsh.KubernetesImagePullSecret != "acr-secret" {
 		t.Fatalf("DSH image pull secret = %q, want acr-secret", cfg.Dsh.KubernetesImagePullSecret)
 	}
-	if cfg.Claude.Kubernetes.ServerCASecret != "anban-internal-ca" {
-		t.Fatalf("server CA secret = %q, want anban-internal-ca", cfg.Claude.Kubernetes.ServerCASecret)
+	if cfg.Claude.Kubernetes.ServerCASecret != "" {
+		t.Fatalf("server CA secret = %q, want no default certificate dependency", cfg.Claude.Kubernetes.ServerCASecret)
 	}
 	if cfg.Claude.Kubernetes.ProjectMemoryClaim != "creator-project-memory" {
 		t.Fatalf("project memory claim = %q, want creator-project-memory", cfg.Claude.Kubernetes.ProjectMemoryClaim)
@@ -418,12 +417,24 @@ func TestValidateKubernetesRequiresAgentServerURL(t *testing.T) {
 	}
 }
 
-func TestValidateKubernetesRequiresHTTPSAgentServerURL(t *testing.T) {
-	cfg := baseKubernetesConfigForTest()
-	cfg.Claude.AgentServerURL = "http://creator-api-svc:8080"
-	err := cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "claude.agent_server_url must use https://") {
-		t.Fatalf("Validate() error = %v, want Kubernetes HTTPS requirement", err)
+func TestValidateKubernetesServerTransportWithoutLocalCertificates(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		serverURL string
+		caSecret  string
+	}{
+		{name: "internal HTTP", serverURL: "http://creator-api-svc:8080"},
+		{name: "Ingress HTTPS", serverURL: "https://creator.example.com"},
+		{name: "explicit private CA", serverURL: "https://creator.example.com", caSecret: "custom-ca"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := baseKubernetesConfigForTest()
+			cfg.Claude.AgentServerURL = tc.serverURL
+			cfg.Claude.Kubernetes.ServerCASecret = tc.caSecret
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("Validate() error = %v, want no local certificate requirement", err)
+			}
+		})
 	}
 }
 

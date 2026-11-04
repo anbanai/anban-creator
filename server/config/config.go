@@ -2029,9 +2029,6 @@ func (c *Config) applyDefaults() {
 	if c.Claude.Kubernetes.Namespace == "" {
 		c.Claude.Kubernetes.Namespace = "default"
 	}
-	if c.Claude.Kubernetes.ServerCASecret == "" {
-		c.Claude.Kubernetes.ServerCASecret = "anban-internal-ca"
-	}
 	if c.Claude.Kubernetes.ProjectMemoryClaim == "" {
 		c.Claude.Kubernetes.ProjectMemoryClaim = "creator-project-memory"
 	}
@@ -2804,9 +2801,6 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Claude.Executor == "kubernetes" {
-		if strings.TrimSpace(c.Server.TLSCertFile) == "" || strings.TrimSpace(c.Server.TLSKeyFile) == "" {
-			errs = append(errs, "server.tls_cert_file and server.tls_key_file are required when claude.executor is \"kubernetes\"")
-		}
 		if c.Storage.Provider != "oss" {
 			errs = append(errs, "claude.kubernetes requires storage.provider to be \"oss\"")
 		}
@@ -2815,17 +2809,12 @@ func (c *Config) Validate() error {
 		}
 		if strings.TrimSpace(c.Claude.AgentServerURL) == "" {
 			errs = append(errs, "claude.agent_server_url is required when claude.executor is \"kubernetes\"")
-		} else if !strings.HasPrefix(strings.TrimSpace(c.Claude.AgentServerURL), "https://") {
-			errs = append(errs, "claude.agent_server_url must use https:// when claude.executor is \"kubernetes\"")
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.Namespace) == "" {
 			errs = append(errs, "claude.kubernetes.namespace is required")
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.ServiceAccount) == "" {
 			errs = append(errs, "claude.kubernetes.service_account is required")
-		}
-		if strings.TrimSpace(c.Claude.Kubernetes.ServerCASecret) == "" {
-			errs = append(errs, "claude.kubernetes.server_ca_secret is required")
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.NASStorageClass) == "" {
 			errs = append(errs, "claude.kubernetes.nas_storage_class is required")
