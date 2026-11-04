@@ -37,9 +37,20 @@ export default function TopicsPage() {
   function update(values: Record<string, string | undefined>, replace = false) {
     const viewport = listRef.current?.closest('main') ?? document.scrollingElement
     if (viewport) scrollPositions.set(location.key, viewport.scrollTop)
-    const current = paramsRef.current
-    const next = new URLSearchParams(current); if ('asset_id' in values && values.asset_id !== current.get('asset_id')) { next.delete('source_task_id'); next.delete('script_id'); next.delete('reuse_run') } for (const [key, value] of Object.entries(values)) { if (value) next.set(key, value); else next.delete(key) } paramsRef.current = next
-    setParams(next, { replace, preventScrollReset: true })
+    setParams(current => {
+      const next = new URLSearchParams(current)
+      if ('asset_id' in values && values.asset_id !== current.get('asset_id')) {
+        next.delete('source_task_id')
+        next.delete('script_id')
+        next.delete('reuse_run')
+      }
+      for (const [key, value] of Object.entries(values)) {
+        if (value) next.set(key, value)
+        else next.delete(key)
+      }
+      paramsRef.current = next
+      return next
+    }, { replace, preventScrollReset: true })
   }
   const restoredKey = useRef<string | null>(null)
   useLayoutEffect(() => {
