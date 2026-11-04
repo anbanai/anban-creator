@@ -314,7 +314,7 @@ export default function AssistantWorkspace() {
   const routeState = (location.state ?? {}) as RouteState
   const routeHasContext = Boolean(routeState.modeId || routeState.projectId || routeState.contentId || routeState.checkpointId || routeState.initialMessage)
   const persisted = readPersistedWorkspace()
-  const startsNewWorkspace = routeHasContext && (!persisted?.workspace
+  const startsNewWorkspace = Boolean(routeState.startNew) || routeHasContext && (!persisted?.workspace
     || Boolean(routeState.initialMessage || routeState.checkpointId)
     || Boolean(routeState.modeId && routeState.modeId !== persisted.workspace.mode_id)
     || Boolean(routeState.projectId && routeState.projectId !== persisted.workspace.project_id)
@@ -328,7 +328,14 @@ export default function AssistantWorkspace() {
   const [composer, setComposer] = useState(routeState.initialMessage ?? persisted?.composer ?? '')
   const [attachments, setAttachments] = useState<PromptAttachment[]>([])
   const [executionProfile, setExecutionProfile] = useState<AgentExecutionProfileID | ''>('')
-  const [creationType, setCreationType] = useState(startsNewWorkspace ? '' : persisted?.creationType ?? '')
+  const [creationType, setCreationType] = useState(routeState.creationType ?? (startsNewWorkspace ? '' : persisted?.creationType ?? ''))
+
+  // A mobile handoff starts once. Consume its navigation intent so refreshing
+  // resumes the accepted workspace instead of starting the interview again.
+  useEffect(() => {
+    if (!routeState.startNew) return
+    navigate(location.pathname, { replace: true, state: { ...routeState, startNew: undefined, initialMessage: undefined } })
+  }, [routeState.startNew, navigate, location.pathname])
   const [imageRatio, setImageRatio] = useState<ImageRatio>('auto')
   const [imageCapabilityKey, setImageCapabilityKey] = useState('')
   const [videoEditAssets, setVideoEditAssets] = useState<InputAttachment[]>([])
@@ -338,12 +345,12 @@ export default function AssistantWorkspace() {
   const [videoEditUploading, setVideoEditUploading] = useState(false)
   const [videoEditUploadFailed, setVideoEditUploadFailed] = useState(false)
   const [workspace, setWorkspace] = useState<AssistantWorkspaceState | null>(() => startsNewWorkspace ? null : persisted?.workspace ?? null)
-  const [newProfile, setNewProfile] = useState(false)
+  const [newProfile, setNewProfile] = useState(Boolean(routeState.startNew && routeState.modeId === 'profile' && !routeState.projectId))
   const [conversationPhase, setConversationPhase] = useState<'setup' | 'prepared' | 'active'>(() => startsNewWorkspace ? 'setup' : persisted?.workspace?.lifecycle === 'prepared' ? 'prepared' : persisted?.workspace ? 'active' : 'setup')
-  const [messagesByMode, setMessagesByMode] = useState<Record<string, Message[]>>(persisted?.messagesByMode ?? {})
-  const [questionsByMode, setQuestionsByMode] = useState<Record<string, QuestionBatch[]>>(persisted?.questionsByMode ?? {})
-  const [draftByMode, setDraftByMode] = useState<Record<string, Draft | null>>(persisted?.draftByMode ?? {})
-  const [uncertainRetry, setUncertainRetry] = useState<UncertainRetry | undefined>(persisted?.uncertainRetry)
+  const [messagesByMode, setMessagesByMode] = useState<Record<string, Message[]>>(routeState.startNew ? {} : persisted?.messagesByMode ?? {})
+  const [questionsByMode, setQuestionsByMode] = useState<Record<string, QuestionBatch[]>>(routeState.startNew ? {} : persisted?.questionsByMode ?? {})
+  const [draftByMode, setDraftByMode] = useState<Record<string, Draft | null>>(routeState.startNew ? {} : persisted?.draftByMode ?? {})
+  const [uncertainRetry, setUncertainRetry] = useState<UncertainRetry | undefined>(routeState.startNew ? undefined : persisted?.uncertainRetry)
   const [error, setError] = useState<string | null>(null)
   const [interactionState, dispatchInteraction] = useReducer(assistantInteractionReducer, initialAssistantInteractionState)
   const profileCompleted = workspace?.mode_id === 'profile' && interactionState.status === 'completed'
@@ -369,7 +376,7 @@ export default function AssistantWorkspace() {
   const workspaceHandedOff = useRef(false)
   const sendInFlight = useRef(false)
   const answerInFlight = useRef(false)
-  const [commitIdempotencyKeys, setCommitIdempotencyKeys] = useState<Record<string, string>>(persisted?.commitIdempotencyKeys ?? {})
+  const [commitIdempotencyKeys, setCommitIdempotencyKeys] = useState<Record<string, string>>(routeState.startNew ? {} : persisted?.commitIdempotencyKeys ?? {})
   const modeChosenByUser = useRef(false)
   const imageRatioContextKey = useRef<string | null>(null)
   const conversationOrder = useRef<Record<string, number>>({})
@@ -1554,7 +1561,7 @@ export default function AssistantWorkspace() {
 
   return (
     <AgentPromptDropProvider>
-      <main data-testid="assistant-workspace" className="assistant-workspace flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
+      <main data-testid="assistant-workspace" data-mode={mode} className="assistant-workspace flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
       {!(mode === 'creation' && activeDraft && interactionState.status === 'needs_confirmation') && <AssistantRecoveryBanner
         state={interactionState}
         onRetry={() => { void refreshInteractionSnapshot() }}

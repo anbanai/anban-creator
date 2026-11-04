@@ -21,7 +21,11 @@ const LoginPage = lazyWithRecovery(() => import('@/pages/LoginPage'))
 const LandingPage = lazyWithRecovery(() => import('@/pages/LandingPage'))
 const RegisterPage = lazyWithRecovery(() => import('@/pages/RegisterPage'))
 const DashboardPage = lazyWithRecovery(() => import('@/pages/DashboardPage'))
-const AssistantWorkspace = lazyWithRecovery(() => import('@/pages/AssistantWorkspace'))
+const AssistantWorkspace = lazyWithRecovery(() => import('@/pages/StudioEntryPage'))
+const MobileStudioPage = lazyWithRecovery(() => import('@/pages/MobileStudioPage'))
+const MobilePersonasPage = lazyWithRecovery(() => import('@/pages/MobilePersonasPage'))
+const MobileCreatePage = lazyWithRecovery(() => import('@/pages/MobileCreatePage'))
+const MobileAccountPage = lazyWithRecovery(() => import('@/pages/MobileAccountPage'))
 const TimelinePage = lazyWithRecovery(() => import('@/pages/TimelinePage'))
 const PortraitOnboardingPage = lazyWithRecovery(() => import('@/pages/PortraitOnboardingPage'))
 const PortraitDetailPage = lazyWithRecovery(() => import('@/pages/PortraitDetailPage'))
@@ -171,6 +175,10 @@ function AppRoutes() {
           }
         >
           <Route index element={<LazyPage component={AssistantWorkspace} />} />
+          <Route path="mobile" element={<LazyPage component={MobileStudioPage} />} />
+          <Route path="mobile/personas" element={<LazyPage component={MobilePersonasPage} />} />
+          <Route path="mobile/create" element={<LazyPage component={MobileCreatePage} />} />
+          <Route path="mobile/account" element={<LazyPage component={MobileAccountPage} />} />
           <Route path="assistant" element={<Navigate to="/" replace />} />
           <Route path="dashboard" element={<LazyPage component={DashboardPage} />} />
           <Route

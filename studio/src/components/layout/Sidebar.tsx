@@ -28,7 +28,7 @@ export default function Sidebar() {
   const paletteOpen = useSyncExternalStore(commandPaletteStore.subscribe, commandPaletteStore.getSnapshot)
   const [collapsed, setCollapsed] = useCollapsedState()
   const isAdmin = user?.is_admin === true
-  const currentPage = allNavItems.find(item => item.to === pathname)?.label
+  const currentPage = ({ '/mobile': '创作工作台', '/mobile/personas': '我的人设', '/mobile/create': '开始创作', '/mobile/account': '我的空间' } as Record<string, string>)[pathname] ?? allNavItems.find(item => item.to === pathname)?.label
     ?? (pathname.startsWith('/tasks/') ? '作品详情' : '工作空间')
   const visibleWorkspaceNavItems = visibleNavItems(workspaceNavItems, isAdmin)
 

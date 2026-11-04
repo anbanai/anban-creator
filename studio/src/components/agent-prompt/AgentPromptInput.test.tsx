@@ -133,6 +133,19 @@ function renderPrompt(overrides: Partial<AgentPromptInputProps> = {}) {
 }
 
 describe('AgentPromptInput', () => {
+  it('keeps Return as a newline on phones and submits only through the explicit send button', async () => {
+    const originalMedia = window.matchMedia
+    window.matchMedia = query => ({ matches: query === '(max-width: 767px)', media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() }) as unknown as MediaQueryList
+    try {
+      const { props } = renderPrompt({ submitLabel: '发送' })
+      const event = createEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
+      fireEvent(screen.getByRole('textbox'), event)
+      expect(event.defaultPrevented).toBe(false)
+      expect(props.onSubmit).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole('button', { name: '发送' }))
+      await waitFor(() => expect(props.onSubmit).toHaveBeenCalledOnce())
+    } finally { window.matchMedia = originalMedia }
+  })
   it('supports a prompt-only composer without a duplicate file picker or file admission', () => {
     const { props } = renderPrompt({ attachmentsEnabled: false, ariaLabel: '复刻要求' })
     const prompt = screen.getByLabelText('复刻要求')

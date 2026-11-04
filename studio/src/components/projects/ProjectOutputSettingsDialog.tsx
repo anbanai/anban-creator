@@ -11,10 +11,10 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import type { Project } from '@/types'
 
-export function ProjectOutputSettingsDialog({ project, onClose, onSaved, syncAssistantPlatform = false }: { project: Project; onClose: () => void; onSaved: (project: Project) => void; syncAssistantPlatform?: boolean }) {
+export function ProjectOutputSettingsDialog({ project, onClose, onSaved, syncAssistantPlatform = false, initialAgentIDs }: { project: Project; onClose: () => void; onSaved: (project: Project) => void; syncAssistantPlatform?: boolean; initialAgentIDs?: string[] }) {
   const { user } = useAuth()
   const cache = useQueryClient()
-  const [agents, setAgents] = useState(projectAgentIDs(project))
+  const [agents, setAgents] = useState(initialAgentIDs ?? projectAgentIDs(project))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   async function save() {
@@ -38,6 +38,8 @@ export function ProjectOutputSettingsDialog({ project, onClose, onSaved, syncAss
   return <Dialog open onOpenChange={next => { if (!next && !saving) onClose() }}>
     <DialogContent closeButtonDisabled={saving} className="sm:max-w-2xl">
       <DialogHeader><DialogTitle>设置创作类型</DialogTitle><DialogDescription>为「{project.name}」选择要创作的内容。电商设计需单独配置。保存后回到刚才的创作内容，不会立即生成作品。</DialogDescription></DialogHeader>
+      {initialAgentIDs?.includes('ecommerce') && !projectAgentIDs(project).includes('ecommerce') && <p role="note" className="rounded-lg bg-amber-500/10 p-3 text-sm">启用电商设计会将这个人设的创作类型切换为电商设计，原画像保留。想保留原有创作类型，可先取消，选择另一个人设。</p>}
+      {initialAgentIDs && !initialAgentIDs.includes('ecommerce') && projectAgentIDs(project).includes('ecommerce') && <p role="note" className="rounded-lg bg-amber-500/10 p-3 text-sm">切换到当前创作类型会停用这个人设的电商设计，原画像保留。想继续保留电商设计，可先取消，选择另一个人设。</p>}
       {syncAssistantPlatform && <p className="text-xs text-muted-foreground">部分类型需进入创作页填写素材，保存后会提供入口。</p>}
       <CreationTypePicker multiple disabled={saving} options={projectCreationTypes.filter(agent => user?.is_admin || agent.id !== 'hypit')} value={agents} onChange={next => setAgents(normalizeProjectTypeSelection(agents, next))} />
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

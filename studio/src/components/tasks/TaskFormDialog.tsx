@@ -104,6 +104,7 @@ function preferredProjectTaskType(project: Project, preferred?: string): TaskTyp
 }
 
 export interface TaskFormDialogProps {
+  initialDraft?: import('@/lib/mobile-creation').MobileTaskDraft
   open: boolean
   presentation?: 'dialog' | 'page'
   mode: 'create' | 'clone'
@@ -149,6 +150,7 @@ export function TaskFormDialog({
   sourceTask,
   initialProjectId,
   initialType,
+  initialDraft,
   onOpenChange,
   onCreated,
   shouldHandleResult,
@@ -339,15 +341,19 @@ export function TaskFormDialog({
         })()
       : createInitialDefaults(project ?? (initialType === 'viral-analysis' ? firstProject : undefined), initialType)
     initializedKeyRef.current = initializationKey
+    if (mode === 'create' && initialDraft && initialDraft.projectId === defaults.project_id && initialDraft.type === defaults.type) {
+      defaults.prompt = initialDraft.prompt
+      if (defaults.type === 'ecommerce' && initialDraft.selectedModules) defaults.selected_modules = initialDraft.selectedModules
+    }
     form.reset(defaults)
     resetAttachments(defaults.input_attachments)
     setMontageUploading(false)
     setMontageReady(false)
     setShowDirtyDialog(false)
     explicitTaskTypeRef.current = false
-    const focusTimeout = setTimeout(() => form.setFocus('prompt'), 100)
+    const focusTimeout = setTimeout(() => { if (!window.matchMedia('(max-width: 767px)').matches) form.setFocus('prompt') }, 100)
     return () => clearTimeout(focusTimeout)
-  }, [form, initialProjectId, initialType, mode, open, projectMap, projectsLoading, resetAttachments, sourceTask])
+  }, [form, initialProjectId, initialType, initialDraft, mode, open, projectMap, projectsLoading, resetAttachments, sourceTask])
 
   const defaultExecutionProfile = cheapestAvailableExecutionProfile(
     executionProfilesQuery.data,

@@ -404,6 +404,8 @@ export function AgentPromptInput({
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (submitMode === 'external') return
+    // On phones, Return inserts a newline. Submission always has an explicit button.
+    if (window.matchMedia('(max-width: 767px)').matches) return
     if (event.key !== 'Enter' || event.shiftKey) return
     const nativeEvent = event.nativeEvent
     if (composingRef.current || nativeEvent.isComposing || nativeEvent.keyCode === 229) return

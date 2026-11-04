@@ -21,6 +21,7 @@ import WechatAnalyticsPanel from '@/components/tasks/WechatAnalyticsPanel'
 import ChannelsAnalyticsPanel from '@/components/tasks/ChannelsAnalyticsPanel'
 import { TaskExecutionRail } from '@/components/tasks/TaskExecutionRail'
 import { TaskDeliverablesPanel } from '@/components/tasks/TaskDeliverablesPanel'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { TaskCreationSidebar } from '@/components/tasks/TaskCreationSidebar'
 import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDetailsSheet'
 import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
@@ -223,6 +224,7 @@ function appendPollingReplay(prev: string[], replay: string): string[] {
 }
 
 export default function TaskDetailPage() {
+  const mobile = useIsMobile()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
 
@@ -812,6 +814,8 @@ export default function TaskDetailPage() {
         </div>
 
         <aside className="min-w-0" aria-label="作品辅助信息">
+          <details open={!mobile} className="rounded-xl border border-border/60 md:border-0">
+          <summary className="cursor-pointer px-4 py-4 text-sm font-medium md:hidden">人设与创作信息</summary>
           <TaskCreationSidebar
             task={task}
             project={project}
@@ -819,6 +823,7 @@ export default function TaskDetailPage() {
             onOpenPersona={() => setShowProjectDialog(true)}
             onOpenTab={openTaskDetails}
           />
+          </details>
         </aside>
       </div>
 
