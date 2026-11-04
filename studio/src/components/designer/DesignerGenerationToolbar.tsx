@@ -15,10 +15,12 @@ interface DesignerGenerationToolbarProps {
 
 const QUALITY_LABELS: Record<string, string> = {
   auto: '自动',
-  low: '低',
-  medium: '中',
   high: '高',
+  medium: '中',
+  low: '低',
 }
+
+const QUALITY_ORDER: Record<string, number> = { auto: 0, high: 1, medium: 2, low: 3 }
 
 const CAPABILITY_LABELS: Record<string, string> = {
   standard: '标准',
@@ -43,12 +45,12 @@ export function DesignerGenerationToolbar({
 }: DesignerGenerationToolbarProps) {
   const selectedCapability = capabilities.find((capability) => capability.id === capabilityKey)
   const designerFeatures = selectedCapability?.designerFeatures
-  const qualityLevels = designerFeatures?.qualityLevels ?? []
+  const qualityLevels = [...(designerFeatures?.qualityLevels ?? [])].sort((a, b) => (QUALITY_ORDER[a] ?? 4) - (QUALITY_ORDER[b] ?? 4))
   const sizePresets = designerFeatures?.sizePresets ?? []
   const outputFormats = designerFeatures?.outputFormats ?? []
   return (
-    <fieldset aria-label="创作参数" disabled={disabled || !selectedCapability} className="min-w-0 space-y-3 text-xs disabled:opacity-50">
-      <section className="space-y-1.5">
+    <fieldset aria-label="创作参数" disabled={disabled || !selectedCapability} className="min-w-0 space-y-2 text-xs disabled:opacity-50">
+      <section className="space-y-1">
         <h3 className="font-medium text-muted-foreground">图像能力</h3>
         <ToggleGroup
           aria-label="图像能力"
@@ -63,7 +65,7 @@ export function DesignerGenerationToolbar({
               key={capability.id}
               value={capability.id}
               disabled={!capability.enabled || capability.priceAvailable !== true}
-              className="h-12 w-full min-w-0 flex-col gap-1 rounded-lg border border-border/70 px-2 hover:border-primary/30 aria-pressed:border-primary/40 aria-pressed:bg-primary/5 aria-pressed:text-primary"
+              className="h-10 w-full min-w-0 flex-col gap-1 rounded-lg border border-border/70 px-2 hover:border-primary/30 aria-pressed:border-primary/40 aria-pressed:bg-primary/5 aria-pressed:text-primary"
             >
               <span className="text-[13px] font-medium">{CAPABILITY_LABELS[capability.id] ?? capability.name}</span>
               <span className="text-[11px] font-normal text-muted-foreground tabular-nums">{capability.priceAvailable === true ? `${capability.credits.toLocaleString()} 积分/张` : '价格暂不可用'}</span>
@@ -72,8 +74,8 @@ export function DesignerGenerationToolbar({
         </ToggleGroup>
       </section>
 
-      <section className="space-y-1.5">
-        <h3 className="font-medium text-muted-foreground">画面尺寸</h3>
+      <section className="space-y-1">
+        <h3 className="font-medium text-muted-foreground">尺寸</h3>
         <ToggleGroup
           aria-label="尺寸"
           value={settings.size ? [settings.size] : []}
@@ -90,7 +92,7 @@ export function DesignerGenerationToolbar({
                 key={size}
                 value={size}
                 aria-label={settingLabel(size)}
-                className="h-14 min-w-0 flex-col gap-1 rounded-lg border border-border/70 px-1 text-muted-foreground hover:border-primary/30 aria-pressed:border-primary/50 aria-pressed:bg-primary/5 aria-pressed:text-primary"
+                className="h-12 min-w-0 flex-col gap-1 rounded-lg border border-border/70 px-1 text-muted-foreground hover:border-primary/30 aria-pressed:border-primary/50 aria-pressed:bg-primary/5 aria-pressed:text-primary"
               >
                 <span aria-hidden="true" className="flex h-5 items-center justify-center">
                   {preset ? (
@@ -108,7 +110,7 @@ export function DesignerGenerationToolbar({
       </section>
 
       {qualityLevels.length > 0 ? (
-        <section className="space-y-1.5">
+        <section className="space-y-1">
           <h3 className="font-medium text-muted-foreground">质量</h3>
           <ToggleGroup
             aria-label="质量"
@@ -117,16 +119,16 @@ export function DesignerGenerationToolbar({
               if (next[0]) onSettingsChange({ quality: next[0] })
             }}
             size="sm"
-            className="grid w-full min-w-0 auto-cols-fr grid-flow-col gap-1 rounded-lg bg-muted/70 p-1"
+            className="grid w-full min-w-0 auto-cols-fr grid-flow-col gap-1 rounded-lg bg-muted/70 p-0.5"
           >
             {qualityLevels.map((quality) => (
-              <ToggleGroupItem key={quality} value={quality} className="h-7 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">{QUALITY_LABELS[quality] ?? quality}</ToggleGroupItem>
+              <ToggleGroupItem key={quality} value={quality} className="h-6 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">{QUALITY_LABELS[quality] ?? quality}</ToggleGroupItem>
             ))}
           </ToggleGroup>
         </section>
       ) : null}
 
-      <section className="space-y-1.5">
+      <section className="space-y-1">
         <h3 className="font-medium text-muted-foreground">输出格式</h3>
         <ToggleGroup
           aria-label="输出格式"
@@ -135,10 +137,10 @@ export function DesignerGenerationToolbar({
             if (next[0]) onSettingsChange({ outputFormat: next[0] })
           }}
           size="sm"
-          className="grid w-full min-w-0 auto-cols-fr grid-flow-col gap-1 rounded-lg bg-muted/70 p-1"
+          className="grid w-full min-w-0 auto-cols-fr grid-flow-col gap-1 rounded-lg bg-muted/70 p-0.5"
         >
           {outputFormats.map((format) => (
-            <ToggleGroupItem key={format} value={format} className="h-7 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">{format.toUpperCase()}</ToggleGroupItem>
+            <ToggleGroupItem key={format} value={format} className="h-6 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">{format === 'webp' ? 'WebP' : format.toUpperCase()}</ToggleGroupItem>
           ))}
         </ToggleGroup>
       </section>

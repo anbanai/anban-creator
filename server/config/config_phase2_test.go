@@ -276,6 +276,11 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 		if (key == "standard" || key == "professional") && !slices.Equal(capability.GenerationFeatures.SizePresets, []string{"1:1:2K", "3:4:2K", "4:3:2K", "16:9:2K", "9:16:2K"}) {
 			t.Errorf("image capability %q must offer the five common designer sizes", key)
 		}
+		if key == "standard" || key == "professional" {
+			if capability.Provider != "wangcai_openai" || !capability.GenerationFeatures.HasBackground || !slices.Equal(capability.GenerationFeatures.QualityLevels, []string{"auto", "high", "medium", "low"}) || !slices.Equal(capability.GenerationFeatures.OutputFormats, []string{"png", "jpeg", "webp"}) {
+				t.Errorf("image capability %q must support all quality levels, transparent backgrounds and three output formats", key)
+			}
+		}
 	}
 	expectedRuntimeControls := map[string]map[string]string{
 		"effective": {

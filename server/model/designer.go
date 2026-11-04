@@ -43,6 +43,7 @@ type ImageGeneration struct {
 	OutputFormat           string                  `gorm:"type:varchar(16)" json:"output_format,omitempty"`
 	OutputCompression      int                     `gorm:"default:0" json:"output_compression,omitempty"`
 	Background             string                  `gorm:"type:varchar(16);default:''" json:"background,omitempty"`
+	BackgroundOpacity      *int                    `json:"background_opacity,omitempty"`
 	Watermark              bool                    `gorm:"default:false" json:"watermark,omitempty"`
 	Status                 string                  `gorm:"type:varchar(16);index;not null;default:'generating'" json:"status"`
 	Error                  string                  `gorm:"type:text" json:"error,omitempty"`

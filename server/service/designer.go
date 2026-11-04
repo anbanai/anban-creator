@@ -143,6 +143,7 @@ type DesignerGenerateRequest struct {
 	OutputFormat       string   `json:"output_format"`
 	OutputCompression  int      `json:"output_compression,omitempty"`
 	Background         string   `json:"background,omitempty"`
+	BackgroundOpacity  *int     `json:"background_opacity,omitempty"`
 	ReferenceFileIDs   []string `json:"reference_file_ids,omitempty"`
 	MaskFileID         string   `json:"mask_file_id,omitempty"`
 	Watermark          *bool    `json:"watermark,omitempty"`
@@ -180,6 +181,7 @@ type DesignerGenerationPublic struct {
 	OutputFormat      string                        `json:"output_format,omitempty"`
 	OutputCompression int                           `json:"output_compression"`
 	Background        string                        `json:"background,omitempty"`
+	BackgroundOpacity *int                          `json:"background_opacity,omitempty"`
 	Watermark         bool                          `json:"watermark"`
 	ReferenceFileIDs  []string                      `json:"reference_file_ids,omitempty"`
 	MaskFileID        string                        `json:"mask_file_id,omitempty"`
@@ -216,7 +218,7 @@ func (s *DesignerService) publicGeneration(gen *model.ImageGeneration) *Designer
 	return &DesignerGenerationPublic{ID: gen.ID, ProjectID: gen.ProjectID, Prompt: gen.Prompt,
 		RevisedPrompt: gen.RevisedPrompt, CapabilityKey: capKey, CapabilityName: capName,
 		Quality: gen.Quality, Size: gen.Size, N: gen.N, OutputFormat: gen.OutputFormat,
-		OutputCompression: gen.OutputCompression, Background: gen.Background, Watermark: gen.Watermark,
+		OutputCompression: gen.OutputCompression, Background: gen.Background, BackgroundOpacity: gen.BackgroundOpacity, Watermark: gen.Watermark,
 		ReferenceFileIDs: referenceFileIDs, MaskFileID: gen.MaskFileID,
 		Status: gen.Status, Error: gen.Error, ErrorCode: designerGenerationErrorCode(gen.Error), Cost: gen.Cost, EstimatedCost: gen.EstimatedCost,
 		FinalCost: finalCost, BillingMode: gen.BillingMode, BillingStatus: gen.BillingStatus,
@@ -390,6 +392,7 @@ func (s *DesignerService) CreateGenerationRecord(ctx context.Context, userID str
 		OutputFormat:       req.OutputFormat,
 		OutputCompression:  req.OutputCompression,
 		Background:         req.Background,
+		BackgroundOpacity:  req.BackgroundOpacity,
 		Watermark:          watermark,
 		Status:             model.ImageGenerationStatusGenerating,
 		ReferenceFiles:     string(refFilesJSON),
@@ -546,12 +549,13 @@ func DesignerGenerationFingerprint(userID string, req DesignerGenerateRequest) s
 		N, OutputCompression                                             int
 		ReferenceFileIDs                                                 []string
 		Watermark                                                        *bool
+		BackgroundOpacity                                                *int `json:",omitempty"`
 	}{
 		Operation: "image.generate", UserID: strings.TrimSpace(userID), OperationID: strings.TrimSpace(req.OperationID),
 		ProjectID: strings.TrimSpace(req.ProjectID), Prompt: strings.TrimSpace(req.Prompt), CapabilityKey: strings.TrimSpace(req.CapabilityKey),
 		Quality: strings.TrimSpace(req.Quality), Size: strings.TrimSpace(req.Size), N: req.N,
 		OutputFormat: strings.TrimSpace(req.OutputFormat), OutputCompression: req.OutputCompression,
-		Background: strings.TrimSpace(req.Background), ReferenceFileIDs: req.ReferenceFileIDs, MaskFileID: strings.TrimSpace(req.MaskFileID), Watermark: req.Watermark,
+		Background: strings.TrimSpace(req.Background), ReferenceFileIDs: req.ReferenceFileIDs, MaskFileID: strings.TrimSpace(req.MaskFileID), Watermark: req.Watermark, BackgroundOpacity: req.BackgroundOpacity,
 	})
 	digest := sha256.Sum256(payload)
 	return hex.EncodeToString(digest[:])
@@ -622,6 +626,17 @@ func validateDesignerGenerateRequest(req DesignerGenerateRequest, caps ImageGene
 	}
 	if req.Watermark != nil && *req.Watermark && !caps.Watermark {
 		return designerInputError("selected provider does not support watermark")
+	}
+	if req.BackgroundOpacity != nil {
+		if *req.BackgroundOpacity < 0 || *req.BackgroundOpacity > 100 {
+			return designerInputError("background_opacity must be between 0 and 100")
+		}
+		if req.Background != "transparent" || !caps.HasBackground {
+			return designerInputError("background_opacity requires transparent background support")
+		}
+		if !stringInSet(req.OutputFormat, []string{"png", "jpeg", "webp"}) || !stringInSet("png", caps.OutputFormats) {
+			return designerInputError("background opacity requires PNG generation and PNG, JPEG or WebP output")
+		}
 	}
 	if req.Background != "" && !stringInSet(req.Background, []string{"auto", "transparent", "opaque"}) {
 		return designerInputError("background is invalid")
@@ -789,6 +804,12 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 		Watermark:         &gen.Watermark,
 	}
 
+	if gen.BackgroundOpacity != nil {
+		// Obtain a lossless cutout before compositing/exporting the chosen format.
+		genOpts.OutputFormat = "png"
+		genOpts.OutputCompression = 0
+	}
+
 	result, err := providerInst.Generate(ctx, gen.Prompt, genOpts)
 	if err != nil {
 		s.recordDesignerProviderFailure(ctx, &gen)
@@ -838,6 +859,12 @@ func (s *DesignerService) ExecuteGeneration(ctx context.Context, genID string) {
 			fail("platform_error", designerOutputUnavailableMessage)
 		}
 		return
+	}
+	if gen.BackgroundOpacity != nil {
+		if err := applyDesignerBackgroundOpacity(outputs, &gen); err != nil {
+			fail("provider_error", "背景透明度处理失败，图像接口需要返回透明背景图片，请重试")
+			return
+		}
 	}
 	var durableResults []model.ImageGenerationResult
 	result.OutputWidth, result.OutputHeight, durableResults = s.processResults(ctx, gen.UserID, genID, outputs)
@@ -895,6 +922,32 @@ func materializeDesignerResultOutputs(ctx context.Context, result *image.Generat
 		outputs[index].localPath = localPath
 	}
 	return outputs, cleanup, nil
+}
+
+func applyDesignerBackgroundOpacity(outputs []designerGeneratedOutput, gen *model.ImageGeneration) error {
+	for index, output := range outputs {
+		data, err := os.ReadFile(output.localPath)
+		if err != nil {
+			return err
+		}
+		encoded, err := image.ApplyBackgroundOpacity(data, *gen.BackgroundOpacity, gen.OutputFormat, gen.OutputCompression)
+		if err != nil {
+			return err
+		}
+		file, err := os.CreateTemp("", "anban-designer-background-*."+gen.OutputFormat)
+		if err != nil {
+			return err
+		}
+		_, writeErr := file.Write(encoded)
+		closeErr := file.Close()
+		if writeErr != nil || closeErr != nil {
+			_ = os.Remove(file.Name())
+			return errors.Join(writeErr, closeErr)
+		}
+		_ = os.Remove(output.localPath)
+		outputs[index].localPath = file.Name()
+	}
+	return nil
 }
 
 func inspectDesignerResultDimensions(outputs []designerGeneratedOutput, expectedRatio string) (int, int, error) {

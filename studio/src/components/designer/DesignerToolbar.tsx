@@ -24,7 +24,7 @@ function AdvancedSettings({ designerFeatures, settings, onSettingsChange }: Adva
   const showCompression = designerFeatures.hasCompression && (settings.outputFormat === 'jpeg' || settings.outputFormat === 'webp')
   if (!designerFeatures.watermark && !designerFeatures.hasBackground && !showCompression) return null
   return (
-    <div className="space-y-3 border-t border-border/60 pt-3">
+    <div className="space-y-2 border-t border-border/60 pt-2">
       {designerFeatures.watermark ? (
         <button
           type="button"
@@ -40,27 +40,23 @@ function AdvancedSettings({ designerFeatures, settings, onSettingsChange }: Adva
       ) : null}
 
       {showCompression ? (
-        <div className="space-y-3">
-          <p className="flex items-center justify-between text-xs font-medium text-muted-foreground">
-            压缩率
-            <span className="text-[11px] text-foreground tabular-nums">{settings.compression}%</span>
-          </p>
-          <div className="flex items-center gap-3">
-            <Slider
-              aria-label="压缩率"
-              value={[settings.compression]}
-              onValueChange={(value) => onSettingsChange({ compression: Array.isArray(value) ? value[0] : value })}
-              min={0}
-              max={100}
-              step={1}
-              className="flex-1"
-            />
-          </div>
+        <div className="flex items-center gap-3">
+          <span className="shrink-0 text-xs font-medium text-muted-foreground">压缩率</span>
+          <Slider
+            aria-label="压缩率"
+            value={[settings.compression]}
+            onValueChange={(value) => onSettingsChange({ compression: Array.isArray(value) ? value[0] : value })}
+            min={0}
+            max={100}
+            step={1}
+            className="flex-1"
+          />
+          <span className="w-8 text-right text-[11px] text-foreground tabular-nums">{settings.compression}%</span>
         </div>
       ) : null}
 
       {designerFeatures.hasBackground ? (
-        <div className="space-y-1.5">
+        <div className="space-y-1">
           <p className="text-xs font-medium text-muted-foreground">背景</p>
           <ToggleGroup
             aria-label="背景"
@@ -69,12 +65,30 @@ function AdvancedSettings({ designerFeatures, settings, onSettingsChange }: Adva
               if (value[0]) onSettingsChange({ background: value[0] })
             }}
             size="sm"
-            className="grid w-full grid-cols-3 gap-1 rounded-lg bg-muted/70 p-1"
+            className="grid w-full grid-cols-3 gap-1 rounded-lg bg-muted/70 p-0.5"
           >
-            <ToggleGroupItem value="auto" className="h-7 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">自动</ToggleGroupItem>
-            <ToggleGroupItem value="transparent" className="h-7 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">透明</ToggleGroupItem>
-            <ToggleGroupItem value="opaque" className="h-7 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">不透明</ToggleGroupItem>
+            <ToggleGroupItem value="auto" className="h-6 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">自动</ToggleGroupItem>
+            <ToggleGroupItem value="transparent" className="h-6 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">透明</ToggleGroupItem>
+            <ToggleGroupItem value="opaque" className="h-6 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">不透明</ToggleGroupItem>
           </ToggleGroup>
+          {settings.background === 'transparent' && (
+            <div className="space-y-1.5 pt-1">
+              <p className="flex items-center justify-between text-xs text-muted-foreground">
+                背景透明度
+                <span className="tabular-nums text-foreground">{100 - (settings.backgroundOpacity ?? 0)}%</span>
+              </p>
+              <Slider
+                aria-label="背景透明度"
+                value={[100 - (settings.backgroundOpacity ?? 0)]}
+                onValueChange={(value) => onSettingsChange({ backgroundOpacity: 100 - (Array.isArray(value) ? value[0] : value) })}
+                min={0}
+                max={100}
+                step={1}
+              />
+              <div className="flex justify-between text-[10px] text-muted-foreground"><span>白底</span><span>全透明</span></div>
+              {settings.outputFormat === 'jpeg' && <p className="text-[10px] text-muted-foreground">JPEG 导出为白底</p>}
+            </div>
+          )}
         </div>
       ) : null}
     </div>
@@ -124,7 +138,7 @@ export default function DesignerToolbar({
               <TooltipContent>{balanceError ? '积分余额暂不可用' : '积分余额'}</TooltipContent>
             </Tooltip>
           </div>
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
             {children}
             {!isMobile && <AdvancedSettings designerFeatures={designerFeatures} settings={settings} onSettingsChange={onSettingsChange} />}
           </div>

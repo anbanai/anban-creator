@@ -170,6 +170,18 @@ describe('Designer shared prompt composer', () => {
     expect(screen.queryByRole('button', { name: '添加附件' })).not.toBeInTheDocument()
   })
 
+  it('opens a reference image before any generated result exists', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:product.png')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    render(<DesignerPage />)
+    await addFiles([image('product.png')])
+    expect(screen.getByLabelText('参考图列表')).toContainElement(screen.getByRole('button', { name: '预览 product.png' }))
+    fireEvent.click(screen.getByRole('button', { name: '预览 product.png' }))
+    const preview = await screen.findByRole('dialog', { name: 'product.png' })
+    expect(within(preview).getByRole('img', { name: 'product.png' })).toBeInTheDocument()
+    expect(designerApi.generate).not.toHaveBeenCalled()
+  })
+
   it('sends the shared Server standalone quote/admission payload when no project is selected', async () => {
     vi.mocked(designerApi.getCapabilities).mockResolvedValue({
       items: [{ ...provider({ defaultSize: '1:1:2K', sizePresets: ['1:1:2K'] }), id: 'standard' }], defaultCapability: 'standard',

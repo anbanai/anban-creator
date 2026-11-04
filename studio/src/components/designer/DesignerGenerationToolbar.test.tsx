@@ -13,7 +13,7 @@ const capabilities: DesignerCapability[] = [
     enabled: true,
     idx: 0,
     designerFeatures: {
-      qualityLevels: ['auto', 'high'],
+      qualityLevels: ['auto', 'low', 'medium', 'high'],
       sizePresets: ['1:1:2K', '3:4:2K', '4:3:2K', '16:9:2K', '9:16:2K'],
       defaultSize: '1:1:2K',
       maxBatch: 3,
@@ -78,8 +78,8 @@ describe('DesignerGenerationToolbar', () => {
     expect(within(screen.getByRole('group', { name: '尺寸' })).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual([
       '1:1 · 2K', '3:4 · 2K', '4:3 · 2K', '16:9 · 2K', '9:16 · 2K',
     ])
-    expect(within(screen.getByRole('group', { name: '质量' })).getAllByRole('button').map((button) => button.textContent)).toEqual(['自动', '高'])
-    expect(within(screen.getByRole('group', { name: '输出格式' })).getAllByRole('button').map((button) => button.textContent)).toEqual(['PNG', 'WEBP'])
+    expect(within(screen.getByRole('group', { name: '质量' })).getAllByRole('button').map((button) => button.textContent)).toEqual(['自动', '高', '中', '低'])
+    expect(within(screen.getByRole('group', { name: '输出格式' })).getAllByRole('button').map((button) => button.textContent)).toEqual(['PNG', 'WebP'])
     expect(screen.getByText('1:1')).toBeVisible()
   })
 
@@ -99,11 +99,15 @@ describe('DesignerGenerationToolbar', () => {
     fireEvent.click(within(screen.getByRole('group', { name: '尺寸' })).getByRole('button', { name: '3:4 · 2K' }))
     fireEvent.click(within(screen.getByRole('group', { name: '尺寸' })).getByRole('button', { name: '9:16 · 2K' }))
     fireEvent.click(within(screen.getByRole('group', { name: '质量' })).getByRole('button', { name: '高' }))
-    fireEvent.click(within(screen.getByRole('group', { name: '输出格式' })).getByRole('button', { name: 'WEBP' }))
+    fireEvent.click(within(screen.getByRole('group', { name: '输出格式' })).getByRole('button', { name: 'WebP' }))
 
     expect(onSettingsChange).toHaveBeenCalledWith({ size: '3:4:2K' })
     expect(onSettingsChange).toHaveBeenCalledWith({ size: '9:16:2K' })
     expect(onSettingsChange).toHaveBeenCalledWith({ quality: 'high' })
+    fireEvent.click(within(screen.getByRole('group', { name: '质量' })).getByRole('button', { name: '中' }))
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ quality: 'medium' })
+    fireEvent.click(within(screen.getByRole('group', { name: '质量' })).getByRole('button', { name: '低' }))
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ quality: 'low' })
     expect(onSettingsChange).toHaveBeenCalledWith({ outputFormat: 'webp' })
     expect(screen.queryByRole('button', { name: '增加图片数量' })).not.toBeInTheDocument()
   })

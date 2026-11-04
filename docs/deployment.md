@@ -168,3 +168,31 @@ video-edit executions.
 只有在发布流水线已经单独 apply `deploy/k8s/ack-agent-runtime.yaml` 时，
 才使用 `--server-only`。Server 与 Agent 镜像仍必须从同一提交构建并更新
 到清单中；Catalog 不一致会被 Runtime 拒绝执行。
+
+## 设计师质量与背景透明度
+
+此版本的标准图像配置改用已有 `wangcai_openai` 图像接口，默认模型为
+`gpt-image-2-t`；标准和增强仍各自使用 `image.standard`、
+`image.professional` 的积分价格。上游成本继续按实际 provider/model 记账。
+
+**已有部署必须同步修改实际挂载的配置。** 只升级镜像或修改
+`server/config.example.yaml` 不会更新 ConfigMap、Secret 或本地 `config.yaml`。
+将 `model_routes.image_generation.capabilities.standard` 的
+`provider`、`model`、`base_url`、`api_key`、`response_format` 和
+`generation_features` 按示例配置更新，复用增强接口的地址和凭证；
+若已有 `ANBAN_IMAGE_MODEL_STANDARD`，替换原 Seedream 模型值为网关支持的
+GPT Image 模型，并确认该 provider/model 存在于 `billing/costs.yaml`。
+标准和增强均需声明四档 `quality_levels: [auto, high, medium, low]`、
+`has_background: true`、`output_formats: [png, jpeg, webp]`。
+不要只打开功能声明而继续使用不支持质量和透明底的旧接口。
+
+`background_opacity` 是 0–100 的白色背景不透明度，只在
+`background: transparent` 时提交。Server 先请求无损 PNG 透明底图，
+再叠加白色背景并保存选定格式；主体不透明像素保持不变。
+PNG、WebP 保留透明通道，JPEG 导出为白底。若接口返回全不透明图片，
+本次生成失败并走现有退款流程，不将整张图片变透明来模拟背景透明度。
+
+新字段由启动时 AutoMigrate 添加；手工迁移环境可执行
+`server/migrations/20261104_designer_background_opacity.sql`。
+发布后核对 `/api/v1/image-capabilities` 的两种模式均返回上述功能，
+再检查四档质量、透明度滑条、三种格式以及参考图点击放大。
