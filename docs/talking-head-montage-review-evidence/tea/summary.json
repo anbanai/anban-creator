@@ -1,0 +1,10 @@
+{
+  "id": "tea",
+  "source_path": "/Users/medivh/WORKSPACE/anbanwriter/video-references/喝了这么多年茶，绿茶、白茶、黄茶、红茶、乌龙、黑茶，到底区别在哪_（来源_科普中国）_20261104_101812.mp4",
+  "sha256": "975645e5e1ab24850dd34e73a469fc98f6cd5868047820d2093b3f7c2a1a80b8",
+  "duration_seconds": 51.548005,
+  "frame_sampling_interval_seconds": 2,
+  "sampled_frame_count": 26,
+  "loudness_summary": "Summary:\n\n  Integrated loudness:\n    I:         -11.2 LUFS\n    Threshold: -21.2 LUFS\n\n  Loudness range:\n    LRA:         0.9 LU\n    Threshold: -31.2 LUFS\n    LRA low:   -11.6 LUFS\n    LRA high:  -10.7 LUFS\n\n  True peak:\n    Peak:       -2.4 dBFS\n[out#0/null @ 0x7656c58480] video:0KiB audio:8880KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown\nsize=N/A time=00:00:51.54 bitrate=N/A speed=75.5x elapsed=0:00:00.68    \n",
+  "review_limit": "contact sheets and ASR; not real-time listening or continuous-frame review"
+}

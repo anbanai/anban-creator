@@ -1491,7 +1491,7 @@
       "ui": {
         "renderer": "custom:content-planning"
       },
-      "digest": "1d43ff8999311d26f1ab46bca5143318e5e4e20e6b0f89ff346a097bece074a1"
+      "digest": "89a289eb9099a00b5ebdb7ea70d80ba78af95a7c271ce6c56d61b5f4c5d0f9dc"
     },
     {
       "id": "creation-planner",
@@ -1820,6 +1820,673 @@
         ]
       },
       "digest": "4e2cef89afbe9c47aed84a95c980ca09f4a78ba38a624768a86f6d2dce06211c"
+    },
+    {
+      "id": "ip-explainer",
+      "version": "1.3.2",
+      "kind": "plugin",
+      "display_name": "知识 IP 剪辑",
+      "description": "Use for 知识 IP 剪辑 (IP Explainer): edit recorded creator or expert talking-head footage into clear knowledge explainers. 适用于个人 IP 口播剪辑、专家知识讲解、科普短视频；完成语义精剪、解释性画面、AI 演示镜头、字幕配乐、封面和成片审核。普通访谈精剪、直播切片、娱乐混剪和视频复刻使用对应工作流。",
+      "agent": {
+        "name": "ip-explainer",
+        "skills": [
+          "talking-head-video-generation",
+          "talking-head-composition",
+          "talking-head-sound-design",
+          "content-tagging",
+          "short-video-cover",
+          "talking-head-visual-focus",
+          "talking-head-explainer",
+          "video-bgm-design",
+          "video-production-qc",
+          "video-subtitle-design"
+        ],
+        "max_turns": 260
+      },
+      "interaction": {},
+      "bindings": {},
+      "runtime": {
+        "profile": "ip-explainer",
+        "adapter": "openmontage"
+      },
+      "surfaces": [
+        "plugin"
+      ],
+      "features": [
+        "talking-head",
+        "explainable-knowledge-editing",
+        "semantic-master-variants",
+        "retention-experiments",
+        "independent-validation",
+        "generated-video-inserts",
+        "image-inserts",
+        "motion-graphics",
+        "automatic-review-loop"
+      ],
+      "artifacts": [
+        {
+          "role": "explainer_input_assessment",
+          "path": "output/explainer-input-assessment.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "semantic_master",
+          "path": "output/semantic-master.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "explanation_rehearsal",
+          "path": "output/explanation-rehearsal.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "explanation_plan",
+          "path": "output/explanation-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "platform_variant_plan",
+          "path": "output/platform-variant-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "retention_experiment_plan",
+          "path": "output/retention-experiment-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "independent_validation_plan",
+          "path": "output/independent-validation-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "independent_validation",
+          "path": "output/independent-validation.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "retention_results",
+          "path": "output/retention-results.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "rough_cut",
+          "path": "output/rough-cut.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "semantic_cut",
+          "path": "output/semantic-cut.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "transcript",
+          "path": "output/transcript.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "edit_decision_list",
+          "path": "output/edit-decision-list.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "edit_strategy",
+          "path": "output/edit-strategy.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "asset_requirements",
+          "path": "output/asset-requirements.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "visual_plan_draft",
+          "path": "output/visual-plan-draft.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "asset_source_policy",
+          "path": "output/asset-source-policy.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "generated_video_manifest",
+          "path": "output/generated-video-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "generated_video_review",
+          "path": "output/generated-video-review.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "generated_video_lint",
+          "path": "output/generated-video-lint.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "asset_source_manifest",
+          "path": "output/asset-source-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "visual_plan",
+          "path": "output/visual-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "asset_ledger",
+          "path": "output/asset-ledger.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "composition_plan",
+          "path": "output/composition-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "composition_lint",
+          "path": "output/composition-lint.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "motion_sample",
+          "path": "output/motion-sample.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "motion_review",
+          "path": "output/motion-review.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "motion_source_manifest",
+          "path": "output/motion-source-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "captions",
+          "path": "output/captions.srt",
+          "mime_type": "text/plain",
+          "required": true
+        },
+        {
+          "role": "caption_plan",
+          "path": "output/caption-plan.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "caption_style",
+          "path": "output/caption-style.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "caption_qc",
+          "path": "output/caption-qc.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "final_picture",
+          "path": "output/final-picture.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "final_audio_transcript",
+          "path": "output/final-audio-transcript.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "sfx_cues",
+          "path": "output/sfx-cues.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "bgm_plan",
+          "path": "output/bgm-plan.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "bgm_plan_md",
+          "path": "output/bgm-plan.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "bgm_qc",
+          "path": "output/bgm-qc.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "audio_source_manifest",
+          "path": "output/audio-source-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "quality_evidence",
+          "path": "output/quality-evidence.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "sync_evidence",
+          "path": "output/sync-evidence.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "audio_content_check",
+          "path": "output/audio-content-check.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "cover_reference_input",
+          "path": "output/input-manifest.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_reference_image",
+          "path": "output/reference-cover.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "cover_reference_compressed_image",
+          "path": "output/reference-cover-compressed.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "cover_reference_analysis",
+          "path": "output/reference-analysis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_plan",
+          "path": "output/cover-plan.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png",
+          "required": true
+        },
+        {
+          "role": "cover_quality",
+          "path": "output/cover-quality.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "cover_reference_prompts",
+          "path": "output/cover-prompts.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_review",
+          "path": "output/cover-review.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_candidate",
+          "path": "output/cover_v2.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "cover_asset_manifest",
+          "path": "output/cover-asset-manifest.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "cover_variant_matrix",
+          "path": "output/cover-variant-matrix.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "cover_thumbnail_review",
+          "path": "output/cover-thumbnail-review.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "review_decision",
+          "path": "output/review-decision.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "failure_diagnosis",
+          "path": "output/failure-diagnosis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json",
+          "required": true
+        }
+      ],
+      "artifact_stages": [
+        {
+          "id": "motion_review",
+          "trigger": "output/motion-sample.mp4",
+          "required": [
+            "output/rough-cut.mp4",
+            "output/transcript.json",
+            "output/edit-decision-list.json",
+            "output/edit-strategy.md",
+            "output/semantic-cut.mp4",
+            "output/asset-requirements.json",
+            "output/visual-plan-draft.json",
+            "output/asset-source-policy.json",
+            "output/generated-video-manifest.json",
+            "output/generated-video-review.json",
+            "output/generated-video-lint.json",
+            "output/asset-source-manifest.json",
+            "output/asset-ledger.json",
+            "output/visual-plan.json",
+            "output/composition-plan.json",
+            "output/composition-lint.json",
+            "output/motion-sample.mp4",
+            "output/motion-review.json",
+            "output/motion-source-manifest.json"
+          ]
+        },
+        {
+          "id": "final_delivery",
+          "trigger": "output/final.mp4",
+          "required": [
+            "output/edit-decision-list.json",
+            "output/composition-lint.json",
+            "output/final-audio-transcript.json",
+            "output/audio-content-check.json",
+            "output/sync-evidence.json",
+            "output/quality-evidence.json",
+            "output/generated-video-manifest.json",
+            "output/generated-video-review.json",
+            "output/generated-video-lint.json",
+            "output/progress-state.json"
+          ],
+          "terminal": true
+        },
+        {
+          "id": "explainer_preflight",
+          "trigger": "output/explainer-input-assessment.json",
+          "required": [
+            "output/explainer-input-assessment.json",
+            "output/semantic-master.json",
+            "output/explanation-plan.json",
+            "output/explanation-rehearsal.json",
+            "output/platform-variant-plan.json",
+            "output/retention-experiment-plan.json",
+            "output/independent-validation-plan.json",
+            "output/independent-validation.json"
+          ],
+          "required_on_final": true
+        }
+      ],
+      "delivery": [
+        {
+          "role": "explainer_input_assessment",
+          "path": "output/explainer-input-assessment.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "semantic_master",
+          "path": "output/semantic-master.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "explanation_plan",
+          "path": "output/explanation-plan.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "explanation_rehearsal",
+          "path": "output/explanation-rehearsal.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "platform_variant_plan",
+          "path": "output/platform-variant-plan.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "retention_experiment_plan",
+          "path": "output/retention-experiment-plan.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "independent_validation_plan",
+          "path": "output/independent-validation-plan.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "independent_validation",
+          "path": "output/independent-validation.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "retention_results",
+          "path": "output/retention-results.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "final_audio_transcript",
+          "path": "output/final-audio-transcript.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "final_picture",
+          "path": "output/final-picture.mp4",
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "sfx_cues",
+          "path": "output/sfx-cues.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "bgm_plan",
+          "path": "output/bgm-plan.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "bgm_plan_md",
+          "path": "output/bgm-plan.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "bgm_qc",
+          "path": "output/bgm-qc.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "audio_source_manifest",
+          "path": "output/audio-source-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "captions",
+          "path": "output/captions.srt",
+          "mime_type": "text/plain"
+        },
+        {
+          "role": "caption_plan",
+          "path": "output/caption-plan.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "caption_style",
+          "path": "output/caption-style.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "caption_qc",
+          "path": "output/caption-qc.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png"
+        },
+        {
+          "role": "cover_plan",
+          "path": "output/cover-plan.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "cover_quality",
+          "path": "output/cover-quality.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "cover_asset_manifest",
+          "path": "output/cover-asset-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "cover_variant_matrix",
+          "path": "output/cover-variant-matrix.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "cover_thumbnail_review",
+          "path": "output/cover-thumbnail-review.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "quality_evidence",
+          "path": "output/quality-evidence.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "edit_decision_list",
+          "path": "output/edit-decision-list.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "generated_video_manifest",
+          "path": "output/generated-video-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "generated_video_review",
+          "path": "output/generated-video-review.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "generated_video_lint",
+          "path": "output/generated-video-lint.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "sync_evidence",
+          "path": "output/sync-evidence.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "audio_content_check",
+          "path": "output/audio-content-check.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json"
+        }
+      ],
+      "ui": {
+        "renderer": "custom:ip-explainer"
+      },
+      "digest": "7a130ed71140903e54344ffaf02efdbd7db73c4c0e21566138714fc7e4f570ca"
     },
     {
       "id": "local-life",
@@ -3106,7 +3773,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "d09d8cd9a3f355de43769d09b12163ea08b9688dabedd05d81058d6ac52461ed"
+      "digest": "b01f15a0a8fd9f5a23ca9e8ad4c891ca85060ff422a8fb8d8e08daba6579f9b7"
     },
     {
       "id": "talking-head-editor",
@@ -3508,673 +4175,6 @@
         ]
       },
       "digest": "d42ef8c218b7e029e89465d3c293b286ac25b74493963316ffc3cf5302360efd"
-    },
-    {
-      "id": "talking-head-montage",
-      "version": "1.3.1",
-      "kind": "plugin",
-      "display_name": "口播 Montage 制作",
-      "description": "以 OpenMontage hybrid 为主引擎，完成真人口播、生成视频素材、图片素材、图形动效、字幕与分章节 BGM 的本地制作与文件审核，并在流程最后一步生成封面。",
-      "agent": {
-        "name": "talking-head-montage",
-        "skills": [
-          "talking-head-video-generation",
-          "talking-head-composition",
-          "talking-head-sound-design",
-          "content-tagging",
-          "short-video-cover",
-          "talking-head-visual-focus",
-          "talking-head-explainer",
-          "video-bgm-design",
-          "video-production-qc",
-          "video-subtitle-design"
-        ],
-        "max_turns": 260
-      },
-      "interaction": {},
-      "bindings": {},
-      "runtime": {
-        "profile": "talking-head-montage",
-        "adapter": "openmontage"
-      },
-      "surfaces": [
-        "plugin"
-      ],
-      "features": [
-        "talking-head",
-        "explainable-knowledge-editing",
-        "semantic-master-variants",
-        "retention-experiments",
-        "independent-validation",
-        "generated-video-inserts",
-        "image-inserts",
-        "motion-graphics",
-        "automatic-review-loop"
-      ],
-      "artifacts": [
-        {
-          "role": "explainer_input_assessment",
-          "path": "output/explainer-input-assessment.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "semantic_master",
-          "path": "output/semantic-master.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "explanation_rehearsal",
-          "path": "output/explanation-rehearsal.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "explanation_plan",
-          "path": "output/explanation-plan.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "platform_variant_plan",
-          "path": "output/platform-variant-plan.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "retention_experiment_plan",
-          "path": "output/retention-experiment-plan.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "independent_validation_plan",
-          "path": "output/independent-validation-plan.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "independent_validation",
-          "path": "output/independent-validation.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "retention_results",
-          "path": "output/retention-results.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "rough_cut",
-          "path": "output/rough-cut.mp4",
-          "mime_type": "video/mp4",
-          "required": true
-        },
-        {
-          "role": "semantic_cut",
-          "path": "output/semantic-cut.mp4",
-          "mime_type": "video/mp4",
-          "required": true
-        },
-        {
-          "role": "transcript",
-          "path": "output/transcript.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "edit_decision_list",
-          "path": "output/edit-decision-list.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "edit_strategy",
-          "path": "output/edit-strategy.md",
-          "mime_type": "text/markdown",
-          "required": true
-        },
-        {
-          "role": "asset_requirements",
-          "path": "output/asset-requirements.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "visual_plan_draft",
-          "path": "output/visual-plan-draft.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "asset_source_policy",
-          "path": "output/asset-source-policy.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "generated_video_manifest",
-          "path": "output/generated-video-manifest.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "generated_video_review",
-          "path": "output/generated-video-review.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "generated_video_lint",
-          "path": "output/generated-video-lint.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "asset_source_manifest",
-          "path": "output/asset-source-manifest.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "visual_plan",
-          "path": "output/visual-plan.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "asset_ledger",
-          "path": "output/asset-ledger.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "composition_plan",
-          "path": "output/composition-plan.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "composition_lint",
-          "path": "output/composition-lint.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "motion_sample",
-          "path": "output/motion-sample.mp4",
-          "mime_type": "video/mp4",
-          "required": true
-        },
-        {
-          "role": "motion_review",
-          "path": "output/motion-review.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "motion_source_manifest",
-          "path": "output/motion-source-manifest.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "captions",
-          "path": "output/captions.srt",
-          "mime_type": "text/plain",
-          "required": true
-        },
-        {
-          "role": "caption_plan",
-          "path": "output/caption-plan.md",
-          "mime_type": "text/markdown",
-          "required": true
-        },
-        {
-          "role": "caption_style",
-          "path": "output/caption-style.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "caption_qc",
-          "path": "output/caption-qc.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "final_picture",
-          "path": "output/final-picture.mp4",
-          "mime_type": "video/mp4",
-          "required": true
-        },
-        {
-          "role": "final_video",
-          "path": "output/final.mp4",
-          "mime_type": "video/mp4",
-          "required": true
-        },
-        {
-          "role": "final_audio_transcript",
-          "path": "output/final-audio-transcript.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "sfx_cues",
-          "path": "output/sfx-cues.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "bgm_plan",
-          "path": "output/bgm-plan.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "bgm_plan_md",
-          "path": "output/bgm-plan.md",
-          "mime_type": "text/markdown",
-          "required": true
-        },
-        {
-          "role": "bgm_qc",
-          "path": "output/bgm-qc.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "audio_source_manifest",
-          "path": "output/audio-source-manifest.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "content_tags",
-          "path": "output/content-tags.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "delivery_manifest",
-          "path": "output/delivery-manifest.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "quality_evidence",
-          "path": "output/quality-evidence.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "sync_evidence",
-          "path": "output/sync-evidence.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "audio_content_check",
-          "path": "output/audio-content-check.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "cover_reference_input",
-          "path": "output/input-manifest.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "cover_reference_image",
-          "path": "output/reference-cover.png",
-          "mime_type": "image/png",
-          "required": false
-        },
-        {
-          "role": "cover_reference_compressed_image",
-          "path": "output/reference-cover-compressed.png",
-          "mime_type": "image/png",
-          "required": false
-        },
-        {
-          "role": "cover_reference_analysis",
-          "path": "output/reference-analysis.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "cover_plan",
-          "path": "output/cover-plan.md",
-          "mime_type": "text/markdown",
-          "required": true
-        },
-        {
-          "role": "cover",
-          "path": "output/cover.png",
-          "mime_type": "image/png",
-          "required": true
-        },
-        {
-          "role": "cover_quality",
-          "path": "output/cover-quality.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "cover_reference_prompts",
-          "path": "output/cover-prompts.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "cover_review",
-          "path": "output/cover-review.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "cover_candidate",
-          "path": "output/cover_v2.png",
-          "mime_type": "image/png",
-          "required": false
-        },
-        {
-          "role": "cover_asset_manifest",
-          "path": "output/cover-asset-manifest.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "cover_variant_matrix",
-          "path": "output/cover-variant-matrix.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "cover_thumbnail_review",
-          "path": "output/cover-thumbnail-review.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "review_decision",
-          "path": "output/review-decision.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "failure_state",
-          "path": "output/failure-state.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "failure_diagnosis",
-          "path": "output/failure-diagnosis.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "progress_state",
-          "path": "output/progress-state.json",
-          "mime_type": "application/json",
-          "required": true
-        }
-      ],
-      "artifact_stages": [
-        {
-          "id": "motion_review",
-          "trigger": "output/motion-sample.mp4",
-          "required": [
-            "output/rough-cut.mp4",
-            "output/transcript.json",
-            "output/edit-decision-list.json",
-            "output/edit-strategy.md",
-            "output/semantic-cut.mp4",
-            "output/asset-requirements.json",
-            "output/visual-plan-draft.json",
-            "output/asset-source-policy.json",
-            "output/generated-video-manifest.json",
-            "output/generated-video-review.json",
-            "output/generated-video-lint.json",
-            "output/asset-source-manifest.json",
-            "output/asset-ledger.json",
-            "output/visual-plan.json",
-            "output/composition-plan.json",
-            "output/composition-lint.json",
-            "output/motion-sample.mp4",
-            "output/motion-review.json",
-            "output/motion-source-manifest.json"
-          ]
-        },
-        {
-          "id": "final_delivery",
-          "trigger": "output/final.mp4",
-          "required": [
-            "output/edit-decision-list.json",
-            "output/composition-lint.json",
-            "output/final-audio-transcript.json",
-            "output/audio-content-check.json",
-            "output/sync-evidence.json",
-            "output/quality-evidence.json",
-            "output/generated-video-manifest.json",
-            "output/generated-video-review.json",
-            "output/generated-video-lint.json",
-            "output/progress-state.json"
-          ],
-          "terminal": true
-        },
-        {
-          "id": "explainer_preflight",
-          "trigger": "output/explainer-input-assessment.json",
-          "required": [
-            "output/explainer-input-assessment.json",
-            "output/semantic-master.json",
-            "output/explanation-plan.json",
-            "output/explanation-rehearsal.json",
-            "output/platform-variant-plan.json",
-            "output/retention-experiment-plan.json",
-            "output/independent-validation-plan.json",
-            "output/independent-validation.json"
-          ],
-          "required_on_final": true
-        }
-      ],
-      "delivery": [
-        {
-          "role": "explainer_input_assessment",
-          "path": "output/explainer-input-assessment.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "semantic_master",
-          "path": "output/semantic-master.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "explanation_plan",
-          "path": "output/explanation-plan.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "explanation_rehearsal",
-          "path": "output/explanation-rehearsal.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "platform_variant_plan",
-          "path": "output/platform-variant-plan.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "retention_experiment_plan",
-          "path": "output/retention-experiment-plan.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "independent_validation_plan",
-          "path": "output/independent-validation-plan.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "independent_validation",
-          "path": "output/independent-validation.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "retention_results",
-          "path": "output/retention-results.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "final_video",
-          "path": "output/final.mp4",
-          "mime_type": "video/mp4"
-        },
-        {
-          "role": "final_audio_transcript",
-          "path": "output/final-audio-transcript.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "final_picture",
-          "path": "output/final-picture.mp4",
-          "mime_type": "video/mp4"
-        },
-        {
-          "role": "sfx_cues",
-          "path": "output/sfx-cues.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "bgm_plan",
-          "path": "output/bgm-plan.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "bgm_plan_md",
-          "path": "output/bgm-plan.md",
-          "mime_type": "text/markdown"
-        },
-        {
-          "role": "bgm_qc",
-          "path": "output/bgm-qc.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "audio_source_manifest",
-          "path": "output/audio-source-manifest.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "captions",
-          "path": "output/captions.srt",
-          "mime_type": "text/plain"
-        },
-        {
-          "role": "caption_plan",
-          "path": "output/caption-plan.md",
-          "mime_type": "text/markdown"
-        },
-        {
-          "role": "caption_style",
-          "path": "output/caption-style.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "caption_qc",
-          "path": "output/caption-qc.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "cover",
-          "path": "output/cover.png",
-          "mime_type": "image/png"
-        },
-        {
-          "role": "cover_plan",
-          "path": "output/cover-plan.md",
-          "mime_type": "text/markdown"
-        },
-        {
-          "role": "cover_quality",
-          "path": "output/cover-quality.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "cover_asset_manifest",
-          "path": "output/cover-asset-manifest.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "cover_variant_matrix",
-          "path": "output/cover-variant-matrix.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "cover_thumbnail_review",
-          "path": "output/cover-thumbnail-review.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "content_tags",
-          "path": "output/content-tags.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "delivery_manifest",
-          "path": "output/delivery-manifest.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "quality_evidence",
-          "path": "output/quality-evidence.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "edit_decision_list",
-          "path": "output/edit-decision-list.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "generated_video_manifest",
-          "path": "output/generated-video-manifest.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "generated_video_review",
-          "path": "output/generated-video-review.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "generated_video_lint",
-          "path": "output/generated-video-lint.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "sync_evidence",
-          "path": "output/sync-evidence.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "audio_content_check",
-          "path": "output/audio-content-check.json",
-          "mime_type": "application/json"
-        },
-        {
-          "role": "progress_state",
-          "path": "output/progress-state.json",
-          "mime_type": "application/json"
-        }
-      ],
-      "ui": {
-        "renderer": "custom:talking-head-montage"
-      },
-      "digest": "cbee19f3bd8d7696726d994eafb24a08344c50df358d2732b2010a55bce4faec"
     },
     {
       "id": "topic-radar",
@@ -6248,7 +6248,7 @@
         }
       ],
       "ui": {},
-      "digest": "5b8d1fd167218f2c8393963ce5501acdc63d4285abbf77826a2ecb658ba2874f"
+      "digest": "4fbc486c1e4e07384d39aadbf6481cd13376489a336344e0de8a88ffff49c0d1"
     },
     {
       "id": "wechat-article",
@@ -6513,7 +6513,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "39f5e56d3f4886eb1260e07816496786dd8bfd7a4a75d4ee53b44ec22ed2fb60"
+      "digest": "fda7080d34fdbe9da2a99b776fe4d0abd23fd2cf17e9e72b583811b81a4843c4"
     },
     {
       "id": "wechat-picture",

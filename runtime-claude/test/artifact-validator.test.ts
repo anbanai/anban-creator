@@ -134,7 +134,7 @@ function stableHash(value: unknown): string {
 
 async function writeExplainerEvidence(root: string, overrides: Record<string, unknown> = {}): Promise<void> {
   const hash = stableHash(semanticMaster);
-  const envelope = (extra: Record<string, unknown>) => ({ schema_version: "1.0.0", status: "ready", source: "talking-head-montage", workflow: "talking-head-explainer", data_at: "2026-11-02T00:00:00Z", missing: [], evidence_paths: [], ...extra });
+  const envelope = (extra: Record<string, unknown>) => ({ schema_version: "1.0.0", status: "ready", source: "ip-explainer", workflow: "talking-head-explainer", data_at: "2026-11-02T00:00:00Z", missing: [], evidence_paths: [], ...extra });
   await writeFile(join(root, "output", "explainer-input-assessment.json"), JSON.stringify(envelope({ inputs: [] })));
   await writeFile(join(root, "output", "semantic-master.json"), JSON.stringify(envelope({ semantic_master: semanticMaster, revision_id: "rev-1", content_sha256: hash })));
   for (const path of [

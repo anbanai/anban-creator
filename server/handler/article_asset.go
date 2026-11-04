@@ -49,6 +49,12 @@ func (h *ArticleAssetHandler) Get(c fiber.Ctx) error {
 	}
 	c.Set("Content-Type", asset.ContentType)
 	c.Set("Cache-Control", "public, max-age=86400, immutable")
+	// Article images are intentionally public and are consumed from the
+	// cross-origin WeChat editor after a clipboard handoff.
+	c.Set("Cross-Origin-Resource-Policy", "cross-origin")
+	// The WeChat editor may fetch the image before inserting it into its own
+	// media store, so the public asset must be readable by another origin.
+	c.Set("Access-Control-Allow-Origin", "*")
 	c.Set("X-Content-Type-Options", "nosniff")
 	return c.SendStream(body)
 }
