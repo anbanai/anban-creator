@@ -36,6 +36,12 @@ func TestArticleAssetServesOnlyPublishedArticleImagesWithoutAuthentication(t *te
 	if resp.StatusCode != fiber.StatusOK || string(body) != "png" || resp.Header.Get("Content-Type") != "image/png" || resp.Header.Get("Cache-Control") == "" {
 		t.Fatalf("response = status %d, body %q, headers %v", resp.StatusCode, body, resp.Header)
 	}
+	if got := resp.Header.Get("Cross-Origin-Resource-Policy"); got != "cross-origin" {
+		t.Fatalf("Cross-Origin-Resource-Policy = %q, want cross-origin", got)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want wildcard for public article images", got)
+	}
 }
 
 func TestArticleAssetDoesNotExposeOtherAssetPurpose(t *testing.T) {
