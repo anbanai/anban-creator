@@ -40,12 +40,12 @@ export const mvpNavItems: NavItem[] = [
 
 export const workspaceNavItems: NavItem[] = [
   ...mvpNavItems.slice(0, 4),
+  { to: '/designer', label: '设计师', icon: ImageIcon, adminOnly: true },
   { to: '/timeline', label: '时间线', icon: CalendarDays, adminOnly: true },
   ...mvpNavItems.slice(4),
 ]
 
 export const adminNavItems: NavItem[] = [
-  { to: '/designer', label: '设计师', icon: ImageIcon, adminOnly: true },
   { to: '/templates', label: '模板库', icon: LayoutGrid, adminOnly: true },
   { to: '/admin/billing', label: '充值管理', icon: Coins, adminOnly: true },
 ]

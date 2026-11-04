@@ -142,7 +142,8 @@ func mapToImageSize(size, model string) string {
 
 	if isGPTImageModel(model) {
 		w, h := parseRatioNumbers(ratio)
-		if requiresImageUsageForBilling(model) && isSupportedRatioSize(size) {
+		modelID := strings.ToLower(strings.TrimSpace(model))
+		if (requiresImageUsageForBilling(model) || modelID == "gpt-image-2.5-sunburst" || modelID == "gpt-image-2.5-flare") && isSupportedRatioSize(size) {
 			return exactOpenAIImageSize(w, h, 1536)
 		}
 		switch {

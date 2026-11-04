@@ -1,6 +1,6 @@
 import { createElement, type ReactNode } from 'react'
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
-import { fireEvent, render as testingRender, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render as testingRender, screen, waitFor, within } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import { ThemeProvider } from 'next-themes'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -149,7 +149,7 @@ describe('Designer billing guidance', () => {
   it('does not expose Agent execution profiles for image operations', async () => {
     render(createElement(DesignerPage))
 
-    await screen.findByRole('button', { name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' })
+    await within(screen.getByRole('complementary', { name: '设计师设置' })).findByRole('group', { name: '创作参数' })
     expect(screen.queryByRole('group', { name: 'Agent 执行配置' })).not.toBeInTheDocument()
   })
 
@@ -173,7 +173,7 @@ describe('Designer billing guidance', () => {
 
     render(createElement(DesignerPage))
 
-    await screen.findByRole('button', { name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' })
+    await within(screen.getByRole('complementary', { name: '设计师设置' })).findByRole('group', { name: '创作参数' })
     fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), {
       target: { value: '生成海报' },
     })
@@ -190,16 +190,18 @@ describe('Designer billing guidance', () => {
 
     renderWithQueryClient(queryClient)
 
-    await screen.findByRole('button', { name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' })
+    await within(screen.getByRole('complementary', { name: '设计师设置' })).findByRole('group', { name: '创作参数' })
     await waitFor(() => expect(queryClient.getQueryState(['billing', 'wallet'])?.status).toBe('error'))
     expect(screen.queryByText('每张 500 积分 · 余额 1,000')).not.toBeInTheDocument()
-    expect(screen.getByText('每张 500 积分')).toBeInTheDocument()
+    const promptAddon = screen.getByRole('button', { name: '生成' }).closest('[data-slot="input-group-addon"]')
+    expect(promptAddon).not.toBeNull()
+    expect(within(promptAddon as HTMLElement).getByText('每张 500 积分')).toBeInTheDocument()
   })
 
   it('refreshes the wallet after a normal generation is accepted', async () => {
     render(createElement(DesignerPage))
 
-    await screen.findByRole('button', { name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' })
+    await within(screen.getByRole('complementary', { name: '设计师设置' })).findByRole('group', { name: '创作参数' })
     fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), {
       target: { value: '生成海报' },
     })
@@ -255,7 +257,7 @@ describe('Designer billing guidance', () => {
 
     render(createElement(DesignerPage))
 
-    await screen.findByRole('button', { name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' })
+    await within(screen.getByRole('complementary', { name: '设计师设置' })).findByRole('group', { name: '创作参数' })
     fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), {
       target: { value: '生成海报' },
     })

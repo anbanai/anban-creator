@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -271,6 +272,9 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 			if !fixedImageGenerationSize.MatchString(preset) {
 				t.Fatalf("enabled image capability %q exposes non-fixed generation size %q", key, preset)
 			}
+		}
+		if (key == "standard" || key == "professional") && !slices.Contains(capability.GenerationFeatures.SizePresets, "9:16:2K") {
+			t.Errorf("image capability %q must offer the 9:16:2K portrait preset", key)
 		}
 	}
 	expectedRuntimeControls := map[string]map[string]string{
