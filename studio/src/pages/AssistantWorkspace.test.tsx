@@ -1343,6 +1343,23 @@ describe('AssistantWorkspace', () => {
     expect(screen.queryByRole('button', { name: /前往创作页/ })).not.toBeInTheDocument()
   })
 
+  it.each([['explicit', ['ecommerce']], ['legacy', undefined]] as const)('opens the ecommerce creation form with the selected %s persona', async (_name, agents) => {
+    const persona = activePersona('ecommerce-persona', '电商人设', { platform: 'ecommerce', agent_ids: agents ? [...agents] : undefined })
+    setBootstrap({ defaultModeId: 'creation', modes: [
+      { id: 'creation', displayName: '创作模式', description: '创作', available: true },
+    ], projects: [{ ...persona, profileReady: true, profileRevision: 1, works: [] }] })
+    mocks.projectsList.mockResolvedValue([persona])
+    renderPage({ modeId: 'creation', projectId: persona.id })
+
+    const start = await screen.findByRole('button', { name: '开始电商设计' })
+    expect(within(screen.getByTestId('assistant-context-bar')).getByRole('status')).toHaveTextContent('上传产品图')
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+    fireEvent.click(start)
+    expect(screen.getByTestId('location')).toHaveTextContent('/tasks/new?project_id=ecommerce-persona&type=ecommerce')
+    expect(mocks.workspaceMessage).not.toHaveBeenCalled()
+    expect(mocks.workspaceCommit).not.toHaveBeenCalled()
+  })
+
   function setupUnconfiguredPersona() {
     const persona = activePersona('needs-types', '待设置人设', { platform: '' as Project['platform'], agent_ids: [] })
     setBootstrap({ defaultModeId: 'creation', modes: [
@@ -1382,6 +1399,24 @@ describe('AssistantWorkspace', () => {
     expect(screen.getByRole('textbox', { name: '发送消息' })).toHaveValue('做一组茶知识图片')
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(mocks.workspaceMessage).toHaveBeenCalledWith('workspace-1', 'creation', '做一组茶知识图片\n\n创作类型：wechat-picture', false, expect.any(Object)))
+  })
+
+  it('offers the ecommerce form immediately after saving ecommerce as the creation type', async () => {
+    const persona = setupUnconfiguredPersona()
+    const saved = { ...persona, platform: 'ecommerce' as const, agent_ids: ['ecommerce'] }
+    mocks.projectUpdate.mockImplementation(async () => {
+      mocks.projectsList.mockResolvedValue([saved])
+      return saved
+    })
+    renderPage({ modeId: 'creation', projectId: persona.id })
+    fireEvent.click(await within(screen.getByRole('region', { name: '当前人设' })).findByRole('button', { name: '创作类型：待设置人设' }))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: '电商设计' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    fireEvent.click(await screen.findByRole('button', { name: '开始电商设计' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('/tasks/new?project_id=needs-types&type=ecommerce')
+    expect(mocks.workspaceMessage).not.toHaveBeenCalled()
   })
 
   it('does not modify settings when cancelled and keeps a failed save retryable', async () => {

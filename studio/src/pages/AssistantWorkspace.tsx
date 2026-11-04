@@ -490,6 +490,7 @@ export default function AssistantWorkspace() {
     ?? (!workspace && !projectId && !newProfile && selectionMode !== 'profile' ? selectableProjects[0] : undefined)
   const creationTypes = assistantCreationTypes(selectedProject)
   const selectedAgentIDs = selectedProject ? personaAgentIDs(selectedProject) : []
+  const isEcommerceCreation = mode === 'creation' && selectedAgentIDs.includes('ecommerce')
   const selectedCreationType = creationTypes.some((item) => item.value === creationType) ? creationType : creationTypes[0]?.value ?? ''
   const creationPlatform = creationTypes.find((item) => item.value === selectedCreationType)?.platform ?? selectedProject?.platform
   const isVideoEditCreation = mode === 'creation' && selectedCreationType === 'video-edit'
@@ -535,7 +536,9 @@ export default function AssistantWorkspace() {
       ? { ...bootstrapMode, available: true }
       : bootstrapMode
   const modePrerequisiteBlocked = Boolean(activeMode && !activeMode.available && activeMode.disabledReason && !isRuntimeUnavailable)
-  const missingContextInstruction = activeMode?.available
+  const missingContextInstruction = isEcommerceCreation
+    ? '电商设计需在创作页上传产品图并配置出图内容。'
+    : activeMode?.available
     ? mode === 'creation' && !selectedProject
       ? '先选择人设后即可输入消息'
       : mode === 'creation' && selectedProject && creationTypes.length === 0
@@ -1530,7 +1533,10 @@ export default function AssistantWorkspace() {
       loadingWorks={worksQuery.isLoading}
       status={missingContextInstruction ? <span role="status" className="text-xs text-muted-foreground">{missingContextInstruction}</span> : undefined}
     />
-  ) : missingContextInstruction ? <div data-testid="assistant-context-bar"><span role="status" className="text-xs text-muted-foreground">{missingContextInstruction}</span></div> : undefined
+  ) : missingContextInstruction ? <div data-testid="assistant-context-bar" className="flex flex-wrap items-center justify-between gap-2">
+    <span role="status" className="text-xs text-muted-foreground">{missingContextInstruction}</span>
+    {isEcommerceCreation && selectedProject && <Button type="button" size="sm" disabled={switching || committing || sending || responding} onClick={() => navigate(`/tasks/new?${new URLSearchParams({ project_id: selectedProject.id, type: 'ecommerce' })}`)}>开始电商设计</Button>}
+  </div> : undefined
   const currentPersona = completeProjects.find((project) => project.id === selectedProject?.id)
   const activeReviewSelectors = workspace && pendingMode === 'review' ? <WorkspaceSelectors mode="review" projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={contentId} works={works} disabled={switching} onProject={selectPersona} onContent={selectReviewContent} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} /> : null
 
