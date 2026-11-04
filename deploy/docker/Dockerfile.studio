@@ -39,8 +39,8 @@ RUN bun run build
 # Stage 2: serve the static bundle with nginx.
 FROM crpi-671lgv9lrdyll4t9.cn-chengdu.personal.cr.aliyuncs.com/bx_anbanai/nginx:alpine
 
-# Docker/local defaults preserve the existing HTTP backend contract. ACK
-# overrides all three values to reach the TLS-enabled Server Service.
+# Docker and ACK use HTTP port 8080 for the internal backend Service.
+# ACK overrides the host; public TLS terminates at Ingress.
 ENV BACKEND_HOST=server
 ENV BACKEND_SCHEME=http
 ENV BACKEND_PORT=8080
