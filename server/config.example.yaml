@@ -4,6 +4,7 @@
 server:
   port: 8080
   public_base_url: "${ANBAN_PUBLIC_BASE_URL:-https://creator.anbanai.com}"
+  # 集群内部默认使用 HTTP 8080，公网 TLS 由 Ingress 终止；仅直接监听 HTTPS 时配置以下证书。
   tls_cert_file: "${ANBAN_SERVER_TLS_CERT_FILE}"
   tls_key_file: "${ANBAN_SERVER_TLS_KEY_FILE}"
   host: "0.0.0.0"
@@ -663,7 +664,7 @@ claude:
       model_usage_aliases:
         "kimi-k3[1m]": "kimi-k3"
   # Agent Job/容器访问 server MCP/API 的地址。Kubernetes 生产环境通常使用集群内 Service URL。
-  agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-https://creator-api-svc:8443}"
+  agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-http://creator-api-svc:8080}"
   # 托管 Agent 执行器类型：docker 用于单机容器；kubernetes 用于生产队列。
   executor: "${ANBAN_AGENT_EXECUTOR}"
   # 失败运行时保留多久供排查（秒），之后由 reconciler 清理。
@@ -716,9 +717,8 @@ claude:
     service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"
     # 私有镜像仓库拉取 secret；公开镜像可留空。
     image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET:-acr-secret}"
-    # Agent Job 中的 Go 与 Node/Claude Code TLS 客户端校验 Server 使用的签发 CA Secret，仅挂载 ca.crt。
-    # 不要指向保存叶子证书 tls.crt/tls.key 的 anban-server-tls。
-    server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET:-anban-internal-ca}"
+    # 可选：仅 HTTPS 地址使用私有 CA 时配置，Agent Job 只挂载 ca.crt；内部 HTTP 无需证书。
+    server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET}"
     # 任务工作区 PVC 使用的 RWX NAS 存储类；项目记忆使用预创建的共享 PVC。
     nas_storage_class: "${ANBAN_AGENT_NAS_STORAGE_CLASS:-nas-sc-creator}"
     project_memory_claim: "${ANBAN_AGENT_PROJECT_MEMORY_CLAIM:-creator-project-memory}"

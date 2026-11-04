@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -138,8 +139,6 @@ func buildKubernetesJobWithResources(cfg kubernetesJobConfig, execution *model.T
 						TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
 						Env: []corev1.EnvVar{
 							{Name: "HOME", Value: kubernetesRuntimeHomePath},
-							{Name: "SSL_CERT_FILE", Value: kubernetesServerCAFile},
-							{Name: "NODE_EXTRA_CA_CERTS", Value: kubernetesServerCAFile},
 						},
 						Command: []string{"anban"},
 						Args: []string{
@@ -166,7 +165,6 @@ func buildKubernetesJobWithResources(cfg kubernetesJobConfig, execution *model.T
 							{Name: kubernetesMemoryMountName, MountPath: containerAgentMemoryMountPath(execution.RuntimeAdapter), SubPath: "projects/" + projectID(task)},
 							{Name: kubernetesTmpVolumeName, MountPath: "/tmp"},
 							{Name: kubernetesTokenVolumeName, MountPath: kubernetesTokenMountPath, ReadOnly: true},
-							{Name: kubernetesServerCAVolumeName, MountPath: kubernetesServerCAMountPath, ReadOnly: true},
 						},
 					}},
 					Volumes: []corev1.Volume{
@@ -181,15 +179,25 @@ func buildKubernetesJobWithResources(cfg kubernetesJobConfig, execution *model.T
 								Path:              "token",
 							}}},
 						}}},
-						{Name: kubernetesServerCAVolumeName, VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
-							SecretName:  cfg.ServerCASecret,
-							DefaultMode: int32Ptr(corev1.SecretVolumeSourceDefaultMode),
-							Items:       []corev1.KeyToPath{{Key: "ca.crt", Path: "ca.crt"}},
-						}}},
 					},
 				},
 			},
 		},
+	}
+	container := &job.Spec.Template.Spec.Containers[0]
+	if parsed, err := url.Parse(strings.TrimSpace(cfg.ServerURL)); err == nil && parsed.Scheme == "http" {
+		container.Args = append(container.Args, "--allow-http-server")
+	} else if strings.TrimSpace(cfg.ServerCASecret) != "" {
+		container.Env = append(container.Env,
+			corev1.EnvVar{Name: "SSL_CERT_FILE", Value: kubernetesServerCAFile},
+			corev1.EnvVar{Name: "NODE_EXTRA_CA_CERTS", Value: kubernetesServerCAFile},
+		)
+		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{Name: kubernetesServerCAVolumeName, MountPath: kubernetesServerCAMountPath, ReadOnly: true})
+		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, corev1.Volume{Name: kubernetesServerCAVolumeName, VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+			SecretName:  cfg.ServerCASecret,
+			DefaultMode: int32Ptr(corev1.SecretVolumeSourceDefaultMode),
+			Items:       []corev1.KeyToPath{{Key: "ca.crt", Path: "ca.crt"}},
+		}}})
 	}
 	if strings.TrimSpace(cfg.ImagePullSecret) != "" {
 		job.Spec.Template.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: cfg.ImagePullSecret}}

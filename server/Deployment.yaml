@@ -121,15 +121,7 @@ spec:
             - name: ANBAN_AGENT_EXECUTOR
               value: kubernetes
             - name: ANBAN_CLAUDE_AGENT_SERVER_URL
-              value: "https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443"
-            - name: ANBAN_SERVER_TLS_CERT_FILE
-              value: /var/run/secrets/anban-server-tls/tls.crt
-            - name: ANBAN_SERVER_TLS_KEY_FILE
-              value: /var/run/secrets/anban-server-tls/tls.key
-            - name: SSL_CERT_FILE
-              value: /var/run/secrets/anban-internal-ca/ca.crt
-            - name: NODE_EXTRA_CA_CERTS
-              value: /var/run/secrets/anban-internal-ca/ca.crt
+              value: "http://${micro_service_name}-svc.${namespace}.svc.cluster.local:8080"
             - name: ANBAN_AGENT_NAMESPACE
               value: "${namespace}"
             - name: ANBAN_AGENT_IMAGE_WECHAT_ARTICLE
@@ -180,8 +172,6 @@ spec:
               value: "${dsh_image_repo}"
             - name: ANBAN_AGENT_SERVICE_ACCOUNT
               value: "${agent_service_account}"
-            - name: ANBAN_AGENT_SERVER_CA_SECRET
-              value: anban-internal-ca
             - name: ANBAN_AGENT_NAS_STORAGE_CLASS
               value: nas-sc-creator
             - name: ANBAN_AGENT_PROJECT_MEMORY_CLAIM
@@ -298,32 +288,12 @@ spec:
               name: "${micro_service_name}-config"
               subPath: config.yaml
               readOnly: true
-            - mountPath: /var/run/secrets/anban-server-tls
-              name: anban-server-tls
-              readOnly: true
-            - mountPath: /var/run/secrets/anban-internal-ca
-              name: anban-internal-ca
-              readOnly: true
       imagePullSecrets:
         - name: "${imagePullSecret}"
       volumes:
         - name: project-memory
           persistentVolumeClaim:
             claimName: creator-project-memory
-        - name: anban-server-tls
-          secret:
-            secretName: anban-server-tls
-            items:
-              - key: tls.crt
-                path: tls.crt
-              - key: tls.key
-                path: tls.key
-        - name: anban-internal-ca
-          secret:
-            secretName: anban-internal-ca
-            items:
-              - key: ca.crt
-                path: ca.crt
         - name: "${micro_service_name}-config"
           configMap:
             defaultMode: 420
@@ -345,8 +315,8 @@ spec:
     version: "${version_switch}"
   sessionAffinity: ClientIP
   ports:
-    - name: https-8443
-      port: 8443
+    - name: http-8080
+      port: 8080
       protocol: TCP
       targetPort: 8080
   type: ClusterIP
