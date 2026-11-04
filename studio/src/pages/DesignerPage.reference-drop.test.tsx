@@ -260,6 +260,25 @@ describe('Designer shared prompt composer', () => {
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({ reference_file_ids: ['registered:upload:dropped.png'] }), expect.any(AbortSignal), expect.any(Function)))
   })
 
+  it('fills a library prompt without removing an uploaded product reference', async () => {
+    render(<DesignerPage />)
+    const prompt = await screen.findByLabelText('Designer prompt')
+    await waitFor(() => expect(screen.getByRole('button', { name: '添加附件' })).not.toBeDisabled())
+    fireEvent.drop(prompt.closest('[data-slot="agent-prompt-input"]')!, {
+      dataTransfer: { files: [image('product.png')], types: ['Files'] },
+    })
+    await waitFor(() => expect(uploadToOSS).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: '使用极简留白主图提示词' }))
+    expect((prompt as HTMLTextAreaElement).value).toContain('【商品名称】')
+    expect(screen.getAllByText('product.png').length).toBeGreaterThan(0)
+    expect(designerApi.generate).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '生成' }))
+    await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: expect.stringContaining('【商品名称】'),
+      reference_file_ids: ['registered:upload:product.png'],
+    }), expect.any(AbortSignal), expect.any(Function)))
+  })
+
   it('offers a retry with the same operation after an ambiguous response', async () => {
     vi.mocked(designerApi.generate).mockRejectedValueOnce(new Error('network response lost'))
     render(<DesignerPage />)
@@ -364,33 +383,24 @@ describe('Designer shared prompt composer', () => {
   it('keeps a single quantity even when capability advertises a larger batch', async () => {
     vi.mocked(designerApi.getCapabilities).mockResolvedValue({ items: [provider({ maxBatch: 3 })], defaultCapability: 'professional' })
     render(<DesignerPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
+    await within(screen.getByRole('complementary', { name: '设计师设置' })).findByRole('group', { name: '创作参数' })
     expect(screen.queryByRole('button', { name: '增加图片数量' })).not.toBeInTheDocument()
   })
 
-  it('uses selected project for generation and explicit project IDs for history', async () => {
+  it('generates without a persona selector or loading personas', async () => {
     render(<DesignerPage />)
-    const projectControl = await screen.findByRole('combobox', { name: '项目：未选择' })
-    await waitFor(() => expect(projectControl).not.toBeDisabled())
-    const promptAddon = projectControl.closest('[data-slot="input-group-addon"]')
-    expect(promptAddon).not.toBeNull()
-    const imageSettings = within(promptAddon as HTMLElement).getByRole('button', {
-      name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张',
-    })
-    expect(projectControl.compareDocumentPosition(imageSettings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-
-    fireEvent.click(projectControl)
-    fireEvent.click(await screen.findByRole('option', { name: /品牌项目/ }))
-    expect(screen.getByRole('combobox', { name: '项目：品牌项目' })).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('Designer prompt'), { target: { value: '品牌图' } })
+    const prompt = await screen.findByLabelText('Designer prompt')
+    await waitFor(() => expect(screen.getByRole('button', { name: '添加附件' })).not.toBeDisabled())
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+    expect(api.projects.list).not.toHaveBeenCalled()
+    const parameters = within(screen.getByRole('complementary', { name: '设计师设置' })).getByRole('group', { name: '创作参数' })
+    expect(within(parameters).getByRole('group', { name: '图像能力' })).toBeVisible()
+    fireEvent.change(prompt, { target: { value: '商品图' } })
     fireEvent.click(screen.getByRole('button', { name: '生成' }))
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(
-      expect.objectContaining({ project_id: 'project-1' }),
+      expect.objectContaining({ project_id: '' }),
       expect.any(AbortSignal), expect.any(Function),
     ))
-
-    fireEvent.click(screen.getAllByText('历史记录')[0])
-    await waitFor(() => expect(api.designer.getHistory).toHaveBeenCalledWith({ project_id: 'project-1', page_size: 50 }))
   })
 
   it('requests history without a project filter when no project is selected', async () => {
@@ -451,9 +461,9 @@ describe('Designer shared prompt composer', () => {
   })
 
   it.each([
-    { projectId: 'project-1', selection: '项目：品牌项目' },
-    { projectId: '', selection: '项目：未选择' },
-  ])('restores historical project "$projectId" from unfiltered history before regenerating', async ({ projectId, selection }) => {
+    { projectId: 'project-1' },
+    { projectId: '' },
+  ])('restores historical project "$projectId" from unfiltered history before regenerating', async ({ projectId }) => {
     vi.mocked(api.designer.getHistory).mockResolvedValue({
       items: [{
         id: 'history-project', project_id: projectId, prompt: '复用历史项目', capability_key: 'professional',
@@ -462,11 +472,11 @@ describe('Designer shared prompt composer', () => {
       }], total: 1, page: 1, page_size: 50,
     })
     render(<DesignerPage />)
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '项目：未选择' })).not.toBeDisabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: '添加附件' })).not.toBeDisabled())
     fireEvent.click(screen.getAllByText('历史记录')[0])
     await waitFor(() => expect(api.designer.getHistory).toHaveBeenCalledWith({ project_id: undefined, page_size: 50 }))
     fireEvent.click(await screen.findByRole('button', { name: '重新生成' }))
-    expect(screen.getByRole('combobox', { name: selection })).toBeInTheDocument()
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '生成' }))
     await waitFor(() => expect(designerApi.generate).toHaveBeenCalledWith(
       expect.objectContaining({ project_id: projectId, prompt: '复用历史项目' }),

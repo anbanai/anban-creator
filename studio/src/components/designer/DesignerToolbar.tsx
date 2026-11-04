@@ -1,12 +1,13 @@
+import { useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Coins, History, SlidersHorizontal, Sparkles, Stamp } from 'lucide-react'
+import { ChevronRight, Coins, History, Sparkles } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Slider } from '@/components/ui/slider'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { api } from '@/lib/api'
 import type { DesignerCapabilityFeatures, DesignerSettings } from '@/types/designer'
 
@@ -20,32 +21,33 @@ interface AdvancedSettingsProps {
 
 function AdvancedSettings({ designerFeatures, settings, onSettingsChange }: AdvancedSettingsProps) {
   if (!designerFeatures) return null
+  const showCompression = designerFeatures.hasCompression && (settings.outputFormat === 'jpeg' || settings.outputFormat === 'webp')
+  if (!designerFeatures.watermark && !designerFeatures.hasBackground && !showCompression) return null
   return (
-    <div className="space-y-3">
+    <div className="space-y-5 border-t border-border/60 pt-5">
       {designerFeatures.watermark ? (
         <button
           type="button"
+          aria-pressed={settings.watermark}
           onClick={() => onSettingsChange({ watermark: !settings.watermark })}
-          className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
-            settings.watermark ? 'border-primary bg-primary/5' : 'border-border hover:border-foreground/20'
-          }`}
+          className="flex w-full items-center justify-between gap-3 rounded-md text-left text-xs font-medium text-muted-foreground"
         >
-          <Stamp className={`mt-0.5 h-4 w-4 shrink-0 ${settings.watermark ? 'text-primary' : 'text-muted-foreground'}`} />
-          <span className="min-w-0">
-            <span className={`block text-xs font-medium ${settings.watermark ? 'text-foreground' : 'text-muted-foreground'}`}>水印</span>
-            <span className="block text-[10px] text-muted-foreground">添加水印</span>
+          <span>添加水印</span>
+          <span aria-hidden="true" className={`flex h-5 w-9 items-center rounded-full p-0.5 transition-colors ${settings.watermark ? 'bg-primary' : 'bg-muted'}`}>
+            <span className={`size-4 rounded-full bg-background shadow-sm transition-transform ${settings.watermark ? 'translate-x-4' : ''}`} />
           </span>
         </button>
       ) : null}
 
-      {designerFeatures.hasCompression && (settings.outputFormat === 'jpeg' || settings.outputFormat === 'webp') ? (
-        <div className="space-y-2">
-          <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase text-muted-foreground">
-            <SlidersHorizontal className="h-3 w-3" />
+      {showCompression ? (
+        <div className="space-y-3">
+          <p className="flex items-center justify-between text-xs font-medium text-muted-foreground">
             压缩率
+            <span className="text-[11px] text-foreground tabular-nums">{settings.compression}%</span>
           </p>
           <div className="flex items-center gap-3">
             <Slider
+              aria-label="压缩率"
               value={[settings.compression]}
               onValueChange={(value) => onSettingsChange({ compression: Array.isArray(value) ? value[0] : value })}
               min={0}
@@ -53,27 +55,25 @@ function AdvancedSettings({ designerFeatures, settings, onSettingsChange }: Adva
               step={1}
               className="flex-1"
             />
-            <span className="w-9 text-center text-xs font-medium tabular-nums">{settings.compression}%</span>
           </div>
         </div>
       ) : null}
 
       {designerFeatures.hasBackground ? (
-        <div className="space-y-2">
-          <p className="text-[11px] font-semibold uppercase text-muted-foreground">背景</p>
+        <div className="space-y-2.5">
+          <p className="text-xs font-medium text-muted-foreground">背景</p>
           <ToggleGroup
             aria-label="背景"
             value={[settings.background]}
             onValueChange={(value) => {
               if (value[0]) onSettingsChange({ background: value[0] })
             }}
-            variant="outline"
             size="sm"
-            className="w-full"
+            className="grid w-full grid-cols-3 gap-1 rounded-lg bg-muted/70 p-1"
           >
-            <ToggleGroupItem value="auto">自动</ToggleGroupItem>
-            <ToggleGroupItem value="transparent">透明</ToggleGroupItem>
-            <ToggleGroupItem value="opaque">不透明</ToggleGroupItem>
+            <ToggleGroupItem value="auto" className="h-8 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">自动</ToggleGroupItem>
+            <ToggleGroupItem value="transparent" className="h-8 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">透明</ToggleGroupItem>
+            <ToggleGroupItem value="opaque" className="h-8 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">不透明</ToggleGroupItem>
           </ToggleGroup>
         </div>
       ) : null}
@@ -82,6 +82,7 @@ function AdvancedSettings({ designerFeatures, settings, onSettingsChange }: Adva
 }
 
 interface DesignerToolbarProps {
+  children?: ReactNode
   designerFeatures?: DesignerCapabilityFeatures
   settings: DesignerSettings
   onSettingsChange: (patch: DesignerSettingsPatch) => void
@@ -89,11 +90,14 @@ interface DesignerToolbarProps {
 }
 
 export default function DesignerToolbar({
+  children,
   designerFeatures,
   settings,
   onSettingsChange,
   onHistoryToggle,
 }: DesignerToolbarProps) {
+  const isMobile = useIsMobile()
+  const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false)
   const { data: balanceData, isLoading: balanceLoading, isError: balanceError } = useQuery({
     queryKey: ['billing', 'wallet'],
     queryFn: () => api.billing.wallet(),
@@ -101,49 +105,50 @@ export default function DesignerToolbar({
 
   return (
     <>
-      <div className="hidden w-[280px] shrink-0 p-3 md:block">
-        <aside className="flex h-full flex-col overflow-hidden rounded-xl border border-border/75 bg-card/80">
-          <div className="flex-1 space-y-3 overflow-y-auto p-3">
-            <div className="flex items-center justify-between px-1">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-muted">
-                  <Sparkles className="h-3.5 w-3.5 text-primary" />
-                </div>
-                <span className="text-sm font-semibold">设计师</span>
+      <div className="hidden w-[304px] shrink-0 p-3 md:block">
+        <aside aria-label="设计师设置" className="flex h-full flex-col overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
+          <div className="flex shrink-0 items-center justify-between border-b border-border/60 p-4">
+            <div className="flex items-center gap-2.5">
+              <div className="flex size-8 items-center justify-center rounded-xl bg-primary/8">
+                <Sparkles className="size-4 text-primary" />
               </div>
-              <Tooltip>
-                <TooltipTrigger>
-                  <Badge variant="secondary" className="gap-1 text-[11px] font-medium">
-                    <Coins className="h-3 w-3" />
-                    {balanceLoading ? <Skeleton className="h-3 w-8" /> : balanceError ? '—' : balanceData?.balance.toLocaleString() ?? '—'}
-                  </Badge>
-                </TooltipTrigger>
-                <TooltipContent>{balanceError ? '积分余额暂不可用' : '积分余额'}</TooltipContent>
-              </Tooltip>
+              <span className="text-sm font-semibold">设计师</span>
             </div>
-            <Separator />
-            <AdvancedSettings designerFeatures={designerFeatures} settings={settings} onSettingsChange={onSettingsChange} />
+            <Tooltip>
+              <TooltipTrigger>
+                <Badge variant="secondary" className="gap-1 text-[11px] font-medium">
+                  <Coins className="h-3 w-3" />
+                  {balanceLoading ? <Skeleton className="h-3 w-8" /> : balanceError ? '—' : balanceData?.balance.toLocaleString() ?? '—'}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>{balanceError ? '积分余额暂不可用' : '积分余额'}</TooltipContent>
+            </Tooltip>
           </div>
-          <div className="shrink-0 p-3">
-            <Separator className="mb-3" />
+          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-4">
+            {children}
+            {!isMobile && <AdvancedSettings designerFeatures={designerFeatures} settings={settings} onSettingsChange={onSettingsChange} />}
+          </div>
+          <div className="shrink-0 border-t border-border/60 p-3">
             <button
               type="button"
               onClick={onHistoryToggle}
-              className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="flex w-full items-center gap-2 rounded-lg bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <History className="h-3.5 w-3.5" />
               历史记录
+              <ChevronRight className="ml-auto size-3.5" />
             </button>
           </div>
         </aside>
       </div>
 
       <div className="flex shrink-0 items-center justify-between border-t border-border/50 bg-card/60 px-3 py-2 md:hidden">
-        <details className="relative text-xs">
-          <summary className="cursor-pointer text-muted-foreground">高级参数</summary>
-          <div className="absolute left-0 top-6 z-20 w-64 rounded-lg border bg-popover p-3 shadow-lg">
+        <details className="relative text-xs" onToggle={(event) => setMobileSettingsOpen(event.currentTarget.open)}>
+          <summary className="cursor-pointer text-muted-foreground">创作参数</summary>
+          {mobileSettingsOpen && <div className="absolute left-0 top-6 z-20 max-h-[60dvh] w-[min(20rem,calc(100vw-1.5rem))] space-y-6 overflow-y-auto rounded-xl border bg-popover p-4 shadow-lg">
+            {children}
             <AdvancedSettings designerFeatures={designerFeatures} settings={settings} onSettingsChange={onSettingsChange} />
-          </div>
+          </div>}
         </details>
         <button
           type="button"

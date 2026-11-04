@@ -46,17 +46,17 @@ export default function DesignerCanvas({ images, isGenerating, canInpaint, onIma
   }
 
   return (
-    <div className="mx-auto grid w-full max-w-2xl gap-4">
+    <div className="mx-auto grid h-full min-h-0 w-full auto-rows-fr gap-4">
       {images.map((img, i) => (
         <div
           key={`${img.url}-${i}`}
-          className="group relative overflow-hidden rounded-2xl bg-muted animate-scale-in ring-1 ring-border transition-all duration-300 hover:ring-primary/30 hover:shadow-2xl hover:shadow-black/20"
+          className="group relative flex min-h-0 min-w-0 items-center justify-center overflow-hidden rounded-2xl bg-muted animate-scale-in ring-1 ring-border transition-all duration-300 hover:ring-primary/30 hover:shadow-2xl hover:shadow-black/20"
           style={{ animationDelay: `${i * 50}ms`, animationFillMode: 'backwards' }}
         >
           <SignedImage
             src={img.url}
             alt={`生成图片 ${i + 1}`}
-            className="aspect-square w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+            className="h-full w-full object-contain"
           />
           <span className="absolute top-2 left-2 flex h-5 w-5 items-center justify-center rounded-md bg-background/85 text-[10px] font-medium text-foreground shadow-sm">
             {i + 1}

@@ -1,16 +1,16 @@
 import { isAxiosError } from 'axios'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { PaintbrushIcon, SendIcon, WalletCardsIcon, XIcon } from 'lucide-react'
+import { Library, PaintbrushIcon, SendIcon, WalletCardsIcon, XIcon } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
-import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import DesignerToolbar, { type DesignerSettingsPatch } from '@/components/designer/DesignerToolbar'
 import { DesignerGenerationToolbar } from '@/components/designer/DesignerGenerationToolbar'
 import DesignerCanvas from '@/components/designer/DesignerCanvas'
+import DesignerPromptLibrary from '@/components/designer/DesignerPromptLibrary'
 import InlineMaskEditor from '@/components/designer/InlineMaskEditor'
 import HistoryDrawer from '@/components/designer/HistoryDrawer'
 import ImagePreview from '@/components/designer/ImagePreview'
@@ -100,7 +100,7 @@ export default function DesignerPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [selectedCapabilityKey, setSelectedCapabilityKey] = useState('')
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [projectID, setProjectID] = useState('')
   const [settings, setSettings] = useState<DesignerSettings>(DEFAULT_SETTINGS)
   const [promptValue, setPromptValueState] = useState<AgentPromptValue>(EMPTY_PROMPT_VALUE)
   const promptValueRef = useRef(promptValue)
@@ -110,6 +110,7 @@ export default function DesignerPage() {
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [libraryOpen, setLibraryOpen] = useState(false)
   const [retainedInputs, setRetainedInputs] = useState<{ references: string[]; mask?: string } | null>(null)
   const [stoppedWaiting, setStoppedWaiting] = useState(false)
   const pendingRequestRef = useRef<GenerateRequest | null>(null)
@@ -136,10 +137,6 @@ export default function DesignerPage() {
     queryKey: ['designer', 'capabilities'],
     queryFn: () => designerApi.getCapabilities(),
   })
-  const { data: projects = [], isLoading: projectsLoading } = useQuery({
-    queryKey: ['projects', 'designer', 'active'],
-    queryFn: () => api.projects.list({ status: 'active' }),
-  })
   const { data: wallet, isError: walletError } = useQuery({
     queryKey: ['billing', 'wallet'],
     queryFn: () => api.billing.wallet(),
@@ -160,7 +157,6 @@ export default function DesignerPage() {
     : { ...settings, n: effectiveQuantity }
   const maxReferenceImages = maxReferenceImagesForCapability(effectiveCapability)
   const referenceCapacity = maxReferenceImages
-  const projectID = selectedProjectId ?? ''
   const attachmentPolicy = useMemo<AttachmentAdmissionPolicy>(() => ({
     allowedTypes: ['image'],
     maxCount: editingImage ? 0 : referenceCapacity,
@@ -599,27 +595,6 @@ export default function DesignerPage() {
     }
   }
 
-  const selectedProject = projects.find((project) => project.id === selectedProjectId)
-  const projectControl = (
-    <ProjectContextControl
-      mode="select"
-      projects={projects}
-      value={selectedProjectId}
-      onValueChange={setSelectedProjectId}
-      allowNoProject
-      createProjectHref="/projects"
-      loading={projectsLoading}
-      disabled={isGenerating}
-      placeholder="选择项目"
-      ariaLabel={selectedProject
-        ? `项目：${selectedProject.name}`
-        : projectsLoading
-          ? '项目：加载中'
-          : '项目：未选择'}
-      compact
-    />
-  )
-
   return (
     <div
       data-testid="designer-workspace"
@@ -630,7 +605,20 @@ export default function DesignerPage() {
         settings={settings}
         onSettingsChange={updateSettings}
         onHistoryToggle={() => setHistoryOpen(true)}
-      />
+      >
+        {!editingImage ? (
+          effectiveCapability ? (
+            <DesignerGenerationToolbar
+              capabilities={capabilityList}
+              capabilityKey={effectiveCapability.id}
+              settings={effectiveSettings}
+              onCapabilityChange={handleCapabilityChange}
+              onSettingsChange={updateSettings}
+              disabled={isGenerating}
+            />
+          ) : <p className="text-xs text-muted-foreground">暂无可用图像能力</p>
+        ) : null}
+      </DesignerToolbar>
 
       <div className="relative flex min-h-0 w-full min-w-0 flex-1 flex-col p-3 md:w-auto md:pl-0">
         <div
@@ -638,21 +626,25 @@ export default function DesignerPage() {
           className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/35 shadow-inner"
           style={editingImage ? undefined : { backgroundImage: 'radial-gradient(circle, color-mix(in oklch, var(--color-border) 55%, transparent) 0.5px, transparent 0.5px)', backgroundSize: '20px 20px' }}
         >
-          <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
+          <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4 md:p-6">
             {editingImage ? (
-              <InlineMaskEditor ref={maskEditorRef} imageUrl={editingImage.url} onClose={() => setEditingImage(null)} />
+              <div className="h-full w-full">
+                <InlineMaskEditor ref={maskEditorRef} imageUrl={editingImage.url} onClose={() => setEditingImage(null)} />
+              </div>
             ) : (
-              <DesignerCanvas
-                images={currentImages}
-                isGenerating={isGenerating}
-                canInpaint={effectiveDesignerFeatures?.supportsMask ?? false}
-                onImageClick={(image) => setPreviewImage(image.url)}
-                onEdit={(image) => { setRetainedInputs(null); attachmentController.clear(); setEditingImage(image) }}
-              />
+              <div className="h-full max-h-[360px] w-full max-w-[640px] md:max-h-[460px]">
+                <DesignerCanvas
+                  images={currentImages}
+                  isGenerating={isGenerating}
+                  canInpaint={effectiveDesignerFeatures?.supportsMask ?? false}
+                  onImageClick={(image) => setPreviewImage(image.url)}
+                  onEdit={(image) => { setRetainedInputs(null); attachmentController.clear(); setEditingImage(image) }}
+                />
+              </div>
             )}
           </div>
           <div className="max-h-[55%] shrink-0 overflow-y-auto px-4 pb-4 md:px-6 md:pb-6">
-            <div className="w-full">
+            <div className="mx-auto w-full max-w-[640px] [&_[data-slot=agent-prompt-surface]]:max-h-52 [&_[data-slot=agent-prompt-surface]]:min-h-28 [&_textarea]:min-h-14">
               {retainedInputs && <div className="mb-2 flex items-center gap-2 rounded-lg bg-muted p-2 text-xs">
                 <span>{`已保留历史参考图 ${retainedInputs.references.length} 张${retainedInputs.mask ? '及蒙版' : ''}`}</span>
                 <Button size="sm" variant="ghost" onClick={() => setRetainedInputs(null)}>清除历史输入</Button>
@@ -674,23 +666,12 @@ export default function DesignerPage() {
                 onSubmit={editingImage ? handleEditSubmit : handleGenerate}
                 attachmentController={attachmentController}
                 attachmentPolicy={attachmentPolicy}
-                leadingTools={(
-                  <div className="flex min-w-0 flex-wrap items-center gap-1">
-                    {projectControl}
-                    {!editingImage ? (
-                      effectiveCapability ? (
-                        <DesignerGenerationToolbar
-                          capabilities={capabilityList}
-                          capabilityKey={effectiveCapability.id}
-                          settings={effectiveSettings}
-                          onCapabilityChange={handleCapabilityChange}
-                          onSettingsChange={updateSettings}
-                          disabled={isGenerating}
-                        />
-                      ) : <span className="px-2 text-xs text-muted-foreground">暂无可用图像能力</span>
-                    ) : null}
-                  </div>
-                )}
+                leadingTools={
+                  <Button type="button" size="sm" variant="ghost" className="xl:hidden" onClick={() => setLibraryOpen(true)} disabled={isGenerating || Boolean(editingImage)}>
+                    <Library data-icon="inline-start" />
+                    提示词库
+                  </Button>
+                }
                 placeholder={editingImage ? '描述你想修改的区域...' : '描述你想要生成的图片...'}
                 submitLabel={editingImage ? '编辑' : '生成'}
                 submitIcon={editingImage ? PaintbrushIcon : SendIcon}
@@ -724,6 +705,13 @@ export default function DesignerPage() {
         </div>
       </div>
 
+      <DesignerPromptLibrary
+        open={libraryOpen}
+        onOpenChange={setLibraryOpen}
+        onSelect={(template) => setPromptValue((current) => ({ ...current, prompt: template.prompt }))}
+        disabled={isGenerating || Boolean(editingImage)}
+      />
+
       <HistoryDrawer
         open={historyOpen}
         onOpenChange={setHistoryOpen}
@@ -743,7 +731,7 @@ export default function DesignerPage() {
           const capability = capabilityList.find((item) => item.id === generation.capability_key && item.enabled && item.priceAvailable === true)
           if (!capability) { toast.error('历史图像能力当前不可用'); return }
           handleCapabilityChange(capability.id)
-          setSelectedProjectId(generation.project_id || null)
+          setProjectID(generation.project_id || '')
           const features = capability.designerFeatures
           setSettings({
             quality: features.qualityLevels.includes(generation.quality ?? '') ? generation.quality! : features.qualityLevels[0] ?? 'auto',

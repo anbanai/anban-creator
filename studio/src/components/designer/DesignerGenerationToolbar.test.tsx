@@ -14,7 +14,7 @@ const capabilities: DesignerCapability[] = [
     idx: 0,
     designerFeatures: {
       qualityLevels: ['auto', 'high'],
-      sizePresets: ['1:1:2K', '3:4:2K', '4:3:2K'],
+      sizePresets: ['1:1:2K', '3:4:2K', '4:3:2K', '9:16:2K'],
       defaultSize: '1:1:2K',
       maxBatch: 3,
       maxReferenceImages: 0,
@@ -39,7 +39,29 @@ const settings: DesignerSettings = {
 }
 
 describe('DesignerGenerationToolbar', () => {
-  it('renders a compact summary and fixed specifications from generation_features', () => {
+  it('shows standard and enhanced choices with only their names and server prices', () => {
+    const onCapabilityChange = vi.fn()
+    render(
+      <DesignerGenerationToolbar
+        capabilities={[
+          { ...capabilities[0], id: 'standard', name: '标准图像', credits: 400, description: '适合日常视觉与产品图片' },
+          { ...capabilities[0], description: '适合复杂构图与高细节视觉任务' },
+        ]}
+        capabilityKey="standard"
+        settings={settings}
+        onCapabilityChange={onCapabilityChange}
+        onSettingsChange={vi.fn()}
+      />,
+    )
+
+    const choices = within(screen.getByRole('group', { name: '图像能力' }))
+    expect(choices.getByRole('button', { name: /^标准\s*400 积分\/张$/ })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(choices.getByRole('button', { name: /^增强\s*500 积分\/张$/ }))
+    expect(onCapabilityChange).toHaveBeenCalledWith('professional')
+    expect(screen.queryByText(/适合/)).not.toBeInTheDocument()
+  })
+
+  it('shows generation controls immediately without opening a popover', () => {
     render(
       <DesignerGenerationToolbar
         capabilities={capabilities}
@@ -50,17 +72,15 @@ describe('DesignerGenerationToolbar', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
-
-    const dialog = screen.getByRole('dialog', { name: '创作参数' })
-    expect(dialog).toBeInTheDocument()
-    expect(within(dialog).getByRole('group', { name: '图像能力' })).toHaveClass('flex-col')
-    expect(within(screen.getByRole('group', { name: '尺寸' })).getAllByRole('button').map((button) => button.textContent)).toEqual([
-      '1:1 · 2K', '3:4 · 2K', '4:3 · 2K',
+    const parameters = screen.getByRole('group', { name: '创作参数' })
+    expect(within(parameters).getByRole('group', { name: '图像能力' })).toBeVisible()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(within(screen.getByRole('group', { name: '尺寸' })).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual([
+      '1:1 · 2K', '3:4 · 2K', '4:3 · 2K', '9:16 · 2K',
     ])
     expect(within(screen.getByRole('group', { name: '质量' })).getAllByRole('button').map((button) => button.textContent)).toEqual(['自动', '高'])
     expect(within(screen.getByRole('group', { name: '输出格式' })).getAllByRole('button').map((button) => button.textContent)).toEqual(['PNG', 'WEBP'])
-    expect(screen.queryByText('1:1')).not.toBeInTheDocument()
+    expect(screen.getByText('1:1')).toBeVisible()
   })
 
   it('reports supported size, quality and output format while keeping quantity fixed', () => {
@@ -76,12 +96,13 @@ describe('DesignerGenerationToolbar', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
     fireEvent.click(within(screen.getByRole('group', { name: '尺寸' })).getByRole('button', { name: '3:4 · 2K' }))
+    fireEvent.click(within(screen.getByRole('group', { name: '尺寸' })).getByRole('button', { name: '9:16 · 2K' }))
     fireEvent.click(within(screen.getByRole('group', { name: '质量' })).getByRole('button', { name: '高' }))
     fireEvent.click(within(screen.getByRole('group', { name: '输出格式' })).getByRole('button', { name: 'WEBP' }))
 
     expect(onSettingsChange).toHaveBeenCalledWith({ size: '3:4:2K' })
+    expect(onSettingsChange).toHaveBeenCalledWith({ size: '9:16:2K' })
     expect(onSettingsChange).toHaveBeenCalledWith({ quality: 'high' })
     expect(onSettingsChange).toHaveBeenCalledWith({ outputFormat: 'webp' })
     expect(screen.queryByRole('button', { name: '增加图片数量' })).not.toBeInTheDocument()
@@ -102,16 +123,13 @@ describe('DesignerGenerationToolbar', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
-
-    const fixedQuantity = screen.getByText('图片数量 1 · 当前能力上限')
-    expect(fixedQuantity).toBeInTheDocument()
-    expect(fixedQuantity.parentElement).toHaveClass('col-span-2')
+    const fixedQuantity = screen.getByLabelText('图片数量：1，当前能力上限')
+    expect(fixedQuantity).toHaveTextContent('1 张')
     expect(screen.queryByRole('button', { name: '增加图片数量' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '减少图片数量' })).not.toBeInTheDocument()
   })
 
-  it('constrains the fixed-specification popover to the available viewport height', () => {
+  it('disables the expanded controls while generation is in progress', () => {
     render(
       <DesignerGenerationToolbar
         capabilities={capabilities}
@@ -119,11 +137,12 @@ describe('DesignerGenerationToolbar', () => {
         settings={settings}
         onCapabilityChange={vi.fn()}
         onSettingsChange={vi.fn()}
+        disabled
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '创作参数：专业增强 · 1:1 · 2K · 自动 · PNG · 1 张' }))
-
-    expect(screen.getByRole('dialog')).toHaveClass('max-h-[var(--available-height)]', 'overflow-y-auto')
+    for (const button of within(screen.getByRole('group', { name: '创作参数' })).getAllByRole('button')) {
+      expect(button).toBeDisabled()
+    }
   })
 })
