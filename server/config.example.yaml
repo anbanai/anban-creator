@@ -2,11 +2,9 @@
 # then replace the ${VAR} placeholders you need with literal values. Kubernetes
 # keeps the placeholders: server/Deployment.yaml injects them from Secrets.
 server:
+  # Server 仅监听 HTTP；公网域名的 TLS 证书由 Ingress 管理。
   port: 8080
   public_base_url: "${ANBAN_PUBLIC_BASE_URL:-https://creator.anbanai.com}"
-  # 集群内部默认使用 HTTP 8080，公网 TLS 由 Ingress 终止；仅直接监听 HTTPS 时配置以下证书。
-  tls_cert_file: "${ANBAN_SERVER_TLS_CERT_FILE}"
-  tls_key_file: "${ANBAN_SERVER_TLS_KEY_FILE}"
   host: "0.0.0.0"
 
 # Per-bucket, per-IP, per-request-path limits. Windows use Go duration syntax.
@@ -223,7 +221,8 @@ dsh:
   kubernetes_image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET:-acr-secret}"
   kubernetes_project_memory_claim: "${ANBAN_AGENT_PROJECT_MEMORY_CLAIM:-creator-project-memory}"
   kubernetes_project_memory_mount: "/workspace/project"
-  server_url: "${ANBAN_DSH_SERVER_URL:-http://server:8080}"
+  # 留空时继承 claude.agent_server_url，集群内部使用 HTTP 8080。
+  server_url: "${ANBAN_DSH_SERVER_URL}"
   server_instance_id: "${HOSTNAME:-local}"
   # Kubernetes-native quantities. These are applied directly to each DSH Pod.
   resources:
@@ -249,7 +248,8 @@ dsh:
   bridge_args: ["dist/dsh-bridge.js"]
   bridge_dir: "${ANBAN_DSH_BRIDGE_DIR:-./runtime-dsh}"
   dsh_patch: "${ANBAN_DSH_BRIDGE_PATCH:-./harness/dsh/project-creator.patch.yml}"
-  mcp_url: "${ANBAN_DSH_BRIDGE_MCP_URL:-https://creator.anbanai.com/mcp}"
+  # 留空时使用 server_url + /mcp，无需绕行公网 Ingress。
+  mcp_url: "${ANBAN_DSH_BRIDGE_MCP_URL}"
   route: "effective"
   routes:
     # DeepSeek's official adapter. This route uses the DSH-native
@@ -717,8 +717,6 @@ claude:
     service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"
     # 私有镜像仓库拉取 secret；公开镜像可留空。
     image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET:-acr-secret}"
-    # 可选：仅 HTTPS 地址使用私有 CA 时配置，Agent Job 只挂载 ca.crt；内部 HTTP 无需证书。
-    server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET}"
     # 任务工作区 PVC 使用的 RWX NAS 存储类；项目记忆使用预创建的共享 PVC。
     nas_storage_class: "${ANBAN_AGENT_NAS_STORAGE_CLASS:-nas-sc-creator}"
     project_memory_claim: "${ANBAN_AGENT_PROJECT_MEMORY_CLAIM:-creator-project-memory}"

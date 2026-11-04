@@ -516,8 +516,6 @@ type EmailConfig struct {
 type ServerConfig struct {
 	Port          int    `yaml:"port"` // default 8080
 	Host          string `yaml:"host"` // default "0.0.0.0"
-	TLSCertFile   string `yaml:"tls_cert_file"`
-	TLSKeyFile    string `yaml:"tls_key_file"`
 	PublicBaseURL string `yaml:"public_base_url"`
 }
 
@@ -1331,7 +1329,6 @@ type KubernetesConfig struct {
 	Namespace       string `yaml:"namespace"`
 	ServiceAccount  string `yaml:"service_account"`
 	ImagePullSecret string `yaml:"image_pull_secret"`
-	ServerCASecret  string `yaml:"server_ca_secret"`
 
 	NASStorageClass         string                              `yaml:"nas_storage_class"`
 	ProjectMemoryClaim      string                              `yaml:"project_memory_claim"`
@@ -1401,7 +1398,7 @@ func (c *DockerConfig) UnmarshalYAML(value *yaml.Node) error {
 func (c *KubernetesConfig) UnmarshalYAML(value *yaml.Node) error {
 	known := map[string]bool{
 		"namespace": true, "service_account": true, "image_pull_secret": true,
-		"server_ca_secret": true, "nas_storage_class": true,
+		"nas_storage_class":    true,
 		"project_memory_claim": true, "task_workspace_size": true,
 		"active_deadline_seconds": true, "heartbeat_timeout_seconds": true,
 		"completion_grace_seconds": true, "ttl_seconds_after_finished": true,
@@ -1819,9 +1816,6 @@ func (c *Config) applyDefaults() {
 	if c.Dsh.IdleTimeoutSec == 0 {
 		c.Dsh.IdleTimeoutSec = 30 * 60
 	}
-	if c.Dsh.ServerURL == "" {
-		c.Dsh.ServerURL = c.AgentServerURL()
-	}
 	if c.Dsh.ServerInstanceID == "" {
 		c.Dsh.ServerInstanceID = strings.TrimSpace(os.Getenv("HOSTNAME"))
 		if c.Dsh.ServerInstanceID == "" {
@@ -1875,6 +1869,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Server.Host == "" {
 		c.Server.Host = "0.0.0.0"
+	}
+	if c.Dsh.ServerURL == "" {
+		c.Dsh.ServerURL = c.AgentServerURL()
+	}
+	if c.Dsh.MCPURL == "" {
+		c.Dsh.MCPURL = strings.TrimRight(c.Dsh.ServerURL, "/") + "/mcp"
 	}
 	if c.Database.MaxOpenConns == 0 {
 		c.Database.MaxOpenConns = 10
@@ -2848,10 +2848,6 @@ func (c *Config) Validate() error {
 			errs = append(errs, err.Error())
 		}
 	}
-	if (strings.TrimSpace(c.Server.TLSCertFile) == "") != (strings.TrimSpace(c.Server.TLSKeyFile) == "") {
-		errs = append(errs, "server.tls_cert_file and server.tls_key_file must be configured together")
-	}
-
 	if c.Claude.AgentServerURL != "" {
 		u := strings.TrimSpace(c.Claude.AgentServerURL)
 		if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {

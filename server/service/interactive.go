@@ -3380,7 +3380,7 @@ func (f ExecRuntimeFactory) start(ctx context.Context, sessionID, presetID, runt
 const dshBridgeProviderAPIKeyEnv = "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY"
 
 func dshBridgeRuntimeEnvironment(dshHome, providerAPIKey string) []string {
-	keys := []string{"PATH", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "TZ", "SYSTEMROOT", "WINDIR", "NODE_EXTRA_CA_CERTS"}
+	keys := []string{"PATH", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "TZ", "SYSTEMROOT", "WINDIR"}
 	env := make([]string, 0, len(keys)+5)
 	for _, key := range keys {
 		if value, ok := os.LookupEnv(key); ok {

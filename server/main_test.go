@@ -614,7 +614,7 @@ func TestMainWiresRequiredBillingRuntime(t *testing.T) {
 	if workerStart < 0 || workerWait <= workerStart || repoClose <= workerWait {
 		t.Fatalf("billing worker lifecycle order invalid: start=%d wait=%d repoClose=%d", workerStart, workerWait, repoClose)
 	}
-	listen := strings.Index(text, "app.Listen(addr, listenConfig)")
+	listen := strings.Index(text, "app.Listen(addr)")
 	if listen < 0 || !strings.Contains(text[listen:], "cancel()") {
 		t.Fatal("main must cancel the shared lifecycle context when Listen returns")
 	}
