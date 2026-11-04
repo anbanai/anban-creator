@@ -198,6 +198,12 @@ This is quoted documentation, not a registration.
 description = "old plugin registration"
 config_file = "~/.codex/agents/talking-head-montage.toml"
 
+[agents."personal[helper]"]
+config_file = "~/bracket-agent.toml"
+
+[agents.'helper#with.dots']
+config_file = "~/literal-agent.toml"
+
 [agents.personal-helper]
 description = "preserve this unrelated agent"
 config_file = "~/personal-helper.toml"
@@ -237,6 +243,12 @@ config_file = "~/personal-helper.toml"
 				if parsed["model"] != "keep-model" || !strings.Contains(instructions, "[agents.talking-head-montage]") {
 					t.Fatal("installer changed unrelated top-level settings or quoted documentation")
 				}
+				for name, want := range map[string]string{"personal[helper]": "~/bracket-agent.toml", "helper#with.dots": "~/literal-agent.toml"} {
+					agent, ok := agents[name].(map[string]any)
+					if !ok || agent["config_file"] != want {
+						t.Fatalf("unrelated quoted agent %s changed: %v", name, agent)
+					}
+				}
 				other := agents["personal-helper"].(map[string]any)
 				if other["config_file"] != "~/personal-helper.toml" {
 					t.Fatal("installer changed an unrelated agent")
@@ -261,6 +273,31 @@ func TestInstallSubagentsRejectedMigrationPreservesInstalledFiles(t *testing.T) 
 		"[agents.talking-head-montage]\nconfig_file = 'old.toml'\n[mcp_servers.\"creator\"]\nurl = 'https://example.com/mcp'\n",
 		"[agents]\ntalking-head-montage = {config_file = 'old.toml'}\n",
 		"agents.talking-head-montage.config_file = 'old.toml'\n",
+		`[agents.talking-head-montage]
+description = """
+Literal: \"""
+"""
+[agents.personal-helper]
+config_file = "~/personal-helper.toml"
+`,
+		`[agents.talking-head-montage.'"""']
+value = "retired child"
+[agents.personal-helper]
+config_file = "~/personal-helper.toml"
+`,
+		`[agents.talking-head-montage]
+config_file = "old.toml"
+[custom]
+instructions = """
+Literal: \"""
+[mcp_servers.creator]
+url = "https://unrelated.example/quoted-documentation"
+bearer_token_env_var = "QUOTED_DOCUMENTATION"
+"""
+[mcp_servers.creator]
+url = "https://creator.anbanai.com/mcp"
+bearer_token_env_var = "ANBAN_API_KEY"
+`,
 		"invalid = [\n",
 	} {
 		t.Run(initial, func(t *testing.T) {

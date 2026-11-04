@@ -1491,7 +1491,7 @@
       "ui": {
         "renderer": "custom:content-planning"
       },
-      "digest": "72dc880d733dcd4d2570360395e4362e5afb57acff93b864159aadcbec4e18b3"
+      "digest": "89a289eb9099a00b5ebdb7ea70d80ba78af95a7c271ce6c56d61b5f4c5d0f9dc"
     },
     {
       "id": "creation-planner",
@@ -3773,7 +3773,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "7e6d545a2662b70aa9b998bfb8a2f6e7c1f70f8bced9bb71014f52f56ed3e0dd"
+      "digest": "c62ae4da84a79db320e2dc1715efa6c33da321f8a720ebc7e921c2df2ab1881f"
     },
     {
       "id": "talking-head-editor",
@@ -6496,7 +6496,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "e6dca692670d75a52d7a935e0f5ea10bc59c30436441e3e0c8fcd18a693a91ae"
+      "digest": "aaba72bf39d1257eecede6480e5a382afa686b2cbef003b9ad49723b7d06d17c"
     },
     {
       "id": "wechat-picture",

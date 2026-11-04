@@ -28,7 +28,7 @@
 
 这些测试证明已有生成采用、时间线、音轨、声音和 QC 检查仍满足代码合同，**不证明新指令已能产出参考品质视频**。本轮没有新增仅匹配指令措辞的测试，也没有执行独立模型前向行为测试。
 
-## 未通过的外围检查
+## 初轮未通过的外围检查（审查后修复）
 
 - `make dsh-check`：workflow audit 报 `seednote: startup 38416 > 38000`。只读执行 `node scripts/audit-workflows.mjs --baseline` 后，HEAD 基线报告含相同数值与错误；该模式仅输出基线，退出码 0 不是检查通过。本轮未修改 Seednote。
 - `make dsh-smoke`：wechat-article 挂载 Skill 列表包含 `redfox-research`，smoke 期望列表缺少它。用 `git show HEAD:packs/wechat-article/agent-pack.yaml` 与 `git show HEAD:dsh/scripts/smoke-profile.mjs` 确认基线已存在此清单不一致；相关 Pack/DSH 源文件没有本次差异。未为本任务修改文章工作流或放宽 smoke。
@@ -43,7 +43,7 @@
 - 没有生成新版样片/终片，也没有取得与用户成片哈希对应的原始 take、EDL 和执行链。另一个同题目录的不同 revision 不能补足这些证据。
 - 新指令明确要求先验证最难解释单元，再扩展全片；后续达标必须由当前候选媒体和独立审片证明，不能由本次文档改写或单元测试替代。
 
-所有修改保留在当前 worktree，未提交、推送或发布。
+以上为初轮验证时状态；最终审查、提交与合并状态以下节为准。
 
 ## 精简命名后的复验
 
@@ -57,3 +57,32 @@
 - 按 ID 比较 catalog：旧 `talking-head-montage` 被 `ip-explainer` 替换，另有共享 Skill 消费者 `viral-ip-video-editor` 的 digest 更新；大段文本差异主要来自按 ID 排序后位置移动。两宿主生成 Agent 与 canonical Pack 字节一致，Pack/Codex 注册的 description 与别名一致。
 
 这些验证确认命名与安装/证据合同一致，不代表已实测模型在所有自然语言请求下的路由选择。
+
+## 合并前审查（2026-11-04）
+
+- 独立审查发现安装迁移会漏掉带引号/空格的旧 Agent 注册，并在配置验证失败前删除旧文件。修复后支持等价表路径及子表，验证成功后才改 Agent 文件。
+- 后续独立审查发现带方括号的自定义 Agent 名称和转义多行字符串可能误导扫描。已增加 TOML key 识别、原始/过滤后及最终合并结果的语义比对；不能保证保留所有无关设置时明确失败，配置与原 Agent 文件不变。临时 HOME 回归测试覆盖这些情况以及重装幂等性，没有改用户真实配置。
+- 已合入本地 main 的封面质量改进（主仓库 `31af0d85`，harness `ba5ed6f245`），保留授权人物素材、确定性标题排版、缩略图检查和独立封面验证。对应基线/最终 Claude Agent 为 164/88 行，Codex 为 71/59 行。
+- 初轮 DSH 失败已定位：RedFox 清单与测试预期不同步、Seednote 启动指令超预算。补齐明确的 smoke/fixture 清单和版本期望；仅压缩 RedFox 重复说明，保留只读、凭证、证据和失败合同。Seednote 启动字符降到 37968/38000，没有调高预算或删依赖。
+- DSH 首次完整检查到离线安装时缺缓存依赖；在临时目录安装相同依赖补齐缓存，未改依赖版本、锁文件或离线验证要求。
+- 全量 Go 首轮出现一次既有进程退出诊断测试失败；定向连续三次通过，后续全量重跑通过。未改 Server 生产代码或放宽断言。
+- 输入 3 条原始媒体和 20 份证据哈希再次验证全部匹配。媒体验证范围不变：抽帧、机器转录、响度；没有新成片、连续视听验收、真实观众测试或传播验证。
+
+最终验证：
+
+| 检查 | 最终结果 |
+|---|---|
+| `make agent-pack-check`，两宿主与 catalog 一致性 | 通过 |
+| `go test ./...`、`go test ./mcp -count=1`、Server build | 通过（最终安装修正后再次确认） |
+| 临时 HOME 安装迁移与失败保持测试 | 通过 |
+| `make dsh-check` | 通过；13 个测试文件、485 项通过、1 项既有跳过；含类型检查、构建、离线包完整性、真实 profile smoke |
+| `make dsh-smoke` | 通过；wechat-article 15 个、seednote 12 个 Skill |
+| runtime artifact-validator | 24 项通过 |
+| 五组媒体/QC Python 测试 | 35 项通过 |
+| 两个编辑 Skill 与 RedFox Skill validator | 通过 |
+| Claude plugin validator | 通过；既有 icon/privacyPolicyUrl 警告保留 |
+| 原始素材及证据 SHA-256 | 3 条媒体、20 份证据全部匹配 |
+
+独立审查确认解释视频门禁与封面集成保留；安装修订按每轮反例增加回归，最终写入必须与允许的语义变更完全一致。上述工程验证不等于独立媒体品质或自然语言路由效果实测。
+
+GitHub fetch 因连接超时失败；不推送或发布。目标为合并到本地 main，保留主工作区已有的未跟踪素材与 humanizer 子模块状态。
