@@ -70,6 +70,38 @@ type InteractionSpec struct {
 	Intents       []string `yaml:"intents,omitempty" json:"intents,omitempty"`
 }
 
+// HasSurface reports whether the Pack declares a distribution or product surface.
+func (m Manifest) HasSurface(surface string) bool {
+	for _, declared := range m.Surfaces {
+		if declared == surface {
+			return true
+		}
+	}
+	return false
+}
+
+// HasTaskSurface reports whether the Pack declares the server-scheduled task
+// surface. Plugin Packs may own this surface: Studio creates their tasks with
+// an identity equal to the Pack id.
+func (m Manifest) HasTaskSurface() bool {
+	return m.HasSurface("task")
+}
+
+// SupportsServerTask reports whether the Server may freeze this Pack's contract
+// for a managed task execution. Managed Packs are always eligible. Plugin Packs
+// are eligible only when they declare the task surface, because the Server
+// creates those tasks and must dispatch them exactly like managed Pack tasks.
+func (m Manifest) SupportsServerTask() bool {
+	switch m.Kind {
+	case KindManaged:
+		return true
+	case KindPlugin:
+		return m.HasTaskSurface()
+	default:
+		return false
+	}
+}
+
 func (m Manifest) SupportsTaskKind(taskKind string) bool {
 	for _, supported := range m.Bindings.TaskKinds {
 		if supported == taskKind {
@@ -83,12 +115,7 @@ func (m Manifest) SupportsPlan() bool {
 	if m.Kind != KindManaged || strings.TrimSpace(m.Channel) == "" || strings.TrimSpace(m.PlanTaskKind) == "" {
 		return false
 	}
-	for _, surface := range m.Surfaces {
-		if surface == "plan" {
-			return m.SupportsTaskKind(m.PlanTaskKind)
-		}
-	}
-	return false
+	return m.HasSurface("plan") && m.SupportsTaskKind(m.PlanTaskKind)
 }
 
 type AgentSpec struct {

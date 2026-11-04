@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/agentpack"
@@ -126,6 +127,57 @@ func TestResolveFrozenExecutionContractsRejectInvalidSnapshot(t *testing.T) {
 func TestApplyAgentPackIdentityRejectsUnknownManagedTaskType(t *testing.T) {
 	if err := applyAgentPackIdentity(&model.TaskExecution{}, "unknown"); err == nil {
 		t.Fatal("unknown task type accepted")
+	}
+}
+
+func TestApplyAgentPackIdentityAcceptsPluginPackWithTaskSurface(t *testing.T) {
+	pack, ok := agentpack.Default().Pack(model.AgentIDEcommerce)
+	if !ok {
+		t.Fatal("ecommerce Pack missing")
+	}
+	if pack.Kind != agentpack.KindPlugin || !slices.Contains(pack.Surfaces, "task") {
+		t.Fatalf("ecommerce Pack = %#v, want plugin Pack with task surface", pack)
+	}
+	execution := &model.TaskExecution{TaskKind: model.PlatformEcommerce}
+	if err := applyAgentPackIdentity(execution, model.AgentIDEcommerce); err != nil {
+		t.Fatalf("applyAgentPackIdentity: %v", err)
+	}
+	if execution.AgentPackID != pack.ID || execution.AgentID != model.AgentIDEcommerce || execution.Channel != model.ChannelEcommerce {
+		t.Fatalf("frozen identity = %#v", execution)
+	}
+	if execution.TaskKind != model.PlatformEcommerce {
+		t.Fatalf("frozen task kind = %q, want %q", execution.TaskKind, model.PlatformEcommerce)
+	}
+	if execution.AgentPackVersion != pack.Version || execution.AgentPackDigest != pack.Digest || len(execution.AgentPackDigest) != 64 {
+		t.Fatalf("frozen Pack revision = %#v", execution)
+	}
+	if execution.RuntimeProfile != pack.Runtime.Profile || execution.RuntimeAdapter != pack.Runtime.Adapter {
+		t.Fatalf("frozen runtime = %s/%s, want %s/%s", execution.RuntimeProfile, execution.RuntimeAdapter, pack.Runtime.Profile, pack.Runtime.Adapter)
+	}
+	if delivery, err := resolveFrozenExecutionDeliveryContract(execution); err != nil || len(delivery) == 0 {
+		t.Fatalf("frozen delivery contract = %#v, %v", delivery, err)
+	}
+	if required, err := resolveFrozenExecutionRequiredArtifactContract(execution); err != nil || len(required) == 0 {
+		t.Fatalf("frozen required artifact contract = %#v, %v", required, err)
+	}
+	if tagging, err := resolveFrozenExecutionTaggingContract(execution); err != nil || tagging == nil {
+		t.Fatalf("frozen tagging contract = %#v, %v", tagging, err)
+	}
+	if !hasCompleteAgentPackIdentity(execution) {
+		t.Fatal("frozen plugin task execution is incomplete")
+	}
+}
+
+func TestApplyAgentPackIdentityRejectsPluginPackWithoutTaskSurface(t *testing.T) {
+	pack, ok := agentpack.Default().Pack("viral-ip-video-editor")
+	if !ok {
+		t.Fatal("viral-ip-video-editor Pack missing")
+	}
+	if pack.Kind != agentpack.KindPlugin || slices.Contains(pack.Surfaces, "task") {
+		t.Fatalf("viral-ip-video-editor Pack = %#v, want plugin-only Pack", pack)
+	}
+	if err := applyAgentPackIdentity(&model.TaskExecution{}, pack.ID); err == nil {
+		t.Fatal("plugin-only Pack accepted as a dispatchable task")
 	}
 }
 

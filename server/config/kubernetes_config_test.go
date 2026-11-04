@@ -199,7 +199,7 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 
 func completeKubernetesResourceProfilesForTest() map[string]KubernetesResourceConfig {
 	profiles := make(map[string]KubernetesResourceConfig)
-	for _, taskType := range executableKubernetesTaskTypes() {
+	for _, taskType := range KubernetesTaskTypes() {
 		profiles[taskType] = KubernetesResourceConfig{
 			Requests: map[string]string{"cpu": "500m", "memory": "512Mi"},
 			Limits:   map[string]string{"cpu": "1", "memory": "1Gi"},
@@ -208,21 +208,19 @@ func completeKubernetesResourceProfilesForTest() map[string]KubernetesResourceCo
 	return profiles
 }
 
-func executableKubernetesTaskTypes() []string {
-	types := make([]string, 0)
-	for _, pack := range agentpack.Default().Packs {
-		if pack.Kind != agentpack.KindManaged || pack.Channel == "" || (pack.Interaction != nil && pack.Interaction.UserQuestions) {
-			continue
+func TestKubernetesTaskTypesRegistersPluginTaskPacks(t *testing.T) {
+	for _, taskType := range []string{model.PlatformEcommerce, model.PlatformMoments} {
+		pack, ok := agentpack.Default().Pack(taskType)
+		if !ok {
+			t.Fatalf("Pack %q missing", taskType)
 		}
-		for _, taskKind := range pack.Bindings.TaskKinds {
-			if taskKind == model.TaskKindContentGeneration {
-				types = append(types, pack.Channel)
-			} else {
-				types = append(types, model.TaskTypeForTaskKind(taskKind))
-			}
+		if pack.Kind != agentpack.KindPlugin || !pack.HasTaskSurface() {
+			t.Fatalf("Pack %q = %#v, want plugin Pack with task surface", taskType, pack)
+		}
+		if !slices.Contains(KubernetesTaskTypes(), taskType) {
+			t.Errorf("KubernetesTaskTypes() missing plugin task Pack %q", taskType)
 		}
 	}
-	return types
 }
 
 func TestKubernetesResourcesForTaskRequiresExactProfile(t *testing.T) {
