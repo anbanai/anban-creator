@@ -380,10 +380,11 @@ func TestProjectServiceMontageDefaultsSurviveCreateAndUpdate(t *testing.T) {
 		Name:     "launch",
 	}
 	project.SetMontageDefaults(model.MontageDefaults{
-		DefaultPipeline: "social-short",
+		DefaultPipeline: "hybrid",
+		OutputProfileKey: "youtube_landscape",
 		Preferences: model.MontagePreferences{
 			DurationSeconds: 45,
-			Style:           "documentary",
+			PlaybookKey:     "minimalist-diagram",
 			MusicPrompt:     "minimal electronic",
 			SubtitleMode:    "burned-in",
 			VoiceoverMode:   "narrated",
@@ -402,7 +403,7 @@ func TestProjectServiceMontageDefaultsSurviveCreateAndUpdate(t *testing.T) {
 		t.Fatalf("FindByID: %v", err)
 	}
 	got := stored.MontageDefaults.Data()
-	if got.DefaultPipeline != "social-short" || got.Preferences.DurationSeconds != 45 || got.AssetGuidance != "prefer uploaded footage" {
+	if got.DefaultPipeline != "hybrid" || got.OutputProfileKey != "youtube_landscape" || got.Preferences.DurationSeconds != 45 || got.Preferences.PlaybookKey != "minimalist-diagram" || got.AssetGuidance != "prefer uploaded footage" {
 		t.Fatalf("created MontageDefaults = %#v", got)
 	}
 	if len(got.DeliveryTargets) != 2 || got.DeliveryTargets[1] != "subtitles" {
@@ -411,8 +412,9 @@ func TestProjectServiceMontageDefaultsSurviveCreateAndUpdate(t *testing.T) {
 
 	update := &model.Project{Platform: model.PlatformMontage}
 	update.SetMontageDefaults(model.MontageDefaults{
-		DefaultPipeline: "product-demo",
-		Preferences:     model.MontagePreferences{DurationSeconds: 30},
+		DefaultPipeline:  "animated-explainer",
+		OutputProfileKey: "instagram_feed",
+		Preferences:      model.MontagePreferences{DurationSeconds: 30},
 		DeliveryTargets: []string{"final_video"},
 	})
 	update.MontageDefaultsSet = true
@@ -421,7 +423,7 @@ func TestProjectServiceMontageDefaultsSurviveCreateAndUpdate(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 	got = updated.MontageDefaults.Data()
-	if got.DefaultPipeline != "product-demo" || got.Preferences.DurationSeconds != 30 {
+	if got.DefaultPipeline != "animated-explainer" || got.OutputProfileKey != "instagram_feed" || got.Preferences.DurationSeconds != 30 {
 		t.Fatalf("updated MontageDefaults = %#v", got)
 	}
 }

@@ -12,9 +12,14 @@ export function useMontageCapabilities(enabled = true) {
   })
 
   const items: MontagePipelineCapability[] = data?.items ?? []
+  const availableItems = items.filter((item) => item.available !== false && item.key !== 'framework-smoke')
 
   return {
     items,
+    availableItems,
+    styles: data?.styles ?? [],
+    outputProfiles: data?.output_profiles ?? [],
+    defaultOutputProfile: data?.default_output_profile ?? 'tiktok',
     enabled: data?.enabled ?? false,
     defaultPipeline: data?.default_pipeline ?? '',
     maxDurationSeconds: data?.max_duration_seconds ?? 0,

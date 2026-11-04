@@ -35,7 +35,6 @@ func TestTaskServiceNormalizesMontageInputFromProjectDefaults(t *testing.T) {
 		DefaultPipeline: "talking-head",
 		Preferences: model.MontagePreferences{
 			DurationSeconds: 90,
-			Style:           "clean",
 		},
 		DeliveryTargets: []string{"final_video"},
 	})
@@ -60,7 +59,7 @@ func TestTaskServiceNormalizesMontageInputFromProjectDefaults(t *testing.T) {
 	if got.Brief != "精剪产品介绍" || got.PipelineKey != "talking-head" {
 		t.Fatalf("normalized input = %#v", got)
 	}
-	if got.Preferences.DurationSeconds != 90 || got.Preferences.Style != "clean" {
+	if got.Preferences.DurationSeconds != 90 {
 		t.Fatalf("normalized preferences = %#v", got.Preferences)
 	}
 	if got.DeliveryTargets == nil || len(got.DeliveryTargets) != 0 {

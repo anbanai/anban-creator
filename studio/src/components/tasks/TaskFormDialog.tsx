@@ -253,7 +253,7 @@ export function TaskFormDialog({
   const isTalkingHeadEditorTask = watchedType === 'talking-head-editor'
   const isLocalLifeTask = watchedType === 'local-life'
   const isViralAnalysisTask = watchedType === 'viral-analysis'
-  const usesImageSettings = !isViralAnalysisTask && watchedType !== 'hypit' && !isLocalLifeTask && !isVideoEditTask && !isTalkingHeadEditorTask
+  const usesImageSettings = !isViralAnalysisTask && watchedType !== 'montage' && watchedType !== 'hypit' && !isLocalLifeTask && !isVideoEditTask && !isTalkingHeadEditorTask
   const { items: imageCapabilityOptions, defaultCapability, isLoading: imageCapabilitiesLoading, isError: imageCapabilitiesError } = useImageCapabilities(usesImageSettings)
   const hasIncompatibleSeednoteAttachments = watchedType === 'seednote'
     && attachmentController.attachments.some((attachment) => attachment.type !== 'image')

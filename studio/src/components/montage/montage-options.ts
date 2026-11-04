@@ -21,3 +21,10 @@ export function montageDurationError(duration: number | undefined, maxDurationSe
   if (maxDurationSeconds > 0 && duration > maxDurationSeconds) return `目标时长不能超过 ${maxDurationSeconds} 秒`
   return ''
 }
+
+export function montageOutputPreviewSize(width: number, height: number): { width: number; height: number } {
+  const ratio = width / height
+  return ratio >= 1
+    ? { width: 24, height: 24 / ratio }
+    : { width: 24 * ratio, height: 24 }
+}

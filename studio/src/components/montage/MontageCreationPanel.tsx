@@ -15,6 +15,7 @@ import { MontageSourceAssetInput } from './MontageSourceAssetInput'
 import {
   includesMontageOption,
   montageDurationError,
+  montageOutputPreviewSize,
   montageSubtitleOptions,
   montageVoiceoverOptions,
 } from './montage-options'
@@ -56,11 +57,17 @@ export function MontageCreationPanel({
   const control = form.control
   const pipelinePath = `${fieldRoot}.pipeline_key`
   const durationPath = `${fieldRoot}.preferences.duration_seconds`
+  const outputProfilePath = `${fieldRoot}.output_profile_key`
+  const outputProfileKey = useWatch({ control, name: outputProfilePath }) as string | undefined
   const pipelineKey = useWatch({ control, name: pipelinePath }) as string | undefined
   const duration = useWatch({ control, name: durationPath }) as number | undefined
   const assets = (useWatch({ control, name: `${fieldRoot}.source_assets` }) ?? []) as MontageAsset[]
   const {
     items,
+    availableItems,
+    styles = [],
+    outputProfiles = [],
+    defaultOutputProfile = 'tiktok',
     enabled,
     defaultPipeline,
     maxDurationSeconds,
@@ -70,6 +77,8 @@ export function MontageCreationPanel({
     capabilityByKey,
   } = useMontageCapabilities()
   const selectedCapability = pipelineKey ? capabilityByKey(pipelineKey) : undefined
+  const selectableItems = availableItems ?? items.filter((item) => item.available !== false && item.key !== 'framework-smoke')
+  const selectedOutputProfile = outputProfiles.find((profile) => profile.key === outputProfileKey)
   const sourceError = sourceRequirementError(selectedCapability, assets)
   const assetsError = maxAssets > 0 && assets.length > maxAssets ? `来源素材不能超过 ${maxAssets} 个` : ''
   const durationError = montageDurationError(duration, maxDurationSeconds)
@@ -77,21 +86,30 @@ export function MontageCreationPanel({
     ? ''
     : isError
       ? '视频类型加载失败，暂时无法创建视频'
-      : !enabled
+    : !enabled
         ? '视频创作当前不可用'
-        : pipelineKey && !selectedCapability
+    : pipelineKey && (!selectedCapability || selectedCapability.available === false || selectedCapability.key === 'framework-smoke')
           ? '当前视频类型已停用，请重新选择'
           : !pipelineKey
             ? '请选择视频类型'
             : ''
-  const ready = !isLoading && !isError && enabled && !!selectedCapability && !sourceError && !assetsError && !durationError
+  const outputProfileError = !isLoading && (outputProfiles.length === 0 || !selectedOutputProfile)
+    ? '成片规格缺失或无效，暂时无法创建视频'
+    : ''
+  const ready = !isLoading && !isError && enabled && !!selectedCapability && selectedCapability.available !== false && selectedCapability.key !== 'framework-smoke' && !outputProfileError && !sourceError && !assetsError && !durationError
 
   useEffect(() => {
     if (isLoading || isError || !enabled || pipelineKey || form.getFieldState(pipelinePath).isDirty) return
-    const fallback = capabilityByKey(defaultPipeline) ?? items[0]
+    const fallback = selectableItems.find((item) => item.key === defaultPipeline) ?? selectableItems[0]
     if (!fallback) return
     form.setValue(pipelinePath, fallback.key, { shouldDirty: false, shouldValidate: true })
-  }, [capabilityByKey, defaultPipeline, enabled, form, isError, isLoading, items, pipelineKey, pipelinePath])
+  }, [capabilityByKey, defaultPipeline, enabled, form, isError, isLoading, selectableItems, pipelineKey, pipelinePath])
+
+  useEffect(() => {
+    if (isLoading || outputProfileKey) return
+    const profile = outputProfiles.find((item) => item.key === defaultOutputProfile) ?? outputProfiles[0]
+    if (profile) form.setValue(outputProfilePath, profile.key, { shouldDirty: false })
+  }, [defaultOutputProfile, form, isLoading, outputProfileKey, outputProfilePath, outputProfiles])
 
   useEffect(() => {
     if (!selectedCapability || form.getFieldState(durationPath).isDirty) return
@@ -166,6 +184,21 @@ export function MontageCreationPanel({
 
       <section aria-labelledby={`${groupID}-output-settings`} className="space-y-3">
         <h3 id={`${groupID}-output-settings`} className="text-sm font-medium text-foreground">成片设置</h3>
+        {outputProfiles.length > 0 && <fieldset className="space-y-2">
+          <legend className="text-sm font-medium text-foreground">成片画幅</legend>
+          <div className="flex flex-wrap gap-2">
+            {outputProfiles.map((profile) => {
+              const previewSize = montageOutputPreviewSize(profile.width, profile.height)
+              return <label key={profile.key} className={cn('flex min-w-0 cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/50', outputProfileKey === profile.key ? 'border-primary bg-primary/5' : 'border-border')}>
+                <input aria-label={`${profile.display_name}，${profile.width} × ${profile.height}，${profile.aspect_ratio}`} type="radio" name={`${groupID}-profile`} value={profile.key} checked={outputProfileKey === profile.key} onChange={() => form.setValue(outputProfilePath, profile.key, { shouldDirty: true, shouldValidate: true })} className="sr-only" />
+                <span aria-hidden="true" className="flex size-8 shrink-0 items-center justify-center rounded-sm bg-muted"><span className="block border-2 border-foreground bg-background" style={previewSize} /></span>
+                <span className="min-w-0 break-words"><span className="block font-medium">{profile.display_name}</span><span className="block text-[11px] text-muted-foreground">{profile.aspect_ratio} · {profile.width} × {profile.height}</span></span>
+              </label>
+            })}
+          </div>
+          {selectedOutputProfile && <p className="text-[11px] text-muted-foreground">输出尺寸由服务端配置为 {selectedOutputProfile.width} × {selectedOutputProfile.height}。</p>}
+        </fieldset>}
+        {outputProfileError && <p role="alert" className="text-xs text-destructive">{outputProfileError}</p>}
         <div className="grid gap-3 md:grid-cols-3">
           <FormField control={control} name={durationPath} render={({ field }) => (
             <FormItem>
@@ -237,16 +270,19 @@ export function MontageCreationPanel({
         </CollapsibleTrigger>
         <CollapsibleContent className="space-y-3 pt-3">
           <div className="grid gap-3 md:grid-cols-2">
-            <FormField control={control} name={`${fieldRoot}.preferences.style`} render={({ field }) => (
+            {styles.length > 0 && <FormField control={control} name={`${fieldRoot}.preferences.playbook_key`} render={({ field }) => (
               <FormItem>
-                <FormLabel>风格偏好</FormLabel>
+                <FormLabel>风格模板</FormLabel>
                 <FormControl>
-                  <Textarea aria-label="风格偏好" {...field} value={field.value ?? ''} placeholder="镜头、色彩、节奏与整体调性" rows={3} />
+                  <NativeSelect aria-label="风格模板" className="w-full" {...field} value={field.value ?? ''}>
+                    <NativeSelectOption value="">沿用人设默认</NativeSelectOption>
+                    <NativeSelectOption value="auto">自动选择</NativeSelectOption>
+                    {styles.map((style) => <NativeSelectOption key={style.key} value={style.key}>{style.display_name} · {style.description}</NativeSelectOption>)}
+                  </NativeSelect>
                 </FormControl>
-                <FormDescription>影响镜头语言、色彩和剪辑节奏；留空则由 Agent 按参考素材判断。</FormDescription>
-                <FormMessage />
+                <FormDescription>选择模板会覆盖默认模板；自动选择由 Agent 根据 brief 决定。</FormDescription>
               </FormItem>
-            )} />
+            )} />}
             <FormField control={control} name={`${fieldRoot}.preferences.music_prompt`} render={({ field }) => (
               <FormItem>
                 <FormLabel>音乐提示</FormLabel>

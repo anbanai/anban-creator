@@ -170,7 +170,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "3cb4853a1bb77cf32197a450353c70c76c768550efcffb8db9f2642bfd2dfa67"
+      "digest": "652afbe7f514cf28858002edabc93ffec5ad1393e3c76457799458e57ef96a59"
     },
     {
       "id": "content-planning",
@@ -2742,7 +2742,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "62933c66d9b000190d5274d3a63f0bb8e18589090d18c8b256c24696eeb9a44f"
+      "digest": "007ed6a274197d747f2194e835a0d6bb31b9f8fcf8e4e854c9994e3c65fb2b5f"
     },
     {
       "id": "montage",
@@ -2899,7 +2899,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "800d343fb9744396f630e2b0be9568b42ed874a4e0e5fdafd482f1e89c0a7411"
+      "digest": "22c752a783129942dca4c0f5daae574b91950a022fc8583960874578d7b694f6"
     },
     {
       "id": "postmortem-review",
@@ -3773,7 +3773,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "b01f15a0a8fd9f5a23ca9e8ad4c891ca85060ff422a8fb8d8e08daba6579f9b7"
+      "digest": "e33e0c12701eed067410ea2db7e86633377092fefbe7ed033ff13d9899da5603"
     },
     {
       "id": "talking-head-editor",
@@ -6248,7 +6248,7 @@
         }
       ],
       "ui": {},
-      "digest": "4fbc486c1e4e07384d39aadbf6481cd13376489a336344e0de8a88ffff49c0d1"
+      "digest": "1473c6c2ac20d1b6f34ee504bd696bcc649fd0a864f909fdee9f6c9ecbc79597"
     },
     {
       "id": "wechat-article",
@@ -6513,7 +6513,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "fda7080d34fdbe9da2a99b776fe4d0abd23fd2cf17e9e72b583811b81a4843c4"
+      "digest": "f3623e4389cec7df946608cde2b758c7179da980c2e974daef3d85918cce43f0"
     },
     {
       "id": "wechat-picture",

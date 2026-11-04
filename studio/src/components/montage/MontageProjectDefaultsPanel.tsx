@@ -12,6 +12,7 @@ import { MontagePipelineSelector } from './MontagePipelineSelector'
 import {
   includesMontageOption,
   montageDurationError,
+  montageOutputPreviewSize,
   montageSubtitleOptions,
   montageVoiceoverOptions,
 } from './montage-options'
@@ -31,10 +32,15 @@ function parseTags(value: string): string[] {
 export function MontageProjectDefaultsPanel({ form, onReadyChange }: MontageProjectDefaultsPanelProps) {
   const pipelinePath = 'montage_defaults.default_pipeline' as const
   const durationPath = 'montage_defaults.preferences.duration_seconds' as const
+  const outputProfilePath = 'montage_defaults.output_profile_key' as const
+  const outputProfileKey = useWatch({ control: form.control, name: outputProfilePath })
   const pipelineKey = useWatch({ control: form.control, name: pipelinePath })
   const duration = useWatch({ control: form.control, name: durationPath })
   const {
     items,
+    outputProfiles = [],
+    defaultOutputProfile = 'tiktok',
+    styles = [],
     enabled,
     defaultPipeline,
     maxDurationSeconds,
@@ -42,7 +48,9 @@ export function MontageProjectDefaultsPanel({ form, onReadyChange }: MontageProj
     isError,
     capabilityByKey,
   } = useMontageCapabilities()
+  const selectableItems = items.filter((item) => item.available !== false && item.key !== 'framework-smoke')
   const selectedCapability = pipelineKey ? capabilityByKey(pipelineKey) : undefined
+  const selectedProfile = outputProfiles.find((item) => item.key === outputProfileKey)
   const durationError = montageDurationError(duration, maxDurationSeconds)
   const catalogError = isLoading
     ? ''
@@ -50,19 +58,28 @@ export function MontageProjectDefaultsPanel({ form, onReadyChange }: MontageProj
       ? '视频类型加载失败，暂时无法保存视频默认设置'
       : !enabled
         ? '视频创作当前不可用'
-        : pipelineKey && !selectedCapability
+        : pipelineKey && (!selectedCapability || selectedCapability.available === false || selectedCapability.key === 'framework-smoke')
           ? '当前视频类型已停用，请重新选择'
           : !pipelineKey
             ? '请选择视频类型'
             : ''
-  const ready = !isLoading && !isError && enabled && !!selectedCapability && !durationError
+  const outputProfileError = !isLoading && (outputProfiles.length === 0 || !selectedProfile)
+    ? '成片规格缺失或无效，暂时无法保存视频默认设置'
+    : ''
+  const ready = !isLoading && !isError && enabled && !!selectedCapability && selectedCapability.available !== false && selectedCapability.key !== 'framework-smoke' && !outputProfileError && !durationError
 
   useEffect(() => {
     if (isLoading || isError || !enabled || pipelineKey || form.getFieldState(pipelinePath).isDirty) return
-    const fallback = capabilityByKey(defaultPipeline) ?? items[0]
+    const fallback = selectableItems.find((item) => item.key === defaultPipeline) ?? selectableItems[0]
     if (!fallback) return
     form.setValue(pipelinePath, fallback.key, { shouldDirty: false, shouldValidate: true })
-  }, [capabilityByKey, defaultPipeline, enabled, form, isError, isLoading, items, pipelineKey])
+  }, [capabilityByKey, defaultPipeline, enabled, form, isError, isLoading, selectableItems, pipelineKey])
+
+  useEffect(() => {
+    if (isLoading || outputProfileKey) return
+    const profile = outputProfiles.find((item) => item.key === defaultOutputProfile) ?? outputProfiles[0]
+    if (profile) form.setValue(outputProfilePath, profile.key, { shouldDirty: false })
+  }, [defaultOutputProfile, form, isLoading, outputProfileKey, outputProfilePath, outputProfiles])
 
   useEffect(() => {
     if (!selectedCapability || form.getFieldState(durationPath).isDirty) return
@@ -104,6 +121,19 @@ export function MontageProjectDefaultsPanel({ form, onReadyChange }: MontageProj
         compact
         onChange={selectPipeline}
       />
+
+      {outputProfiles.length > 0 && <fieldset className="space-y-2">
+        <legend className="text-sm font-medium text-foreground">默认成片画幅</legend>
+        <div className="flex flex-wrap gap-2">
+          {outputProfiles.map((profile) => <label key={profile.key} className={`flex min-w-0 cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm ${outputProfileKey === profile.key ? 'border-primary bg-primary/5' : 'border-border'}`}>
+            <input type="radio" name="montage-default-profile" checked={outputProfileKey === profile.key} onChange={() => form.setValue(outputProfilePath, profile.key, { shouldDirty: true, shouldValidate: true })} className="sr-only" />
+            <span aria-hidden="true" className="flex size-8 shrink-0 items-center justify-center rounded-sm bg-muted"><span className="block border-2 border-foreground bg-background" style={montageOutputPreviewSize(profile.width, profile.height)} /></span>
+            <span className="min-w-0 break-words">{profile.display_name}<span className="ml-1 text-[11px] text-muted-foreground">{profile.aspect_ratio}</span></span>
+          </label>)}
+        </div>
+        {selectedProfile && <p className="text-[11px] text-muted-foreground">{selectedProfile.width} × {selectedProfile.height}</p>}
+      </fieldset>}
+      {outputProfileError && <p role="alert" className="text-xs text-destructive">{outputProfileError}</p>}
 
       <div className="grid gap-3 md:grid-cols-3">
         <FormField control={form.control} name="montage_defaults.preferences.duration_seconds" render={({ field }) => (
@@ -166,16 +196,19 @@ export function MontageProjectDefaultsPanel({ form, onReadyChange }: MontageProj
         )} />
       </div>
 
-      <FormField control={form.control} name="montage_defaults.preferences.style" render={({ field }) => (
+      {styles.length > 0 && <FormField control={form.control} name="montage_defaults.preferences.playbook_key" render={({ field }) => (
         <FormItem>
-          <FormLabel>风格偏好</FormLabel>
+          <FormLabel>默认风格模板</FormLabel>
           <FormControl>
-            <Textarea aria-label="风格偏好" {...field} value={field.value ?? ''} rows={3} placeholder="镜头、色彩、节奏与整体视觉调性" />
+            <NativeSelect aria-label="默认风格模板" className="w-full" {...field} value={field.value ?? ''}>
+              <NativeSelectOption value="">不指定</NativeSelectOption>
+              <NativeSelectOption value="auto">自动选择</NativeSelectOption>
+              {styles.map((style) => <NativeSelectOption key={style.key} value={style.key}>{style.display_name}</NativeSelectOption>)}
+            </NativeSelect>
           </FormControl>
-          <FormDescription>作为该人设每次视频创作的默认风格约束。</FormDescription>
-          <FormMessage />
+          <FormDescription>新视频默认采用此模板，单次创作可覆盖。</FormDescription>
         </FormItem>
-      )} />
+      )} />}
       <FormField control={form.control} name="montage_defaults.preferences.music_prompt" render={({ field }) => (
         <FormItem>
           <FormLabel>音乐提示</FormLabel>

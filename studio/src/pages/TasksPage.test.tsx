@@ -160,6 +160,18 @@ vi.mock('@/lib/api', async () => {
         list: vi.fn().mockResolvedValue({
           enabled: true,
           default_pipeline: 'cinematic',
+          default_output_profile: 'tiktok',
+          output_profiles: [
+            { key: 'youtube_landscape', display_name: 'YouTube 横版', width: 1920, height: 1080, aspect_ratio: '16:9' },
+            { key: 'youtube_4k', display_name: 'YouTube 4K', width: 3840, height: 2160, aspect_ratio: '16:9' },
+            { key: 'youtube_shorts', display_name: 'YouTube Shorts', width: 1080, height: 1920, aspect_ratio: '9:16' },
+            { key: 'instagram_reels', display_name: 'Instagram Reels', width: 1080, height: 1920, aspect_ratio: '9:16' },
+            { key: 'instagram_feed', display_name: 'Instagram Feed', width: 1080, height: 1080, aspect_ratio: '1:1' },
+            { key: 'tiktok', display_name: 'TikTok', width: 1080, height: 1920, aspect_ratio: '9:16' },
+            { key: 'linkedin', display_name: 'LinkedIn', width: 1920, height: 1080, aspect_ratio: '16:9' },
+            { key: 'cinematic', display_name: '电影宽银幕', width: 2560, height: 1080, aspect_ratio: '21:9' },
+          ],
+          styles: [{ key: 'clean-professional', display_name: '专业简洁', description: '清晰克制' }],
           max_duration_seconds: 600,
           max_assets: 20,
           items: [
@@ -1031,9 +1043,10 @@ describe('TasksPage Montage creation', () => {
     name: '视频生成人设',
     montage_defaults: {
       default_pipeline: 'cinematic',
+      output_profile_key: 'tiktok',
       preferences: {
         duration_seconds: 45,
-        style: 'clean product film',
+        playbook_key: 'clean-professional',
         music_prompt: 'minimal electronic',
         subtitle_mode: 'burned_in',
         voiceover_mode: 'narrated',
@@ -1092,6 +1105,7 @@ describe('TasksPage Montage creation', () => {
       montage_input: {
         brief: '新品发布短片',
         pipeline_key: 'cinematic',
+        output_profile_key: 'tiktok',
         source_assets: [{
           type: 'video_url',
           url: '/source.mp4',
@@ -1101,7 +1115,7 @@ describe('TasksPage Montage creation', () => {
         }],
         preferences: {
           duration_seconds: 45,
-          style: 'clean product film',
+          playbook_key: 'clean-professional',
           music_prompt: 'minimal electronic',
           subtitle_mode: 'burned_in',
           voiceover_mode: 'narrated',
@@ -1125,7 +1139,7 @@ describe('TasksPage Montage creation', () => {
     expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
   })
 
-  it('blocks Montage creation when required cover image capabilities are unavailable', async () => {
+  it('keeps Montage creation available when unrelated image capabilities are unavailable', async () => {
     vi.mocked(api.imageCapabilities.list).mockRejectedValueOnce(new Error('image capabilities unavailable'))
     renderTasksPage(`/tasks?create=true&type=montage&project_id=${montageProject.id}&intent=new`)
 
@@ -1134,10 +1148,8 @@ describe('TasksPage Montage creation', () => {
       target: { value: '不依赖图像能力的 Montage 视频' },
     })
 
-    const createButton = screen.getByRole('button', { name: '创建' })
-    await waitFor(() => expect(createButton).toBeDisabled())
-    expect(screen.getByText('图像能力暂时无法加载，请稍后重试。')).toBeInTheDocument()
-    expect(api.tasks.create).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '创建' })).toBeEnabled()
+    expect(screen.queryByText('图像能力暂时无法加载，请稍后重试。')).not.toBeInTheDocument()
   })
 })
 
