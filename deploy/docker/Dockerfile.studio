@@ -18,7 +18,7 @@ USER root
 RUN mkdir -p /usr/share/nginx/html/assets
 
 # Stage 1: build the production bundle.
-FROM oven/bun:latest AS build
+FROM crpi-671lgv9lrdyll4t9.cn-chengdu.personal.cr.aliyuncs.com/bx_anbanai/oven-bun:latest AS build
 WORKDIR /app
 
 # Cache dependency install. --frozen-lockfile makes the build reproducible and
@@ -37,7 +37,7 @@ ENV STUDIO_REQUIRE_BUILD_COMMIT=1
 RUN bun run build
 
 # Stage 2: serve the static bundle with nginx.
-FROM nginx:alpine
+FROM crpi-671lgv9lrdyll4t9.cn-chengdu.personal.cr.aliyuncs.com/bx_anbanai/nginx:alpine
 
 # Docker/local defaults preserve the existing HTTP backend contract. ACK
 # overrides all three values to reach the TLS-enabled Server Service.
