@@ -1,6 +1,6 @@
 import { AxiosError, CanceledError } from 'axios'
 import http from '@/lib/http-client'
-import standaloneRequest from '../../../server/service/testdata/designer-standalone-request.json'
+import standaloneRequest from '@/test/fixtures/designer-standalone-request.json'
 import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { act, fireEvent, render as testingRender, screen, waitFor, within } from '@testing-library/react'
 import { QueryClientProvider, useQuery } from '@tanstack/react-query'

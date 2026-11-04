@@ -971,7 +971,9 @@ func TestDesignerExecuteGenerationDownloadsRemoteResultOnceForValidationAndPersi
 
 func TestDesignerStudioStandalonePayloadQuoteAdmissionAndHistory(t *testing.T) {
 	f := newDesignerFixedSKUFixture(t, 5000)
-	data, err := os.ReadFile("testdata/designer-standalone-request.json")
+	// The payload is owned by the Studio test fixtures so the Studio image build
+	// context stays self-contained; this contract test proves the Server accepts it.
+	data, err := os.ReadFile("../../studio/src/test/fixtures/designer-standalone-request.json")
 	if err != nil {
 		t.Fatal(err)
 	}
