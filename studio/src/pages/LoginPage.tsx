@@ -88,6 +88,7 @@ export default function LoginPage() {
       footerText="还没有账号？"
       footerLinkText="立即注册"
       footerLinkTo="/register"
+      followSystemTheme
     >
       {inviteCode ? (
         <div className="mb-6">

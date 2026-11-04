@@ -71,6 +71,7 @@ export default function RegisterPage() {
       footerText="已有账号？"
       footerLinkText="登录"
       footerLinkTo="/login"
+      followSystemTheme
     >
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
