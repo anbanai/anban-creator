@@ -66,7 +66,7 @@ func (h *ImageCapabilityHandler) List(c fiber.Ctx) error {
 		if !route.Enabled || !model.TierSatisfies(userTier, requiredTier) {
 			continue
 		}
-		features := route.GenerationFeatures
+		features := service.DesignerGenerationFeatures(key, route.GenerationFeatures)
 		features.MaxBatch = 1
 		item := ImageCapabilityOption{Key: key, DisplayName: route.Alias, Description: route.Description, MinTier: string(requiredTier), Enabled: route.Enabled, SortOrder: route.SortOrder, GenerationFeatures: features}
 		if h.catalog != nil && strings.TrimSpace(route.BillingSKU) != "" {

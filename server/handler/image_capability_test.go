@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -106,5 +107,43 @@ func TestValidateImageCapabilityKey(t *testing.T) {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestImageCapabilitiesListUsesCommonDesignerSizesWithOldDeploymentPresets(t *testing.T) {
+	standard := handlerCapability("Standard", "free", "image.standard", 10)
+	standard.GenerationFeatures.SizePresets = []string{"1:1:2K", "3:4:2K", "4:3:2K", "16:9:2K"}
+	standard.GenerationFeatures.DefaultSize = "1:1:2K"
+	professional := handlerCapability("Professional", "free", "image.professional", 20)
+	professional.GenerationFeatures.SizePresets = []string{"1:1:2K", "3:2:2K", "2:3:2K"}
+	professional.GenerationFeatures.DefaultSize = "2:3:2K"
+	routes := config.ImageGenerationRoutesConfig{DefaultCapability: "standard", Capabilities: map[string]config.ImageGenerationRouteConfig{
+		"standard": standard, "professional": professional,
+	}}
+	h := NewImageCapabilityHandler(routes, nil, nil, nil)
+	app := fiber.New()
+	app.Use(func(c fiber.Ctx) error { c.Locals("user_id", "designer-size-user"); return c.Next() })
+	app.Get("/api/v1/image-capabilities", h.List)
+	resp, err := app.Test(httptest.NewRequest("GET", "/api/v1/image-capabilities", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var envelope struct {
+		Data struct {
+			Items []ImageCapabilityOption `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Data.Items) != 2 {
+		t.Fatalf("got %d capabilities, want 2", len(envelope.Data.Items))
+	}
+	want := []string{"1:1:2K", "3:4:2K", "4:3:2K", "16:9:2K", "9:16:2K"}
+	for _, item := range envelope.Data.Items {
+		if !reflect.DeepEqual(item.GenerationFeatures.SizePresets, want) || item.GenerationFeatures.DefaultSize != "1:1:2K" {
+			t.Errorf("%s sizes = %v, default = %q", item.Key, item.GenerationFeatures.SizePresets, item.GenerationFeatures.DefaultSize)
+		}
 	}
 }

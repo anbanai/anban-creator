@@ -27,9 +27,9 @@ spec:
             - name: BACKEND_HOST
               value: ${backend_host}
             - name: BACKEND_SCHEME
-              value: https
+              value: http
             - name: BACKEND_PORT
-              value: "8443"
+              value: "8080"
             # Archestra web Service in anbanai-prod. nginx resolves this name
             # at startup, so it must stay resolvable. See
             # docs/archestra-integration.md.

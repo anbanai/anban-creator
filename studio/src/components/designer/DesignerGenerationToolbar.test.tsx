@@ -14,7 +14,7 @@ const capabilities: DesignerCapability[] = [
     idx: 0,
     designerFeatures: {
       qualityLevels: ['auto', 'high'],
-      sizePresets: ['1:1:2K', '3:4:2K', '4:3:2K', '9:16:2K'],
+      sizePresets: ['1:1:2K', '3:4:2K', '4:3:2K', '16:9:2K', '9:16:2K'],
       defaultSize: '1:1:2K',
       maxBatch: 3,
       maxReferenceImages: 0,
@@ -76,7 +76,7 @@ describe('DesignerGenerationToolbar', () => {
     expect(within(parameters).getByRole('group', { name: '图像能力' })).toBeVisible()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(within(screen.getByRole('group', { name: '尺寸' })).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual([
-      '1:1 · 2K', '3:4 · 2K', '4:3 · 2K', '9:16 · 2K',
+      '1:1 · 2K', '3:4 · 2K', '4:3 · 2K', '16:9 · 2K', '9:16 · 2K',
     ])
     expect(within(screen.getByRole('group', { name: '质量' })).getAllByRole('button').map((button) => button.textContent)).toEqual(['自动', '高'])
     expect(within(screen.getByRole('group', { name: '输出格式' })).getAllByRole('button').map((button) => button.textContent)).toEqual(['PNG', 'WEBP'])
@@ -108,25 +108,17 @@ describe('DesignerGenerationToolbar', () => {
     expect(screen.queryByRole('button', { name: '增加图片数量' })).not.toBeInTheDocument()
   })
 
-  it('shows a static image quantity when the current capability only supports one image', () => {
-    const singleImageCapabilities = [{
-      ...capabilities[0],
-      designerFeatures: { ...capabilities[0].designerFeatures, maxBatch: 1 },
-    }]
-    render(
-      <DesignerGenerationToolbar
-        capabilities={singleImageCapabilities}
-        capabilityKey="professional"
-        settings={{ ...settings, n: 3 }}
-        onCapabilityChange={vi.fn()}
-        onSettingsChange={vi.fn()}
-      />,
-    )
-
-    const fixedQuantity = screen.getByLabelText('图片数量：1，当前能力上限')
-    expect(fixedQuantity).toHaveTextContent('1 张')
-    expect(screen.queryByRole('button', { name: '增加图片数量' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '减少图片数量' })).not.toBeInTheDocument()
+  it('defaults to one image and accepts a quantity from one to four', () => {
+    const onSettingsChange = vi.fn()
+    render(<DesignerGenerationToolbar capabilities={capabilities} capabilityKey="professional" settings={settings} onCapabilityChange={vi.fn()} onSettingsChange={onSettingsChange} />)
+    const quantity = screen.getByRole('spinbutton', { name: '生成数量' })
+    expect(quantity).toHaveValue(1)
+    fireEvent.change(quantity, { target: { value: '3' } })
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ n: 3 })
+    fireEvent.change(quantity, { target: { value: '5' } })
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ n: 4 })
+    fireEvent.change(quantity, { target: { value: '0' } })
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ n: 1 })
   })
 
   it('disables the expanded controls while generation is in progress', () => {

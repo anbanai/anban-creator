@@ -46,7 +46,7 @@ export default function DesignerCanvas({ images, isGenerating, canInpaint, onIma
   }
 
   return (
-    <div className="mx-auto grid h-full min-h-0 w-full auto-rows-fr gap-4">
+    <div className={`mx-auto grid h-full min-h-0 w-full auto-rows-fr gap-3 ${images.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
       {images.map((img, i) => (
         <div
           key={`${img.url}-${i}`}

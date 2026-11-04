@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 describe('Studio nginx backend proxy contract', () => {
-  it('keeps local HTTP defaults while ACK selects the TLS service', () => {
+  it('uses HTTP port 8080 for local and ACK backend services', () => {
     const template = readFileSync('default.conf.template', 'utf8')
     const dockerfile = readFileSync('../deploy/docker/Dockerfile.studio', 'utf8')
     const deployment = readFileSync('Deployment.yaml', 'utf8').replace(/\r\n/g, '\n')
@@ -13,8 +13,8 @@ describe('Studio nginx backend proxy contract', () => {
     expect(dockerfile).toContain('ENV BACKEND_SCHEME=http')
     expect(dockerfile).toContain('ENV BACKEND_PORT=8080')
 
-    expect(deployment).toContain('- name: BACKEND_SCHEME\n              value: https')
-    expect(deployment).toContain('- name: BACKEND_PORT\n              value: "8443"')
+    expect(deployment).toContain('- name: BACKEND_SCHEME\n              value: http')
+    expect(deployment).toContain('- name: BACKEND_PORT\n              value: "8080"')
   })
 
   it('pins the Studio Service to the active blue/green release', () => {

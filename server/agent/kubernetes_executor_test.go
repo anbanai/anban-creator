@@ -190,6 +190,58 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	}
 }
 
+func TestBuildKubernetesJobServerTransport(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		serverURL string
+		caSecret  string
+		wantHTTP  bool
+		wantCA    bool
+	}{
+		{name: "internal HTTP", serverURL: "http://creator-server:8080", wantHTTP: true},
+		{name: "HTTP ignores unused CA", serverURL: "http://creator-server:8080", caSecret: "unused-ca", wantHTTP: true},
+		{name: "Ingress HTTPS", serverURL: "https://creator.example.com"},
+		{name: "explicit private CA", serverURL: "https://creator.example.com", caSecret: "custom-ca", wantCA: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testJobConfig()
+			cfg.ServerURL = tc.serverURL
+			cfg.ServerCASecret = tc.caSecret
+			job := mustBuildKubernetesJob(cfg, testExecution(), testTask())
+			container := job.Spec.Template.Spec.Containers[0]
+			if got := slices.Contains(container.Args, "--allow-http-server"); got != tc.wantHTTP {
+				t.Fatalf("HTTP permission = %v, want %v", got, tc.wantHTTP)
+			}
+			for _, name := range []string{"SSL_CERT_FILE", "NODE_EXTRA_CA_CERTS"} {
+				found := false
+				for _, env := range container.Env {
+					if env.Name == name {
+						found = true
+						if env.Value != kubernetesServerCAFile {
+							t.Fatalf("%s = %q, want CA mount path", name, env.Value)
+						}
+					}
+				}
+				if found != tc.wantCA {
+					t.Fatalf("%s configured = %v, want %v", name, found, tc.wantCA)
+				}
+			}
+			if got := slices.ContainsFunc(container.VolumeMounts, func(m corev1.VolumeMount) bool { return m.Name == kubernetesServerCAVolumeName }); got != tc.wantCA {
+				t.Fatalf("CA mount present = %v, want %v", got, tc.wantCA)
+			}
+			if got := slices.ContainsFunc(job.Spec.Template.Spec.Volumes, func(v corev1.Volume) bool { return v.Name == kubernetesServerCAVolumeName }); got != tc.wantCA {
+				t.Fatalf("CA volume present = %v, want %v", got, tc.wantCA)
+			}
+			if tc.wantCA {
+				volume := requireTestVolume(t, job, kubernetesServerCAVolumeName)
+				if volume.Secret == nil || volume.Secret.SecretName != tc.caSecret {
+					t.Fatalf("CA volume = %#v, want configured Secret", volume)
+				}
+			}
+		})
+	}
+}
+
 func TestRuntimeMemoryMountUsesFrozenAdapterCWD(t *testing.T) {
 	for _, tc := range []struct{ adapter, taskType, want string }{
 		{agentpack.AdapterStandard, model.PlatformMontage, "/workspace/.claude/agent-memory"},
