@@ -1,0 +1,10 @@
+{
+  "id": "lotus",
+  "source_path": "/Users/medivh/WORKSPACE/anbanwriter/video-references/原来“荷花”还有这么多叫法！#藕 #中国文化 #传统文化 #涨知识_20261104_101813.mp4",
+  "sha256": "8c6c3f9f98627d0b6a849b641af4284d2e4d724570fea4da46ff7559b812ec9b",
+  "duration_seconds": 115.9839,
+  "frame_sampling_interval_seconds": 2,
+  "sampled_frame_count": 58,
+  "loudness_summary": "Summary:\n\n  Integrated loudness:\n    I:         -11.5 LUFS\n    Threshold: -21.9 LUFS\n\n  Loudness range:\n    LRA:         2.7 LU\n    Threshold: -31.9 LUFS\n    LRA low:   -13.2 LUFS\n    LRA high:  -10.5 LUFS\n\n  True peak:\n    Peak:        0.4 dBFS\n[out#0/null @ 0x754f00c900] video:0KiB audio:19980KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown\nsize=N/A time=00:01:55.98 bitrate=N/A speed= 134x elapsed=0:00:00.86    \n",
+  "review_limit": "contact sheets and ASR; not real-time listening or continuous-frame review"
+}
