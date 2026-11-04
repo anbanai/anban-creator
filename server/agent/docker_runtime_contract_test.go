@@ -853,7 +853,7 @@ func TestDockerBuildInputsUseDeclaredImageTags(t *testing.T) {
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.studio"),
-			from: []string{"FROM ${STUDIO_PREVIOUS_IMAGE} AS previous", "FROM oven/bun:latest AS build", "FROM nginx:alpine"},
+			from: []string{"FROM ${STUDIO_PREVIOUS_IMAGE} AS previous", "FROM oven-bun:latest AS build", "FROM nginx:alpine"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.sidecar-ilink"),
@@ -1179,7 +1179,7 @@ func TestStudioDockerfileUsesRootBuildContext(t *testing.T) {
 	body := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.studio"))
 	for _, want := range []string{
 		"# syntax=docker/dockerfile:1.7",
-		"FROM oven/bun:latest AS build",
+		"FROM oven-bun:latest AS build",
 		"WORKDIR /app",
 		"COPY studio/package.json studio/bun.lock ./",
 		"COPY studio/ .",
