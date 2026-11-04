@@ -5,17 +5,26 @@ import (
 	"fmt"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 // MigrateTopicPoolToContentAssets backfills legacy topic_pool rows into the
-// user-scoped reusable asset table. It is idempotent and leaves the legacy row
-// available for older clients while linking it to the canonical asset.
+// user-scoped canonical asset table, preserving queue consumption and lineage.
 func MigrateTopicPoolToContentAssets(ctx context.Context, db *gorm.DB, log *zerolog.Logger) error {
 	if db == nil || !db.Migrator().HasTable("topic_pool") || !db.Migrator().HasTable("content_assets") {
 		return nil
+	}
+	var assets []model.ContentAsset
+	if err := db.WithContext(ctx).Where("title_key IS NULL OR title_key = ''").Find(&assets).Error; err != nil {
+		return err
+	}
+	for _, asset := range assets {
+		if err := db.WithContext(ctx).Model(&model.ContentAsset{}).Where("id = ?", asset.ID).UpdateColumn("title_key", model.NormalizeTopicDedupeKey(asset.Title)).Error; err != nil {
+			return err
+		}
 	}
 	var rows []struct {
 		ID             uint
@@ -64,5 +73,8 @@ func MigrateTopicPoolToContentAssets(ctx context.Context, db *gorm.DB, log *zero
 			log.Info().Uint("topic_id", row.ID).Str("asset_id", assetID).Msg("backfilled topic pool row into content asset")
 		}
 	}
-	return nil
+	if err := repository.RekeyTopicQueues(ctx, db, "", ""); err != nil {
+		return err
+	}
+	return migrateUnifiedTopicHistory(ctx, db)
 }

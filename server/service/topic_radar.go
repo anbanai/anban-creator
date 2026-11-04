@@ -33,6 +33,7 @@ type TopicRadarService struct {
 	taskSvc            *TaskService
 	now                func() time.Time
 	notificationClient *http.Client
+	publicBaseURL      string
 }
 
 func (s *TopicRadarService) SetTaskService(taskSvc *TaskService) {
@@ -292,4 +293,8 @@ func defaultJSON(value datatypes.JSON, fallback string) datatypes.JSON {
 func topicJSON(value any) string {
 	data, _ := json.Marshal(value)
 	return string(data)
+}
+
+func (s *TopicRadarService) SetPublicBaseURL(base string) {
+	s.publicBaseURL = strings.TrimRight(strings.TrimSpace(base), "/")
 }

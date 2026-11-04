@@ -43,7 +43,7 @@ export default function ContentAutopilotSettingsPage() {
 
   return <div className="mx-auto w-full max-w-4xl space-y-6 pb-10">
     <PageHeader title="自动生产设置" description="为选题研究、内容生成和发布配置工作区策略。">
-      <Link to="/content-assets" className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3.5 text-sm font-medium transition-colors hover:bg-muted"><ArrowLeft className="size-4" />返回选题资产</Link>
+      <Link to="/topics" className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3.5 text-sm font-medium transition-colors hover:bg-muted"><ArrowLeft className="size-4" />返回选题</Link>
     </PageHeader>
     {policy.isPending && <p role="status" className="text-sm text-muted-foreground">正在加载策略…</p>}
     {policy.isError && <div role="alert" className="flex items-center gap-3 text-sm text-destructive"><span>策略加载失败。</span><Button variant="outline" size="sm" onClick={() => void policy.refetch()}>重试</Button></div>}

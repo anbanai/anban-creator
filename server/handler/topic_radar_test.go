@@ -153,14 +153,19 @@ func TestTopicRadarHandlerReturnsDurableWorkAfterQueueFailure(t *testing.T) {
 	log := zerolog.New(io.Discard)
 	h := NewTopicRadarHandler(svc, repo, &log)
 	app.Post("/subscriptions/:subscription_id/run", h.RunDigest)
-	app.Post("/suggestions/:suggestion_id/script", h.RequestScript)
+	app.Post("/content-assets/:id/scripts", h.RequestScript)
 	ctx := context.Background()
+	asset := model.NewContentAsset("owner", "Scoped topic")
+	asset.ID = "asset"
+	if err := repo.ContentAssets().Create(ctx, asset); err != nil {
+		t.Fatal(err)
+	}
 	if err := repo.TopicSuggestions().CreateBatch(ctx, []*model.TopicSuggestion{{ID: "suggestion", DigestID: "digest", ProjectID: "project", Title: "Scoped topic", SourceRefs: []byte(`[]`), Scores: []byte(`{}`), VideoFit: "strong"}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct{ path, body string }{
 		{"/subscriptions/subscription/run", `{"request_key":"durable"}`},
-		{"/suggestions/suggestion/script", `{"target_platform":"douyin"}`},
+		{"/content-assets/asset/scripts", `{"project_id":"project","target_platform":"douyin"}`},
 	} {
 		req := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))
 		req.Header.Set("Content-Type", "application/json")

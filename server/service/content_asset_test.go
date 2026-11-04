@@ -1249,7 +1249,11 @@ func TestReuseTaskAdmissionChecksRunInsideTransaction(t *testing.T) {
 			ctx := context.Background()
 			userID := uuid.NewString()
 			projectID := createTestProject(t, repo, userID, model.PlatformWechat)
-			run := model.NewContentReuseRun(userID, uuid.NewString(), projectID, model.PlatformWechat)
+			asset := model.NewContentAsset(userID, "admission topic")
+			if err := repo.ContentAssets().Create(ctx, asset); err != nil {
+				t.Fatal(err)
+			}
+			run := model.NewContentReuseRun(userID, asset.ID, projectID, model.PlatformWechat)
 			run.Status = tc.status
 			if tc.alreadyBound {
 				run.TaskID = "existing-task"
@@ -1292,7 +1296,11 @@ func TestReuseAdmissionConsumesFrozenQuoteAndRollsBackWhenStopped(t *testing.T) 
 			svc, f, _ := newFixedTaskBillingFixture(t, 1500, 0)
 			projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformWechat)
 			quote := f.quote(t, billingWalletUserID, "task.wechat_article", "", "reuse-frozen")
-			run := model.NewContentReuseRun(billingWalletUserID, uuid.NewString(), projectID, model.PlatformWechat)
+			asset := model.NewContentAsset(billingWalletUserID, "frozen quote topic")
+			if err := f.repo.ContentAssets().Create(ctx, asset); err != nil {
+				t.Fatal(err)
+			}
+			run := model.NewContentReuseRun(billingWalletUserID, asset.ID, projectID, model.PlatformWechat)
 			run.Status, run.BillingQuoteID, run.BillingFingerprint = status, quote.ID, quote.RequestFingerprint
 			if err := f.repo.ContentAssets().CreateReuseRun(ctx, run); err != nil {
 				t.Fatal(err)
@@ -1748,7 +1756,11 @@ func TestReuseRecoveryDispatchesAlreadyAdmittedPendingTask(t *testing.T) {
 	repo := repository.New(db)
 	ctx := context.Background()
 	projectID := createTestProject(t, repo, "owner", model.PlatformWechat)
-	run := model.NewContentReuseRun("owner", "asset", projectID, model.PlatformWechat)
+	asset := model.NewContentAsset("owner", "pending recovery topic")
+	if err := repo.ContentAssets().Create(ctx, asset); err != nil {
+		t.Fatal(err)
+	}
+	run := model.NewContentReuseRun("owner", asset.ID, projectID, model.PlatformWechat)
 	run.Status = model.ContentReuseRunStatusRunning
 	if err := repo.ContentAssets().CreateReuseRun(ctx, run); err != nil {
 		t.Fatal(err)
@@ -1756,7 +1768,7 @@ func TestReuseRecoveryDispatchesAlreadyAdmittedPendingTask(t *testing.T) {
 	queue := &mockEnqueuer{}
 	logger := zerolog.New(io.Discard)
 	taskSvc := newTestTaskService(&committedAdmissionCrashRepository{Repository: repo}, queue, nil, &logger, "", nil, nil)
-	_, err := taskSvc.CreateManual(ctx, CreateManualParams{UserID: "owner", ProjectID: projectID, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective", Prompt: "recover pending", ContentAssetID: "asset", ReuseRunID: run.ID})
+	_, err := taskSvc.CreateManual(ctx, CreateManualParams{UserID: "owner", ProjectID: projectID, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective", Prompt: "recover pending", ContentAssetID: asset.ID, ReuseRunID: run.ID})
 	if err == nil {
 		t.Fatal("crash simulation did not interrupt dispatch")
 	}

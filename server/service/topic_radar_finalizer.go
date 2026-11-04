@@ -18,6 +18,7 @@ import (
 type topicDigestArtifact struct {
 	topicArtifactEnvelope
 	SchemaVersion string                  `json:"schema_version"`
+	Outcome       string                  `json:"outcome,omitempty"`
 	GeneratedAt   time.Time               `json:"generated_at"`
 	Suggestions   []topicDigestSuggestion `json:"suggestions"`
 }
@@ -65,8 +66,15 @@ func (s *TopicRadarService) finalizeOwnedTopicDigest(ctx context.Context, digest
 	if parsed.GeneratedAt.IsZero() {
 		return s.failDigest(ctx, digest, errors.New("topic digest generated_at is required"))
 	}
-	if len(parsed.Suggestions) == 0 {
-		return s.failDigest(ctx, digest, errors.New("topic digest contains no suggestions"))
+	researchRefs, receiptCount, err := s.topicResearchSources(ctx, digest)
+	if err != nil {
+		return err
+	}
+	if len(parsed.Suggestions) == 0 && (parsed.Outcome != "no_new_candidates" || receiptCount == 0) {
+		return s.failDigest(ctx, digest, errors.New("empty digest requires no_new_candidates and successful current-execution research"))
+	}
+	if len(parsed.Suggestions) > 0 && parsed.Outcome != "" && parsed.Outcome != "candidates" {
+		return s.failDigest(ctx, digest, errors.New("digest outcome contradicts suggestions"))
 	}
 	frozenRefs, _ := frozenTopicSourceRefs(digest.InputSnapshot)
 	for i := range parsed.Suggestions {
@@ -85,8 +93,12 @@ func (s *TopicRadarService) finalizeOwnedTopicDigest(ctx context.Context, digest
 				return s.failDigest(ctx, digest, fmt.Errorf("suggestion %d contains an unresolvable source reference", i))
 			}
 			canonical, found := canonicalTopicSourceRef(ref, frozenRefs)
+			// A new citation must identify both receipt and exact result URL.
+			if !found && ref.RefID != "" && ref.URL != "" {
+				canonical, found = canonicalTopicSourceRef(ref, researchRefs)
+			}
 			if !found {
-				return s.failDigest(ctx, digest, fmt.Errorf("suggestion %d contains a source outside the frozen snapshot", i))
+				return s.failDigest(ctx, digest, fmt.Errorf("suggestion %d contains a source outside frozen or current-execution evidence", i))
 			}
 			candidate.SourceRefs[j] = canonical
 		}
@@ -95,7 +107,7 @@ func (s *TopicRadarService) finalizeOwnedTopicDigest(ctx context.Context, digest
 		return s.failDigest(ctx, digest, err)
 	}
 
-	err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		now := s.now()
 		digest.Status = model.TopicDigestStatusSucceeded
 		digest.DispatchStatus = model.TopicDigestDispatchClaimed
@@ -108,6 +120,9 @@ func (s *TopicRadarService) finalizeOwnedTopicDigest(ctx context.Context, digest
 			return err
 		}
 		if !won {
+			return nil
+		}
+		if len(parsed.Suggestions) == 0 {
 			return nil
 		}
 		suggestions := make([]*model.TopicSuggestion, 0, len(parsed.Suggestions))
@@ -133,6 +148,17 @@ func (s *TopicRadarService) finalizeOwnedTopicDigest(ctx context.Context, digest
 				VideoFit:       strings.TrimSpace(candidate.VideoFit),
 				Rank:           i + 1,
 				AdoptionStatus: model.TopicAdoptionPending,
+			}
+			row := &model.TopicPool{UserID: digest.UserID, ProjectID: digest.ProjectID, Topic: suggestion.Title, SourceDigestID: &digest.ID, SourceSuggestionID: &suggestion.ID, SourceLabel: topicPoolSourceLabel(suggestion.SourceSummary), Status: model.TopicStatusUnused}
+			_, asset, err := writeTopicAsset(ctx, tx, row, suggestion.Introduction)
+			if err != nil {
+				return err
+			}
+			suggestion.ContentAssetID = asset.ID
+			for _, ref := range candidate.SourceRefs {
+				if err := tx.ContentAssets().CreateEvidence(ctx, &model.ContentAssetEvidence{ID: uuid.NewString(), AssetID: asset.ID, UserID: digest.UserID, ProjectID: digest.ProjectID, SourceType: model.ContentAssetEvidenceExternal, SourceKind: ref.Type, SourceID: ref.RefID, Title: ref.Title, URL: ref.URL, Notes: suggestion.SourceSummary, Quality: "source_verified", DataSource: "topic_research"}); err != nil {
+					return err
+				}
 			}
 			suggestions = append(suggestions, suggestion)
 			adoptions = append(adoptions, &model.TopicSuggestionAdoption{
@@ -260,8 +286,11 @@ func (s *TopicRadarService) AdoptSuggestion(ctx context.Context, adoptionID stri
 	}
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		topic := &model.TopicPool{UserID: adoption.UserID, ProjectID: adoption.ProjectID, Topic: suggestion.Title, SourceDigestID: &adoption.DigestID, SourceSuggestionID: &suggestion.ID, SourceLabel: topicPoolSourceLabel(suggestion.SourceSummary), Status: model.TopicStatusUnused}
-		if _, err := tx.TopicPools().AddWithSource(ctx, topic); err != nil {
+		if _, _, err := writeTopicAsset(ctx, tx, topic, suggestion.Introduction); err != nil {
 			return err
+		}
+		if topic.ContentAssetID != nil {
+			suggestion.ContentAssetID = *topic.ContentAssetID
 		}
 		adoption.TopicPoolID = &topic.ID
 		adoption.Status = model.TopicAdoptionAdopted

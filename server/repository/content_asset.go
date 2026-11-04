@@ -57,7 +57,7 @@ func (r *contentAssetRepository) FindByID(ctx context.Context, userID, id string
 
 func (r *contentAssetRepository) FindByTitle(ctx context.Context, userID, title string) (*model.ContentAsset, error) {
 	var asset model.ContentAsset
-	if err := r.db.WithContext(ctx).Where("user_id = ? AND title = ?", userID, title).Order("created_at ASC").First(&asset).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("user_id = ? AND title_key = ?", userID, model.NormalizeTopicDedupeKey(title)).Order("created_at ASC").First(&asset).Error; err != nil {
 		return nil, err
 	}
 	return &asset, nil
@@ -88,6 +88,8 @@ func (r *contentAssetRepository) ListWithFilters(ctx context.Context, filter Con
 	q := r.db.WithContext(ctx).Model(&model.ContentAsset{}).Where("content_assets.user_id = ?", filter.UserID)
 	if filter.Status != "" {
 		q = q.Where("content_assets.status = ?", filter.Status)
+	} else {
+		q = q.Where("content_assets.status <> ?", model.ContentAssetStatusArchived)
 	}
 	if filter.Lifecycle != "" {
 		q = q.Where("content_assets.lifecycle = ?", filter.Lifecycle)
@@ -106,12 +108,36 @@ func (r *contentAssetRepository) ListWithFilters(ctx context.Context, filter Con
 	if filter.ProjectID != "" {
 		q = q.Where(`(EXISTS (SELECT 1 FROM content_asset_links l WHERE l.asset_id = content_assets.id AND l.user_id = content_assets.user_id AND l.project_id = ?)
 			OR EXISTS (SELECT 1 FROM content_asset_evidence e WHERE e.asset_id = content_assets.id AND e.user_id = content_assets.user_id AND e.project_id = ?)
-			OR EXISTS (SELECT 1 FROM content_reuse_runs r WHERE r.asset_id = content_assets.id AND r.user_id = content_assets.user_id AND r.target_project_id = ?))`, filter.ProjectID, filter.ProjectID, filter.ProjectID)
+			OR EXISTS (SELECT 1 FROM content_reuse_runs r WHERE r.asset_id = content_assets.id AND r.user_id = content_assets.user_id AND r.target_project_id = ?)
+			OR EXISTS (SELECT 1 FROM topic_script_jobs j WHERE j.content_asset_id = content_assets.id AND j.user_id = content_assets.user_id AND j.project_id = ?)
+			OR EXISTS (SELECT 1 FROM topic_pool p WHERE p.content_asset_id = content_assets.id AND p.user_id = content_assets.user_id AND p.project_id = ?))`, filter.ProjectID, filter.ProjectID, filter.ProjectID, filter.ProjectID, filter.ProjectID)
+	}
+	if filter.Usage != "" {
+		if filter.Usage != model.TopicStatusUnused && filter.Usage != model.TopicStatusUsed {
+			return nil, 0, errors.New("invalid topic usage filter")
+		}
+		scope := "p.content_asset_id = content_assets.id AND p.user_id = content_assets.user_id"
+		args := []any{filter.Usage}
+		if filter.ProjectID != "" {
+			scope += " AND p.project_id = ?"
+			args = append(args, filter.ProjectID)
+		}
+		if filter.Usage == model.TopicStatusUnused {
+			scope += " AND NOT EXISTS (SELECT 1 FROM topic_pool used WHERE used.user_id = p.user_id AND used.project_id = p.project_id AND used.content_asset_id = p.content_asset_id AND used.status = 'used')"
+		}
+		predicate := "EXISTS (SELECT 1 FROM topic_pool p WHERE p.status = ? AND " + scope + ")"
+		if filter.ProjectID == "" && filter.Usage == model.TopicStatusUnused {
+			predicate = "(" + predicate + " OR NOT EXISTS (SELECT 1 FROM topic_pool p WHERE p.content_asset_id = content_assets.id AND p.user_id = content_assets.user_id))"
+		}
+		q = q.Where(predicate, args...)
 	}
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	if err := q.Order("content_assets.updated_at DESC, content_assets.id DESC").Offset(filter.Offset).Limit(filter.Limit).Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	if err := r.PopulateTopicSummaries(ctx, filter.UserID, rows); err != nil {
 		return nil, 0, err
 	}
 	return rows, total, nil
@@ -132,6 +158,11 @@ func (r *contentAssetRepository) MergeAsset(ctx context.Context, userID, canonic
 		return nil
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Match admission's project-first lock order before reassigning consumption.
+		var projects []model.Project
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ?", userID).Order("id ASC").Find(&projects).Error; err != nil {
+			return err
+		}
 		var canonical, source model.ContentAsset
 		if err := tx.Where("id = ? AND user_id = ?", canonicalID, userID).First(&canonical).Error; err != nil {
 			return err
@@ -178,6 +209,28 @@ func (r *contentAssetRepository) MergeAsset(ctx context.Context, userID, canonic
 			if err := tx.Model(&model.ContentAssetEvidence{}).Where("id = ? AND asset_id = ? AND user_id = ?", item.ID, sourceID, userID).Updates(map[string]any{"asset_id": canonicalID}).Error; err != nil {
 				return err
 			}
+		}
+		for _, table := range []string{"topic_pool", "tasks", "topic_script_jobs"} {
+			if err := tx.Table(table).Where("user_id = ? AND content_asset_id = ?", userID, sourceID).UpdateColumn("content_asset_id", canonicalID).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Model(&model.TopicSuggestion{}).Where("content_asset_id = ? AND project_id IN (SELECT id FROM projects WHERE user_id = ?)", sourceID, userID).UpdateColumn("content_asset_id", canonicalID).Error; err != nil {
+			return err
+		}
+		if err := RekeyTopicQueues(ctx, tx, userID, canonicalID); err != nil {
+			return err
+		}
+		for _, table := range []string{"content_reuse_runs", "content_asset_score_snapshots"} {
+			if err := tx.Table(table).Where("user_id = ? AND asset_id = ?", userID, sourceID).UpdateColumn("asset_id", canonicalID).Error; err != nil {
+				return err
+			}
+		}
+		// Research job candidate IDs are part of their frozen idempotency binding.
+		// Keep them unchanged; finalization follows the task's current asset link.
+		// Existing frozen script input remains evidence; normalize only future request dedupe.
+		if err := rekeyTopicScripts(ctx, tx, userID, canonicalID); err != nil {
+			return err
 		}
 		return tx.Model(&model.ContentAsset{}).Where("id = ? AND user_id = ?", sourceID, userID).Updates(map[string]any{"status": model.ContentAssetStatusArchived, "updated_at": time.Now().UTC()}).Error
 	})

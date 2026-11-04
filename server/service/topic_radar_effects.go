@@ -67,7 +67,7 @@ func (s *TopicRadarService) queueTopicDigestEffects(ctx context.Context, digest 
 			if i >= policy.TopN {
 				break
 			}
-			job, err := s.requestTopicScript(ctx, RequestTopicScriptParams{UserID: digest.UserID, SuggestionID: suggestion.ID, TargetPlatform: policy.Platform, DurationSeconds: policy.DurationSeconds, AspectRatio: policy.AspectRatio}, false)
+			job, err := s.requestTopicScript(ctx, RequestTopicScriptParams{UserID: digest.UserID, AssetID: suggestion.ContentAssetID, ProjectID: digest.ProjectID, sourceDigestID: digest.ID, sourceSuggestionID: suggestion.ID, TargetPlatform: policy.Platform, DurationSeconds: policy.DurationSeconds, AspectRatio: policy.AspectRatio}, false)
 			// A persisted queued job is itself a recoverable outbox entry.
 			if err != nil && job == nil {
 				return err

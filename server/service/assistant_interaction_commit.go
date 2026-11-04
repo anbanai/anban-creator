@@ -612,7 +612,7 @@ func mergeInteractionCommitOptions(modeID string, payload, options json.RawMessa
 		return nil, ErrAssistantCheckpointInvalid
 	}
 	allowed := map[string]struct{}{
-		"content_type": {}, "execution_profile": {}, "image_ratio": {}, "image_capability_key": {},
+		"asset_id": {}, "content_type": {}, "execution_profile": {}, "image_ratio": {}, "image_capability_key": {},
 		"assets": {}, "video_edit_brief": {}, "video_edit_preferences": {},
 	}
 	for key := range planPatch {

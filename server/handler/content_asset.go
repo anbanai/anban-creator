@@ -24,12 +24,13 @@ func NewContentAssetHandler(svc *service.ContentAssetService, logger *zerolog.Lo
 }
 
 type createContentAssetRequest struct {
-	Title          string `json:"title"`
-	CoreQuestion   string `json:"core_question"`
-	Audience       string `json:"audience"`
-	SemanticKernel string `json:"semantic_kernel"`
-	Lifecycle      string `json:"lifecycle"`
-	Status         string `json:"status"`
+	ProjectIDs     []string `json:"project_ids"`
+	Title          string   `json:"title"`
+	CoreQuestion   string   `json:"core_question"`
+	Audience       string   `json:"audience"`
+	SemanticKernel string   `json:"semantic_kernel"`
+	Lifecycle      string   `json:"lifecycle"`
+	Status         string   `json:"status"`
 }
 
 type ingestContentAssetRequest struct {
@@ -154,7 +155,7 @@ func (h *ContentAssetHandler) List(c fiber.Ctx) error {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	items, total, err := h.service.ListFiltered(c.Context(), service.ContentAssetListParams{UserID: userID, Status: c.Query("status", ""), Query: c.Query("q", ""), Platform: c.Query("platform", ""), Source: c.Query("source", ""), Lifecycle: c.Query("lifecycle", ""), ProjectID: c.Query("project_id", ""), Offset: offset, Limit: limit})
+	items, total, err := h.service.ListFiltered(c.Context(), service.ContentAssetListParams{UserID: userID, Status: c.Query("status", ""), Query: c.Query("q", ""), Platform: c.Query("platform", ""), Source: c.Query("source", ""), Lifecycle: c.Query("lifecycle", ""), ProjectID: c.Query("project_id", ""), Usage: c.Query("usage", ""), Offset: offset, Limit: limit})
 	if err != nil {
 		return Error(c, fiber.StatusInternalServerError, "failed to list content assets")
 	}
@@ -197,7 +198,7 @@ func (h *ContentAssetHandler) Create(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
-	asset, err := h.service.Create(c.Context(), service.CreateContentAssetParams{UserID: userID, Title: req.Title, CoreQuestion: req.CoreQuestion, Audience: req.Audience, SemanticKernel: req.SemanticKernel, Lifecycle: req.Lifecycle, Status: req.Status})
+	asset, err := h.service.Create(c.Context(), service.CreateContentAssetParams{UserID: userID, ProjectIDs: req.ProjectIDs, Title: req.Title, CoreQuestion: req.CoreQuestion, Audience: req.Audience, SemanticKernel: req.SemanticKernel, Lifecycle: req.Lifecycle, Status: req.Status})
 	if err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
@@ -213,7 +214,7 @@ func (h *ContentAssetHandler) Ingest(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
-	detail, err := h.service.Ingest(c.Context(), service.IngestContentAssetParams{CreateContentAssetParams: service.CreateContentAssetParams{UserID: userID, Title: req.Title, CoreQuestion: req.CoreQuestion, Audience: req.Audience, SemanticKernel: req.SemanticKernel, Lifecycle: req.Lifecycle, Status: req.Status}, Evidence: req.Evidence})
+	detail, err := h.service.Ingest(c.Context(), service.IngestContentAssetParams{CreateContentAssetParams: service.CreateContentAssetParams{UserID: userID, ProjectIDs: req.ProjectIDs, Title: req.Title, CoreQuestion: req.CoreQuestion, Audience: req.Audience, SemanticKernel: req.SemanticKernel, Lifecycle: req.Lifecycle, Status: req.Status}, Evidence: req.Evidence})
 	if err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
@@ -411,4 +412,16 @@ func (h *ContentAssetHandler) UpdatePolicy(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	return Success(c, saved)
+}
+
+func (h *ContentAssetHandler) Archive(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	asset, err := h.service.Archive(c.Context(), userID, c.Params("id"))
+	if err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+	return Success(c, asset)
 }

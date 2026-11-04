@@ -1,4 +1,9 @@
 export const queryKeys = {
+  topics: {
+    all: ['content-assets'] as const,
+    list: (filters: Record<string, unknown>) => ['content-assets', 'list', filters] as const,
+    detail: (id: string) => ['content-assets', 'detail', id] as const,
+  },
   agentPacks: {
     all: ['agent-packs'] as const,
   },
@@ -61,10 +66,6 @@ export const queryKeys = {
   usage: {
     stats: (params?: { from?: string; to?: string; project_id?: string }) =>
       ['usage', 'stats', params] as const,
-  },
-  topicPool: {
-    all: (projectId: string) => ['topic-pool', projectId] as const,
-    list: (projectId: string, status?: string) => ['topic-pool', projectId, status] as const,
   },
   topicRadar: {
     subscriptions: (projectId: string) => ['topic-radar', 'subscriptions', projectId] as const,

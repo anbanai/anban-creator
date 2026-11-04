@@ -151,6 +151,7 @@ func NewTopicDigestInput(snapshot any) (datatypes.JSON, string, error) {
 }
 
 type TopicSuggestion struct {
+	ContentAssetID string         `gorm:"type:char(36);index" json:"asset_id"`
 	ID             string         `gorm:"type:char(36);primaryKey" json:"id"`
 	DigestID       string         `gorm:"type:char(36);index;not null" json:"digest_id"`
 	ProjectID      string         `gorm:"type:char(36);index;not null" json:"project_id"`
@@ -175,7 +176,7 @@ type TopicSuggestionAdoption struct {
 	UserID       string     `gorm:"type:char(36);index;not null" json:"user_id"`
 	ProjectID    string     `gorm:"type:char(36);index;not null" json:"project_id"`
 	Status       string     `gorm:"type:varchar(24);index;not null" json:"status"`
-	TopicPoolID  *uint      `gorm:"index" json:"topic_pool_id,omitempty"`
+	TopicPoolID  *uint      `gorm:"index" json:"-"`
 	Attempt      int        `gorm:"not null;default:0" json:"attempt"`
 	LeaseToken   string     `gorm:"type:char(36);index" json:"-"`
 	LeaseUntil   *time.Time `gorm:"index" json:"-"`
@@ -187,26 +188,28 @@ type TopicSuggestionAdoption struct {
 func (TopicSuggestionAdoption) TableName() string { return "topic_suggestion_adoptions" }
 
 type TopicScriptJob struct {
-	ID              string     `gorm:"type:char(36);primaryKey" json:"id"`
-	SuggestionID    string     `gorm:"type:char(36);index;not null" json:"suggestion_id"`
-	DigestID        string     `gorm:"type:char(36);index;not null" json:"digest_id"`
-	UserID          string     `gorm:"type:char(36);index;not null" json:"user_id"`
-	ProjectID       string     `gorm:"type:char(36);index;not null" json:"project_id"`
-	TargetPlatform  string     `gorm:"type:varchar(48);not null" json:"target_platform"`
-	DurationSeconds int        `gorm:"not null" json:"duration_seconds"`
-	AspectRatio     string     `gorm:"type:varchar(24);not null" json:"aspect_ratio"`
-	Fingerprint     string     `gorm:"type:char(64);uniqueIndex;not null" json:"fingerprint"`
-	Status          string     `gorm:"type:varchar(24);index;not null" json:"status"`
-	Attempt         int        `gorm:"not null;default:0" json:"attempt"`
-	TaskID          *string    `gorm:"type:char(36);index" json:"task_id,omitempty"`
-	ExecutionID     *string    `gorm:"type:char(36);index" json:"execution_id,omitempty"`
-	ArtifactPath    string     `gorm:"type:varchar(500)" json:"artifact_path,omitempty"`
-	ArtifactSHA256  string     `gorm:"type:char(64)" json:"artifact_sha256,omitempty"`
-	Error           string     `gorm:"type:text" json:"error,omitempty"`
-	StartedAt       *time.Time `json:"started_at,omitempty"`
-	FinishedAt      *time.Time `json:"finished_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	ContentAssetID  string         `gorm:"type:char(36);index" json:"asset_id"`
+	InputSnapshot   datatypes.JSON `gorm:"type:json" json:"-"`
+	ID              string         `gorm:"type:char(36);primaryKey" json:"id"`
+	SuggestionID    string         `gorm:"type:char(36);index;not null" json:"suggestion_id"`
+	DigestID        string         `gorm:"type:char(36);index;not null" json:"digest_id"`
+	UserID          string         `gorm:"type:char(36);index;not null" json:"user_id"`
+	ProjectID       string         `gorm:"type:char(36);index;not null" json:"project_id"`
+	TargetPlatform  string         `gorm:"type:varchar(48);not null" json:"target_platform"`
+	DurationSeconds int            `gorm:"not null" json:"duration_seconds"`
+	AspectRatio     string         `gorm:"type:varchar(24);not null" json:"aspect_ratio"`
+	Fingerprint     string         `gorm:"type:char(64);uniqueIndex;not null" json:"fingerprint"`
+	Status          string         `gorm:"type:varchar(24);index;not null" json:"status"`
+	Attempt         int            `gorm:"not null;default:0" json:"attempt"`
+	TaskID          *string        `gorm:"type:char(36);index" json:"task_id,omitempty"`
+	ExecutionID     *string        `gorm:"type:char(36);index" json:"execution_id,omitempty"`
+	ArtifactPath    string         `gorm:"type:varchar(500)" json:"artifact_path,omitempty"`
+	ArtifactSHA256  string         `gorm:"type:char(64)" json:"artifact_sha256,omitempty"`
+	Error           string         `gorm:"type:text" json:"error,omitempty"`
+	StartedAt       *time.Time     `json:"started_at,omitempty"`
+	FinishedAt      *time.Time     `json:"finished_at,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 func (TopicScriptJob) TableName() string { return "topic_script_jobs" }

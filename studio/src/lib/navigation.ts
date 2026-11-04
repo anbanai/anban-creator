@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   Sparkles,
+  NotebookPen,
   CalendarRange,
   CalendarDays,
   GalleryHorizontalEnd,
@@ -10,7 +11,6 @@ import {
   PlugZap,
   BarChart3,
   Flame,
-  Radar,
   UserRound,
   ImageIcon,
 } from 'lucide-react'
@@ -25,6 +25,7 @@ export interface NavItem {
 
 export const mvpNavItems: NavItem[] = [
   { to: '/', label: '首页', icon: Sparkles, end: true },
+  { to: '/topics', label: '选题', icon: NotebookPen },
   { to: '/projects', label: '人设', icon: UserRound },
   { to: '/tasks', label: '作品', icon: GalleryHorizontalEnd },
   { to: '/plans', label: '排期', icon: CalendarRange },
@@ -32,17 +33,15 @@ export const mvpNavItems: NavItem[] = [
   { to: '/plugins', label: '插件', icon: PlugZap },
   { to: '/settings', label: '设置', icon: Settings },
   { to: '/content-analytics', label: '内容分析', icon: BarChart3 },
-  { to: '/content-assets', label: '选题资产', icon: Sparkles },
   { to: '/media-assets', label: '素材库', icon: ImageIcon },
   { to: '/trends', label: '热点雷达', icon: Flame },
-  { to: '/topic-radar', label: '选题雷达', icon: Radar },
 ]
 
 export const workspaceNavItems: NavItem[] = [
-  ...mvpNavItems.slice(0, 4),
+  ...mvpNavItems.slice(0, 5),
   { to: '/designer', label: '设计师', icon: ImageIcon, adminOnly: true },
   { to: '/timeline', label: '时间线', icon: CalendarDays, adminOnly: true },
-  ...mvpNavItems.slice(4),
+  ...mvpNavItems.slice(5),
 ]
 
 export const adminNavItems: NavItem[] = [

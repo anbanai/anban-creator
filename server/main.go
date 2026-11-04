@@ -14,7 +14,6 @@ import (
 	"time"
 
 	dockerclient "github.com/docker/docker/client"
-	"github.com/gofiber/fiber/v3"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"gorm.io/driver/mysql"
@@ -683,7 +682,6 @@ func main() {
 	var viralAnalysisHandler *handler.ViralAnalysisHandler
 	var posterHandler *handler.PosterHandler
 	var resourceHandler *handler.ResourceHandler
-	var topicPoolHandler *handler.TopicPoolHandler
 	var contentAssetHandler *handler.ContentAssetHandler
 	var trendsHandler *handler.TrendsHandler
 	var topicRadarHandler *handler.TopicRadarHandler
@@ -779,7 +777,6 @@ func main() {
 		}
 		posterHandler = handler.NewPosterHandler(posterSvc, log)
 		topicPoolSvc = service.NewTopicPoolService(repo, log)
-		topicPoolHandler = handler.NewTopicPoolHandler(topicPoolSvc, log)
 		contentAssetSvc = service.NewContentAssetService(repo)
 		if asynqClient != nil {
 			contentAssetSvc.SetEnqueuer(asynqClient)
@@ -796,6 +793,7 @@ func main() {
 		trendsHandler = handler.NewTrendsHandler(trendSvc, log)
 		topicRadarSvc = service.NewTopicRadarService(repo, asynqClient, nil)
 		topicRadarSvc.SetTaskService(taskSvc)
+		topicRadarSvc.SetPublicBaseURL(cfg.Server.PublicBaseURL)
 		taskSvc.SetTopicRadarFinalizer(topicRadarSvc.FinalizeTopicRadarExecution)
 		topicRadarHandler = handler.NewTopicRadarHandler(topicRadarSvc, repo, log)
 		if taskSvc != nil {
@@ -1170,7 +1168,6 @@ func main() {
 		ViralAnalysisHandler:                viralAnalysisHandler,
 		PosterHandler:                       posterHandler,
 		ResourceHandler:                     resourceHandler,
-		TopicPoolHandler:                    topicPoolHandler,
 		ContentAssetHandler:                 contentAssetHandler,
 		TrendsHandler:                       trendsHandler,
 		TopicRadarHandler:                   topicRadarHandler,
@@ -1287,16 +1284,8 @@ func main() {
 		close(shutdownDone)
 	}()
 
-	listenConfig := fiber.ListenConfig{}
-	if cfg.Server.TLSCertFile != "" || cfg.Server.TLSKeyFile != "" {
-		if cfg.Server.TLSCertFile == "" || cfg.Server.TLSKeyFile == "" {
-			log.Fatal().Msg("server TLS requires both certificate and key files")
-		}
-		listenConfig.CertFile = cfg.Server.TLSCertFile
-		listenConfig.CertKeyFile = cfg.Server.TLSKeyFile
-	}
-	log.Info().Str("addr", addr).Bool("tls", listenConfig.CertFile != "").Msg("server starting")
-	if err := app.Listen(addr, listenConfig); err != nil {
+	log.Info().Str("addr", addr).Str("scheme", "http").Msg("server starting")
+	if err := app.Listen(addr); err != nil {
 		log.Error().Err(err).Msg("server listen error")
 	}
 	cancel()

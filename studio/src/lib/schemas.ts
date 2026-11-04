@@ -192,6 +192,7 @@ export const registerSchema = z.object({
 export type RegisterFormValues = z.infer<typeof registerSchema>
 
 export const createTaskSchema = z.object({
+  asset_id: z.string().uuid().optional(),
   project_id: z.string().optional().default(""),
   execution_profile: executionProfileSchema,
   type: z.enum(["seednote", "wechat-article", "wechat-picture", "moments", "viral-analysis", "profile-analysis", "content-research", "content-validation", "content-script", "feedback-analysis", "ecommerce", "montage", "whiteboard-animation", "hypit", "local-life", "video-edit", "talking-head-editor"]),

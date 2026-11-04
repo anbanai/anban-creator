@@ -36,6 +36,7 @@ type ContentAssetService struct {
 }
 
 type ContentAssetListParams struct {
+	Usage     string
 	UserID    string
 	Status    string
 	Query     string
@@ -80,6 +81,7 @@ func (s *ContentAssetService) SetBillingWalletService(wallet *BillingWalletServi
 }
 
 type CreateContentAssetParams struct {
+	ProjectIDs     []string
 	UserID         string
 	Title          string
 	CoreQuestion   string
@@ -274,7 +276,56 @@ func (s *ContentAssetService) Create(ctx context.Context, p CreateContentAssetPa
 		}
 		asset.Lifecycle = lifecycle
 	}
-	if err := s.repo.ContentAssets().Create(ctx, asset); err != nil {
+	if len([]rune(title)) > maxTopicLength {
+		return nil, fmt.Errorf("topic exceeds %d characters", maxTopicLength)
+	}
+	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		projects := append([]string(nil), p.ProjectIDs...)
+		sort.Strings(projects)
+		for _, id := range projects {
+			project, err := tx.Projects().FindByIDForUpdate(ctx, id)
+			if err != nil || project.UserID != p.UserID {
+				return fmt.Errorf("project not owned by user")
+			}
+		}
+		if len(projects) > 0 {
+			original := asset
+			row := &model.TopicPool{UserID: p.UserID, ProjectID: projects[0], Topic: title, Status: model.TopicStatusUnused}
+			created, canonical, err := writeTopicAsset(ctx, tx, row, p.CoreQuestion)
+			if err != nil {
+				return err
+			}
+			asset = canonical
+			if created && asset.Audience == "" && asset.SemanticKernel == "" {
+				asset.Audience, asset.SemanticKernel, asset.Lifecycle = original.Audience, original.SemanticKernel, original.Lifecycle
+				if err := tx.ContentAssets().Update(ctx, asset); err != nil {
+					return err
+				}
+			}
+		} else {
+			existing, err := tx.ContentAssets().FindByTitle(ctx, p.UserID, title)
+			if err == nil {
+				asset = existing
+			} else if errors.Is(err, gorm.ErrRecordNotFound) {
+				if err := tx.ContentAssets().Create(ctx, asset); err != nil {
+					return err
+				}
+			} else {
+				return err
+			}
+		}
+		for _, projectID := range projects {
+			row := &model.TopicPool{UserID: p.UserID, ProjectID: projectID, Topic: asset.Title, ContentAssetID: &asset.ID, Status: model.TopicStatusUnused}
+			_, canonical, err := writeTopicAsset(ctx, tx, row, asset.CoreQuestion)
+			if err != nil {
+				return err
+			}
+			if canonical.ID != asset.ID {
+				return fmt.Errorf("persona already has another topic with this title")
+			}
+		}
+		return nil
+	}); err != nil {
 		return nil, fmt.Errorf("create content asset: %w", err)
 	}
 	return asset, nil
@@ -318,6 +369,9 @@ func (s *ContentAssetService) Ingest(ctx context.Context, p IngestContentAssetPa
 			if err := tx.ContentAssets().CreateEvidence(ctx, &evidence); err != nil {
 				return fmt.Errorf("create content asset evidence: %w", err)
 			}
+			if err := tx.ContentAssets().ProjectTopicAssociation(ctx, p.UserID, evidence.ProjectID, asset.ID, "", false, evidence.CreatedAt); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -338,7 +392,7 @@ func (s *ContentAssetService) ListFiltered(ctx context.Context, p ContentAssetLi
 	if p.Limit <= 0 || p.Limit > 100 {
 		p.Limit = 50
 	}
-	return s.repo.ContentAssets().ListWithFilters(ctx, repository.ContentAssetListFilter{UserID: p.UserID, Status: p.Status, Query: p.Query, Platform: p.Platform, Source: p.Source, Lifecycle: p.Lifecycle, ProjectID: p.ProjectID, Offset: p.Offset, Limit: p.Limit})
+	return s.repo.ContentAssets().ListWithFilters(ctx, repository.ContentAssetListFilter{UserID: p.UserID, Status: p.Status, Query: p.Query, Platform: p.Platform, Source: p.Source, Lifecycle: p.Lifecycle, ProjectID: p.ProjectID, Usage: p.Usage, Offset: p.Offset, Limit: p.Limit})
 }
 
 func (s *ContentAssetService) ListReuseRuns(ctx context.Context, f repository.ContentReuseRunListFilter) ([]*model.ContentReuseRun, int64, error) {
@@ -456,6 +510,18 @@ func (s *ContentAssetService) ListRecommendations(ctx context.Context, userID st
 }
 
 func (s *ContentAssetService) LinkContent(ctx context.Context, p LinkContentAssetParams) (*model.ContentAssetLink, error) {
+	var link *model.ContentAssetLink
+	err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		service := *s
+		service.repo = tx
+		var err error
+		link, err = service.linkContent(ctx, p)
+		return err
+	})
+	return link, err
+}
+
+func (s *ContentAssetService) linkContent(ctx context.Context, p LinkContentAssetParams) (*model.ContentAssetLink, error) {
 	if _, err := s.repo.ContentAssets().FindByID(ctx, p.UserID, p.AssetID); err != nil {
 		return nil, ErrContentAssetNotFound
 	}
@@ -486,6 +552,15 @@ func (s *ContentAssetService) LinkContent(ctx context.Context, p LinkContentAsse
 	if relation == "" {
 		relation = model.ContentAssetLinkDerivative
 	}
+	if projectID != "" {
+		project, err := s.repo.Projects().FindByIDForUpdate(ctx, projectID)
+		if err != nil || project.UserID != p.UserID {
+			return nil, fmt.Errorf("project does not belong to user")
+		}
+	}
+	if err := projectTopicLink(ctx, s.repo, &model.ContentAssetLink{UserID: p.UserID, ProjectID: projectID, AssetID: p.AssetID, ContentKind: p.ContentKind, ContentID: p.ContentID, Relation: relation}); err != nil {
+		return nil, err
+	}
 	if existing, err := s.repo.ContentAssets().FindLink(ctx, p.UserID, p.AssetID, p.ContentKind, p.ContentID, relation); err == nil {
 		return existing, nil
 	}
@@ -512,6 +587,9 @@ func (s *ContentAssetService) Get(ctx context.Context, userID, assetID string) (
 	scores, err := s.repo.ContentAssets().ListScoreSnapshots(ctx, userID, assetID)
 	if err != nil {
 		return nil, fmt.Errorf("list content asset score snapshots: %w", err)
+	}
+	if err := s.repo.ContentAssets().PopulateTopicSummaries(ctx, userID, []*model.ContentAsset{asset}); err != nil {
+		return nil, err
 	}
 	return &ContentAssetDetail{Asset: asset, Evidence: evidence, Links: links, Scores: scores}, nil
 }
@@ -754,7 +832,12 @@ func (s *ContentAssetService) createReuseRun(ctx context.Context, p CreateReuseR
 		run.ScoreSnapshot = mustContentAssetJSON(p.ScoreSnapshot)
 	}
 	run.PolicySnapshot = mustContentAssetJSON(policy)
-	if err := s.repo.ContentAssets().CreateReuseRun(ctx, run); err != nil {
+	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if err := tx.ContentAssets().ProjectTopicAssociation(ctx, p.UserID, project.ID, asset.ID, "", false, run.CreatedAt); err != nil {
+			return err
+		}
+		return tx.ContentAssets().CreateReuseRun(ctx, run)
+	}); err != nil {
 		return nil, false, fmt.Errorf("create content reuse run: %w", err)
 	}
 	if p.deferDispatch {
@@ -2002,4 +2085,16 @@ func contentReuseRunFingerprint(run *model.ContentReuseRun) string {
 		ScoreSnapshot:     scoreSnapshot,
 		PolicySnapshot:    policySnapshot,
 	}, run.AssetID, run.TargetProjectID)
+}
+
+func (s *ContentAssetService) Archive(ctx context.Context, userID, assetID string) (*model.ContentAsset, error) {
+	asset, err := s.repo.ContentAssets().FindByID(ctx, userID, assetID)
+	if err != nil {
+		return nil, ErrContentAssetNotFound
+	}
+	asset.Status = model.ContentAssetStatusArchived
+	if err := s.repo.ContentAssets().Update(ctx, asset); err != nil {
+		return nil, err
+	}
+	return asset, nil
 }

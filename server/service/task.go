@@ -1065,23 +1065,7 @@ func (s *TaskService) createManual(ctx context.Context, p CreateManualParams, tr
 			reuseRunKey = &reuseRunID
 		}
 
-		// Topic pool: when the caller supplied no prompt and the project is a
-		// topic-driven platform (article/seednote/moments), claim the next unused topic
-		// from the pool as this task's prompt — mirroring CreateFromPlan. Ecommerce
-		// is product-image based with no topic semantics, so it is skipped. The pool
-		// may run out mid-batch; remaining tasks keep an empty prompt and fall back
-		// to the agent's auto-research path. The generation skill respects an
-		// already-set topic, so it will not re-claim during execution.
 		taskPrompt := p.Prompt
-		if taskPrompt == "" && !p.PreserveFrozenConfig && s.topicPoolSvc != nil &&
-			((taskType == model.TaskTypeWechatArticle || taskType == model.TaskTypeWechatPicture) || taskType == model.PlatformSeednote || taskType == model.PlatformMoments) {
-			claimed, claimErr := s.topicPoolSvc.ClaimForTask(ctx, p.UserID, p.ProjectID, taskID)
-			if claimErr != nil {
-				s.logger.Warn().Err(claimErr).Str("task_id", taskID).Msg("claim topic from pool failed, leaving prompt empty")
-			} else if claimed != "" {
-				taskPrompt = claimed
-			}
-		}
 
 		// Seednote image composition: honor caller's explicit choice, otherwise rely
 		// on the model's column defaults (content on, tail off).
@@ -1195,13 +1179,6 @@ func (s *TaskService) createManual(ctx context.Context, p CreateManualParams, tr
 	}
 	persistenceStarted = true
 	if err := s.persistTasksWithFixedAdmission(ctx, tasks, p.HasContentImage, p); err != nil {
-		if s.topicPoolSvc != nil {
-			for _, task := range tasks {
-				if relErr := s.topicPoolSvc.ReleaseForTask(ctx, task.ID); relErr != nil {
-					s.logger.Error().Err(relErr).Str("task_id", task.ID).Msg("failed to release topic during batch rollback")
-				}
-			}
-		}
 		return nil, fmt.Errorf("create tasks: %w", err)
 	}
 
@@ -1301,6 +1278,11 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 		return nil
 	}
 	createTask := func(repo repository.Repository, task *model.Task) error {
+		if s.topicPoolSvc != nil || task.ContentAssetID != "" {
+			if err := bindTaskTopic(ctx, repo, task, manualAdmission); err != nil {
+				return err
+			}
+		}
 		if err := bindTopicManagedTask(ctx, repo, task, manualAdmission); err != nil {
 			return err
 		}
@@ -1323,6 +1305,14 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 		if err := repo.Tasks().Create(ctx, task); err != nil {
 			return err
 		}
+		if task.ContentAssetID != "" {
+			if err := repo.ContentAssets().ProjectTopicAssociation(ctx, task.UserID, task.ProjectID, task.ContentAssetID, task.ID, topicTaskIsProduction(task), task.CreatedAt); err != nil {
+				return err
+			}
+			if err := repo.ContentAssets().CreateLink(ctx, &model.ContentAssetLink{ID: generateTaskID(), UserID: task.UserID, AssetID: task.ContentAssetID, ProjectID: task.ProjectID, ContentKind: "task", ContentID: task.ID, Platform: task.ProjectSnapshot.Data().Platform, Relation: model.ContentAssetLinkDerivative}); err != nil {
+				return err
+			}
+		}
 		if !explicitlyDisableContentImage {
 			return nil
 		}
@@ -1333,10 +1323,6 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 		return repo.Tasks().Update(ctx, task)
 	}
 	freeProfileAdmission := manualAdmission != nil && manualAdmission.ProfileAnalysisExpectedVersion != nil && len(tasks) == 1 && tasks[0].Type == model.TaskTypeProfileAnalysis
-	// Topic Radar is an unbilled MVP task. It still uses server-owned admission
-	// for identity, binding, and enqueue ordering, but must not require a
-	// catalog SKU, billing account, or balance.
-	freeTopicAdmission := manualAdmission != nil && len(tasks) == 1 && (tasks[0].Type == model.TaskTypeTopicDigest || tasks[0].Type == model.TaskTypeTopicScript)
 	linkProfileTask := func(tx repository.Repository) error {
 		if !freeProfileAdmission {
 			return nil
@@ -1386,7 +1372,7 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 			return linkProfileTask(tx)
 		})
 	}
-	if freeProfileAdmission || freeTopicAdmission {
+	if freeProfileAdmission {
 		return s.repo.WithTx(ctx, func(tx repository.Repository) error {
 			if err := lockProjectAdmission(tx); err != nil {
 				return err
@@ -1646,27 +1632,11 @@ func (s *TaskService) createFromPlanWithEntryInputs(ctx context.Context, plan *m
 		s.freezeProjectChannelConfig(ctx, project.ID, channel, &projectSnapshot)
 		task.SetProjectSnapshot(projectSnapshot)
 	}
-	// Try to claim a topic from the topic pool if no prompt is set.
-	if prompt == "" && s.topicPoolSvc != nil && plan.ProjectID != "" {
-		claimed, err := s.topicPoolSvc.ClaimForTask(ctx, plan.UserID, plan.ProjectID, taskID)
-		if err != nil {
-			s.logger.Warn().Err(err).Str("plan_id", plan.ID).Msg("failed to claim topic from pool, falling back to auto-research")
-		} else if claimed != "" {
-			task.Prompt = claimed
-		}
-	}
 
 	if err := s.persistTasksWithFixedAdmission(ctx, []*model.Task{task}, plan.ID); err != nil {
 		if errors.Is(err, ErrBillingDebtOutstanding) || errors.Is(err, ErrBillingInsufficientForTask) {
 			s.logger.Warn().Err(err).Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task at fixed-SKU admission")
 			return nil, nil
-		}
-		// Release the pre-claimed topic back to the pool so it isn't orphaned
-		// (a no-op when no topic was claimed for this task).
-		if s.topicPoolSvc != nil {
-			if relErr := s.topicPoolSvc.ReleaseForTask(ctx, taskID); relErr != nil {
-				s.logger.Error().Err(relErr).Str("task_id", taskID).Msg("failed to release topic during plan task rollback")
-			}
 		}
 		return nil, fmt.Errorf("create task from plan: %w", err)
 	}

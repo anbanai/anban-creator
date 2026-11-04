@@ -37,6 +37,7 @@ type runTopicDigestRequest struct {
 	RequestKey string `json:"request_key"`
 }
 type topicScriptRequest struct {
+	ProjectID       string `json:"project_id"`
 	TargetPlatform  string `json:"target_platform"`
 	DurationSeconds int    `json:"duration_seconds"`
 	AspectRatio     string `json:"aspect_ratio"`
@@ -134,7 +135,7 @@ func (h *TopicRadarHandler) RequestScript(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
-	job, err := h.service.RequestTopicScript(c.Context(), service.RequestTopicScriptParams{UserID: userID, SuggestionID: c.Params("suggestion_id"), TargetPlatform: req.TargetPlatform, DurationSeconds: req.DurationSeconds, AspectRatio: req.AspectRatio})
+	job, err := h.service.RequestTopicScript(c.Context(), service.RequestTopicScriptParams{UserID: userID, AssetID: c.Params("id"), ProjectID: req.ProjectID, TargetPlatform: req.TargetPlatform, DurationSeconds: req.DurationSeconds, AspectRatio: req.AspectRatio})
 	if err != nil && job == nil {
 		return topicRadarError(c, err)
 	}

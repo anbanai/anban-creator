@@ -2,11 +2,8 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -78,36 +75,9 @@ func (s *TopicRadarService) EnsureTopicScriptManagedTask(ctx context.Context, jo
 	if job.TaskID != nil && strings.TrimSpace(*job.TaskID) != "" {
 		return s.repo.Tasks().FindByID(ctx, *job.TaskID)
 	}
-	suggestion, err := s.repo.TopicSuggestions().FindByID(ctx, job.SuggestionID)
-	if err != nil {
-		return nil, err
-	}
-	digest, err := s.repo.TopicDigests().FindByID(ctx, job.DigestID)
-	if err != nil {
-		return nil, err
-	}
-	if suggestion.DigestID != digest.ID || digest.UserID != job.UserID || digest.ProjectID != job.ProjectID {
-		return nil, errors.New("topic script ownership mismatch")
-	}
-	var refs []model.TopicSourceRef
-	if err := json.Unmarshal(suggestion.SourceRefs, &refs); err != nil {
-		return nil, fmt.Errorf("decode topic source refs: %w", err)
-	}
-	var scores map[string]float64
-	if err := json.Unmarshal(suggestion.Scores, &scores); err != nil {
-		return nil, fmt.Errorf("decode topic scores: %w", err)
-	}
-	selected := map[string]any{"title": suggestion.Title, "introduction": suggestion.Introduction, "source_summary": suggestion.SourceSummary, "source_refs": refs, "scores": scores, "video_fit": suggestion.VideoFit}
-	target := map[string]any{"platform": job.TargetPlatform, "duration_seconds": job.DurationSeconds, "aspect_ratio": job.AspectRatio}
-	frozen, err := json.Marshal(map[string]any{"selected_topic": selected, "target": target, "frozen_context": json.RawMessage(digest.InputSnapshot)})
-	if err != nil {
-		return nil, err
-	}
-	hash := sha256.Sum256(frozen)
-	input := map[string]any{
-		"schema_version": "1.0", "task_id": "", "execution_id": "", "task_kind": model.TaskKindTopicScript,
-		"snapshot":       map[string]any{"snapshot_id": job.ID, "snapshot_hash": hex.EncodeToString(hash[:]), "captured_at": job.CreatedAt.UTC().Format(time.RFC3339Nano), "project_id": job.ProjectID, "subscription_id": digest.SubscriptionID, "digest_id": job.DigestID, "suggestion_id": job.SuggestionID},
-		"source_records": refs, "selected_topic": selected, "target": target, "frozen_context": json.RawMessage(digest.InputSnapshot),
+	var input map[string]any
+	if err := json.Unmarshal(job.InputSnapshot, &input); err != nil || len(input) == 0 {
+		return nil, errors.New("invalid frozen script input")
 	}
 	input, err = normalizeTopicPackInput(input)
 	if err != nil {
@@ -116,7 +86,7 @@ func (s *TopicRadarService) EnsureTopicScriptManagedTask(ctx context.Context, jo
 	created, err := s.taskSvc.CreateManual(ctx, CreateManualParams{
 		UserID: job.UserID, ProjectID: job.ProjectID, AgentID: model.AgentIDTopicRadar, Channel: model.ChannelTopicRadar,
 		TaskKind: model.TaskKindTopicScript, RequestedTaskType: model.TaskTypeTopicScript, ExecutionProfile: "effective",
-		Prompt: "Generate a dedicated short-video script for the selected topic.", AgentInput: input, topicScriptJobID: job.ID,
+		Prompt: "Generate a dedicated short-video script for the selected topic.", AgentInput: input, topicScriptJobID: job.ID, ContentAssetID: job.ContentAssetID,
 	})
 	if errors.Is(err, errTopicTaskAlreadyClaimed) {
 		current, findErr := s.repo.TopicScriptJobs().FindByID(ctx, job.ID)

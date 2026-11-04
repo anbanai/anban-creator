@@ -40,7 +40,7 @@ func TestManagedAgentsOwnDynamicLifecycleReporting(t *testing.T) {
 				wantVersion = "2.0.17"
 			}
 			if pack.ID == "wechat-picture" {
-				wantVersion = "1.0.9"
+				wantVersion = "1.0.10"
 			}
 			if pack.ID == "montage" {
 				wantVersion = "2.0.8"
@@ -56,6 +56,9 @@ func TestManagedAgentsOwnDynamicLifecycleReporting(t *testing.T) {
 			}
 			if pack.ID == "profile-analysis" {
 				wantVersion = "2.1.6"
+			}
+			if pack.ID == "topic-radar" {
+				wantVersion = "1.0.1"
 			}
 			if pack.ID == "video-edit" {
 				wantVersion = "1.0.1"

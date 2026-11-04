@@ -83,12 +83,20 @@ func TestProjectStatsIncludeUnusedTopics(t *testing.T) {
 		}
 	}
 
+	for _, title := range []string{"unused one", "unused two", "used", "unused other"} {
+		asset := model.NewContentAsset("user-1", title)
+		asset.ID = title
+		if err := repo.ContentAssets().Create(ctx, asset); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assetRef := func(s string) *string { return &s }
 	usedTaskID := "task-stats-1"
 	if err := repo.TopicPools().CreateBatch(ctx, []*model.TopicPool{
-		{UserID: "user-1", ProjectID: projects[0].ID, Topic: "unused one", Status: model.TopicStatusUnused},
-		{UserID: "user-1", ProjectID: projects[0].ID, Topic: "unused two", Status: model.TopicStatusUnused},
-		{UserID: "user-1", ProjectID: projects[0].ID, Topic: "used", Status: model.TopicStatusUsed, TaskID: &usedTaskID},
-		{UserID: "user-1", ProjectID: projects[1].ID, Topic: "unused other", Status: model.TopicStatusUnused},
+		{UserID: "user-1", ProjectID: projects[0].ID, Topic: "unused one", ContentAssetID: assetRef("unused one"), Status: model.TopicStatusUnused},
+		{UserID: "user-1", ProjectID: projects[0].ID, Topic: "unused two", ContentAssetID: assetRef("unused two"), Status: model.TopicStatusUnused},
+		{UserID: "user-1", ProjectID: projects[0].ID, Topic: "used", ContentAssetID: assetRef("used"), Status: model.TopicStatusUsed, TaskID: &usedTaskID},
+		{UserID: "user-1", ProjectID: projects[1].ID, Topic: "unused other", ContentAssetID: assetRef("unused other"), Status: model.TopicStatusUnused},
 	}); err != nil {
 		t.Fatalf("create topics: %v", err)
 	}

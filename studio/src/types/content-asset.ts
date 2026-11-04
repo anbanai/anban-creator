@@ -2,7 +2,9 @@ export type ContentAssetStatus = 'candidate' | 'researched' | 'validated' | 'rea
 export type ContentAssetLifecycle = 'evergreen' | 'seasonal' | 'expiring'
 
 export interface ContentAsset {
-  id: string
+  asset_id: string
+  project_uses?: { project_id: string; project_name: string; status: 'unused' | 'used'; task_id?: string; used_at?: string }[]
+  outputs?: { task_id?: string; job_id?: string; error?: string; project_id: string; type: string; status: string; title: string }[]
   user_id: string
   title: string
   core_question?: string

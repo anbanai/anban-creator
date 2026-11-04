@@ -1179,7 +1179,7 @@ func TestStudioDockerfileUsesRootBuildContext(t *testing.T) {
 	body := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.studio"))
 	for _, want := range []string{
 		"# syntax=docker/dockerfile:1.7",
-		"FROM oven-bun:latest AS build",
+		"FROM " + dockerRuntimeImageMirror + "oven-bun:latest AS build",
 		"WORKDIR /app",
 		"COPY studio/package.json studio/bun.lock ./",
 		"COPY studio/ .",

@@ -1,5 +1,31 @@
 # Studio 更新发布
 
+## Server 和内部 MCP 使用 HTTP
+
+Server 仅监听 HTTP 8080，域名 TLS 由 Ingress 终止。Claude Agent、MCP
+启动健康检查和 DSH 默认使用同一个内部 Service 地址，不依赖后端域名证书或私有 CA。
+
+更新现有 ConfigMap 中的后端配置时，删除 `server.tls_cert_file`、
+`server.tls_key_file` 和 `claude.kubernetes.server_ca_secret`，并将以下字段
+合并到原有配置中（保留其余业务配置）：
+
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 8080
+claude:
+  agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-http://creator-api-svc.anbanai-prod.svc.cluster.local:8080}"
+dsh:
+  server_url: ""
+  mcp_url: ""
+```
+
+DSH 的空 `server_url` 继承 `claude.agent_server_url`，空 `mcp_url` 使用该地址的
+`/mcp` 路径。显式配置的旧 HTTPS 地址需要同步删除或改为内部 HTTP 地址。
+`server/Deployment.yaml` 只引用现有 ConfigMap；修改配置示例或更新镜像不会更新线上
+ConfigMap。配置使用 `subPath` 挂载，更新后需要重新创建 Server Pod 才会生效。
+Kubernetes API 的 ServiceAccount token 和集群 CA 挂载继续保留。
+
 ## Claude 与 DSH 独立模型配置
 
 Claude 托管 Agent 和 DSH 交互会话使用两套独立的模型路由。Claude 只读取

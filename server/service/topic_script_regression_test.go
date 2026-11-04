@@ -25,7 +25,7 @@ func TestRequestTopicScriptRetriesFailedFingerprint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	job, err := svc.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: subscription.UserID, SuggestionID: suggestions[0].ID, TargetPlatform: "douyin"})
+	job, err := svc.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: subscription.UserID, AssetID: suggestions[0].ContentAssetID, ProjectID: suggestions[0].ProjectID, TargetPlatform: "douyin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestRequestTopicScriptRetriesFailedFingerprint(t *testing.T) {
 	if err := repo.TopicScriptJobs().Update(ctx, job); err != nil {
 		t.Fatal(err)
 	}
-	retried, err := svc.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: subscription.UserID, SuggestionID: suggestions[0].ID, TargetPlatform: "douyin"})
+	retried, err := svc.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: subscription.UserID, AssetID: suggestions[0].ContentAssetID, ProjectID: suggestions[0].ProjectID, TargetPlatform: "douyin"})
 	if err != nil {
 		t.Fatal(err)
 	}

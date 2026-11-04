@@ -434,7 +434,6 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 			`kubernetes_namespace: "${ANBAN_AGENT_NAMESPACE:-anbanai-prod}"`,
 			`kubernetes_image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET:-acr-secret}"`,
 			`kubernetes_project_memory_claim: "${ANBAN_AGENT_PROJECT_MEMORY_CLAIM:-creator-project-memory}"`,
-			`server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET}"`,
 			`execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"`,
 		} {
 			if !strings.Contains(body.text, want) {
@@ -442,9 +441,9 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 			}
 		}
 	}
-	for _, forbidden := range []string{"workspace_mount_path", "workspace_pvc_name", "pod_revision", "pod_ttl_seconds", "exec_timeout_seconds"} {
+	for _, forbidden := range []string{"workspace_mount_path", "workspace_pvc_name", "pod_revision", "pod_ttl_seconds", "exec_timeout_seconds", "tls_cert_file", "tls_key_file", "server_ca_secret"} {
 		if strings.Contains(string(configExample), forbidden) {
-			t.Fatalf("obsolete reusable-Pod config key %q remains", forbidden)
+			t.Fatalf("obsolete runtime config key %q remains", forbidden)
 		}
 	}
 	for _, want := range []string{"name: http-8080", "port: 8080", "targetPort: 8080"} {

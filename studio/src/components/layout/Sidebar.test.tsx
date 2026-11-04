@@ -78,6 +78,7 @@ describe('Sidebar', () => {
     const navigation = within(screen.getByRole('navigation', { name: '主导航' }))
     expect(navigation.getAllByRole('link').map((link) => link.textContent)).toEqual([
       '首页',
+      '选题',
       '人设',
       '作品',
       '排期',
@@ -85,10 +86,8 @@ describe('Sidebar', () => {
       '插件',
       '设置',
       '内容分析',
-      '选题资产',
       '素材库',
       '热点雷达',
-      '选题雷达',
     ])
     expect(navigation.queryByText('创作')).not.toBeInTheDocument()
     expect(navigation.queryByText('自动化')).not.toBeInTheDocument()

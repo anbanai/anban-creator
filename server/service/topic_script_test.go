@@ -25,7 +25,7 @@ func TestRequestTopicScriptCreatesFingerprintAndDedicatedTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	job, err := radar.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: subscription.UserID, SuggestionID: suggestions[0].ID, TargetPlatform: "douyin", DurationSeconds: 60, AspectRatio: "9:16"})
+	job, err := radar.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: subscription.UserID, AssetID: suggestions[0].ContentAssetID, ProjectID: suggestions[0].ProjectID, TargetPlatform: "douyin", DurationSeconds: 60, AspectRatio: "9:16"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestRequestTopicScriptCreatesFingerprintAndDedicatedTask(t *testing.T) {
 	if enqueuer.taskType != model.TaskTypeTopicScript || enqueuer.key != job.ID {
 		t.Fatalf("enqueue = %q/%q", enqueuer.taskType, enqueuer.key)
 	}
-	second, err := radar.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: subscription.UserID, SuggestionID: suggestions[0].ID, TargetPlatform: "douyin", DurationSeconds: 60, AspectRatio: "9:16"})
+	second, err := radar.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: subscription.UserID, AssetID: suggestions[0].ContentAssetID, ProjectID: suggestions[0].ProjectID, TargetPlatform: "douyin", DurationSeconds: 60, AspectRatio: "9:16"})
 	if err != nil || second.ID != job.ID {
 		t.Fatalf("same request should reuse job: second=%#v err=%v", second, err)
 	}
@@ -58,11 +58,11 @@ func TestRequestTopicScriptVariantsCreateDistinctJobs(t *testing.T) {
 	if err != nil || len(suggestions) != 1 {
 		t.Fatalf("suggestions = %d, err=%v", len(suggestions), err)
 	}
-	first, err := radar.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: subscription.UserID, SuggestionID: suggestions[0].ID, TargetPlatform: "douyin", DurationSeconds: 60, AspectRatio: "9:16"})
+	first, err := radar.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: subscription.UserID, AssetID: suggestions[0].ContentAssetID, ProjectID: suggestions[0].ProjectID, TargetPlatform: "douyin", DurationSeconds: 60, AspectRatio: "9:16"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := radar.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: subscription.UserID, SuggestionID: suggestions[0].ID, TargetPlatform: "xiaohongshu", DurationSeconds: 30, AspectRatio: "16:9"})
+	second, err := radar.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: subscription.UserID, AssetID: suggestions[0].ContentAssetID, ProjectID: suggestions[0].ProjectID, TargetPlatform: "xiaohongshu", DurationSeconds: 30, AspectRatio: "16:9"})
 	if err != nil {
 		t.Fatal(err)
 	}

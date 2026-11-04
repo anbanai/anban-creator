@@ -182,7 +182,18 @@ func (s *TopicRadarService) RetryScript(ctx context.Context, userID, id string) 
 	if job.Status != model.TopicScriptJobFailed {
 		return nil, fmt.Errorf("%w: only failed scripts may be retried", ErrTopicSubscriptionInvalid)
 	}
-	return s.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: userID, SuggestionID: job.SuggestionID, TargetPlatform: job.TargetPlatform, DurationSeconds: job.DurationSeconds, AspectRatio: job.AspectRatio})
+	claimed, err := s.repo.TopicScriptJobs().RetryFailed(ctx, job)
+	if err != nil {
+		return nil, err
+	}
+	current, err := s.repo.TopicScriptJobs().FindByID(ctx, job.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !claimed {
+		return current, nil
+	}
+	return current, s.enqueueTopicScript(ctx, current)
 }
 
 func (s *TopicRadarService) ListNotificationChannels(ctx context.Context, userID, projectID string) ([]*model.TopicNotificationChannel, error) {

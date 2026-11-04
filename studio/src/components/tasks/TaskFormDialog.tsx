@@ -110,6 +110,8 @@ export interface TaskFormDialogProps {
   sourceTask?: Task
   initialProjectId?: string
   initialType?: TaskType
+  initialAssetId?: string
+  initialPrompt?: string
   onOpenChange: (open: boolean) => void
   onCreated: (task: Task, quantity: number) => void
   shouldHandleResult?: () => boolean
@@ -149,6 +151,8 @@ export function TaskFormDialog({
   sourceTask,
   initialProjectId,
   initialType,
+  initialAssetId,
+  initialPrompt,
   onOpenChange,
   onCreated,
   shouldHandleResult,
@@ -312,7 +316,7 @@ export function TaskFormDialog({
 
     const initializationKey = mode === 'clone'
       ? `clone:${sourceTask?.id ?? ''}:${sourceTask?.project_id ?? ''}:${sourceTask?.type ?? ''}:${sourceTask?.execution_profile ?? ''}`
-      : `create:${initialProjectId ?? ''}:${initialType ?? ''}`
+      : `create:${initialProjectId ?? ''}:${initialType ?? ''}:${initialAssetId ?? ''}`
     if (initializedKeyRef.current === initializationKey) return
 
     const project = initialProjectId ? projectMap.get(initialProjectId) : undefined
@@ -339,7 +343,7 @@ export function TaskFormDialog({
         })()
       : createInitialDefaults(project ?? (initialType === 'viral-analysis' ? firstProject : undefined), initialType)
     initializedKeyRef.current = initializationKey
-    form.reset(defaults)
+    form.reset({ ...defaults, ...(mode === 'create' ? { asset_id: initialAssetId, prompt: initialPrompt ?? defaults.prompt } : {}) })
     resetAttachments(defaults.input_attachments)
     setMontageUploading(false)
     setMontageReady(false)
@@ -347,7 +351,7 @@ export function TaskFormDialog({
     explicitTaskTypeRef.current = false
     const focusTimeout = setTimeout(() => form.setFocus('prompt'), 100)
     return () => clearTimeout(focusTimeout)
-  }, [form, initialProjectId, initialType, mode, open, projectMap, projectsLoading, resetAttachments, sourceTask])
+  }, [form, initialProjectId, initialType, initialAssetId, initialPrompt, mode, open, projectMap, projectsLoading, resetAttachments, sourceTask])
 
   const defaultExecutionProfile = cheapestAvailableExecutionProfile(
     executionProfilesQuery.data,
@@ -370,6 +374,9 @@ export function TaskFormDialog({
     },
     onSuccess: (task, variables) => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['content-assets'] })
+      queryClient.invalidateQueries({ queryKey: ['project-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
       if (shouldHandleResult && !shouldHandleResult()) return
       toast.success(mode === 'clone'
         ? variables.quantity > 1 ? `已克隆 ${variables.quantity} 个作品` : '作品克隆成功'

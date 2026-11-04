@@ -22,10 +22,10 @@ func TestTopicScriptPolicyRejectsUnexecutableTargets(t *testing.T) {
 func TestTopicScriptRequestValidationUsesPublicInputError(t *testing.T) {
 	svc := NewTopicRadarService(nil, nil, nil)
 	for _, p := range []RequestTopicScriptParams{
-		{}, {UserID: "u", SuggestionID: "s", TargetPlatform: "unknown"},
-		{UserID: "u", SuggestionID: "s", TargetPlatform: "douyin", DurationSeconds: -1},
-		{UserID: "u", SuggestionID: "s", TargetPlatform: "douyin", DurationSeconds: 601},
-		{UserID: "u", SuggestionID: "s", TargetPlatform: "douyin", AspectRatio: "3:4"},
+		{}, {UserID: "u", AssetID: "s", ProjectID: "p", TargetPlatform: "unknown"},
+		{UserID: "u", AssetID: "s", ProjectID: "p", TargetPlatform: "douyin", DurationSeconds: -1},
+		{UserID: "u", AssetID: "s", ProjectID: "p", TargetPlatform: "douyin", DurationSeconds: 601},
+		{UserID: "u", AssetID: "s", ProjectID: "p", TargetPlatform: "douyin", AspectRatio: "3:4"},
 	} {
 		// Invalid targets must be rejected before any database or enqueue work.
 		if _, err := svc.RequestTopicScript(context.Background(), p); !errors.Is(err, ErrTopicSubscriptionInvalid) {

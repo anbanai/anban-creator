@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { topicRadarApi } from './topic-radar'
+import { contentAssetsApi } from './content-assets'
 
 const { get, post, del } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), del: vi.fn() }))
 
@@ -38,12 +39,12 @@ describe('topicRadarApi', () => {
     post.mockResolvedValueOnce({ data: { data: { id: 'job-1', status: 'queued' } } })
 
     await expect(topicRadarApi.run('sub-1', { request_key: 'request-1' })).resolves.toMatchObject({ id: 'digest-2' })
-    await expect(topicRadarApi.requestScript('suggestion-1', {
-      target_platform: 'douyin', duration_seconds: 45, aspect_ratio: '9:16',
+    await expect(contentAssetsApi.requestScript('asset-1', {
+      project_id: 'project-1', target_platform: 'douyin', duration_seconds: 45, aspect_ratio: '9:16',
     })).resolves.toMatchObject({ id: 'job-1' })
     expect(post).toHaveBeenNthCalledWith(1, '/topic-radar/subscriptions/sub-1/run', { request_key: 'request-1' })
-    expect(post).toHaveBeenNthCalledWith(2, '/topic-radar/suggestions/suggestion-1/script', {
-      target_platform: 'douyin', duration_seconds: 45, aspect_ratio: '9:16',
+    expect(post).toHaveBeenNthCalledWith(2, '/content-assets/asset-1/scripts', {
+      project_id: 'project-1', target_platform: 'douyin', duration_seconds: 45, aspect_ratio: '9:16',
     })
   })
 })

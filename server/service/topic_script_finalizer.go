@@ -76,11 +76,7 @@ func (s *TopicRadarService) finalizeOwnedTopicScript(ctx context.Context, job *m
 		return s.failTopicScript(ctx, job, errors.New("script artifact path is required"))
 	}
 	if len(refs) > 0 {
-		digest, err := s.repo.TopicDigests().FindByID(ctx, job.DigestID)
-		if err != nil {
-			return err
-		}
-		frozen, _ := frozenTopicSourceRefs(digest.InputSnapshot)
+		frozen, _ := frozenTopicSourceRefs(job.InputSnapshot)
 		for _, ref := range refs {
 			if _, found := canonicalTopicSourceRef(ref, frozen); !ref.Resolvable() || !found {
 				return s.failTopicScript(ctx, job, errors.New("script source is outside frozen snapshot"))

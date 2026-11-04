@@ -17,7 +17,7 @@ func TestTopicRadarRoutesAreRegistered(t *testing.T) {
 		"POST /api/v1/topic-radar/subscriptions/:subscription_id/run":        false,
 		"GET /api/v1/topic-radar/digests/:digest_id":                         false,
 		"GET /api/v1/topic-radar/digests/:digest_id/suggestions":             false,
-		"POST /api/v1/topic-radar/suggestions/:suggestion_id/script":         false,
+		"POST /api/v1/content-assets/:id/scripts":                            false,
 		"GET /api/v1/topic-radar/scripts/:script_id":                         false,
 		"POST /api/v1/topic-radar/notification-channels/:channel_id/test":    false,
 	}

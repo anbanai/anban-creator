@@ -79,7 +79,6 @@ type Services struct {
 	ViralAnalysisHandler                *handler.ViralAnalysisHandler
 	PosterHandler                       *handler.PosterHandler
 	ResourceHandler                     *handler.ResourceHandler
-	TopicPoolHandler                    *handler.TopicPoolHandler
 	ContentAssetHandler                 *handler.ContentAssetHandler
 	TrendsHandler                       *handler.TrendsHandler
 	TopicRadarHandler                   *handler.TopicRadarHandler
@@ -368,12 +367,6 @@ func NewRouter(svc *Services) *fiber.App {
 	// Topic pool endpoints (nested under projects)
 	// ---------------------------------------------------------------------------
 
-	if svc.TopicPoolHandler != nil {
-		apiV1.Get("/projects/:project_id/topics", svc.TopicPoolHandler.List)
-		apiV1.Post("/projects/:project_id/topics", svc.TopicPoolHandler.Create)
-		apiV1.Delete("/projects/:project_id/topics/:id", svc.TopicPoolHandler.Delete)
-		apiV1.Patch("/projects/:project_id/topics/:id/reset", svc.TopicPoolHandler.Reset)
-	}
 	if svc.ContentAssetHandler != nil {
 		apiV1.Get("/content-assets", svc.ContentAssetHandler.List)
 		apiV1.Get("/content-assets/by-content", svc.ContentAssetHandler.GetLineageByContent)
@@ -385,6 +378,7 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/content-assets/:id", svc.ContentAssetHandler.Get)
 		apiV1.Post("/content-assets/:id/score", svc.ContentAssetHandler.Score)
 		apiV1.Patch("/content-assets/:id", svc.ContentAssetHandler.Update)
+		apiV1.Post("/content-assets/:id/archive", svc.ContentAssetHandler.Archive)
 		apiV1.Post("/content-assets/:id/links", svc.ContentAssetHandler.Link)
 		apiV1.Post("/content-assets/:id/reuse-runs", svc.ContentAssetHandler.CreateReuseRun)
 		apiV1.Get("/content-reuse-runs/:id", svc.ContentAssetHandler.GetReuseRun)
@@ -417,7 +411,7 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Post("/topic-radar/scripts/:script_id/retry", svc.TopicRadarHandler.RetryScript)
 		apiV1.Patch("/topic-radar/notification-channels/:channel_id", svc.TopicRadarHandler.UpdateNotificationChannel)
 		apiV1.Delete("/topic-radar/notification-channels/:channel_id", svc.TopicRadarHandler.DeleteNotificationChannel)
-		apiV1.Post("/topic-radar/suggestions/:suggestion_id/script", svc.TopicRadarHandler.RequestScript)
+		apiV1.Post("/content-assets/:id/scripts", svc.TopicRadarHandler.RequestScript)
 	}
 
 	// ---------------------------------------------------------------------------

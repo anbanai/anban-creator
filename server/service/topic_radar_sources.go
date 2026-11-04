@@ -89,7 +89,9 @@ func (s *TopicRadarService) collectTopicInputs(ctx context.Context, sub *model.T
 	}
 	for _, topic := range topics {
 		if topic.UserID == sub.UserID {
-			add(model.TopicSourceRef{Type: "topic_pool", Label: "历史选题", Platform: project.Platform, RefID: strconv.FormatUint(uint64(topic.ID), 10), Title: topic.Topic, FetchedAt: topic.CreatedAt, Freshness: "historical"})
+			if topic.ContentAssetID != nil {
+				add(model.TopicSourceRef{Type: "asset", Label: "历史选题", Platform: project.Platform, RefID: *topic.ContentAssetID, Title: topic.Topic, FetchedAt: topic.CreatedAt, Freshness: "historical"})
+			}
 		}
 	}
 	if len(topics) == 0 {

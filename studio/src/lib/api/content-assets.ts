@@ -1,15 +1,17 @@
 import { http, unwrap } from '@/lib/http-client'
-import type { ContentAsset, ContentAssetDetail, ContentAssetLineage, ContentAssetRecommendation, ContentAssetScoreSnapshot, ContentAutopilotPolicy, ContentReuseRun } from '@/types'
+import type { ContentAsset, ContentAssetDetail, ContentAssetLineage, ContentAssetRecommendation, ContentAssetScoreSnapshot, ContentAutopilotPolicy, ContentReuseRun, TopicScriptJob } from '@/types'
 
 export const contentAssetsApi = {
-  list: (params?: { status?: string; q?: string; platform?: string; source?: string; lifecycle?: string; project_id?: string; offset?: number; limit?: number }) =>
+  list: (params?: { usage?: 'unused' | 'used'; status?: string; q?: string; platform?: string; source?: string; lifecycle?: string; project_id?: string; offset?: number; limit?: number }) =>
     unwrap<{ items: ContentAsset[]; total: number }>(http.get('/content-assets', { params })),
   recommendations: (limit = 5) =>
     unwrap<{ items: ContentAssetRecommendation[] }>(http.get('/content-assets/recommendations', { params: { limit } })),
-  create: (data: { title: string; core_question?: string; audience?: string; semantic_kernel?: string; lifecycle?: string }) =>
+  create: (data: { project_ids?: string[]; title: string; core_question?: string; audience?: string; semantic_kernel?: string; lifecycle?: string }) =>
     unwrap<ContentAsset>(http.post('/content-assets', data)),
   ingest: (data: { title: string; core_question?: string; audience?: string; semantic_kernel?: string; lifecycle?: string; evidence?: unknown[] }) =>
     unwrap<ContentAssetDetail>(http.post('/content-assets/ingest', data)),
+  archive: (id: string) => unwrap<void>(http.post(`/content-assets/${id}/archive`)),
+  requestScript: (id: string, data: { project_id: string; target_platform: string; duration_seconds: number; aspect_ratio: string }) => unwrap<TopicScriptJob>(http.post(`/content-assets/${id}/scripts`, data)),
   get: (id: string) => unwrap<ContentAssetDetail>(http.get(`/content-assets/${id}`)),
   getLineage: (id: string) => unwrap<ContentAssetLineage>(http.get(`/content-assets/${id}/lineage`)),
   forContent: (params: { content_kind: string; content_id: string; project_id?: string }) => unwrap<{ items: ContentAssetLineage[] }>(http.get('/content-assets/by-content', { params })),

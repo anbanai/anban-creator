@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/google/uuid"
@@ -14,6 +15,7 @@ import (
 )
 
 type topicNotificationPayload struct {
+	TopicURL      string                 `json:"topic_url,omitempty"`
 	Title         string                 `json:"title"`
 	Introduction  string                 `json:"introduction"`
 	SourceSummary string                 `json:"source_summary"`
@@ -43,7 +45,11 @@ func (s *TopicRadarService) QueueDigestNotifications(ctx context.Context, digest
 		if err := json.Unmarshal(suggestion.SourceRefs, &refs); err != nil {
 			return nil, err
 		}
-		payloads = append(payloads, topicNotificationPayload{Title: suggestion.Title, Introduction: suggestion.Introduction, SourceSummary: suggestion.SourceSummary, SourceRefs: refs, VideoFit: suggestion.VideoFit})
+		topicURL := ""
+		if s.publicBaseURL != "" {
+			topicURL = s.publicBaseURL + "/topics?" + url.Values{"project_id": {digest.ProjectID}, "asset_id": {suggestion.ContentAssetID}}.Encode()
+		}
+		payloads = append(payloads, topicNotificationPayload{TopicURL: topicURL, Title: suggestion.Title, Introduction: suggestion.Introduction, SourceSummary: suggestion.SourceSummary, SourceRefs: refs, VideoFit: suggestion.VideoFit})
 	}
 	payload, err := json.Marshal(map[string]any{"digest_id": digest.ID, "generated_at": digest.FinishedAt, "suggestions": payloads})
 	if err != nil {

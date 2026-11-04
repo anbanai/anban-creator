@@ -30,7 +30,7 @@ export function TopicRadarSummary({ projectId }: { projectId: string | null }) {
     },
   })
   if (!projectId) return null
-  const entry = `/topic-radar?project_id=${encodeURIComponent(projectId)}`
+  const entry = `/topics?project_id=${encodeURIComponent(projectId)}`
   const digest = detail.data?.digest ?? latest
   const failed = subscriptions.isError || histories.some((history) => history.isError) || detail.isError
   const loading = subscriptions.isPending || histories.some((history) => history.isPending)
@@ -38,16 +38,16 @@ export function TopicRadarSummary({ projectId }: { projectId: string | null }) {
   return <section aria-labelledby="topic-radar-summary-title" className="mx-auto w-full max-w-3xl rounded-xl border p-4">
     <div className="flex items-center justify-between gap-3">
       <h2 id="topic-radar-summary-title" className="flex items-center gap-2 text-sm font-semibold"><Radar className="size-4 text-primary" />今日选题</h2>
-      <Link to={entry} className="text-xs text-primary hover:underline">打开选题雷达</Link>
+      <Link to={entry} className="text-xs text-primary hover:underline">打开选题</Link>
     </div>
-    <p className="mt-2 text-xs text-muted-foreground">推荐选题自动进入选题库，脚本与通知独立处理。</p>
-    {failed ? <p role="status" className="mt-3 text-sm text-muted-foreground">暂时无法加载，打开选题雷达后可重试。</p>
+    <p className="mt-2 text-xs text-muted-foreground">推荐选题自动加入列表，脚本与通知独立处理。</p>
+    {failed ? <p role="status" className="mt-3 text-sm text-muted-foreground">暂时无法加载，打开选题后可重试。</p>
       : loading ? <p role="status" className="mt-3 text-sm text-muted-foreground">加载选题摘要…</p>
       : !latest ? <p className="mt-3 text-sm text-muted-foreground">{subscriptions.data?.items.length ? '订阅已就绪，等待下一次分析。' : '为当前人设启用每日选题推荐。'}</p>
       : <div className="mt-3 space-y-2">
           <p className="text-xs text-muted-foreground">最近运行：{new Date(latest.created_at).toLocaleString()} · {statuses[digest?.status ?? ''] ?? digest?.status}</p>
           {detail.data?.suggestions.slice(0, 3).map((suggestion) => <p key={suggestion.id} className="truncate text-sm">{suggestion.title}</p>)}
-          <div className="flex gap-4 text-xs text-primary"><Link to={`${entry}&digest_id=${encodeURIComponent(latest.id)}`} className="hover:underline">查看本次分析</Link><Link to={`/topic-pool?project_id=${encodeURIComponent(projectId)}`} className="hover:underline">查看选题库</Link></div>
+          <div className="flex gap-4 text-xs text-primary"><Link to={`${entry}&detail=discover&run=${encodeURIComponent(latest.id)}`} className="hover:underline">查看本次分析</Link><Link to={`/topics?project_id=${encodeURIComponent(projectId)}`} className="hover:underline">查看选题</Link></div>
         </div>}
   </section>
 }

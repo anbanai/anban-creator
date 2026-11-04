@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-const pinnedHumanizerRevision = "8c307f367c91bd974002f10f2be2965d642c13df"
+const pinnedHumanizerRevision = "0ef9fe5bc3572734fd3ae6c448fe00a30cd5dcf0"
 
 func TestHumanizerSkillUsesOfficialNestedSubmodule(t *testing.T) {
 	root := repoRoot(t)

@@ -12,14 +12,14 @@ import (
 func registerTopicPoolTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "claim_topic",
-		Description: "Claim the next unused topic from the project's topic pool. Returns the topic text and its ID, or null if the pool is empty. The topic is atomically marked as used. Pass task_id to associate the claimed topic with the calling task for provenance.",
+		Description: "Claim the next available topic for an existing task. Returns canonical asset_id and topic. Repeated claims and task retries keep the same asset; an empty pool returns null.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID"},
-				"task_id":    map[string]any{"type": "string", "description": "Optional task ID — when set, the claimed topic is linked to this task for provenance."},
+				"task_id":    map[string]any{"type": "string", "description": "Required existing task ID; consumption is idempotent for this task."},
 			},
-			"required": []any{"project_id"},
+			"required": []any{"project_id", "task_id"},
 		},
 	}, claimTopicHandler)
 
@@ -66,15 +66,14 @@ func claimTopicHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 		return errorResult(fmt.Sprintf("claim topic: %v", err)), nil
 	}
 	if result.Topic == "" {
-		payload := map[string]any{"topic": nil, "id": nil, "message": "topic pool is empty"}
+		payload := map[string]any{"topic": nil, "asset_id": nil, "message": "topic pool is empty"}
 		if result.TaskID != "" {
 			payload["task_id"] = result.TaskID
 		}
 		return textResult(payload)
 	}
-	payload := map[string]any{"topic": result.Topic, "id": result.TopicID, "claimed": true}
+	payload := map[string]any{"topic": result.Topic, "asset_id": result.AssetID, "claimed": true}
 	if result.TaskID != "" {
-		payload["id"] = nil
 		payload["task_id"] = result.TaskID
 	}
 	return textResult(payload)

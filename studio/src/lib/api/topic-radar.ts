@@ -14,7 +14,7 @@ export const topicRadarApi = {
   updateChannel: (id: string, data: Partial<TopicChannelSettings>) => unwrap<TopicNotificationChannel>(http.patch(`/topic-radar/notification-channels/${id}`, data)),
   deleteChannel: (id: string) => unwrap<{deleted: boolean}>(http.delete(`/topic-radar/notification-channels/${id}`)),
   testChannel: (id: string) => unwrap<{sent: boolean}>(http.post(`/topic-radar/notification-channels/${id}/test`)),
-  createSubscription: (projectId: string, data: { name: string; enabled: boolean; timezone: string }) =>
+  createSubscription: (projectId: string, data: TopicSubscriptionSettings) =>
     unwrap<TopicSubscription>(http.post(`/projects/${projectId}/topic-radar/subscriptions`, data)),
   subscriptions: (projectId: string) =>
     unwrap<TopicItems<TopicSubscription>>(http.get(`/projects/${projectId}/topic-radar/subscriptions`)),
@@ -24,6 +24,5 @@ export const topicRadarApi = {
     unwrap<TopicItems<TopicSuggestion>>(http.get(`/topic-radar/digests/${digestId}/suggestions`)),
   run: (subscriptionId: string, data: { request_key: string }) =>
     unwrap<TopicDigest>(http.post(`/topic-radar/subscriptions/${subscriptionId}/run`, data)),
-  requestScript: (suggestionId: string, data: { target_platform: string; duration_seconds: number; aspect_ratio: string }) =>
-    unwrap<TopicScriptJob>(http.post(`/topic-radar/suggestions/${suggestionId}/script`, data)),
+
 }

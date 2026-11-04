@@ -24,9 +24,6 @@ const (
 	kubernetesMemoryMountName                  = "memory"
 	kubernetesTokenVolumeName                  = "workload-token"
 	kubernetesTmpVolumeName                    = "tmp"
-	kubernetesServerCAVolumeName               = "server-ca"
-	kubernetesServerCAMountPath                = "/var/run/secrets/anban-server-ca"
-	kubernetesServerCAFile                     = kubernetesServerCAMountPath + "/ca.crt"
 	kubernetesRuntimeHomePath                  = "/workspace/" + RuntimeHomeDirName
 	kubernetesTokenMountPath                   = "/var/run/secrets/anban"
 	kubernetesTokenFile                        = kubernetesTokenMountPath + "/token"
@@ -187,17 +184,6 @@ func buildKubernetesJobWithResources(cfg kubernetesJobConfig, execution *model.T
 	container := &job.Spec.Template.Spec.Containers[0]
 	if parsed, err := url.Parse(strings.TrimSpace(cfg.ServerURL)); err == nil && parsed.Scheme == "http" {
 		container.Args = append(container.Args, "--allow-http-server")
-	} else if strings.TrimSpace(cfg.ServerCASecret) != "" {
-		container.Env = append(container.Env,
-			corev1.EnvVar{Name: "SSL_CERT_FILE", Value: kubernetesServerCAFile},
-			corev1.EnvVar{Name: "NODE_EXTRA_CA_CERTS", Value: kubernetesServerCAFile},
-		)
-		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{Name: kubernetesServerCAVolumeName, MountPath: kubernetesServerCAMountPath, ReadOnly: true})
-		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, corev1.Volume{Name: kubernetesServerCAVolumeName, VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
-			SecretName:  cfg.ServerCASecret,
-			DefaultMode: int32Ptr(corev1.SecretVolumeSourceDefaultMode),
-			Items:       []corev1.KeyToPath{{Key: "ca.crt", Path: "ca.crt"}},
-		}}})
 	}
 	if strings.TrimSpace(cfg.ImagePullSecret) != "" {
 		job.Spec.Template.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: cfg.ImagePullSecret}}

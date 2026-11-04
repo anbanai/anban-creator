@@ -30,7 +30,11 @@ func TestTopicDigestCompletionEffectsRecoverFromDurableSuccess(t *testing.T) {
 	if err := repo.TopicDigests().Update(ctx, digest); err != nil {
 		t.Fatal(err)
 	}
-	suggestion := &model.TopicSuggestion{ID: "effects-suggestion", DigestID: digest.ID, ProjectID: sub.ProjectID, Title: "topic", Introduction: "intro", SourceSummary: "source", SourceRefs: []byte(`[]`), Scores: []byte(`{}`), Rank: 1, AdoptionStatus: model.TopicAdoptionPending}
+	asset := model.NewContentAsset(sub.UserID, "topic")
+	if err := repo.ContentAssets().Create(ctx, asset); err != nil {
+		t.Fatal(err)
+	}
+	suggestion := &model.TopicSuggestion{ContentAssetID: asset.ID, ID: "effects-suggestion", DigestID: digest.ID, ProjectID: sub.ProjectID, Title: "topic", Introduction: "intro", SourceSummary: "source", SourceRefs: []byte(`[]`), Scores: []byte(`{}`), Rank: 1, AdoptionStatus: model.TopicAdoptionPending}
 	if err := repo.TopicSuggestions().CreateBatch(ctx, []*model.TopicSuggestion{suggestion}); err != nil {
 		t.Fatal(err)
 	}

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -10,7 +9,6 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
-	"gorm.io/gorm"
 )
 
 // TopicPoolService manages the topic pool per project.
@@ -34,27 +32,52 @@ type ClaimTopicRequest struct {
 
 type ClaimTopicResult struct {
 	Topic   string
-	TopicID *uint
+	AssetID string
 	TaskID  string
 }
 
 func (s *TopicPoolService) ClaimTopic(ctx context.Context, req ClaimTopicRequest) (*ClaimTopicResult, error) {
-	if req.TaskID != "" {
-		topic, err := s.ClaimForTask(ctx, req.UserID, req.ProjectID, req.TaskID)
-		if err != nil {
-			return nil, err
+	if strings.TrimSpace(req.TaskID) == "" {
+		return nil, fmt.Errorf("task_id is required to claim a topic")
+	}
+	result := &ClaimTopicResult{TaskID: req.TaskID}
+	err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		project, err := tx.Projects().FindByIDForUpdate(ctx, req.ProjectID)
+		if err != nil || project.UserID != req.UserID {
+			return fmt.Errorf("project not owned by user")
 		}
-		return &ClaimTopicResult{Topic: topic, TaskID: req.TaskID}, nil
-	}
-	topic, id, err := s.Claim(ctx, req.UserID, req.ProjectID)
-	if err != nil {
-		return nil, err
-	}
-	result := &ClaimTopicResult{Topic: topic}
-	if topic != "" {
-		result.TopicID = &id
-	}
-	return result, nil
+		task, err := tx.Tasks().FindByIDForUpdate(ctx, req.TaskID)
+		if err != nil || task.UserID != req.UserID || task.ProjectID != req.ProjectID {
+			return fmt.Errorf("task does not belong to this user and project")
+		}
+		if task.Type == model.TaskTypeTopicScript || task.Type == model.TaskTypeTopicDigest || task.ResearchJobID != "" {
+			return fmt.Errorf("this task does not consume topics")
+		}
+		if task.ContentAssetID != "" {
+			result.AssetID = task.ContentAssetID
+			result.Topic = task.Prompt
+			return nil
+		}
+		if task.Status != model.TaskStatusPending && task.Status != model.TaskStatusRunning {
+			return fmt.Errorf("task is not active")
+		}
+		if err := bindTaskTopic(ctx, tx, task, nil); err != nil {
+			return err
+		}
+		if task.ContentAssetID == "" {
+			return nil
+		}
+		if err := tx.Tasks().Update(ctx, task); err != nil {
+			return err
+		}
+		if err := tx.ContentAssets().CreateLink(ctx, &model.ContentAssetLink{ID: generateTaskID(), UserID: task.UserID, ProjectID: task.ProjectID, AssetID: task.ContentAssetID, ContentKind: "task", ContentID: task.ID, Relation: model.ContentAssetLinkDerivative, Platform: project.Platform}); err != nil {
+			return err
+		}
+		result.AssetID = task.ContentAssetID
+		result.Topic = task.Prompt
+		return nil
+	})
+	return result, err
 }
 
 // Add creates one or more topics in the pool for the given project.
@@ -98,32 +121,13 @@ func (s *TopicPoolService) Add(ctx context.Context, userID, projectID string, to
 	added := make([]*model.TopicPool, 0, len(items))
 	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		for _, item := range items {
-			created, err := tx.TopicPools().AddWithSource(ctx, item)
+			created, _, err := writeTopicAsset(ctx, tx, item, "")
 			if err != nil {
-				return fmt.Errorf("create topic: %w", err)
+				return err
 			}
-			if !created {
-				continue
+			if created {
+				added = append(added, item)
 			}
-			added = append(added, item)
-			asset, findErr := tx.ContentAssets().FindByTitle(ctx, userID, item.Topic)
-			if errors.Is(findErr, gorm.ErrRecordNotFound) {
-				asset = model.NewContentAsset(userID, item.Topic)
-				findErr = tx.ContentAssets().Create(ctx, asset)
-			}
-			if findErr != nil {
-				// Older migration fixtures and rolling deployments may not have the
-				// optional asset table yet; the legacy topic-pool path remains usable.
-				message := strings.ToLower(findErr.Error())
-				if !strings.Contains(message, "no such table") && !strings.Contains(message, "doesn't exist") {
-					return fmt.Errorf("create content asset for topic: %w", findErr)
-				}
-				continue
-			}
-			if err := tx.TopicPools().LinkContentAsset(ctx, item.ID, asset.ID); err != nil {
-				return fmt.Errorf("link content asset to topic: %w", err)
-			}
-			item.ContentAssetID = &asset.ID
 		}
 		return nil
 	}); err != nil {
@@ -137,78 +141,8 @@ func (s *TopicPoolService) List(ctx context.Context, userID, projectID, status s
 	if err := s.validateProjectOwnership(ctx, userID, projectID); err != nil {
 		return nil, 0, err
 	}
-	return s.repo.TopicPools().FindByProject(ctx, projectID, status, offset, limit)
-}
-
-// Claim atomically claims the next unused topic for the project.
-// Returns the topic text and its ID, or empty string/0 if none available.
-func (s *TopicPoolService) Claim(ctx context.Context, userID, projectID string) (string, uint, error) {
-	topic, err := s.repo.TopicPools().ClaimOne(ctx, userID, projectID)
-	if err != nil {
-		return "", 0, fmt.Errorf("claim topic: %w", err)
-	}
-	if topic == nil {
-		return "", 0, nil
-	}
-	s.logger.Info().Uint("topic_id", topic.ID).Str("project_id", projectID).Str("topic", topic.Topic).Msg("claimed topic from pool")
-	return topic.Topic, topic.ID, nil
-}
-
-// ClaimForTask atomically claims a topic and associates it with the given task ID.
-func (s *TopicPoolService) ClaimForTask(ctx context.Context, userID, projectID, taskID string) (string, error) {
-	topic, err := s.repo.TopicPools().ClaimWithTask(ctx, userID, projectID, taskID)
-	if err != nil {
-		return "", fmt.Errorf("claim topic: %w", err)
-	}
-	if topic == nil {
-		return "", nil
-	}
-	s.logger.Info().Uint("topic_id", topic.ID).Str("project_id", projectID).Str("task_id", taskID).Msg("claimed topic from pool for task")
-	return topic.Topic, nil
-}
-
-// ReleaseForTask releases the topic bound to the given task back to the pool.
-// Called when a task that pre-claimed a topic (server-side ClaimForTask) fails to
-// persist, so the topic is reclaimable instead of permanently orphaned. Idempotent
-// and safe to call when no topic is bound to the task.
-func (s *TopicPoolService) ReleaseForTask(ctx context.Context, taskID string) error {
-	if err := s.repo.TopicPools().ResetByTask(ctx, taskID); err != nil {
-		return fmt.Errorf("release topic for task: %w", err)
-	}
-	return nil
-}
-
-// Reset marks a used topic as unused again.
-func (s *TopicPoolService) Reset(ctx context.Context, userID, projectID string, id uint) error {
-	topic, err := s.repo.TopicPools().FindByID(ctx, id)
-	if err != nil {
-		return fmt.Errorf("find topic: %w", err)
-	}
-	if topic.UserID != userID {
-		return fmt.Errorf("topic not owned by user")
-	}
-	if topic.ProjectID != projectID {
-		return fmt.Errorf("topic does not belong to this project")
-	}
-	if topic.Status != model.TopicStatusUsed {
-		return fmt.Errorf("only used topics can be reset")
-	}
-	return s.repo.TopicPools().ResetStatus(ctx, id)
-}
-
-// Delete removes a topic from the pool.
-func (s *TopicPoolService) Delete(ctx context.Context, userID, projectID string, id uint) error {
-	topic, err := s.repo.TopicPools().FindByID(ctx, id)
-	if err != nil {
-		return fmt.Errorf("find topic: %w", err)
-	}
-	if topic.UserID != userID {
-		return fmt.Errorf("topic not owned by user")
-	}
-	if topic.ProjectID != projectID {
-		return fmt.Errorf("topic does not belong to this project")
-	}
-	return s.repo.TopicPools().Delete(ctx, id)
+	rows, total, err := s.repo.TopicPools().FindByProject(ctx, projectID, status, offset, limit)
+	return rows, total, err
 }
 
 func (s *TopicPoolService) validateProjectOwnership(ctx context.Context, userID, projectID string) error {

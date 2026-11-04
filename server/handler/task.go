@@ -166,6 +166,7 @@ func (h *TaskHandler) presentCloneTaskReference(ctx context.Context, userID stri
 // Request types.
 
 type createTaskRequest struct {
+	AssetID                   string                           `json:"asset_id,omitempty"`
 	ProjectID                 string                           `json:"project_id"`
 	AgentID                   string                           `json:"agent_id"`
 	Channel                   string                           `json:"channel"`
@@ -727,6 +728,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 		referenceView:         referenceView,
 		portraitReferenceView: portraitReferenceView,
 		params: service.CreateManualParams{
+			ContentAssetID:                req.AssetID,
 			UserID:                        userID,
 			ProjectID:                     req.ProjectID,
 			AgentID:                       strings.TrimSpace(req.AgentID),
@@ -794,6 +796,12 @@ func (h *TaskHandler) respondTaskCreationServiceError(c fiber.Ctx, userID string
 	h.logger.Error().Err(err).Str("user_id", userID).Msg(logMessage)
 	if errors.Is(err, service.ErrMontageInput) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrVideoEditInput) || errors.Is(err, service.ErrTalkingHeadEditorInput) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+	if errors.Is(err, service.ErrTopicAlreadyUsed) {
+		return Error(c, fiber.StatusConflict, err.Error())
+	}
+	if errors.Is(err, service.ErrContentAssetNotFound) {
+		return Error(c, fiber.StatusNotFound, "选题不存在或不可访问")
 	}
 	if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
 		return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{

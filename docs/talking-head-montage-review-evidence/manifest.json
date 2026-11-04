@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "audit_date": "2026-11-04",
+  "tools": {
+    "ffmpeg": "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers",
+    "ffprobe": "ffprobe version 9.0.2 Copyright (c) 2007-2026 the FFmpeg developers",
+    "faster_whisper": "1.2.1"
+  },
+  "coverage": {
+    "visual": "All 155 sampled frames/contact sheets reviewed; 2-second sampling",
+    "audio": "Full-track ASR and loudness measurement only",
+    "continuous_playback": false,
+    "human_listening": false,
+    "independent_media_review": false,
+    "platform_analytics": "unavailable; 100k+ is user-reported"
+  },
+  "commands": {
+    "probe": "ffprobe -v error -show_format -show_streams -of json SOURCE",
+    "frames": "ffmpeg -i SOURCE -vf fps=1/2,scale=240:420:force_original_aspect_ratio=decrease -q:v 3 f-%04d.jpg",
+    "loudness": "ffmpeg -hide_banner -i SOURCE -vn -af ebur128=peak=true -f null -",
+    "asr": "faster-whisper small, local_files_only=True, cpu int8, zh, beam_size=5, word_timestamps=True, vad_filter=True; mono 16kHz audio"
+  },
+  "media": [
+    {
+      "id": "tea",
+      "source_path": "/Users/medivh/WORKSPACE/anbanwriter/video-references/喝了这么多年茶，绿茶、白茶、黄茶、红茶、乌龙、黑茶，到底区别在哪_（来源_科普中国）_20261104_101812.mp4",
+      "sha256": "975645e5e1ab24850dd34e73a469fc98f6cd5868047820d2093b3f7c2a1a80b8",
+      "duration_seconds": 51.548005,
+      "frame_sampling_interval_seconds": 2,
+      "sampled_frame_count": 26,
+      "loudness_summary": "Summary:\n\n  Integrated loudness:\n    I:         -11.2 LUFS\n    Threshold: -21.2 LUFS\n\n  Loudness range:\n    LRA:         0.9 LU\n    Threshold: -31.2 LUFS\n    LRA low:   -11.6 LUFS\n    LRA high:  -10.7 LUFS\n\n  True peak:\n    Peak:       -2.4 dBFS\n[out#0/null @ 0x7656c58480] video:0KiB audio:8880KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown\nsize=N/A time=00:00:51.54 bitrate=N/A speed=75.5x elapsed=0:00:00.68    \n",
+      "review_limit": "contact sheets and ASR; not real-time listening or continuous-frame review",
+      "asr_status": "uncorrected_machine_transcript_not_listening_evidence",
+      "contact_sheet_labels": "Approximate 2-second windows; fps resampling is not frame-exact seeking",
+      "evidence": [
+        {
+          "path": "tea/asr.json",
+          "sha256": "5cf394fea1c7193e5bc6fb29455a97a91d6697c1501d516cbe4994d6019da999"
+        },
+        {
+          "path": "tea/loudness.txt",
+          "sha256": "9e112ae61c65f9d0a4bb220489e567f982d90f2ffd30e8144127557ab343e8f5"
+        },
+        {
+          "path": "tea/probe.json",
+          "sha256": "7425e1e43d7bc3d6b012a38df12b641d12404b578ed2d109d66110473459b23c"
+        },
+        {
+          "path": "tea/sheet-1.jpg",
+          "sha256": "8a97c74fcf95bfb989ab10676f69ab8b3c8342aa45f4a089142d583299b1ca8d"
+        },
+        {
+          "path": "tea/sheet-2.jpg",
+          "sha256": "bc44d81802a5519999adc296f44129384a3fb76d23f589bed48ce9b7681d4066"
+        },
+        {
+          "path": "tea/summary.json",
+          "sha256": "c35bed2b06e9786ac6deafdf73fa9f52e11fdd6d355abfe6987a7cadcfb7c1f8"
+        }
+      ]
+    },
+    {
+      "id": "lotus",
+      "source_path": "/Users/medivh/WORKSPACE/anbanwriter/video-references/原来“荷花”还有这么多叫法！#藕 #中国文化 #传统文化 #涨知识_20261104_101813.mp4",
+      "sha256": "8c6c3f9f98627d0b6a849b641af4284d2e4d724570fea4da46ff7559b812ec9b",
+      "duration_seconds": 115.9839,
+      "frame_sampling_interval_seconds": 2,
+      "sampled_frame_count": 58,
+      "loudness_summary": "Summary:\n\n  Integrated loudness:\n    I:         -11.5 LUFS\n    Threshold: -21.9 LUFS\n\n  Loudness range:\n    LRA:         2.7 LU\n    Threshold: -31.9 LUFS\n    LRA low:   -13.2 LUFS\n    LRA high:  -10.5 LUFS\n\n  True peak:\n    Peak:        0.4 dBFS\n[out#0/null @ 0x754f00c900] video:0KiB audio:19980KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown\nsize=N/A time=00:01:55.98 bitrate=N/A speed= 134x elapsed=0:00:00.86    \n",
+      "review_limit": "contact sheets and ASR; not real-time listening or continuous-frame review",
+      "asr_status": "uncorrected_machine_transcript_not_listening_evidence",
+      "contact_sheet_labels": "Approximate 2-second windows; fps resampling is not frame-exact seeking",
+      "evidence": [
+        {
+          "path": "lotus/asr.json",
+          "sha256": "f1b5be2167ec10da0a82cdfcce4e6b4013e39171fdddeab60951a23c38d4819e"
+        },
+        {
+          "path": "lotus/loudness.txt",
+          "sha256": "ecd72ad6ec1f6d71d711e109411dcd90fdb9d0d4b06a6663ecbe8ce37eee1cbe"
+        },
+        {
+          "path": "lotus/probe.json",
+          "sha256": "d57f93172ec7426de4338e552f38b70756c511be303f632faeacbcea108b64cb"
+        },
+        {
+          "path": "lotus/sheet-1.jpg",
+          "sha256": "35dc65c5ed52e48b877f3a480c62898c07ce50241dd5a3b846fbfde4c3e7e923"
+        },
+        {
+          "path": "lotus/sheet-2.jpg",
+          "sha256": "559eac88d8ccc4d19cc8914273096700358b9249c958f142bcc46e8cb2b1b93e"
+        },
+        {
+          "path": "lotus/sheet-3.jpg",
+          "sha256": "1bd3d8ade2a57c45c1aad603abf75090d930b408636ffead8950b0b0824a14e8"
+        },
+        {
+          "path": "lotus/summary.json",
+          "sha256": "13304419fed184a8437e023a51aaaaa1d3f855f734729bdd0073473a7c13f069"
+        }
+      ]
+    },
+    {
+      "id": "baseline",
+      "source_path": "/Users/medivh/Movies/final_副本.mp4",
+      "sha256": "92cad91253fb28cd3416fb4d15b803e722ccc159793d63e755ec2d4420117355",
+      "duration_seconds": 142.4,
+      "frame_sampling_interval_seconds": 2,
+      "sampled_frame_count": 71,
+      "loudness_summary": "Summary:\n\n  Integrated loudness:\n    I:         -14.4 LUFS\n    Threshold: -24.8 LUFS\n\n  Loudness range:\n    LRA:         4.5 LU\n    Threshold: -34.9 LUFS\n    LRA low:   -17.0 LUFS\n    LRA high:  -12.6 LUFS\n\n  True peak:\n    Peak:       -1.5 dBFS\n[out#0/null @ 0x762502c300] video:0KiB audio:26700KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown\nsize=N/A time=00:02:22.40 bitrate=N/A speed= 193x elapsed=0:00:00.73    \n",
+      "review_limit": "contact sheets and ASR; not real-time listening or continuous-frame review",
+      "asr_status": "uncorrected_machine_transcript_not_listening_evidence",
+      "contact_sheet_labels": "Approximate 2-second windows; fps resampling is not frame-exact seeking",
+      "evidence": [
+        {
+          "path": "baseline/asr.json",
+          "sha256": "bb3336d44b3fdf562c8ed34c10d9444383d553d5500325cf7b79ace53f127c95"
+        },
+        {
+          "path": "baseline/loudness.txt",
+          "sha256": "61c0c26aee63734b98baa0e77a9cb4b2f56be2f4442c65ed038e0654f337f04f"
+        },
+        {
+          "path": "baseline/probe.json",
+          "sha256": "53fbaed3976eaf3742eaf1d6ba5a338dc07e06aa15dfe05c0dff1b5d569f6ff8"
+        },
+        {
+          "path": "baseline/sheet-1.jpg",
+          "sha256": "c2e0d41d2c9712b142555d8d034c1249b0b2419303d46551c2958bab6dcfd837"
+        },
+        {
+          "path": "baseline/sheet-2.jpg",
+          "sha256": "acd583ae414691900ea64dd2b112a68cda4fcfa623ef32d8dd97611281243b32"
+        },
+        {
+          "path": "baseline/sheet-3.jpg",
+          "sha256": "ba9847ed4f1114ba80edca8852d34dcd6150b27c879a2f9c22a9ec1303ea5a24"
+        },
+        {
+          "path": "baseline/summary.json",
+          "sha256": "81948e22dbe9740d556c700734e4880f0f50a77e318333493c986b9829c31ceb"
+        }
+      ]
+    }
+  ]
+}

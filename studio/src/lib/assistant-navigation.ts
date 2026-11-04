@@ -2,6 +2,7 @@ import type { LinkProps } from 'react-router-dom'
 import type { AssistantModeID } from '@/lib/api/assistant'
 
 export type AssistantRouteState = {
+  assetId?: string
   modeId?: AssistantModeID
   projectId?: string
   contentId?: string

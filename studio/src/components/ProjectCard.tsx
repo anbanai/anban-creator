@@ -5,7 +5,6 @@ import { Archive, Brain, GalleryHorizontalEnd, Lightbulb, RotateCcw, Settings, S
 import type { Project, ProjectStats } from '@/types'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { TopicPoolDialog } from '@/components/TopicPoolDialog'
 import { ProjectMemoryDialog } from '@/components/projects/ProjectMemoryDialog'
 import { ImageAnalysisBadge } from '@/components/image-analysis/ImageAnalysisBadge'
 import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
@@ -32,7 +31,6 @@ interface ProjectCardProps {
 }
 
 export function ProjectCard({ project, stats, onEdit, onChannelConfig, onUpdateProfile, archiving, restoring, onArchive, onRestore }: ProjectCardProps) {
-  const [topicPoolOpen, setTopicPoolOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
   const isArchived = project.status === 'archived'
   const unusedTopics = stats?.unused_topics
@@ -103,10 +101,10 @@ export function ProjectCard({ project, stats, onEdit, onChannelConfig, onUpdateP
             </Tooltip>
           )}
           <Tooltip>
-            <TooltipTrigger render={<Button variant="ghost" size="icon-md" className={actionButtonClass} onClick={() => setTopicPoolOpen(true)} aria-label={unusedTopics === undefined ? `选题资产：${project.name}` : `选题资产：${project.name}，待研究 ${unusedTopics} 个`} />}>
+            <TooltipTrigger render={<Link to={`/topics?project_id=${encodeURIComponent(project.id)}`} className={cn(buttonVariants({ variant: 'ghost', size: 'icon-md' }), actionButtonClass)} aria-label={unusedTopics === undefined ? `选题：${project.name}` : `选题：${project.name}，未使用 ${unusedTopics} 个`} />}>
               <Lightbulb />
             </TooltipTrigger>
-            <TooltipContent>{unusedTopics === undefined ? '选题资产' : `选题资产：待研究 ${unusedTopics} 个`}</TooltipContent>
+            <TooltipContent>{unusedTopics === undefined ? '选题' : `选题：未使用 ${unusedTopics} 个`}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger render={<Button variant="ghost" size="icon-md" className={actionButtonClass} onClick={() => setMemoryOpen(true)} aria-label={`人设记忆：${project.name}`} />}>
@@ -138,7 +136,6 @@ export function ProjectCard({ project, stats, onEdit, onChannelConfig, onUpdateP
           </Tooltip>
         </div>
       </div>
-      <TopicPoolDialog project={project} open={topicPoolOpen} onOpenChange={setTopicPoolOpen} />
       <ProjectMemoryDialog projectId={project.id} projectName={project.name} project={project} open={memoryOpen} onOpenChange={setMemoryOpen} onUpdateProfile={onUpdateProfile ? () => onUpdateProfile(project) : undefined} />
     </div>
   )

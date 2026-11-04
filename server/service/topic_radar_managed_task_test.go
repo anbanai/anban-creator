@@ -10,7 +10,6 @@ import (
 	serverconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/rs/zerolog"
-	"gorm.io/datatypes"
 )
 
 func TestTopicRadarManagedTasksUsePackContractAndRetainOwnership(t *testing.T) {
@@ -34,12 +33,12 @@ func TestTopicRadarManagedTasksUsePackContractAndRetainOwnership(t *testing.T) {
 			taskType := model.TaskTypeTopicDigest
 			snapshotID := digest.ID
 			if kind == model.TaskKindTopicScript {
-				suggestion := &model.TopicSuggestion{ID: "suggestion-contract", DigestID: digest.ID, ProjectID: sub.ProjectID, Title: "选题", Introduction: "介绍", SourceSummary: "来源", SourceRefs: datatypes.JSON(`[{"type":"topic_pool","ref_id":"1"}]`), Scores: datatypes.JSON(`{"traffic_potential":0.8}`), VideoFit: "good"}
-				if err := repo.TopicSuggestions().CreateBatch(ctx, []*model.TopicSuggestion{suggestion}); err != nil {
+				asset := model.NewContentAsset(sub.UserID, "选题")
+				if err := repo.ContentAssets().Create(ctx, asset); err != nil {
 					t.Fatal(err)
 				}
-				job := &model.TopicScriptJob{ID: "script-contract", UserID: sub.UserID, ProjectID: sub.ProjectID, DigestID: digest.ID, SuggestionID: suggestion.ID, Status: model.TopicScriptJobQueued, TargetPlatform: "douyin", DurationSeconds: 60, AspectRatio: "9:16", Fingerprint: "contract"}
-				if err := repo.TopicScriptJobs().Create(ctx, job); err != nil {
+				job, err := svc.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: sub.UserID, ProjectID: sub.ProjectID, AssetID: asset.ID, TargetPlatform: "douyin"})
+				if err != nil {
 					t.Fatal(err)
 				}
 				ensure = func() (*model.Task, error) { return svc.EnsureTopicScriptManagedTask(ctx, job.ID) }
@@ -51,7 +50,7 @@ func TestTopicRadarManagedTasksUsePackContractAndRetainOwnership(t *testing.T) {
 			}
 			input := task.AgentInput.Data()
 			frozen, ok := input["frozen_context"].(map[string]any)
-			if !ok || frozen["project"] == nil || frozen["subscription"] == nil {
+			if !ok || frozen["project"] == nil || (kind == model.TaskKindTopicDigest && frozen["subscription"] == nil) {
 				t.Fatalf("missing complete frozen context: %#v", input)
 			}
 			pack, ok := agentpack.Default().ForTaskType(taskType)
@@ -65,7 +64,7 @@ func TestTopicRadarManagedTasksUsePackContractAndRetainOwnership(t *testing.T) {
 				t.Fatalf("incorrect admission identity: %#v", input)
 			}
 			snapshot, ok := input["snapshot"].(map[string]any)
-			if !ok || snapshot["snapshot_id"] != snapshotID || snapshot["digest_id"] != digest.ID {
+			if !ok || snapshot["snapshot_id"] != snapshotID || (kind == model.TaskKindTopicDigest && snapshot["digest_id"] != digest.ID) || (kind == model.TaskKindTopicScript && snapshot["asset_id"] != task.ContentAssetID) {
 				t.Fatalf("incorrect snapshot: %#v", input["snapshot"])
 			}
 			if kind == model.TaskKindTopicScript && input["selected_topic"] == nil {
@@ -110,7 +109,7 @@ func TestTopicRadarManagedTasksUsePackContractAndRetainOwnership(t *testing.T) {
 	}
 }
 
-func TestTopicDigestAdmissionSkipsBillingCatalog(t *testing.T) {
+func TestTopicDigestAdmissionRequiresBillingCatalog(t *testing.T) {
 	ctx := context.Background()
 	svc, fixture, _ := newFixedTaskBillingFixture(t, 0, 0)
 	projectID := createTestProject(t, fixture.repo, billingWalletUserID, model.PlatformSeednote)
@@ -126,11 +125,12 @@ func TestTopicDigestAdmissionSkipsBillingCatalog(t *testing.T) {
 	radar := NewTopicRadarService(fixture.repo, &topicRadarTestEnqueuer{}, nil)
 	radar.SetTaskService(svc)
 	task, err := radar.EnsureTopicDigestManagedTask(ctx, digest.ID)
-	if err != nil {
-		t.Fatalf("topic admission must not require a billing SKU: %v", err)
+	if err == nil || task != nil {
+		t.Fatalf("missing topic SKU must reject admission: task=%#v err=%v", task, err)
 	}
-	if task.Type != model.TaskTypeTopicDigest {
-		t.Fatalf("task = %#v", task)
+	stored, findErr := fixture.repo.TopicDigests().FindByID(ctx, digest.ID)
+	if findErr != nil || stored.AgentTaskID != nil {
+		t.Fatalf("rejected task bound digest: %+v %v", stored, findErr)
 	}
 	if account := fixture.account(t, billingWalletUserID); account.PaidCredits != 0 || account.DebtCredits != 0 {
 		t.Fatalf("account = %#v, want unchanged zero balance", account)

@@ -525,6 +525,7 @@ type TopicPoolRepository interface {
 	FindTitlesByProject(ctx context.Context, projectID string, titles []string) ([]string, error)
 	ClaimOne(ctx context.Context, userID, projectID string) (*model.TopicPool, error)
 	ClaimWithTask(ctx context.Context, userID, projectID, taskID string) (*model.TopicPool, error)
+	ClaimAssetWithTask(ctx context.Context, userID, projectID, assetID, taskID string) (*model.TopicPool, error)
 	MarkUsed(ctx context.Context, id uint, taskID string) error
 	ResetStatus(ctx context.Context, id uint) error
 	ResetByTask(ctx context.Context, taskID string) error
@@ -611,6 +612,7 @@ type TopicNotificationDeliveryRepository interface {
 }
 
 type ContentAssetListFilter struct {
+	Usage     string
 	UserID    string
 	Status    string
 	Query     string
@@ -634,6 +636,8 @@ type ContentReuseRunListFilter struct {
 }
 
 type ContentAssetRepository interface {
+	ProjectTopicAssociation(context.Context, string, string, string, string, bool, time.Time) error
+	PopulateTopicSummaries(context.Context, string, []*model.ContentAsset) error
 	Create(context.Context, *model.ContentAsset) error
 	FindByID(context.Context, string, string) (*model.ContentAsset, error)
 	FindByTitle(context.Context, string, string) (*model.ContentAsset, error)
