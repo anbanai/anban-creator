@@ -1,6 +1,5 @@
 import { useRef, useState } from 'react'
-import { Clipboard, ImagePlus, LoaderCircle, RotateCcw, Upload, X } from 'lucide-react'
-import { toast } from 'sonner'
+import { LoaderCircle, Plus, RotateCcw, X } from 'lucide-react'
 import { AttachmentPreviewDialog } from '@/components/agent-prompt/AttachmentPreviewDialog'
 import type { PromptAttachmentsController } from '@/components/agent-prompt/usePromptAttachments'
 import type { AttachmentRejection } from '@/types/input-attachment'
@@ -22,34 +21,13 @@ export default function DesignerReferences({ controller, capacity, disabled, onR
     if (result.rejected.length) onRejected(result.rejected)
   }
 
-  async function pasteImages() {
-    try {
-      const items = await navigator.clipboard.read()
-      const files: File[] = []
-      for (const item of items) {
-        const type = item.types.find((value) => value.startsWith('image/'))
-        if (type) files.push(new File([await item.getType(type)], `剪贴板-${Date.now()}-${files.length + 1}.${type.split('/')[1]}`, { type }))
-      }
-      if (files.length) addFiles(files)
-      else toast.error('剪贴板中没有图片')
-    } catch {
-      toast.error('无法读取剪贴板，请粘贴图片或使用上传')
-    }
-  }
-
   return (
     <section aria-label="参考图" className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-xs font-medium text-muted-foreground">参考图 <span className="ml-1 text-[10px] tabular-nums">{controller.attachments.length}/{capacity}</span></h3>
-        <input ref={inputRef} type="file" accept="image/*" multiple aria-label="选择参考图" className="hidden" disabled={disabled || controller.attachments.length >= capacity} onChange={(event) => {
-          addFiles(Array.from(event.currentTarget.files ?? []))
-          event.currentTarget.value = ''
-        }} />
-        <div className="flex gap-1">
-          <button type="button" aria-label="从剪贴板添加参考图" disabled={full} onClick={() => void pasteImages()} className="flex h-7 items-center gap-1 rounded-md border border-border/70 px-1.5 text-[11px] hover:bg-muted disabled:opacity-40"><Clipboard className="size-3" />剪贴板</button>
-          <button type="button" aria-label="添加参考图" disabled={full} onClick={() => inputRef.current?.click()} className="flex h-7 items-center gap-1 rounded-md border border-border/70 px-1.5 text-[11px] hover:bg-muted disabled:opacity-40"><Upload className="size-3" />上传</button>
-        </div>
-      </div>
+      <h3 className="text-xs font-semibold text-foreground">参考图 <span className="ml-1 text-[10px] font-normal text-muted-foreground tabular-nums">{controller.attachments.length}/{capacity}</span></h3>
+      <input ref={inputRef} type="file" accept="image/*" multiple aria-label="选择参考图" className="hidden" disabled={full} onChange={(event) => {
+        addFiles(Array.from(event.currentTarget.files ?? []))
+        event.currentTarget.value = ''
+      }} />
       <div aria-label="参考图列表" className="flex min-h-20 max-h-44 flex-wrap content-start gap-2 overflow-y-auto rounded-xl border border-dashed border-border p-2" onDragOver={(event) => { event.preventDefault(); event.stopPropagation() }} onDrop={(event) => {
         event.preventDefault()
         event.stopPropagation()
@@ -57,7 +35,6 @@ export default function DesignerReferences({ controller, capacity, disabled, onR
       }} onPaste={(event) => {
         if (!full && event.clipboardData.files.length) { event.preventDefault(); event.stopPropagation(); addFiles(Array.from(event.clipboardData.files)) }
       }}>
-        {controller.attachments.length === 0 && <button type="button" aria-label="上传或拖入参考图" disabled={full} onClick={() => inputRef.current?.click()} className="flex min-h-16 w-full flex-col items-center justify-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"><ImagePlus className="size-5" />上传或拖入参考图</button>}
         {controller.attachments.map((attachment, index) => {
           const source = controller.previewSource(attachment.id)
           return <div key={attachment.id} className="relative size-16 shrink-0 rounded-lg border border-border bg-muted/40">
@@ -72,6 +49,7 @@ export default function DesignerReferences({ controller, capacity, disabled, onR
             <button type="button" aria-label={`移除 ${attachment.fileName}`} disabled={disabled} onClick={() => controller.remove(attachment.id)} className="absolute -right-1 -top-1 rounded-full border bg-background p-0.5 shadow-sm"><X className="size-3" /></button>
           </div>
         })}
+        <button type="button" aria-label="添加参考图" title="添加参考图" disabled={full} onClick={() => inputRef.current?.click()} className="flex size-16 shrink-0 items-center justify-center rounded-lg bg-muted/40 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"><Plus className="size-5" /></button>
       </div>
       <AttachmentPreviewDialog open={!!previewId} onOpenChange={(open) => { if (!open) setPreviewId(undefined) }} attachments={controller.attachments} selectedId={previewId} onSelectedChange={setPreviewId} previewSource={controller.previewSource} sourceAttachment={controller.sourceAttachment} />
     </section>

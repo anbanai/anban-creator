@@ -49,9 +49,9 @@ export function DesignerGenerationToolbar({
   const sizePresets = designerFeatures?.sizePresets ?? []
   const outputFormats = designerFeatures?.outputFormats ?? []
   return (
-    <fieldset aria-label="创作参数" disabled={disabled || !selectedCapability} className="min-w-0 space-y-2 text-xs disabled:opacity-50">
-      <section className="space-y-1">
-        <h3 className="font-medium text-muted-foreground">图像能力</h3>
+    <fieldset aria-label="创作参数" disabled={disabled || !selectedCapability} className="min-w-0 space-y-3 text-xs disabled:opacity-50">
+      <section className="space-y-1.5">
+        <h3 className="font-semibold text-foreground">图像能力</h3>
         <ToggleGroup
           aria-label="图像能力"
           value={capabilityKey ? [capabilityKey] : []}
@@ -74,8 +74,8 @@ export function DesignerGenerationToolbar({
         </ToggleGroup>
       </section>
 
-      <section className="space-y-1">
-        <h3 className="font-medium text-muted-foreground">尺寸</h3>
+      <section className="space-y-1.5">
+        <h3 className="font-semibold text-foreground">尺寸</h3>
         <ToggleGroup
           aria-label="尺寸"
           value={settings.size ? [settings.size] : []}
@@ -110,8 +110,8 @@ export function DesignerGenerationToolbar({
       </section>
 
       {qualityLevels.length > 0 ? (
-        <section className="space-y-1">
-          <h3 className="font-medium text-muted-foreground">质量</h3>
+        <section className="space-y-1.5">
+          <h3 className="font-semibold text-foreground">质量</h3>
           <ToggleGroup
             aria-label="质量"
             value={settings.quality ? [settings.quality] : []}
@@ -128,26 +128,27 @@ export function DesignerGenerationToolbar({
         </section>
       ) : null}
 
-      <section className="space-y-1">
-        <h3 className="font-medium text-muted-foreground">输出格式</h3>
-        <ToggleGroup
-          aria-label="输出格式"
-          value={settings.outputFormat ? [settings.outputFormat] : []}
-          onValueChange={(next) => {
-            if (next[0]) onSettingsChange({ outputFormat: next[0] })
-          }}
-          size="sm"
-          className="grid w-full min-w-0 auto-cols-fr grid-flow-col gap-1 rounded-lg bg-muted/70 p-0.5"
-        >
-          {outputFormats.map((format) => (
-            <ToggleGroupItem key={format} value={format} className="h-6 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">{format === 'webp' ? 'WebP' : format.toUpperCase()}</ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      </section>
-
-      <div className="flex items-center justify-between text-muted-foreground">
-        <span>生成数量</span>
-        <div className="flex items-center gap-1.5"><Input type="number" aria-label="生成数量" min={1} max={4} step={1} value={settings.n} onChange={(event) => onSettingsChange({ n: Math.min(4, Math.max(1, Math.trunc(Number(event.target.value)) || 1)) })} className="h-7 w-16 px-2 text-xs tabular-nums" /><span className="text-[11px]">张</span></div>
+      <div className="grid grid-cols-[minmax(0,1fr)_4.5rem] gap-3">
+        <section className="min-w-0 space-y-1.5">
+          <h3 className="font-semibold text-foreground">输出格式</h3>
+          <ToggleGroup
+            aria-label="输出格式"
+            value={settings.outputFormat ? [settings.outputFormat] : []}
+            onValueChange={(next) => {
+              if (next[0]) onSettingsChange({ outputFormat: next[0] })
+            }}
+            size="sm"
+            className="grid w-full min-w-0 auto-cols-fr grid-flow-col gap-1 rounded-lg bg-muted/70 p-0.5"
+          >
+            {outputFormats.map((format) => (
+              <ToggleGroupItem key={format} value={format} className="h-6 min-w-0 rounded-md px-1 text-xs text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm">{format === 'webp' ? 'WebP' : format.toUpperCase()}</ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </section>
+        <section className="space-y-1.5">
+          <h3 className="font-semibold text-foreground">生成数量</h3>
+          <div className="flex items-center gap-1.5"><Input type="number" aria-label="生成数量" min={1} max={4} step={1} value={settings.n} onChange={(event) => onSettingsChange({ n: Math.min(4, Math.max(1, Math.trunc(Number(event.target.value)) || 1)) })} className="h-7 min-w-0 flex-1 px-2 text-xs tabular-nums" /><span className="text-[11px] text-muted-foreground">张</span></div>
+        </section>
       </div>
     </fieldset>
   )
