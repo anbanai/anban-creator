@@ -9,7 +9,6 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import type { TopicSubscription, TopicSubscriptionSettings } from '@/types/topic-radar'
 
 const defaultWeights = { traffic_potential: .25, account_fit: .2, differentiation: .15, timeliness: .1, monetization: .15, production_cost: .08, compliance_risk: .07 }
-const dimensions: Record<string, string> = { traffic_potential: '流量潜力', account_fit: '账号匹配', differentiation: '差异化', timeliness: '时效性', monetization: '变现潜力', production_cost: '易制作程度', compliance_risk: '合规安全度' }
 const platforms: Record<string, string> = { weibo: '微博', douyin: '抖音', zhihu: '知乎', bilibili: 'B站', baidu: '百度', toutiao: '头条' }
 const inputClass = 'h-9 w-full rounded-md border bg-background px-2 text-sm'
 
@@ -42,22 +41,22 @@ export function SubscriptionSettings({ subscription, onClose, onSaved, onDeleted
               <span><span className="block font-medium">自动生成短视频脚本</span><span className="mt-1 block text-sm text-muted-foreground">为新选题准备一份可编辑的脚本</span></span>
               <Switch aria-label="自动生成短视频脚本" checked={form.script_policy!.enabled} onCheckedChange={(enabled) => patchPolicy({ enabled, auto_generate: false })} />
             </div>
-            {form.script_policy!.enabled && <fieldset className="mt-4 grid grid-cols-2 gap-3 border-t pt-4">
-              <legend className="sr-only">脚本设置</legend>
-              <label className="grid gap-1 text-sm">每次生成数量<input aria-label="每次生成数量" className={inputClass} type="number" min="1" max="20" required value={form.script_policy!.top_n} onChange={(event) => patchPolicy({ top_n: Number(event.target.value) })} /></label>
-              <label className="grid gap-1 text-sm">目标平台<select className={inputClass} value={form.script_policy!.platform} onChange={(event) => patchPolicy({ platform: event.target.value })}><option value="douyin">抖音</option><option value="channels">视频号</option><option value="bilibili">B站</option><option value="xiaohongshu">小红书</option></select></label>
-              <label className="grid gap-1 text-sm">时长（秒）<input className={inputClass} type="number" min="15" max="300" required value={form.script_policy!.duration_seconds} onChange={(event) => patchPolicy({ duration_seconds: Number(event.target.value) })} /></label>
-              <label className="grid gap-1 text-sm">画幅<select className={inputClass} value={form.script_policy!.aspect_ratio} onChange={(event) => patchPolicy({ aspect_ratio: event.target.value })}><option>9:16</option><option>16:9</option><option>1:1</option></select></label>
-            </fieldset>}
+            {form.script_policy!.enabled && <details className="mt-4 border-t pt-3">
+              <summary className="cursor-pointer text-sm text-muted-foreground">调整脚本格式</summary>
+              <fieldset className="mt-3 grid grid-cols-2 gap-3">
+                <legend className="sr-only">脚本设置</legend>
+                <label className="grid gap-1 text-sm">每次生成数量<input aria-label="每次生成数量" className={inputClass} type="number" min="1" max="20" required value={form.script_policy!.top_n} onChange={(event) => patchPolicy({ top_n: Number(event.target.value) })} /></label>
+                <label className="grid gap-1 text-sm">目标平台<select aria-label="脚本目标平台" className={inputClass} value={form.script_policy!.platform} onChange={(event) => patchPolicy({ platform: event.target.value })}><option value="douyin">抖音</option><option value="channels">视频号</option><option value="bilibili">B站</option><option value="xiaohongshu">小红书</option></select></label>
+                <label className="grid gap-1 text-sm">时长（秒）<input aria-label="脚本时长（秒）" className={inputClass} type="number" min="15" max="300" required value={form.script_policy!.duration_seconds} onChange={(event) => patchPolicy({ duration_seconds: Number(event.target.value) })} /></label>
+                <label className="grid gap-1 text-sm">画幅<select aria-label="脚本画幅" className={inputClass} value={form.script_policy!.aspect_ratio} onChange={(event) => patchPolicy({ aspect_ratio: event.target.value })}><option>9:16</option><option>16:9</option><option>1:1</option></select></label>
+              </fieldset>
+            </details>}
           </div>
 
           <details className="rounded-md border px-4">
             <summary className="cursor-pointer py-3 text-sm font-medium">更多设置</summary>
             <div className="space-y-4 border-t py-4">
-              <label className="grid max-w-sm gap-1 text-sm">设置名称<input aria-label="设置名称" className={inputClass} required maxLength={120} value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></label>
-              <label className="grid max-w-sm gap-1 text-sm">时区<input aria-label="时区" className={inputClass} required value={form.timezone} onChange={(event) => setForm((current) => ({ ...current, timezone: event.target.value }))} /></label>
               <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">趋势来源</legend><div className="flex flex-wrap gap-3">{Object.entries(platforms).map(([id, label]) => <label key={id} className="flex items-center gap-1 text-sm"><input type="checkbox" checked={(form.source_config?.platforms ?? []).includes(id)} onChange={(event) => setPlatform(id, event.target.checked)} />{label}</label>)}</div><p className="text-xs text-muted-foreground">未选择时使用全部支持的趋势来源。</p></fieldset>
-              <fieldset><legend className="mb-2 text-sm font-medium">选题评分权重</legend><div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{Object.entries(dimensions).map(([id, label]) => <label key={id} className="grid gap-1 text-xs">{label}<input className={inputClass} type="number" min="0" step="0.01" required value={form.weights![id] ?? 0} onChange={(event) => setForm((current) => ({ ...current, weights: { ...current.weights, [id]: Number(event.target.value) } }))} /></label>)}</div><p className="mt-2 text-xs text-muted-foreground">所有维度均为越高越适合；权重按总和归一，缺失分数按 0 计算。</p></fieldset>
               <Button type="button" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDeleteOpen(true)} disabled={save.isPending || remove.isPending}>删除自动找题设置</Button>
             </div>
           </details>
