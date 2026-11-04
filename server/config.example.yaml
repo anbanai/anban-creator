@@ -739,6 +739,17 @@ claude:
       whiteboard-animation:
         requests: { cpu: "1", memory: "2Gi" }
         limits: { cpu: "2", memory: "4Gi" }
+      # 视频类 Agent 需要更高的 CPU / 内存。
+      talking-head-editor:
+        requests: { cpu: "2", memory: "4Gi" }
+        limits: { cpu: "4", memory: "7Gi" }
+      # plugin Pack 只要声明 task surface，就必须在这里配置同名资源档位。
+      moments:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
+      ecommerce:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
       profile-analysis:
         requests: { cpu: "1", memory: "2Gi" }
         limits: { cpu: "2", memory: "4Gi" }

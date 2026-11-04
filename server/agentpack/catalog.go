@@ -227,7 +227,7 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 			if len(manifest.Artifacts) > 0 || len(manifest.ArtifactsByTaskType) > 0 || len(manifest.ArtifactStages) > 0 || len(manifest.Delivery) > 0 || len(manifest.DeliveryByTaskType) > 0 || len(manifest.DataDeliveries) > 0 {
 				return fmt.Errorf("interactive Pack must not declare task artifacts or delivery")
 			}
-			if hasSurface(manifest.Surfaces, "task") || hasSurface(manifest.Surfaces, "plan") {
+			if manifest.HasTaskSurface() || manifest.HasSurface("plan") {
 				return fmt.Errorf("interactive Pack must not expose task or plan surfaces")
 			}
 		} else {
@@ -240,7 +240,7 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 			if len(manifest.Bindings.TaskKinds) == 0 {
 				return fmt.Errorf("managed Pack requires at least one task kind")
 			}
-			if hasSurface(manifest.Surfaces, "plan") {
+			if manifest.HasSurface("plan") {
 				if strings.TrimSpace(manifest.PlanTaskKind) == "" {
 					return fmt.Errorf("managed Pack with plan surface requires plan_task_kind")
 				}
@@ -439,7 +439,7 @@ func requiresContentTagging(manifest *Manifest) bool {
 	// ordinary product task bindings below, which makes missing declarations
 	// fail closed for newly added content Packs.
 	if manifest.Kind == KindPlugin {
-		return hasSurface(manifest.Surfaces, "task")
+		return manifest.HasTaskSurface()
 	}
 	for _, taskKind := range manifest.Bindings.TaskKinds {
 		switch strings.TrimSpace(taskKind) {
@@ -449,15 +449,6 @@ func requiresContentTagging(manifest *Manifest) bool {
 			// Any ordinary product/task binding is a content Pack unless it is
 			// explicitly one of the non-content analysis kinds above. This keeps
 			// newly added content Packs fail-closed when tagging is omitted.
-			return true
-		}
-	}
-	return false
-}
-
-func hasSurface(surfaces []string, wanted string) bool {
-	for _, surface := range surfaces {
-		if surface == wanted {
 			return true
 		}
 	}

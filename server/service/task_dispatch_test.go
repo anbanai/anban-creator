@@ -2445,3 +2445,51 @@ func TestDispatchCloudTaskKeepsProjectConcurrencySlot(t *testing.T) {
 		t.Fatalf("slot count = %d, want 1 until terminal finalization", count)
 	}
 }
+
+func TestDispatchEcommercePluginTaskFreezesPackContract(t *testing.T) {
+	svc, repo, _, dispatcher, task := setupDispatchTest(t)
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{
+		Profile: model.PlatformEcommerce,
+		Image:   "registry.example.com/creator-agent-ecommerce@sha256:" + strings.Repeat("f", 64),
+	}
+	task.Type = model.PlatformEcommerce
+	task.AgentID = model.AgentIDEcommerce
+	task.Channel = model.ChannelEcommerce
+	task.TaskKind = model.PlatformEcommerce
+	task.SetEcommerce(model.EcommerceConfig{
+		SelectedModules: map[string]int{"main_images": 1},
+		ProductPhotos:   []string{"https://example.com/product.png"},
+	})
+	if err := repo.Tasks().Update(t.Context(), task); err != nil {
+		t.Fatal(err)
+	}
+	project, err := repo.Projects().FindByID(t.Context(), task.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.Platform = model.PlatformEcommerce
+	if err := repo.Projects().Update(t.Context(), project); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.HandleExecutionFromPayload(t.Context(), task.ID, task.UserID); err != nil {
+		t.Fatalf("dispatch ecommerce task: %v", err)
+	}
+	if dispatcher.callCount() != 1 {
+		t.Fatalf("dispatch calls = %d, want 1", dispatcher.callCount())
+	}
+	execution := mustCurrentExecution(t, repo, task.ID)
+	if execution.AgentPackID != model.AgentIDEcommerce || execution.AgentID != model.AgentIDEcommerce ||
+		execution.Channel != model.ChannelEcommerce || execution.TaskKind != model.PlatformEcommerce {
+		t.Fatalf("frozen plugin Pack identity = %#v", execution)
+	}
+	if execution.RuntimeProfile != model.PlatformEcommerce || execution.RuntimeImage != dispatcher.runtimeSelection.Image {
+		t.Fatalf("frozen runtime = %s/%s", execution.RuntimeProfile, execution.RuntimeImage)
+	}
+	if execution.Status != model.TaskExecutionStarting {
+		t.Fatalf("execution status = %q, want starting", execution.Status)
+	}
+	if !hasCompleteAgentPackIdentity(execution) {
+		t.Fatalf("frozen execution contract is incomplete: %#v", execution)
+	}
+}
