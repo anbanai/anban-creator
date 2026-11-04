@@ -14,7 +14,6 @@ import (
 	"time"
 
 	dockerclient "github.com/docker/docker/client"
-	"github.com/gofiber/fiber/v3"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"gorm.io/driver/mysql"
@@ -1285,16 +1284,8 @@ func main() {
 		close(shutdownDone)
 	}()
 
-	listenConfig := fiber.ListenConfig{}
-	if cfg.Server.TLSCertFile != "" || cfg.Server.TLSKeyFile != "" {
-		if cfg.Server.TLSCertFile == "" || cfg.Server.TLSKeyFile == "" {
-			log.Fatal().Msg("server TLS requires both certificate and key files")
-		}
-		listenConfig.CertFile = cfg.Server.TLSCertFile
-		listenConfig.CertKeyFile = cfg.Server.TLSKeyFile
-	}
-	log.Info().Str("addr", addr).Bool("tls", listenConfig.CertFile != "").Msg("server starting")
-	if err := app.Listen(addr, listenConfig); err != nil {
+	log.Info().Str("addr", addr).Str("scheme", "http").Msg("server starting")
+	if err := app.Listen(addr); err != nil {
 		log.Error().Err(err).Msg("server listen error")
 	}
 	cancel()

@@ -18,13 +18,13 @@ import (
 )
 
 func TestDshSecretEnvDefaultsToServerMCPRoute(t *testing.T) {
-	envs, err := dshSecretEnv("session-secret", "session-1", "", "https://creator-server:8443", "project-creator")
+	envs, err := dshSecretEnv("session-secret", "session-1", "", "http://creator-server:8080", "project-creator")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, env := range envs {
 		if env.Name == "ANBAN_DSH_BRIDGE_MCP_URL" {
-			if env.Value != "https://creator-server:8443/mcp" {
+			if env.Value != "http://creator-server:8080/mcp" {
 				t.Fatalf("default MCP URL = %q, want server /mcp route", env.Value)
 			}
 			return

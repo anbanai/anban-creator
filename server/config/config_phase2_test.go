@@ -220,6 +220,9 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewConfig(config.example.yaml): %v", err)
 	}
+	if cfg.Dsh.ServerURL != cfg.AgentServerURL() || cfg.Dsh.MCPURL != cfg.AgentServerURL()+"/mcp" {
+		t.Fatalf("example DSH server/MCP = %q / %q, want internal Agent server %q", cfg.Dsh.ServerURL, cfg.Dsh.MCPURL, cfg.AgentServerURL())
+	}
 	if cfg.Storage.MediaLibraryPrefix != DefaultMediaLibraryPrefix {
 		t.Fatalf("loaded media prefix = %q", cfg.Storage.MediaLibraryPrefix)
 	}

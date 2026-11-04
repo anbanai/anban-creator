@@ -195,7 +195,7 @@ func TestExecRuntimeFactoryDoesNotMapServerCredentialNamesForDSH(t *testing.T) {
 	}
 }
 
-func TestExecRuntimeFactoryPassesNodeExtraCACertsToBridge(t *testing.T) {
+func TestExecRuntimeFactoryDropsInheritedServerCA(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("bridge process test uses a POSIX shell")
 	}
@@ -221,8 +221,11 @@ func TestExecRuntimeFactoryPassesNodeExtraCACertsToBridge(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if got := strings.TrimSpace(string(data)); got != "/var/run/secrets/anban-internal-ca/ca.crt" {
-		t.Fatalf("NODE_EXTRA_CA_CERTS = %q, want mounted internal CA path", got)
+	if len(data) == 0 {
+		t.Fatal("bridge did not write its environment probe")
+	}
+	if got := strings.TrimSpace(string(data)); got != "" {
+		t.Fatalf("NODE_EXTRA_CA_CERTS = %q, want no inherited server CA", got)
 	}
 }
 
