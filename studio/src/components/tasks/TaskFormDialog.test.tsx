@@ -1514,3 +1514,48 @@ describe('identity creation page and inline settings', () => {
     expect(within(settings).getByRole('button', { name: '公众号文章' })).toHaveAttribute('aria-pressed', 'true')
   })
 })
+
+describe('topic based creation', () => {
+  it('starts a topic draft without requiring extra prompt input and keeps optional choices hidden', async () => {
+    renderDialog({
+      initialAssetId: '22222222-2222-4222-8222-222222222222',
+      initialPrompt: '一个值得写的选题\n这个问题为何重要',
+    })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
+
+    const prompt = await within(dialog).findByRole('textbox', { name: 'Agent prompt' })
+    expect(prompt).toHaveValue('一个值得写的选题\n这个问题为何重要')
+    expect(within(dialog).getByTestId('topic-prompt-summary').textContent).toBe('一个值得写的选题\n这个问题为何重要')
+    expect(within(dialog).getByTestId('topic-prompt-summary')).toBeVisible()
+    const extraPromptDetails = within(dialog).getByText('补充创作要求（可选）').closest('details')
+    expect(extraPromptDetails).not.toHaveAttribute('open')
+    expect(prompt).not.toBeVisible()
+    const moreSettings = within(dialog).getByText('更多创作设置').closest('details')
+    expect(moreSettings).not.toHaveAttribute('open')
+    expect(within(dialog).getByRole('switch', { name: '生成封面图' })).not.toBeVisible()
+    expect(within(dialog).queryByRole('group', { name: '创作类型' })).not.toBeInTheDocument()
+    expect(within(dialog).getByText('当前选择为高峰时段 · 预计 4800 积分/次')).not.toBeVisible()
+
+    expect(within(dialog).getByText(/预计基础创作费：4,800 积分/)).toBeVisible()
+    expect(within(dialog).getByText(/图片、视频等增值操作按实际使用另行计费/)).toBeVisible()
+    const billingDetails = within(dialog).getByText('费用明细').closest('details')
+    expect(billingDetails).not.toHaveAttribute('open')
+    expect(within(billingDetails!).getByText(/云端 Agent 运行成本由平台承担/)).toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('已匹配输出方式：公众号文章')).not.toBeVisible()
+    fireEvent.click(within(dialog).getByText('更多创作设置'))
+    expect(within(dialog).getByLabelText('已匹配输出方式：公众号文章')).toBeVisible()
+    expect(within(dialog).getByText('当前选择为高峰时段 · 预计 4800 积分/次')).not.toBeVisible()
+    fireEvent.click(within(dialog).getByText('费用明细'))
+    expect(within(billingDetails!).getByText('当前选择为高峰时段 · 预计 4800 积分/次')).toBeVisible()
+
+    const createButton = within(dialog).getByRole('button', { name: '开始创作' })
+    await waitFor(() => expect(createButton).toBeEnabled())
+    fireEvent.click(createButton)
+
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'wechat-article',
+      asset_id: '22222222-2222-4222-8222-222222222222',
+      prompt: '一个值得写的选题\n这个问题为何重要',
+    })))
+  })
+})
