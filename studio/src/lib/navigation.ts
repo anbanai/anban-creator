@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   Sparkles,
-  Lightbulb,
+  NotebookPen,
   CalendarRange,
   CalendarDays,
   GalleryHorizontalEnd,
@@ -25,8 +25,8 @@ export interface NavItem {
 
 export const mvpNavItems: NavItem[] = [
   { to: '/', label: '首页', icon: Sparkles, end: true },
+  { to: '/topics', label: '选题', icon: NotebookPen },
   { to: '/projects', label: '人设', icon: UserRound },
-  { to: '/topics', label: '选题', icon: Lightbulb },
   { to: '/tasks', label: '作品', icon: GalleryHorizontalEnd },
   { to: '/plans', label: '排期', icon: CalendarRange },
   { to: '/billing', label: '钱包', icon: Coins },

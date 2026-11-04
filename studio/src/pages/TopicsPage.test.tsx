@@ -69,6 +69,23 @@ describe('unified topics page', () => {
     }
     expect(document.querySelector('a[href*="undefined"]')).toBeNull()
   })
+  it('keeps search, persona, usage, and page when opening a script result', async () => {
+    const withScript: ContentAsset = { ...asset, outputs: [{ job_id: 'filtered-script', project_id: mockProjects[0].id, type: 'topic-script', title: '脚本', status: 'completed' }] }
+    vi.mocked(api.contentAssets.list).mockResolvedValue({ items: [withScript], total: 60 })
+    vi.mocked(api.contentAssets.get).mockResolvedValue({ asset: withScript, evidence: [], links: [], scores: [] })
+    vi.spyOn(api.topicRadar, 'script').mockResolvedValue({ id: 'filtered-script', suggestion_id: '', digest_id: '', aspect_ratio: '9:16', target_platform: 'douyin', duration_seconds: 60, status: 'completed' })
+    page(`/topics?q=foo&project_id=${mockProjects[0].id}&usage=unused&page=2`)
+    fireEvent.click(await screen.findByRole('link', { name: '脚本：已完成' }))
+    await screen.findByRole('dialog')
+    const query = new URLSearchParams(screen.getByTestId('url').textContent!)
+    expect(query.get('q')).toBe('foo')
+    expect(query.get('project_id')).toBe(mockProjects[0].id)
+    expect(query.get('usage')).toBe('unused')
+    expect(query.get('page')).toBe('2')
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(new URLSearchParams(screen.getByTestId('url').textContent!).get('page')).toBe('2')
+  })
 
   it('defaults to all personas and separates script status from persona usage', async () => {
     page()
@@ -121,6 +138,27 @@ describe('unified topics page', () => {
     fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(screen.getByTestId('url').textContent).not.toContain('asset_id')
+  })
+  it('allows global topic availability from a persona-filtered add drawer', async () => {
+    const create = vi.spyOn(api.contentAssets, 'create').mockResolvedValue({ ...asset, project_uses: [] })
+    page(`/topics?project_id=${mockProjects[0].id}`)
+    fireEvent.click(await screen.findByRole('button', { name: '添加选题' }))
+    fireEvent.change(await screen.findByRole('combobox', { name: '操作人设' }), { target: { value: '__all__' } })
+    expect(screen.getByRole('combobox', { name: '操作人设' })).toHaveValue('__all__')
+    fireEvent.change(screen.getByRole('textbox', { name: '选题标题' }), { target: { value: '全局选题' } })
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '添加选题' }))
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ title: '全局选题', project_ids: [] })))
+    expect(new URLSearchParams(screen.getByTestId('url').textContent!).get('project_id')).toBe(mockProjects[0].id)
+  })
+  it('routes an already-used persona and topic to the existing reuse flow', async () => {
+    const used: ContentAsset = { ...asset, project_uses: [{ project_id: mockProjects[0].id, project_name: mockProjects[0].name, status: 'used' }] }
+    vi.mocked(api.contentAssets.list).mockResolvedValue({ items: [used], total: 1 })
+    vi.mocked(api.contentAssets.get).mockResolvedValue({ asset: used, evidence: [], links: [], scores: [] })
+    vi.spyOn(api.contentAssets, 'listRuns').mockResolvedValue({ items: [], total: 0, offset: 0, limit: 25 })
+    page(`/topics?project_id=${mockProjects[0].id}&asset_id=${asset.asset_id}`)
+    const drawer = await screen.findByRole('dialog')
+    expect(await within(drawer).findByRole('button', { name: '开始复用' })).toBeInTheDocument()
+    expect(within(drawer).queryByRole('link', { name: '开始创作' })).not.toBeInTheDocument()
   })
   it.each([false, true])('clamps empty last page, archive=%s', async archiveLast => {
     let archived = !archiveLast

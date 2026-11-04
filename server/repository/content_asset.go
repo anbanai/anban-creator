@@ -109,7 +109,8 @@ func (r *contentAssetRepository) ListWithFilters(ctx context.Context, filter Con
 		q = q.Where(`(EXISTS (SELECT 1 FROM content_asset_links l WHERE l.asset_id = content_assets.id AND l.user_id = content_assets.user_id AND l.project_id = ?)
 			OR EXISTS (SELECT 1 FROM content_asset_evidence e WHERE e.asset_id = content_assets.id AND e.user_id = content_assets.user_id AND e.project_id = ?)
 			OR EXISTS (SELECT 1 FROM content_reuse_runs r WHERE r.asset_id = content_assets.id AND r.user_id = content_assets.user_id AND r.target_project_id = ?)
-			OR EXISTS (SELECT 1 FROM topic_pool p WHERE p.content_asset_id = content_assets.id AND p.user_id = content_assets.user_id AND p.project_id = ?))`, filter.ProjectID, filter.ProjectID, filter.ProjectID, filter.ProjectID)
+			OR EXISTS (SELECT 1 FROM topic_script_jobs j WHERE j.content_asset_id = content_assets.id AND j.user_id = content_assets.user_id AND j.project_id = ?)
+			OR EXISTS (SELECT 1 FROM topic_pool p WHERE p.content_asset_id = content_assets.id AND p.user_id = content_assets.user_id AND p.project_id = ?))`, filter.ProjectID, filter.ProjectID, filter.ProjectID, filter.ProjectID, filter.ProjectID)
 	}
 	if filter.Usage != "" {
 		if filter.Usage != model.TopicStatusUnused && filter.Usage != model.TopicStatusUsed {

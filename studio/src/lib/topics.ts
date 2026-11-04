@@ -1,6 +1,11 @@
 import type { ContentAsset } from '@/types'
 import type { QueryClient } from '@tanstack/react-query'
 export const topicPageSize = 25
+export const allTopicPersonas = '__all__'
+const topicConsumingTypes = new Set(['wechat-article', 'wechat-picture', 'seednote', 'moments'])
+export function topicTaskTypes(types: readonly string[]) {
+  return types.filter(type => topicConsumingTypes.has(type))
+}
 export function topicFilters(params: URLSearchParams) {
   const requested = Number(params.get('page') ?? 1)
   const page = Number.isSafeInteger(requested) && requested > 0 ? requested : 1
@@ -21,8 +26,14 @@ export async function invalidateTopics(client: QueryClient) {
 export function isTopicScript(output: NonNullable<ContentAsset['outputs']>[number]) {
   return output.type === 'topic-script' || output.type === 'content-script'
 }
-export function topicOutputHref(assetId: string, output: NonNullable<ContentAsset['outputs']>[number]) {
-  if (output.job_id) return `/topics?${new URLSearchParams({ asset_id: assetId, detail: 'script', script_id: output.job_id })}`
+export function topicOutputHref(assetId: string, output: NonNullable<ContentAsset['outputs']>[number], context = new URLSearchParams()) {
+  if (output.job_id) {
+    const params = new URLSearchParams(context)
+    params.set('asset_id', assetId)
+    params.set('detail', 'script')
+    params.set('script_id', output.job_id)
+    return `/topics?${params}`
+  }
   return output.task_id ? `/tasks/${output.task_id}` : undefined
 }
 
