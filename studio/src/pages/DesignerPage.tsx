@@ -689,11 +689,6 @@ export default function DesignerPage() {
                 onAttachmentRejected={handleAttachmentRejected}
                 status={isGenerating ? (
                   <span className="text-xs text-muted-foreground">正在生成...</span>
-                ) : effectiveCapability ? (
-                  <span className="text-xs text-muted-foreground">
-                    {editingImage || effectiveQuantity === 1 ? `每张 ${effectiveCapability.credits.toLocaleString()} 积分` : `${effectiveQuantity} 张 · 合计 ${(effectiveCapability.credits * effectiveQuantity).toLocaleString()} 积分`}
-                    {!walletError && wallet ? ` · 余额 ${wallet.balance.toLocaleString()}` : ''}
-                  </span>
                 ) : null}
                 trailingTools={isGenerating ? (
                   <Button type="button" size="sm" variant="ghost" aria-label="停止等待" onClick={handleCancel}>

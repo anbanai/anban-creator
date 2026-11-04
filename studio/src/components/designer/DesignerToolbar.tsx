@@ -24,7 +24,7 @@ function AdvancedSettings({ designerFeatures, settings, onSettingsChange }: Adva
   const showCompression = designerFeatures.hasCompression && (settings.outputFormat === 'jpeg' || settings.outputFormat === 'webp')
   if (!designerFeatures.watermark && !designerFeatures.hasBackground && !showCompression) return null
   return (
-    <div className="space-y-2 border-t border-border/60 pt-2">
+    <div className="space-y-3">
       {designerFeatures.watermark ? (
         <button
           type="button"
@@ -32,7 +32,7 @@ function AdvancedSettings({ designerFeatures, settings, onSettingsChange }: Adva
           onClick={() => onSettingsChange({ watermark: !settings.watermark })}
           className="flex w-full items-center justify-between gap-3 rounded-md text-left text-xs font-medium text-muted-foreground"
         >
-          <span>添加水印</span>
+          <span className="font-semibold text-foreground">添加水印</span>
           <span aria-hidden="true" className={`flex h-5 w-9 items-center rounded-full p-0.5 transition-colors ${settings.watermark ? 'bg-primary' : 'bg-muted'}`}>
             <span className={`size-4 rounded-full bg-background shadow-sm transition-transform ${settings.watermark ? 'translate-x-4' : ''}`} />
           </span>
@@ -40,8 +40,11 @@ function AdvancedSettings({ designerFeatures, settings, onSettingsChange }: Adva
       ) : null}
 
       {showCompression ? (
-        <div className="flex items-center gap-3">
-          <span className="shrink-0 text-xs font-medium text-muted-foreground">压缩率</span>
+        <div className="space-y-1.5">
+          <p className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-foreground">压缩率</span>
+            <span className="text-[11px] text-muted-foreground tabular-nums">{settings.compression}%</span>
+          </p>
           <Slider
             aria-label="压缩率"
             value={[settings.compression]}
@@ -49,15 +52,13 @@ function AdvancedSettings({ designerFeatures, settings, onSettingsChange }: Adva
             min={0}
             max={100}
             step={1}
-            className="flex-1"
           />
-          <span className="w-8 text-right text-[11px] text-foreground tabular-nums">{settings.compression}%</span>
         </div>
       ) : null}
 
       {designerFeatures.hasBackground ? (
-        <div className="space-y-1">
-          <p className="text-xs font-medium text-muted-foreground">背景</p>
+        <div className="space-y-1.5">
+          <p className="text-xs font-semibold text-foreground">背景</p>
           <ToggleGroup
             aria-label="背景"
             value={[settings.background]}
@@ -73,9 +74,9 @@ function AdvancedSettings({ designerFeatures, settings, onSettingsChange }: Adva
           </ToggleGroup>
           {settings.background === 'transparent' && (
             <div className="space-y-1.5 pt-1">
-              <p className="flex items-center justify-between text-xs text-muted-foreground">
+              <p className="flex items-center justify-between text-xs font-semibold text-foreground">
                 背景透明度
-                <span className="tabular-nums text-foreground">{100 - (settings.backgroundOpacity ?? 0)}%</span>
+                <span className="font-normal tabular-nums">{100 - (settings.backgroundOpacity ?? 0)}%</span>
               </p>
               <Slider
                 aria-label="背景透明度"
@@ -138,7 +139,7 @@ export default function DesignerToolbar({
               <TooltipContent>{balanceError ? '积分余额暂不可用' : '积分余额'}</TooltipContent>
             </Tooltip>
           </div>
-          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
             {children}
             {!isMobile && <AdvancedSettings designerFeatures={designerFeatures} settings={settings} onSettingsChange={onSettingsChange} />}
           </div>
@@ -159,7 +160,7 @@ export default function DesignerToolbar({
       <div className="flex shrink-0 items-center justify-between border-t border-border/50 bg-card/60 px-3 py-2 md:hidden">
         <details className="relative text-xs" onToggle={(event) => setMobileSettingsOpen(event.currentTarget.open)}>
           <summary className="cursor-pointer text-muted-foreground">创作参数</summary>
-          {mobileSettingsOpen && <div className="absolute left-0 top-6 z-20 max-h-[60dvh] w-[min(20rem,calc(100vw-1.5rem))] space-y-3 overflow-y-auto rounded-xl border bg-popover p-4 shadow-lg">
+          {mobileSettingsOpen && <div className="absolute left-0 top-6 z-20 max-h-[60dvh] w-[min(20rem,calc(100vw-1.5rem))] space-y-4 overflow-y-auto rounded-xl border bg-popover p-4 shadow-lg">
             {children}
             <AdvancedSettings designerFeatures={designerFeatures} settings={settings} onSettingsChange={onSettingsChange} />
           </div>}

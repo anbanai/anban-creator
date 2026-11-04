@@ -153,12 +153,16 @@ describe('Designer billing guidance', () => {
     expect(screen.queryByRole('group', { name: 'Agent 执行配置' })).not.toBeInTheDocument()
   })
 
-  it('shows price and balance and disables generation when credits are insufficient', async () => {
+  it('keeps billing outside the composer and disables generation when credits are insufficient', async () => {
     vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 100, promotional: 0, debt: 0, balance: 100 })
 
     render(createElement(DesignerPage))
 
-    expect(await screen.findByText('每张 500 积分 · 余额 100')).toBeInTheDocument()
+    const settings = within(screen.getByRole('complementary', { name: '设计师设置' }))
+    expect(await settings.findByText('500 积分/张')).toBeInTheDocument()
+    const composer = screen.getByRole('button', { name: '生成' }).closest('[data-slot="agent-prompt-surface"]')
+    expect(composer).not.toBeNull()
+    expect(composer).not.toHaveTextContent(/积分|余额/)
     fireEvent.change(screen.getByPlaceholderText('描述你想要生成的图片...'), {
       target: { value: '生成海报' },
     })
@@ -195,7 +199,7 @@ describe('Designer billing guidance', () => {
     expect(screen.queryByText('每张 500 积分 · 余额 1,000')).not.toBeInTheDocument()
     const promptAddon = screen.getByRole('button', { name: '生成' }).closest('[data-slot="input-group-addon"]')
     expect(promptAddon).not.toBeNull()
-    expect(within(promptAddon as HTMLElement).getByText('每张 500 积分')).toBeInTheDocument()
+    expect(promptAddon).not.toHaveTextContent(/积分|余额/)
   })
 
   it('refreshes the wallet after a normal generation is accepted', async () => {
