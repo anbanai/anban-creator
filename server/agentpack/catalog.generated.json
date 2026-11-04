@@ -3291,6 +3291,18 @@
           "required": false
         },
         {
+          "role": "cover_quality",
+          "path": "output/cover-quality.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "independent_validation",
+          "path": "output/independent-validation.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
           "role": "cover",
           "path": "output/cover.png",
           "mime_type": "image/png",
@@ -3312,6 +3324,24 @@
           "role": "cover_candidate",
           "path": "output/cover_v2.png",
           "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "cover_asset_manifest",
+          "path": "output/cover-asset-manifest.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "cover_variant_matrix",
+          "path": "output/cover-variant-matrix.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "cover_thumbnail_review",
+          "path": "output/cover-thumbnail-review.json",
+          "mime_type": "application/json",
           "required": false
         },
         {
@@ -3432,6 +3462,31 @@
           "mime_type": "application/json"
         },
         {
+          "role": "cover_quality",
+          "path": "output/cover-quality.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "independent_validation",
+          "path": "output/independent-validation.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "cover_asset_manifest",
+          "path": "output/cover-asset-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "cover_variant_matrix",
+          "path": "output/cover-variant-matrix.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "cover_thumbnail_review",
+          "path": "output/cover-thumbnail-review.json",
+          "mime_type": "application/json"
+        },
+        {
           "role": "subtitles",
           "path": "output/subtitles.srt",
           "mime_type": "application/x-subrip"
@@ -3452,11 +3507,11 @@
           "funnel_stage"
         ]
       },
-      "digest": "fbd19d1732f4866255446067e538c9bf65337cda6f4ab8db363baf1f4dbd1f5c"
+      "digest": "d42ef8c218b7e029e89465d3c293b286ac25b74493963316ffc3cf5302360efd"
     },
     {
       "id": "talking-head-montage",
-      "version": "1.3.0",
+      "version": "1.3.1",
       "kind": "plugin",
       "display_name": "口播 Montage 制作",
       "description": "以 OpenMontage hybrid 为主引擎，完成真人口播、生成视频素材、图片素材、图形动效、字幕与分章节 BGM 的本地制作与文件审核，并在流程最后一步生成封面。",
@@ -3828,6 +3883,24 @@
           "required": false
         },
         {
+          "role": "cover_asset_manifest",
+          "path": "output/cover-asset-manifest.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "cover_variant_matrix",
+          "path": "output/cover-variant-matrix.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "cover_thumbnail_review",
+          "path": "output/cover-thumbnail-review.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
           "role": "review_decision",
           "path": "output/review-decision.json",
           "mime_type": "application/json",
@@ -4033,6 +4106,21 @@
           "mime_type": "application/json"
         },
         {
+          "role": "cover_asset_manifest",
+          "path": "output/cover-asset-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "cover_variant_matrix",
+          "path": "output/cover-variant-matrix.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "cover_thumbnail_review",
+          "path": "output/cover-thumbnail-review.json",
+          "mime_type": "application/json"
+        },
+        {
           "role": "content_tags",
           "path": "output/content-tags.json",
           "mime_type": "application/json"
@@ -4086,7 +4174,7 @@
       "ui": {
         "renderer": "custom:talking-head-montage"
       },
-      "digest": "815db567bbcde12aadb74a943661253b13a2c35607d4ecb1d328edeba465c379"
+      "digest": "cbee19f3bd8d7696726d994eafb24a08344c50df358d2732b2010a55bce4faec"
     },
     {
       "id": "topic-radar",
@@ -5446,7 +5534,7 @@
     },
     {
       "id": "viral-ip-video-editor",
-      "version": "1.3.0",
+      "version": "1.3.1",
       "kind": "plugin",
       "display_name": "爆款 IP 视频剪辑",
       "description": "基于 Montage 运行时处理真人 IP 口播素材，完成留存导向的剪辑规划、制作指导和成片质量复核；字幕与 BGM 各自按独立方法论制作（BGM 可按章节换曲），封面在流程最后一步生成。",
@@ -5854,6 +5942,24 @@
           "required": false
         },
         {
+          "role": "cover_asset_manifest",
+          "path": "output/cover-asset-manifest.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "cover_variant_matrix",
+          "path": "output/cover-variant-matrix.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "cover_thumbnail_review",
+          "path": "output/cover-thumbnail-review.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
           "role": "failure_state",
           "path": "output/failure-state.json",
           "mime_type": "application/json",
@@ -6107,10 +6213,25 @@
           "role": "cover_review",
           "path": "output/cover-quality.json",
           "mime_type": "application/json"
+        },
+        {
+          "role": "cover_asset_manifest",
+          "path": "output/cover-asset-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "cover_variant_matrix",
+          "path": "output/cover-variant-matrix.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "cover_thumbnail_review",
+          "path": "output/cover-thumbnail-review.json",
+          "mime_type": "application/json"
         }
       ],
       "ui": {},
-      "digest": "7feeee339869aad8290657824f79d9849189247e74bd45193e3b6a5ff0f800ea"
+      "digest": "5b8d1fd167218f2c8393963ce5501acdc63d4285abbf77826a2ecb658ba2874f"
     },
     {
       "id": "wechat-article",
