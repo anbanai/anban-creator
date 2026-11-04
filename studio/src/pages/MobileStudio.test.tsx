@@ -82,6 +82,16 @@ describe('mobile core creation', () => {
     expect(mocks.update).toHaveBeenCalledWith('p1', { agent_ids: ['ecommerce'], platform: 'ecommerce' })
     expect(mocks.create).not.toHaveBeenCalled()
   })
+  it('also explains switching away from an ecommerce identity before any settings are written', async () => {
+    mocks.list.mockResolvedValue([{ ...persona, platform: 'ecommerce', agent_ids: ['ecommerce'] }])
+    mount(<MobileCreatePage />, '/mobile/create?project_id=p1&type=wechat-article')
+    await screen.findByRole('option', { name: persona.name })
+    fireEvent.click(screen.getByRole('button', { name: '进入创作对话' }))
+    expect(within(screen.getByRole('dialog')).getByRole('note')).toHaveTextContent('停用这个人设的电商设计')
+    expect(mocks.update).not.toHaveBeenCalled()
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '取消' }))
+    expect(mocks.create).not.toHaveBeenCalled()
+  })
   it('blocks an archived or removed selected identity instead of silently switching to another one', async () => {
     mount(<MobileCreatePage />, '/mobile/create?project_id=removed&type=seednote')
     expect(await screen.findByRole('alert')).toHaveTextContent('这个人设已不可用')
