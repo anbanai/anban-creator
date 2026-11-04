@@ -136,6 +136,50 @@ func TestDesignerRouteResolvesExactCapabilityKeyOnly(t *testing.T) {
 	}
 }
 
+func TestDesignerRouteUsesCommonSizesForValidation(t *testing.T) {
+	want := []string{"1:1:2K", "3:4:2K", "4:3:2K", "16:9:2K", "9:16:2K"}
+	for _, key := range []string{"standard", "professional"} {
+		t.Run(key, func(t *testing.T) {
+			configured := srvconfig.ImageGenerationRouteConfig{Enabled: true, GenerationFeatures: ImageGenerationFeatures{
+				SizePresets: []string{"1:1:2K"}, DefaultSize: "1:1:2K", QualityLevels: []string{"auto"}, OutputFormats: []string{"png"}, MaxBatch: 1,
+			}}
+			svc := &DesignerService{fullCfg: &srvconfig.Config{ModelRoutes: srvconfig.ModelRoutesConfig{ImageGeneration: srvconfig.ImageGenerationRoutesConfig{
+				Capabilities: map[string]srvconfig.ImageGenerationRouteConfig{key: configured},
+			}}}}
+			route, ok := svc.designerRoute(key)
+			if !ok || !reflect.DeepEqual(route.GenerationFeatures.SizePresets, want) {
+				t.Fatalf("%s sizes = %v, want %v", key, route.GenerationFeatures.SizePresets, want)
+			}
+			for _, size := range want {
+				req := DesignerGenerateRequest{Size: size, Quality: "auto", N: 1, OutputFormat: "png"}
+				if err := validateDesignerGenerateRequest(req, route.GenerationFeatures); err != nil {
+					t.Errorf("%s rejected: %v", size, err)
+				}
+			}
+			if !reflect.DeepEqual(svc.fullCfg.ModelRoutes.ImageGeneration.Capabilities[key], configured) {
+				t.Fatal("designer size policy mutated the task capability configuration")
+			}
+		})
+	}
+}
+
+func TestDesignerSizePolicyPreservesOtherFeaturesAndCustomCapabilities(t *testing.T) {
+	configured := ImageGenerationFeatures{
+		SizePresets: []string{"3:4:2K"}, DefaultSize: "3:4:2K", QualityLevels: []string{"high"},
+		OutputFormats: []string{"webp"}, SupportsReference: true, MaxReferenceImages: 3, SupportsMask: true,
+		HasBackground: true, HasCompression: true, Watermark: true, MaxBatch: 1,
+	}
+	for _, key := range []string{"standard", "professional", "custom"} {
+		got := DesignerGenerationFeatures(key, configured)
+		if key != "custom" {
+			got.SizePresets = configured.SizePresets
+		}
+		if !reflect.DeepEqual(got, configured) {
+			t.Errorf("%s changed other configured features: %#v", key, got)
+		}
+	}
+}
+
 func TestValidateDesignerGenerateRequestRequiresExactFixedSizePreset(t *testing.T) {
 	caps := ImageGenerationFeatures{
 		SizePresets:   []string{"1:1:2K", "3:4:2K"},

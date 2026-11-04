@@ -415,7 +415,7 @@ model_routes:
         response_format: "${ANBAN_IMAGE_RESPONSE_FORMAT:-b64_json}"
         generation_features:
           quality_levels: ["auto", "low", "medium", "high"]
-          size_presets: ["1:1:2K", "3:2:2K", "2:3:2K", "9:16:2K"]
+          size_presets: ["1:1:2K", "3:4:2K", "4:3:2K", "16:9:2K", "9:16:2K"]
           default_size: "1:1:2K"
           max_batch: 1
           max_reference_images: 16

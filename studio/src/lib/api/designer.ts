@@ -1,4 +1,6 @@
 import { http, unwrap } from '@/lib/http-client'
+import { isAxiosError } from 'axios'
+import { loadDesignerBatch, saveDesignerBatch } from '@/lib/designer-session'
 import type { ImageCapabilityListResponse, ImageCapabilityOption } from '@/types'
 import type { DesignerCapability, GenerateQuote, GenerateRequest, HistoryResponse, ImageGeneration } from '@/types/designer'
 
@@ -33,14 +35,7 @@ export function normalizeCapability(raw: ImageCapabilityOption): DesignerCapabil
   }
 }
 
-export const designerApi = {
-  getCapabilities: () =>
-    unwrap<ImageCapabilityListResponse>(http.get('/image-capabilities')).then((response) => ({
-      items: response.items.map(normalizeCapability),
-      defaultCapability: response.default_capability,
-    })),
-
-  generate: async (req: GenerateRequest, signal?: AbortSignal, onAdmitting?: (operationId: string) => void) => {
+async function generateSingle(req: GenerateRequest, signal?: AbortSignal, onAdmitting?: (operationId: string) => void) {
     const operation_id = req.operation_id ?? crypto.randomUUID()
     const quotedRequest = { ...req, n: 1, operation_id }
     const quote = await unwrap<GenerateQuote>(
@@ -58,6 +53,54 @@ export const designerApi = {
     return unwrap<{ generation_id: string; status: string; price_credits: number }>(
       signal ? http.post('/designer/generate', generateRequest, { signal }) : http.post('/designer/generate', generateRequest),
     )
+}
+
+function getSingleGeneration(id: string, signal?: AbortSignal) {
+  return unwrap<ImageGeneration>(signal ? http.get(`/designer/generations/${id}`, { signal }) : http.get(`/designer/generations/${id}`))
+}
+
+export const designerApi = {
+  getCapabilities: () =>
+    unwrap<ImageCapabilityListResponse>(http.get('/image-capabilities')).then((response) => ({
+      items: response.items.map(normalizeCapability),
+      defaultCapability: response.default_capability,
+    })),
+
+  generate: async (req: GenerateRequest, signal?: AbortSignal, onAdmitting?: (operationId: string) => void) => {
+    if (!Number.isInteger(req.n) || req.n < 1 || req.n > 4) throw new Error('生成数量需为 1–4 张')
+    if (req.n === 1) return generateSingle(req, signal, onAdmitting)
+    const id = req.operation_id ?? crypto.randomUUID()
+    const fingerprint = JSON.stringify({ ...req, operation_id: undefined })
+    const batch = loadDesignerBatch(id) ?? {
+      fingerprint,
+      operations: Array.from({ length: req.n }, (_, index) => ({ id: index === 0 ? id : crypto.randomUUID(), state: 'pending' as const })),
+    }
+    if (batch.fingerprint !== fingerprint) throw new Error('生成请求与上次提交不一致')
+    saveDesignerBatch(id, batch)
+    const outcomes = await Promise.allSettled(batch.operations.map(async (operation) => {
+      try {
+        return await generateSingle({ ...req, operation_id: operation.id, n: 1 }, signal, () => {
+          onAdmitting?.(id)
+          operation.state = 'admitted'
+          saveDesignerBatch(id, batch)
+        })
+      } catch (error) {
+        const status = isAxiosError(error) ? error.response?.status : undefined
+        if (operation.state !== 'admitted' || (status !== undefined && status >= 400 && status < 500 && status !== 408)) {
+          operation.state = 'rejected'
+          saveDesignerBatch(id, batch)
+        }
+        throw error
+      }
+    }))
+    signal?.throwIfAborted()
+    const accepted = outcomes.filter((outcome) => outcome.status === 'fulfilled')
+    if (accepted.length === 0) {
+      const uncertainIndex = batch.operations.findIndex((operation) => operation.state === 'admitted')
+      const failed = uncertainIndex >= 0 ? outcomes[uncertainIndex] : outcomes.find((outcome) => outcome.status === 'rejected')
+      throw (failed as PromiseRejectedResult).reason
+    }
+    return { generation_id: id, status: 'generating', price_credits: accepted.reduce((sum, outcome) => sum + outcome.value.price_credits, 0) }
   },
 
   registerReference: (data: { upload_id: string; key: string }, signal?: AbortSignal) =>
@@ -75,8 +118,20 @@ export const designerApi = {
   getHistory: (params: { project_id?: string; page?: number; page_size?: number } = {}) =>
     unwrap<HistoryResponse>(http.get('/designer/history', { params })),
 
-  getGeneration: (id: string, signal?: AbortSignal) =>
-    unwrap<ImageGeneration>(
-      signal ? http.get(`/designer/generations/${id}`, { signal }) : http.get(`/designer/generations/${id}`),
-    ),
+  getGeneration: async (id: string, signal?: AbortSignal): Promise<ImageGeneration> => {
+    const batch = loadDesignerBatch(id)
+    if (!batch) return getSingleGeneration(id, signal)
+    const admitted = batch.operations.filter((operation) => operation.state === 'admitted')
+    if (!admitted.length) return { id, project_id: '', prompt: '', n: batch.operations.length, status: 'failed', error: '图片未能提交，请重试', created_at: '', updated_at: '' }
+    const generations = await Promise.all(admitted.map((operation) => getSingleGeneration(operation.id, signal)))
+    const results = generations.flatMap((generation) => generation.status === 'completed' ? generation.results ?? [] : []).map((result, index) => ({ ...result, index }))
+    const generating = generations.some((generation) => generation.status === 'generating')
+    return {
+      ...generations[0], id, n: batch.operations.length, results,
+      status: generating ? 'generating' : results.length ? 'completed' : 'failed',
+      error: generations.find((generation) => generation.error)?.error,
+      estimated_cost: generations.reduce((sum, generation) => sum + (generation.estimated_cost ?? 0), 0),
+      final_cost: generations.reduce((sum, generation) => sum + (generation.final_cost ?? 0), 0),
+    }
+  },
 }

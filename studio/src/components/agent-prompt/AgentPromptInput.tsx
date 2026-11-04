@@ -101,6 +101,8 @@ export interface AgentPromptInputProps {
   attachmentPolicy: AttachmentAdmissionPolicy
   /** Use a dedicated media uploader while reusing the prompt composer. */
   attachmentsEnabled?: boolean
+  /** Keep paste/drop handling when attachment controls live beside the composer. */
+  externalAttachmentControls?: boolean
   contextBar?: ReactNode
   leadingTools?: ReactNode
   trailingTools?: ReactNode
@@ -308,6 +310,7 @@ export function AgentPromptInput({
   attachmentController,
   attachmentPolicy,
   attachmentsEnabled = true,
+  externalAttachmentControls = false,
   contextBar,
   leadingTools,
   trailingTools,
@@ -471,7 +474,7 @@ export function AgentPromptInput({
           className="min-h-40 h-auto rounded-xl bg-card max-h-[min(42rem,calc(100dvh-8rem))] flex-col overflow-hidden"
         >
           <div data-slot="agent-prompt-content" className="assistant-scroll flex min-h-0 w-full flex-1 flex-col overflow-y-auto">
-            {value.attachments.length > 0 ? (
+            {!externalAttachmentControls && value.attachments.length > 0 ? (
               <div data-slot="agent-prompt-attachments" className="flex flex-row flex-wrap gap-2 px-2.5 pt-2.5">
                 {value.attachments.map((item) => (
                   <AttachmentTile
@@ -509,7 +512,7 @@ export function AgentPromptInput({
           </div>
 
           <InputGroupAddon align="block-end" className="shrink-0 gap-1.5">
-            {attachmentsEnabled && (
+            {attachmentsEnabled && !externalAttachmentControls && (
               <>
                 <input
                   ref={fileInputRef}

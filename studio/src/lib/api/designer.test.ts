@@ -1,9 +1,13 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { designerApi, normalizeCapability } from './designer'
 import { http } from '@/lib/http-client'
+import { AxiosError } from 'axios'
+import { clearActiveGeneration, loadActiveGeneration, saveActiveGeneration } from '@/lib/designer-session'
+import type { GenerateRequest } from '@/types/designer'
 
 describe('designer API normalization', () => {
+  beforeEach(() => sessionStorage.clear())
   afterEach(() => {
     vi.restoreAllMocks()
   })
@@ -141,14 +145,13 @@ describe('designer API normalization', () => {
     expect(generateRequest).not.toHaveProperty('execution_profile')
   })
 
-  it('normalizes to a single image in quote and generation requests', async () => {
-    const post = vi.spyOn(http, 'post')
-      .mockResolvedValueOnce({
-        data: { code: 0, msg: 'success', data: { quote_id: 'quote-1', request_fingerprint: 'fingerprint-1' } },
-      })
-      .mockResolvedValueOnce({
-        data: { code: 0, msg: 'success', data: { generation_id: 'generation-1', status: 'generating', price_credits: 1500 } },
-      })
+  it('quotes and submits each requested image independently at its single-image price', async () => {
+    const post = vi.spyOn(http, 'post').mockImplementation(async (path, data) => {
+      const request = data as GenerateRequest
+      return { data: { data: path === '/designer/quote'
+        ? { quote_id: `quote-${request.operation_id}`, request_fingerprint: request.operation_id }
+        : { generation_id: request.operation_id, status: 'generating', price_credits: 500 } } }
+    })
 
     await designerApi.generate({
       project_id: 'default',
@@ -160,8 +163,57 @@ describe('designer API normalization', () => {
       n: 3,
     })
 
-    expect(post.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ n: 1 }))
-    expect(post.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ n: 1 }))
+    expect(post.mock.calls.filter(([path]) => path === '/designer/quote')).toHaveLength(3)
+    const submitted = post.mock.calls.filter(([path]) => path === '/designer/generate').map(([, data]) => data as GenerateRequest)
+    expect(submitted).toHaveLength(3)
+    expect(new Set(submitted.map((data) => data.operation_id)).size).toBe(3)
+    for (const data of submitted) expect(data).toMatchObject({ n: 1, quote_id: `quote-${data.operation_id}`, request_fingerprint: data.operation_id })
+  })
+
+  it.each([0, 5, 1.5])('rejects invalid image count %s before billing', async (n) => {
+    const post = vi.spyOn(http, 'post')
+    await expect(designerApi.generate({ project_id: '', prompt: 'image', capability_key: 'standard', size: '1:1:2K', quality: 'auto', output_format: 'png', n })).rejects.toThrow()
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('recovers a mixed batch from saved operation identities and only returns successful images', async () => {
+    const ids: string[] = []
+    vi.spyOn(http, 'post').mockImplementation(async (path, data) => {
+      if (path === '/designer/quote') return { data: { data: { quote_id: 'quote', request_fingerprint: 'fingerprint' } } }
+      const request = data as GenerateRequest
+      ids.push(request.operation_id!)
+      return { data: { data: { generation_id: request.operation_id, price_credits: 500, status: 'generating' } } }
+    })
+    const request = { operation_id: 'batch-root', project_id: '', prompt: 'image', capability_key: 'standard', size: '1:1:2K', quality: 'auto', output_format: 'png', n: 3 }
+    const accepted = await designerApi.generate(request)
+    vi.spyOn(http, 'get').mockImplementation(async (path) => {
+      const id = String(path).split('/').pop()!
+      const failed = id === ids[1]
+      return { data: { data: { id, project_id: '', prompt: 'image', n: 1, status: failed ? 'failed' : 'completed', final_cost: failed ? 0 : 500, results: failed ? [] : [{ id: 1, generation_id: id, image_url: `/images/${id}.png`, index: 0 }], created_at: '', updated_at: '' } } }
+    })
+    const reloadedApi = (await import('./designer')).designerApi
+    const result = await reloadedApi.getGeneration(accepted.generation_id)
+    expect(result).toMatchObject({ status: 'completed', n: 3, final_cost: 1000 })
+    expect(result.results).toHaveLength(2)
+    expect(result.results?.map((image) => image.index)).toEqual([0, 1])
+    await designerApi.generate(request)
+    expect(ids.slice(3)).toEqual(ids.slice(0, 3))
+  })
+
+  it('retains uncertain admission even when another image is definitively rejected', async () => {
+    const rejected = new AxiosError('rejected', 'ERR_BAD_REQUEST', undefined, undefined, { status: 402, data: {}, statusText: 'Payment Required', headers: {}, config: {} as never })
+    vi.spyOn(http, 'post').mockImplementation(async (path, data) => {
+      if (path === '/designer/quote') return { data: { data: { quote_id: 'q', request_fingerprint: 'f' } } }
+      if ((data as GenerateRequest).operation_id === 'mixed-admission') throw rejected
+      throw new Error('response lost')
+    })
+    await expect(designerApi.generate({ operation_id: 'mixed-admission', project_id: '', prompt: 'image', capability_key: 'standard', size: '1:1:2K', quality: 'auto', output_format: 'png', n: 2 }, undefined, (id) => saveActiveGeneration('alice', id))).rejects.toThrow('response lost')
+    expect(loadActiveGeneration('alice')?.generationId).toBe('mixed-admission')
+    const get = vi.spyOn(http, 'get').mockResolvedValue({ data: { data: { id: 'accepted-child', project_id: '', prompt: 'image', n: 1, status: 'completed', results: [{ id: 1, generation_id: 'accepted-child', image_url: '/image.png', index: 0 }], created_at: '', updated_at: '' } } })
+    expect((await designerApi.getGeneration('mixed-admission')).results).toHaveLength(1)
+    expect(get).toHaveBeenCalledTimes(1)
+    clearActiveGeneration('alice')
+    expect(sessionStorage.getItem('designer_batch:mixed-admission')).toBeNull()
   })
 })
 

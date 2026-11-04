@@ -9,6 +9,7 @@ import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import DesignerToolbar, { type DesignerSettingsPatch } from '@/components/designer/DesignerToolbar'
 import { DesignerGenerationToolbar } from '@/components/designer/DesignerGenerationToolbar'
+import DesignerReferences from '@/components/designer/DesignerReferences'
 import DesignerCanvas from '@/components/designer/DesignerCanvas'
 import DesignerPromptLibrary from '@/components/designer/DesignerPromptLibrary'
 import InlineMaskEditor from '@/components/designer/InlineMaskEditor'
@@ -147,10 +148,10 @@ export default function DesignerPage() {
   const configuredDefaultCapability = capabilityList.find((capability) => capability.id === imageCapabilityCatalog?.defaultCapability && capability.enabled && capability.priceAvailable === true)
   const effectiveCapability = activeCapability ?? configuredDefaultCapability ?? capabilityList.find((capability) => capability.enabled && capability.priceAvailable === true)
   const hasInsufficientCredits = Boolean(
-    !walletError && wallet && effectiveCapability && wallet.balance < effectiveCapability.credits,
+    !walletError && wallet && effectiveCapability && wallet.balance < effectiveCapability.credits * (editingImage ? 1 : Math.min(4, Math.max(1, settings.n))),
   )
   const effectiveDesignerFeatures = effectiveCapability?.designerFeatures
-  const effectiveMaxBatch = 1
+  const effectiveMaxBatch = 4
   const effectiveQuantity = Math.min(effectiveMaxBatch, Math.max(1, settings.n))
   const effectiveSettings = settings.n === effectiveQuantity
     ? settings
@@ -184,7 +185,7 @@ export default function DesignerPage() {
       size: designerFeatures?.defaultSize || DEFAULT_SETTINGS.size,
       quality: designerFeatures?.qualityLevels?.[0] ?? DEFAULT_SETTINGS.quality,
       outputFormat: designerFeatures?.outputFormats?.[0] ?? DEFAULT_SETTINGS.outputFormat,
-      n: Math.min(DEFAULT_SETTINGS.n, Math.max(1, designerFeatures?.maxBatch ?? 1)),
+      n: DEFAULT_SETTINGS.n,
     })
   }, [])
 
@@ -289,7 +290,8 @@ export default function DesignerPage() {
           setCurrentImages(resultsToImages(generation.results))
           clearActiveGeneration(userId)
           void queryClient.invalidateQueries({ queryKey: ['billing', 'wallet'] })
-          toast.success('图片生成成功')
+          if ((generation.results?.length ?? 0) < generation.n) toast.warning(`已生成 ${generation.results?.length ?? 0}/${generation.n} 张，失败图片的积分将退回`)
+          else toast.success('图片生成成功')
           void queryClient.invalidateQueries({ queryKey: ['designer', 'history'] })
         } else if (generation.status === 'failed') {
           if (!finalizeGenerationAttempt(attempt)) return
@@ -606,6 +608,7 @@ export default function DesignerPage() {
         onSettingsChange={updateSettings}
         onHistoryToggle={() => setHistoryOpen(true)}
       >
+        {!editingImage && <DesignerReferences controller={attachmentController} capacity={referenceCapacity} disabled={isGenerating} onRejected={handleAttachmentRejected} onPreview={setPreviewImage} />}
         {!editingImage ? (
           effectiveCapability ? (
             <DesignerGenerationToolbar
@@ -666,6 +669,7 @@ export default function DesignerPage() {
                 onSubmit={editingImage ? handleEditSubmit : handleGenerate}
                 attachmentController={attachmentController}
                 attachmentPolicy={attachmentPolicy}
+                externalAttachmentControls
                 leadingTools={
                   <Button type="button" size="sm" variant="ghost" className="xl:hidden" onClick={() => setLibraryOpen(true)} disabled={isGenerating || Boolean(editingImage)}>
                     <Library data-icon="inline-start" />
@@ -684,7 +688,7 @@ export default function DesignerPage() {
                   <span className="text-xs text-muted-foreground">正在生成...</span>
                 ) : effectiveCapability ? (
                   <span className="text-xs text-muted-foreground">
-                    每张 {effectiveCapability.credits.toLocaleString()} 积分
+                    {editingImage || effectiveQuantity === 1 ? `每张 ${effectiveCapability.credits.toLocaleString()} 积分` : `${effectiveQuantity} 张 · 合计 ${(effectiveCapability.credits * effectiveQuantity).toLocaleString()} 积分`}
                     {!walletError && wallet ? ` · 余额 ${wallet.balance.toLocaleString()}` : ''}
                   </span>
                 ) : null}
