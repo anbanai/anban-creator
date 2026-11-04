@@ -1,4 +1,5 @@
 import { BuildVersion } from '@/components/BuildVersion'
+import { useSystemTheme } from '@/hooks/useSystemTheme'
 import { Link } from 'react-router-dom'
 import { ArrowUpRight } from 'lucide-react'
 import './AuthLayout.css'
@@ -10,6 +11,7 @@ export default function AuthLayout({
   footerText,
   footerLinkText,
   footerLinkTo,
+  followSystemTheme = false,
 }: {
   children: React.ReactNode
   title: string
@@ -17,9 +19,12 @@ export default function AuthLayout({
   footerText: string
   footerLinkText: string
   footerLinkTo: string
+  followSystemTheme?: boolean
 }) {
+  useSystemTheme(followSystemTheme)
+
   return (
-    <div className="auth-page dark relative flex min-h-dvh items-center overflow-hidden">
+    <div className={`auth-page relative flex min-h-dvh items-center overflow-hidden ${followSystemTheme ? 'auth-page--system' : 'dark'}`}>
       <div className="auth-brand-panel">
         <Link to="/" className="auth-brand-panel__logo" aria-label="返回 Anban AI 官网">
           <img src="/brand/anban-horizontal.png" alt="Anban AI" />
@@ -33,7 +38,12 @@ export default function AuthLayout({
 
       <div className="auth-form-zone">
         <div className="auth-mobile-brand">
-          <Link to="/" aria-label="返回 Anban AI 官网"><img src="/brand/anban-horizontal.png" alt="Anban AI" /></Link>
+          <Link to="/" aria-label="返回 Anban AI 官网">
+            <picture>
+              <source media="(prefers-color-scheme: light)" srcSet="/brand/anban-horizontal-light.png" />
+              <img src="/brand/anban-horizontal.png" alt="Anban AI" />
+            </picture>
+          </Link>
         </div>
         <div className="auth-form-panel">
           <div className="auth-form-panel__index">STUDIO / ACCOUNT</div>

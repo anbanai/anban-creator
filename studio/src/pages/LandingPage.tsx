@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSystemTheme } from '@/hooks/useSystemTheme'
 import { ArrowDownRight, ArrowUpRight, Check, ChevronRight, CircleDot, Sparkles } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import './LandingPage.css'
@@ -108,6 +109,8 @@ export default function LandingPage() {
   const [scrolled, setScrolled] = useState(false)
   const [activeStage, setActiveStage] = useState(2)
 
+  useSystemTheme()
+
   useEffect(() => {
     const reveal = Array.from(document.querySelectorAll<HTMLElement>('.anban-reveal'))
     const observer = typeof IntersectionObserver === 'undefined'
@@ -137,7 +140,10 @@ export default function LandingPage() {
     <main className="landing-page">
       <nav className={`landing-nav ${scrolled ? 'is-scrolled' : ''}`} aria-label="主导航">
         <a href="#top" className="landing-nav__brand" aria-label="Anban AI 首页">
-          <img src="/brand/anban-horizontal.png" alt="Anban AI" />
+          <picture>
+            <source media="(prefers-color-scheme: light)" srcSet="/brand/anban-horizontal-light.png" />
+            <img src="/brand/anban-horizontal.png" alt="Anban AI" />
+          </picture>
         </a>
         <div className="landing-nav__links">
           <a href="#capabilities">产品能力</a>
@@ -211,7 +217,7 @@ export default function LandingPage() {
         <div className="landing-shell landing-cta__inner anban-reveal"><BrandMark className="landing-cta__mark" /><p className="landing-kicker"><span /> Make the next one better</p><h2>把今天的创作，<br /><span>变成明天的判断。</span></h2><div className="landing-hero__actions"><Link to="/register" className="landing-button">注册 <ArrowUpRight className="size-4" /></Link><Link to="/login" className="landing-text-button">登录 <ChevronRight className="size-4" /></Link></div></div>
       </section>
 
-      <footer className="landing-footer"><div className="landing-shell landing-footer__inner"><img src="/brand/anban-horizontal.png" alt="Anban AI" /><p>© {new Date().getFullYear()} 成都北冕星辰科技有限公司 · 蜀ICP备2024071665号-3</p><a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">备案信息</a></div></footer>
+      <footer className="landing-footer"><div className="landing-shell landing-footer__inner"><picture><source media="(prefers-color-scheme: light)" srcSet="/brand/anban-horizontal-light.png" /><img src="/brand/anban-horizontal.png" alt="Anban AI" /></picture><p>© {new Date().getFullYear()} 成都北冕星辰科技有限公司 · 蜀ICP备2024071665号-3</p><a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">备案信息</a></div></footer>
     </main>
   )
 }
