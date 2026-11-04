@@ -170,7 +170,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "3cb4853a1bb77cf32197a450353c70c76c768550efcffb8db9f2642bfd2dfa67"
+      "digest": "652afbe7f514cf28858002edabc93ffec5ad1393e3c76457799458e57ef96a59"
     },
     {
       "id": "content-planning",
@@ -1609,7 +1609,7 @@
         }
       ],
       "ui": {},
-      "digest": "897f2ba8e88b8de251b8769b1f12f7d7b74fae1d26047951d060ffc31077b208"
+      "digest": "8ebe8557f8aa345bdeea425993539e3fb4ed2020a2ad8fab1e0a7025eebae293"
     },
     {
       "id": "hypit",
@@ -1823,10 +1823,10 @@
     },
     {
       "id": "ip-explainer",
-      "version": "1.3.2",
+      "version": "1.3.3",
       "kind": "plugin",
       "display_name": "知识 IP 剪辑",
-      "description": "Use for 知识 IP 剪辑 (IP Explainer): edit recorded creator or expert talking-head footage into clear knowledge explainers. 适用于个人 IP 口播剪辑、专家知识讲解、科普短视频；完成语义精剪、解释性画面、AI 演示镜头、字幕配乐、封面和成片审核。普通访谈精剪、直播切片、娱乐混剪和视频复刻使用对应工作流。",
+      "description": "Use for 知识 IP 剪辑 (IP Explainer): edit recorded creator or expert talking-head footage into clear knowledge explainers. 适用于个人 IP 口播剪辑、专家知识讲解、科普短视频；完成语义精剪、解释性画面、真实/生成素材选择、字幕配乐、封面和成片审核。普通访谈精剪、直播切片、娱乐混剪和视频复刻使用对应工作流。",
       "agent": {
         "name": "ip-explainer",
         "skills": [
@@ -1858,12 +1858,18 @@
         "semantic-master-variants",
         "retention-experiments",
         "independent-validation",
-        "generated-video-inserts",
+        "conditional-generated-video-inserts",
         "image-inserts",
         "motion-graphics",
         "automatic-review-loop"
       ],
       "artifacts": [
+        {
+          "role": "preflight_report",
+          "path": "output/preflight-report.json",
+          "mime_type": "application/json",
+          "required": true
+        },
         {
           "role": "explainer_input_assessment",
           "path": "output/explainer-input-assessment.json",
@@ -1970,19 +1976,19 @@
           "role": "generated_video_manifest",
           "path": "output/generated-video-manifest.json",
           "mime_type": "application/json",
-          "required": true
+          "required": false
         },
         {
           "role": "generated_video_review",
           "path": "output/generated-video-review.json",
           "mime_type": "application/json",
-          "required": true
+          "required": false
         },
         {
           "role": "generated_video_lint",
           "path": "output/generated-video-lint.json",
           "mime_type": "application/json",
-          "required": true
+          "required": false
         },
         {
           "role": "asset_source_manifest",
@@ -2239,6 +2245,13 @@
       ],
       "artifact_stages": [
         {
+          "id": "preflight",
+          "trigger": "output/preflight-report.json",
+          "required": [
+            "output/preflight-report.json"
+          ]
+        },
+        {
           "id": "motion_review",
           "trigger": "output/motion-sample.mp4",
           "required": [
@@ -2250,9 +2263,6 @@
             "output/asset-requirements.json",
             "output/visual-plan-draft.json",
             "output/asset-source-policy.json",
-            "output/generated-video-manifest.json",
-            "output/generated-video-review.json",
-            "output/generated-video-lint.json",
             "output/asset-source-manifest.json",
             "output/asset-ledger.json",
             "output/visual-plan.json",
@@ -2273,9 +2283,6 @@
             "output/audio-content-check.json",
             "output/sync-evidence.json",
             "output/quality-evidence.json",
-            "output/generated-video-manifest.json",
-            "output/generated-video-review.json",
-            "output/generated-video-lint.json",
             "output/progress-state.json"
           ],
           "terminal": true
@@ -2284,6 +2291,7 @@
           "id": "explainer_preflight",
           "trigger": "output/explainer-input-assessment.json",
           "required": [
+            "output/preflight-report.json",
             "output/explainer-input-assessment.json",
             "output/semantic-master.json",
             "output/explanation-plan.json",
@@ -2297,6 +2305,11 @@
         }
       ],
       "delivery": [
+        {
+          "role": "preflight_report",
+          "path": "output/preflight-report.json",
+          "mime_type": "application/json"
+        },
         {
           "role": "explainer_input_assessment",
           "path": "output/explainer-input-assessment.json",
@@ -2486,7 +2499,7 @@
       "ui": {
         "renderer": "custom:ip-explainer"
       },
-      "digest": "7a130ed71140903e54344ffaf02efdbd7db73c4c0e21566138714fc7e4f570ca"
+      "digest": "db6d371c7de35bc176373924a28201cadb663d40b3a943a6f04c82eead00a8fc"
     },
     {
       "id": "local-life",
@@ -2742,7 +2755,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "62933c66d9b000190d5274d3a63f0bb8e18589090d18c8b256c24696eeb9a44f"
+      "digest": "007ed6a274197d747f2194e835a0d6bb31b9f8fcf8e4e854c9994e3c65fb2b5f"
     },
     {
       "id": "montage",
@@ -3773,7 +3786,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "b01f15a0a8fd9f5a23ca9e8ad4c891ca85060ff422a8fb8d8e08daba6579f9b7"
+      "digest": "e33e0c12701eed067410ea2db7e86633377092fefbe7ed033ff13d9899da5603"
     },
     {
       "id": "talking-head-editor",
@@ -4174,7 +4187,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "d42ef8c218b7e029e89465d3c293b286ac25b74493963316ffc3cf5302360efd"
+      "digest": "961cdaba6ed42023d520255eb2c2cafb55078c6760bed2e6c48632f8d8927a5b"
     },
     {
       "id": "topic-radar",
@@ -6248,7 +6261,7 @@
         }
       ],
       "ui": {},
-      "digest": "4fbc486c1e4e07384d39aadbf6481cd13376489a336344e0de8a88ffff49c0d1"
+      "digest": "49a2c8f30afa93ed0eb971e6b87d44b2bd03352e3a6845961abde0f4e31cd027"
     },
     {
       "id": "wechat-article",
@@ -6513,7 +6526,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "fda7080d34fdbe9da2a99b776fe4d0abd23fd2cf17e9e72b583811b81a4843c4"
+      "digest": "f3623e4389cec7df946608cde2b758c7179da980c2e974daef3d85918cce43f0"
     },
     {
       "id": "wechat-picture",
