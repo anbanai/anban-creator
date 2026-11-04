@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Pause, Play, Plus, Trash2 } from 'lucide-react'
 import PageHeader from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -23,6 +23,7 @@ export default function ContentAutopilotSettingsPage() {
   const policy = useQuery({ queryKey: ['content-autopilot-policy'], queryFn: () => api.contentAssets.getPolicy() })
   const projects = useQuery({ queryKey: ['projects', 'reuse'], queryFn: () => api.projects.list({ status: 'active' }) })
   const [form, setForm] = useState<ContentAutopilotPolicy | null>(null)
+  const [savedMessage, setSavedMessage] = useState('')
   useEffect(() => {
     if (!policy.data || form) return
     setForm({
@@ -34,10 +35,18 @@ export default function ContentAutopilotSettingsPage() {
     })
   }, [policy.data, form])
   const save = useMutation({
-    mutationFn: (value: ContentAutopilotPolicy) => api.contentAssets.updatePolicy(value),
-    onSuccess: value => { setForm(value); void client.invalidateQueries({ queryKey: ['content-autopilot-policy'] }) },
+    mutationFn: ({ policy: value }: { policy: Partial<ContentAutopilotPolicy>; successMessage: string }) => api.contentAssets.updatePolicy(value),
+    onSuccess: (value, submitted) => {
+      setForm(current => current ? { ...current, ...submitted.policy, ...value } : value)
+      setSavedMessage(submitted.successMessage)
+      void client.invalidateQueries({ queryKey: ['content-autopilot-policy'] })
+    },
   })
-  const update = (patch: Partial<ContentAutopilotPolicy>) => setForm(current => current ? { ...current, ...patch } : current)
+  const update = (patch: Partial<ContentAutopilotPolicy>) => {
+    setSavedMessage('')
+    if (save.isSuccess || save.isError) save.reset()
+    setForm(current => current ? { ...current, ...patch } : current)
+  }
   const toggle = <T extends string>(values: T[], value: T, enabled: boolean) => enabled ? [...new Set([...values, value])] : values.filter(item => item !== value)
   const updateProjects = (projectIDs: string[]) => {
     const selectedPlatforms = [...new Set((projects.data ?? []).filter(project => projectIDs.includes(project.id)).map(project => project.platform))]
@@ -47,6 +56,9 @@ export default function ContentAutopilotSettingsPage() {
   const canEnable = !!form?.project_ids?.length && validDailyBudget && form.daily_budget_credits > 0
   const validRunCap = !!form && Number.isSafeInteger(form.max_run_cost_credits) && form.max_run_cost_credits >= 0
   const windows = form?.publish_windows ?? []
+  const normalizedPolicy = () => form ? { ...form, max_run_cost_credits: form.max_run_cost_credits || form.daily_budget_credits } : null
+  const canSave = validDailyBudget && validRunCap && (!form?.enabled || canEnable)
+  const canStart = canEnable && validRunCap
 
   return <div className="mx-auto w-full max-w-4xl space-y-6 pb-10">
     <PageHeader title="自动生产" description="选好人设和每天的预算，系统会自动寻找选题并准备内容。">
@@ -59,14 +71,10 @@ export default function ContentAutopilotSettingsPage() {
         <fieldset className="space-y-2"><legend className="mb-2 text-sm font-semibold">选择要自动服务的人设</legend>{(projects.data ?? []).length === 0 ? <p className="text-sm text-muted-foreground">还没有可用人设。先创建一个人设即可开始。</p> : <div className="grid gap-2 sm:grid-cols-2">{(projects.data ?? []).map(project => { const selected = form.project_ids?.includes(project.id) ?? false; const platformLabel = platforms.find(item => item.id === project.platform)?.label ?? project.platform; return <label key={project.id} className={`flex cursor-pointer items-center justify-between gap-3 rounded-md border p-3 text-sm ${selected ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'}`}><span><span className="block font-medium">{project.name}</span><span className="mt-0.5 block text-xs text-muted-foreground">{platformLabel}</span></span><input type="checkbox" checked={selected} onChange={event => updateProjects(toggle(form.project_ids ?? [], project.id, event.target.checked))} aria-label={`选择人设 ${project.name}`} /></label> })}</div>}</fieldset>
         <p className="text-xs text-muted-foreground">内容形式会按所选人设自动匹配，无需重复选择。</p>
         <label className="grid max-w-sm gap-1.5 text-sm"><span className="font-medium">每天最多花费</span><span className="text-xs text-muted-foreground">达到上限后，系统会暂停当天的自动任务。</span><span className="relative"><Input type="number" min="1" step="1" value={form.daily_budget_credits || ''} onChange={event => update({ daily_budget_credits: Number(event.target.value) })} aria-label="每天最多花费（积分）" placeholder="填写积分上限" /><span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">积分</span></span></label>
-        <div className="rounded-md border p-4">
-          <label className="flex items-center justify-between gap-3 text-sm"><span><span className="block font-medium">先保存为草稿</span><span className="mt-1 block text-xs text-muted-foreground">完成后由你检查和修改</span></span><Switch checked={form.draft_enabled} onCheckedChange={draft_enabled => update({ draft_enabled, ...(draft_enabled ? {} : { publish_enabled: false }) })} aria-label="允许自动创建草稿" /></label>
-        </div>
-        <label className="flex items-center justify-between gap-4 rounded-md border p-4"><span><span className="block font-medium">开启自动生产</span><span className="mt-1 block text-sm text-muted-foreground">系统会按选中的人设持续找题并准备内容</span></span><Switch checked={form.enabled} disabled={(!canEnable || !validRunCap) && !form.enabled} onCheckedChange={enabled => update({ enabled })} aria-label="启用自动研究与生产" /></label>
-        {!form.project_ids?.length && <p className="text-xs text-muted-foreground">先选择至少一个人设。</p>}
+        {!!projects.data?.length && !form.project_ids?.length && <p className="text-xs text-muted-foreground">先选择至少一个人设。</p>}
         {form.daily_budget_credits <= 0 && <p className="text-xs text-muted-foreground">填写每天的积分上限后，才能开启自动生产。</p>}
         {!validDailyBudget && <p role="alert" className="text-xs text-destructive">每天的积分上限必须是非负整数。</p>}
-        {form.enabled && !canEnable && <p role="alert" className="text-xs text-destructive">补齐人设和每天的积分上限，或先关闭自动生产，再保存设置。</p>}
+        {form.enabled && !canEnable && <p role="alert" className="text-xs text-destructive">补齐人设和每天的积分上限，或先暂停自动生产，再保存设置。</p>}
       </section>
       <details className="rounded-md border px-4">
         <summary className="cursor-pointer py-3 text-sm font-medium">高级设置</summary>
@@ -81,8 +89,8 @@ export default function ContentAutopilotSettingsPage() {
           </section>
           <section className="space-y-3 border-t pt-4">
             <h2 className="text-sm font-semibold">发布方式</h2>
-            {!form.draft_enabled && <p className="text-sm text-muted-foreground">开启“先保存为草稿”后，可进一步设置自动发布。</p>}
-            {form.draft_enabled && <label className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm"><span><span className="block font-medium">检查通过后自动发布</span><span className="mt-1 block text-xs text-muted-foreground">开启后，符合发布条件的内容会直接发布</span></span><Switch checked={form.publish_enabled} onCheckedChange={publish_enabled => update({ publish_enabled })} aria-label="自动发布" /></label>}
+            <label className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm"><span><span className="block font-medium">先保存为草稿</span><span className="mt-1 block text-xs text-muted-foreground">完成后由你检查和修改</span></span><Switch checked={form.draft_enabled} onCheckedChange={draft_enabled => update({ draft_enabled })} aria-label="允许自动创建草稿" /></label>
+            <label className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm"><span><span className="block font-medium">检查通过后自动发布</span><span className="mt-1 block text-xs text-muted-foreground">开启后，符合发布条件的内容会直接发布</span></span><Switch checked={form.publish_enabled} onCheckedChange={publish_enabled => update({ publish_enabled })} aria-label="自动发布" /></label>
           </section>
           <fieldset className="grid gap-3 sm:grid-cols-2"><legend className="mb-2 text-sm font-medium">各平台最低推荐分</legend>{platforms.map(platform => <label key={platform.id} className="flex items-center justify-between gap-3 text-sm"><span>{platform.label}</span><Input aria-label={`${platform.label}最低推荐分`} type="number" min="0" max="100" className="w-24" value={form.platform_min_recommendation_scores?.[platform.id] ?? ''} onChange={event => update({ platform_min_recommendation_scores: { ...form.platform_min_recommendation_scores, [platform.id]: Number(event.target.value) } })} /></label>)}</fieldset>
           <section className="space-y-3 border-t pt-4">
@@ -98,8 +106,13 @@ export default function ContentAutopilotSettingsPage() {
       </details>
       {!validRunCap && <p role="alert" className="text-sm text-destructive">请在高级设置中将单次任务上限填写为非负整数。</p>}
       {save.isError && <p role="alert" className="text-sm text-destructive">保存失败，已保留当前填写内容。</p>}
-      {save.isSuccess && <p role="status" className="text-sm text-muted-foreground">设置已保存。</p>}
-      <div className="flex justify-end"><Button disabled={save.isPending || policy.isPending || !validDailyBudget || !validRunCap || (form.enabled && !canEnable)} onClick={() => save.mutate({ ...form, max_run_cost_credits: form.max_run_cost_credits || form.daily_budget_credits })}>保存设置</Button></div>
+      {save.isSuccess && <p role="status" className="text-sm text-muted-foreground">{savedMessage}</p>}
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button variant={form.enabled ? 'default' : 'outline'} disabled={save.isPending || policy.isPending || !canSave} onClick={() => { const value = normalizedPolicy(); if (value) save.mutate({ policy: value, successMessage: '设置已保存。' }) }}>保存设置</Button>
+        {form.enabled
+          ? <Button variant="outline" disabled={save.isPending || policy.isPending} onClick={() => save.mutate({ policy: { enabled: false }, successMessage: '自动生产已暂停。' })}><Pause />暂停自动生产</Button>
+          : <Button disabled={save.isPending || policy.isPending || !canStart} onClick={() => { const value = normalizedPolicy(); if (value) save.mutate({ policy: { ...value, enabled: true, draft_enabled: true }, successMessage: '自动生产已开启。' }) }}><Play />开启自动生产</Button>}
+      </div>
     </>}
   </div>
 }

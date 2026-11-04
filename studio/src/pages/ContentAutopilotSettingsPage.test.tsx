@@ -31,16 +31,16 @@ describe('ContentAutopilotSettingsPage', () => {
     expect(screen.getByText('高级设置').closest('details')).not.toHaveAttribute('open')
     expect(screen.getByLabelText('自动发布').closest('details')).not.toHaveAttribute('open')
     expect(screen.queryByText('想生成什么内容？')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('允许自动创建草稿').closest('details')).not.toHaveAttribute('open')
     fireEvent.click(screen.getByLabelText('选择人设 小红书账号'))
     fireEvent.change(screen.getByLabelText('每天最多花费（积分）'), { target: { value: '9000' } })
     fireEvent.click(screen.getByText('高级设置'))
     expect(screen.getByLabelText('单次任务上限（积分）')).toHaveValue(2000)
     expect(await screen.findByLabelText('发布时间窗口 2')).toHaveValue('18:00')
     expect(screen.getByLabelText('小红书最低推荐分')).toHaveValue(58)
-    fireEvent.click(screen.getByLabelText('自动发布'))
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
     await waitFor(() => expect(api.updatePolicy).toHaveBeenCalledWith(expect.objectContaining({
-      publish_enabled: false,
+      publish_enabled: true,
       daily_budget_credits: 9000,
       max_run_cost_credits: 2000,
       project_ids: ['p1', 'p2'],
@@ -52,28 +52,28 @@ describe('ContentAutopilotSettingsPage', () => {
       platform_min_recommendation_scores: { wechat: 72, seednote: 58 },
       compliance_version: 'v2',
     })))
+    expect(await screen.findByRole('status')).toHaveTextContent('设置已保存。')
+    fireEvent.change(screen.getByLabelText('每天最多花费（积分）'), { target: { value: '9500' } })
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
-  it('requires a persona and budget before autopilot can be enabled or saved', async () => {
+  it('requires a persona and budget before autopilot can be enabled, and lets users pause invalid existing policies', async () => {
     api.getPolicy.mockResolvedValue({ user_id: 'u1', enabled: false, project_ids: [], platforms: [], daily_budget_credits: 0, max_run_cost_credits: 0, min_recommendation_score: 0, min_video_confidence: 0, draft_enabled: false, publish_enabled: false, failure_mode: 'pause', revision: 1 })
     api.projectsList.mockResolvedValue([])
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(<QueryClientProvider client={client}><MemoryRouter><ContentAutopilotSettingsPage /></MemoryRouter></QueryClientProvider>)
 
-    const enabled = await screen.findByLabelText('启用自动研究与生产')
-    expect(enabled).toHaveAttribute('aria-disabled', 'true')
-    expect(screen.getByText('先选择至少一个人设。')).toBeInTheDocument()
+    const start = await screen.findByRole('button', { name: '开启自动生产' })
+    expect(start).toBeDisabled()
+    expect(screen.getByText('还没有可用人设。先创建一个人设即可开始。')).toBeInTheDocument()
     expect(screen.getByText('填写每天的积分上限后，才能开启自动生产。')).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: '保存设置' })[0]).toBeEnabled()
 
     api.getPolicy.mockResolvedValue({ user_id: 'u1', enabled: true, project_ids: [], platforms: [], daily_budget_credits: 0, max_run_cost_credits: 0, min_recommendation_score: 0, min_video_confidence: 0, draft_enabled: false, publish_enabled: false, failure_mode: 'pause', revision: 1 })
     const enabledClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(<QueryClientProvider client={enabledClient}><MemoryRouter><ContentAutopilotSettingsPage /></MemoryRouter></QueryClientProvider>)
-    await screen.findByText('补齐人设和每天的积分上限，或先关闭自动生产，再保存设置。')
+    await screen.findByText('补齐人设和每天的积分上限，或先暂停自动生产，再保存设置。')
     expect(screen.getAllByRole('button', { name: '保存设置' })[1]).toBeDisabled()
-    fireEvent.click(screen.getAllByLabelText('启用自动研究与生产')[1])
-    expect(screen.getAllByRole('button', { name: '保存设置' })[1]).toBeEnabled()
-    fireEvent.click(screen.getAllByRole('button', { name: '保存设置' })[1])
+    fireEvent.click(screen.getByRole('button', { name: '暂停自动生产' }))
     await waitFor(() => expect(api.updatePolicy).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: false })))
   })
 
@@ -87,13 +87,31 @@ describe('ContentAutopilotSettingsPage', () => {
     const dailyBudget = await screen.findByLabelText('每天最多花费（积分）')
     fireEvent.change(dailyBudget, { target: { value: '5' } })
     fireEvent.change(dailyBudget, { target: { value: '5000' } })
-    expect(screen.getByLabelText('启用自动研究与生产')).not.toHaveAttribute('aria-disabled', 'true')
-    fireEvent.click(screen.getByLabelText('启用自动研究与生产'))
-    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    expect(screen.getByRole('button', { name: '开启自动生产' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: '开启自动生产' }))
     await waitFor(() => expect(api.updatePolicy).toHaveBeenCalledWith(expect.objectContaining({
       enabled: true,
+      draft_enabled: true,
       daily_budget_credits: 5000,
       max_run_cost_credits: 5000,
+    })))
+  })
+
+  it('starts in draft mode without clearing an existing auto-publish policy', async () => {
+    api.getPolicy.mockResolvedValue({ user_id: 'u1', enabled: false, project_ids: ['p1'], platforms: ['wechat'], daily_budget_credits: 1000, max_run_cost_credits: 500, min_recommendation_score: 60, min_video_confidence: 70, draft_enabled: false, publish_enabled: true, failure_mode: 'pause', revision: 1 })
+    api.projectsList.mockResolvedValue([{ id: 'p1', name: '公众号人设', platform: 'wechat', status: 'active' }])
+    api.updatePolicy.mockResolvedValue({ revision: 2 })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><MemoryRouter><ContentAutopilotSettingsPage /></MemoryRouter></QueryClientProvider>)
+
+    fireEvent.click(await screen.findByRole('button', { name: '开启自动生产' }))
+
+    await waitFor(() => expect(api.updatePolicy).toHaveBeenCalledWith(expect.objectContaining({
+      enabled: true,
+      draft_enabled: true,
+      publish_enabled: true,
+      daily_budget_credits: 1000,
+      max_run_cost_credits: 500,
     })))
   })
 
