@@ -106,7 +106,7 @@ function LocationProbe() {
   return <output data-testid="location">{location.pathname}{location.search}</output>
 }
 
-function renderPage(state?: Partial<{ modeId: 'profile' | 'creation' | 'review'; projectId: string; contentId: string; checkpointId: string; initialMessage: string }>, queryClient = createTestQueryClient()) {
+function renderPage(state?: Partial<{ modeId: 'profile' | 'creation' | 'review'; projectId: string; contentId: string; checkpointId: string; initialMessage: string; startNew: boolean; creationType: string }>, queryClient = createTestQueryClient()) {
   const saved = JSON.parse(sessionStorage.getItem('anban:assistant-workspace') ?? '{}')
   mocks.existingConversation = Boolean(saved.workspace && saved.workspace.lifecycle !== 'prepared')
   return { ...render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={[{ pathname: '/', state }]}><AssistantWorkspace /><LocationProbe /></MemoryRouter></QueryClientProvider>), queryClient }
@@ -137,6 +137,17 @@ function emptyDimensions(): NonNullable<Project['profile']>['dimensions'] {
 }
 
 describe('AssistantWorkspace', () => {
+  it('starts a mobile persona interview without reusing a previous persona or its conversation', async () => {
+    sessionStorage.setItem('anban:assistant-workspace', JSON.stringify({
+      workspace: { id: 'old-workspace', mode_id: 'profile', project_id: 'old-persona', sessions: { profile: 'old-session' }, runtime_status: 'running' },
+      messagesByMode: { profile: [{ id: 'old-message', role: 'user', text: '上一位人物的信息', order: 1 }] },
+    }))
+    renderPage({ modeId: 'profile', projectId: '', initialMessage: '', startNew: true })
+    await screen.findByRole('textbox', { name: '发送消息' })
+    expect(screen.queryByText('上一位人物的信息')).not.toBeInTheDocument()
+    expect(mocks.getInteractionSnapshot).not.toHaveBeenCalledWith('old-workspace')
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:assistant-workspace')!).workspace?.id).not.toBe('old-workspace'))
+  })
   function restoreCreation(ready = true, confirmationState = 'pending') {
     setBootstrap({ defaultModeId: 'creation', modes: [{ id: 'creation', displayName: '创作模式', description: '制定计划', available: true }], projects: [{ id: 'project-1', name: '我的人设', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }] })
     const snapshot = {

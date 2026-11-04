@@ -545,6 +545,15 @@ describe('TaskFormDialog', () => {
     expect(within(dialog).getByText('指定文案与图片中文字的输出语言。')).toBeInTheDocument()
   })
 
+  it('carries the mobile product-image brief and module selection into the actual task form without submitting', async () => {
+    renderDialog({ initialProjectId: fixtures.ecommerceProject.id, initialType: 'ecommerce', initialDraft: { projectId: fixtures.ecommerceProject.id, type: 'ecommerce', prompt: '只做纯白背景，保留产品真实颜色', selectedModules: { main_images: 1 } } })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
+    await waitFor(() => expect(within(dialog).getByRole('textbox', { name: 'Agent prompt' })).toHaveValue('只做纯白背景，保留产品真实颜色'))
+    expect(within(dialog).getByRole('switch', { name: '启用 主图套' })).toBeChecked()
+    expect(within(dialog).getByRole('switch', { name: '启用 详情页（商详）' })).not.toBeChecked()
+    expect(api.tasks.create).not.toHaveBeenCalled()
+  })
+
   it('creates viral analysis using a neutral shared project', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([{ ...fixtures.seednoteProject, platform: '', agent_ids: ['seednote'] }])
     renderDialog({ initialProjectId: undefined, initialType: 'viral-analysis' })

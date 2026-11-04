@@ -7,6 +7,8 @@ export type AssistantRouteState = {
   contentId?: string
   checkpointId?: string
   initialMessage?: string
+  creationType?: string
+  startNew?: boolean
 }
 
 export function profileInterviewLinkProps(projectId: string): Pick<LinkProps, 'to' | 'state'> {
