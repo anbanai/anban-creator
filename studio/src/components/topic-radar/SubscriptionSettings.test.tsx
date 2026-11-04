@@ -24,9 +24,9 @@ describe('SubscriptionSettings', () => {
     expect(screen.getByLabelText('每次生成数量')).toBeInTheDocument()
 
     fireEvent.click(screen.getByText('更多设置'))
-    expect(screen.queryByLabelText('设置名称')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('时区')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('流量潜力')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('设置名称')).toBeVisible()
+    expect(screen.getByLabelText('时区')).toBeVisible()
+    expect(screen.getByLabelText('流量潜力')).toBeVisible()
     expect(screen.getByRole('button', { name: '删除自动找题设置' })).toBeInTheDocument()
     expect(screen.getByLabelText('每次生成数量')).toBeVisible()
 
@@ -75,6 +75,25 @@ describe('SubscriptionSettings', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存配置' }))
 
     await waitFor(() => expect(updateSubscription).toHaveBeenCalledWith('sub-1', expect.objectContaining({ name: '自定义名称', timezone: 'UTC', weights })))
+  })
+
+  it('keeps advanced subscription controls editable behind the collapsed disclosure', async () => {
+    updateSubscription.mockResolvedValue({})
+    render(<SubscriptionSettings subscription={{ id: 'sub-1', project_id: 'project-1', name: '每日选题', enabled: false, timezone: 'Asia/Shanghai', source_config: {}, weights: { traffic_potential: .25, account_fit: .2, differentiation: .15, timeliness: .1, monetization: .15, production_cost: .08, compliance_risk: .07 } }} onClose={vi.fn()} onSaved={vi.fn().mockResolvedValue(undefined)} />)
+
+    const advanced = screen.getByText('更多设置').closest('details')!
+    expect(advanced).not.toHaveAttribute('open')
+    fireEvent.click(screen.getByText('更多设置'))
+    fireEvent.change(screen.getByLabelText('设置名称'), { target: { value: '工作日选题' } })
+    fireEvent.change(screen.getByLabelText('时区'), { target: { value: 'UTC' } })
+    fireEvent.change(screen.getByLabelText('流量潜力'), { target: { value: '0.5' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存配置' }))
+
+    await waitFor(() => expect(updateSubscription).toHaveBeenCalledWith('sub-1', expect.objectContaining({
+      name: '工作日选题',
+      timezone: 'UTC',
+      weights: expect.objectContaining({ traffic_potential: .5 }),
+    })))
   })
 
   it('saves default script settings when automatic script generation is enabled', async () => {
