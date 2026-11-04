@@ -1,4 +1,4 @@
-import { Sparkles } from 'lucide-react'
+import { Lightbulb, ShieldUser, Sparkles } from 'lucide-react'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -13,8 +13,8 @@ describe('navigation IA', () => {
   it('defines the MVP navigation in approved order', () => {
     expect(mvpNavItems.map((item) => item.label)).toEqual([
       '首页',
-      '选题',
       '人设',
+      '选题',
       '作品',
       '排期',
       '钱包',
@@ -25,12 +25,14 @@ describe('navigation IA', () => {
       '热点雷达',
     ])
     expect(mvpNavItems[0]?.icon).toBe(Sparkles)
+    expect(mvpNavItems.find((item) => item.to === '/projects')?.icon).toBe(ShieldUser)
+    expect(mvpNavItems.find((item) => item.to === '/topics')?.icon).toBe(Lightbulb)
     expect(mvpNavItems.map((item) => item.to)).not.toContain('/timeline')
     expect(mvpNavItems.map((item) => item.to)).not.toContain('/usage')
     expect(workspaceNavItems.map((item) => item.to)).toEqual([
       '/',
-      '/topics',
       '/projects',
+      '/topics',
       '/tasks',
       '/plans',
       '/designer',
@@ -56,8 +58,8 @@ describe('navigation IA', () => {
   it('filters the combined navigation by administrator access', () => {
     expect(allNavItems.map((item) => item.to)).toEqual([
       '/',
-      '/topics',
       '/projects',
+      '/topics',
       '/tasks',
       '/plans',
       '/designer',

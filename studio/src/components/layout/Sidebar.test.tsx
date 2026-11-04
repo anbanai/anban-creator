@@ -78,8 +78,8 @@ describe('Sidebar', () => {
     const navigation = within(screen.getByRole('navigation', { name: '主导航' }))
     expect(navigation.getAllByRole('link').map((link) => link.textContent)).toEqual([
       '首页',
-      '选题',
       '人设',
+      '选题',
       '作品',
       '排期',
       '钱包',
