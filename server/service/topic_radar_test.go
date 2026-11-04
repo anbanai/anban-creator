@@ -253,7 +253,7 @@ func TestProcessTopicScriptFailsAdmissionWithoutTouchingDigest(t *testing.T) {
 	if err != nil || len(suggestions) != 1 {
 		t.Fatalf("suggestions = %d, err=%v", len(suggestions), err)
 	}
-	job, err := service.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: subscription.UserID, SuggestionID: suggestions[0].ID, TargetPlatform: "douyin", DurationSeconds: 60, AspectRatio: "9:16"})
+	job, err := service.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: subscription.UserID, AssetID: suggestions[0].ContentAssetID, ProjectID: suggestions[0].ProjectID, TargetPlatform: "douyin", DurationSeconds: 60, AspectRatio: "9:16"})
 	if err != nil {
 		t.Fatal(err)
 	}

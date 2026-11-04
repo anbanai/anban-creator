@@ -52,6 +52,7 @@ export interface TopicSuggestion {
 }
 
 export interface TopicScriptJob {
+  asset_id?: string
   id: string
   suggestion_id: string
   digest_id: string
@@ -68,7 +69,7 @@ export interface TopicScriptJob {
 export interface TopicItems<T> { items: T[] }
 
 export type TopicSubscriptionSettings = Pick<TopicSubscription, 'name' | 'enabled' | 'timezone' | 'schedule' | 'source_config' | 'weights' | 'script_policy'>
-export interface TopicAdoption { id: string; suggestion_id: string; status: string; topic_pool_id?: number; error?: string }
+export interface TopicAdoption { id: string; suggestion_id: string; status: string; error?: string }
 export interface TopicNotificationDelivery { id: string; channel_id: string; status: string; attempt: number; last_error?: string; next_attempt_at?: string; sent_at?: string }
 export interface TopicDigestDetail { digest: TopicDigest; suggestions: TopicSuggestion[]; adoptions: TopicAdoption[]; scripts: TopicScriptJob[]; notifications: TopicNotificationDelivery[] }
 export interface TopicNotificationChannel { id: string; project_id: string; name: string; provider: 'feishu' | 'wecom' | 'dingtalk'; enabled: boolean }

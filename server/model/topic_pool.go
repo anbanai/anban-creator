@@ -12,9 +12,9 @@ const (
 	TopicStatusUsed   = "used"
 )
 
-// TopicPool represents a user-managed topic in a project's topic pool.
+// TopicPool is a persona consumption queue. Topic is an immutable historical title; ContentAsset owns editable topic content.
 type TopicPool struct {
-	ID        uint   `gorm:"primaryKey;autoIncrement" json:"id"`
+	ID        uint   `gorm:"primaryKey;autoIncrement" json:"-"`
 	UserID    string `gorm:"type:char(36);index;not null" json:"user_id"`
 	ProjectID string `gorm:"type:char(36);index;not null;uniqueIndex:idx_topic_pool_project_dedupe" json:"project_id"`
 	Topic     string `gorm:"type:varchar(500);not null" json:"topic"`
@@ -26,7 +26,7 @@ type TopicPool struct {
 	SourceLabel        string     `gorm:"type:varchar(120)" json:"source_label,omitempty"`
 	Status             string     `gorm:"type:varchar(20);default:'unused'" json:"status"`
 	TaskID             *string    `gorm:"type:char(36)" json:"task_id,omitempty"`
-	ContentAssetID     *string    `gorm:"type:char(36);index" json:"content_asset_id,omitempty"`
+	ContentAssetID     *string    `gorm:"type:char(36);index" json:"asset_id,omitempty"`
 	UsedAt             *time.Time `json:"used_at,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
@@ -37,7 +37,9 @@ func (TopicPool) TableName() string { return "topic_pool" }
 
 func (t *TopicPool) BeforeSave(_ *gorm.DB) error {
 	t.Topic = strings.TrimSpace(t.Topic)
-	if t.DedupeKey == "" {
+	if t.ContentAssetID != nil && *t.ContentAssetID != "" {
+		t.DedupeKey = "asset:" + *t.ContentAssetID
+	} else if t.DedupeKey == "" {
 		t.DedupeKey = NormalizeTopicDedupeKey(t.Topic)
 	}
 	return nil

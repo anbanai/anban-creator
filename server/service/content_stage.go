@@ -299,7 +299,12 @@ func (s *ContentAssetService) FinalizeResearchJob(ctx context.Context, userID, j
 					}
 				}
 			}
-			if err := applyResearchResult(ctx, tx, userID, strings.TrimSpace(job.CandidateAssetID), research, evidence); err != nil {
+			primaryAssetID := strings.TrimSpace(job.CandidateAssetID)
+			// Merges update live task lineage while preserving the job's frozen request.
+			if primaryAssetID != "" && strings.TrimSpace(task.ContentAssetID) != "" {
+				primaryAssetID = task.ContentAssetID
+			}
+			if err := applyResearchResult(ctx, tx, userID, job.ProjectID, primaryAssetID, research, evidence); err != nil {
 				return fmt.Errorf("apply research result: %w", err)
 			}
 		}
@@ -310,9 +315,15 @@ func (s *ContentAssetService) FinalizeResearchJob(ctx context.Context, userID, j
 // applyResearchResult is the deterministic Server projection of a validated
 // research artifact. It is idempotent so a finalizer retry cannot duplicate
 // evidence or lose historical content links.
-func applyResearchResult(ctx context.Context, repo repository.Repository, userID, primaryAssetID string, result model.PlanningResearchResult, evidence model.PlanningResearchEvidence) error {
+func applyResearchResult(ctx context.Context, repo repository.Repository, userID, projectID, primaryAssetID string, result model.PlanningResearchResult, evidence model.PlanningResearchEvidence) error {
 	if result.Status != "ready" || len(result.Candidates) == 0 {
 		return nil
+	}
+	if projectID != "" {
+		project, err := repo.Projects().FindByIDForUpdate(ctx, projectID)
+		if err != nil || project.UserID != userID {
+			return fmt.Errorf("research project ownership mismatch")
+		}
 	}
 	for index, proposal := range result.Candidates {
 		assetID := strings.TrimSpace(primaryAssetID)
@@ -320,15 +331,16 @@ func applyResearchResult(ctx context.Context, repo repository.Repository, userID
 			assetID = ""
 		}
 		if assetID == "" {
-			asset := model.NewContentAsset(userID, strings.TrimSpace(proposal.Title))
-			asset.CoreQuestion = strings.TrimSpace(proposal.Title)
-			asset.SemanticKernel = strings.TrimSpace(proposal.SemanticKernel)
-			if err := repo.ContentAssets().Create(ctx, asset); err != nil {
-				if existing, findErr := repo.ContentAssets().FindByTitle(ctx, userID, asset.Title); findErr == nil {
-					asset = existing
-				} else {
-					return err
-				}
+			title := strings.TrimSpace(proposal.Title)
+			asset, err := repo.ContentAssets().FindByTitle(ctx, userID, title)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				asset = model.NewContentAsset(userID, title)
+				asset.CoreQuestion = title
+				asset.SemanticKernel = strings.TrimSpace(proposal.SemanticKernel)
+				err = repo.ContentAssets().Create(ctx, asset)
+			}
+			if err != nil {
+				return err
 			}
 			assetID = asset.ID
 		}
@@ -356,6 +368,9 @@ func applyResearchResult(ctx context.Context, repo repository.Repository, userID
 				return err
 			}
 		}
+		if err := repo.ContentAssets().ProjectTopicAssociation(ctx, userID, projectID, assetID, "", false, asset.CreatedAt); err != nil {
+			return err
+		}
 		for _, source := range evidence.Sources {
 			if source.ID == "" {
 				continue
@@ -374,6 +389,9 @@ func applyResearchResult(ctx context.Context, repo repository.Repository, userID
 					duplicate = true
 					break
 				}
+			}
+			if err := repo.ContentAssets().ProjectTopicAssociation(ctx, userID, projectID, assetID, "", false, asset.CreatedAt); err != nil {
+				return err
 			}
 			if duplicate {
 				continue

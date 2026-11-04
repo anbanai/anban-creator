@@ -37,13 +37,10 @@ const SettingsPage = lazyWithRecovery(() => import('@/pages/SettingsPage'))
 const DesignerPage = lazyWithRecovery(() => import('@/pages/DesignerPage'))
 const TemplatesPage = lazyWithRecovery(() => import('@/pages/TemplatesPage'))
 const PluginsPage = lazyWithRecovery(() => import('@/pages/PluginsPage'))
-const ContentAssetsPage = lazyWithRecovery(() => import('@/pages/ContentAssetsPage'))
+const TopicsPage = lazyWithRecovery(() => import('@/pages/TopicsPage'))
 const UserMediaLibraryPage = lazyWithRecovery(() => import('@/pages/UserMediaLibraryPage'))
-const ContentAutopilotSettingsPage = lazyWithRecovery(() => import('@/pages/ContentAutopilotSettingsPage'))
 const ContentAnalyticsPage = lazyWithRecovery(() => import('@/pages/ContentAnalyticsPage'))
 const TrendsPage = lazyWithRecovery(() => import('@/pages/TrendsPage'))
-const TopicRadarPage = lazyWithRecovery(() => import('@/pages/TopicRadarPage'))
-const TopicPoolPage = lazyWithRecovery(() => import('@/pages/TopicPoolPage'))
 const PublicSharePage = lazyWithRecovery(() => import('@/pages/PublicSharePage'))
 
 function ChatRedirect() {
@@ -214,12 +211,9 @@ function AppRoutes() {
           <Route path="usage" element={<LazyPage component={UsagePage} />} />
           <Route path="settings" element={<LazyPage component={SettingsPage} />} />
           <Route path="content-analytics" element={<LazyPage component={ContentAnalyticsPage} />} />
-          <Route path="content-assets" element={<LazyPage component={ContentAssetsPage} />} />
+          <Route path="topics" element={<LazyPage component={TopicsPage} />} />
           <Route path="media-assets" element={<LazyPage component={UserMediaLibraryPage} />} />
-          <Route path="content-assets/settings" element={<LazyPage component={ContentAutopilotSettingsPage} />} />
           <Route path="trends" element={<LazyPage component={TrendsPage} />} />
-          <Route path="topic-radar" element={<LazyPage component={TopicRadarPage} />} />
-          <Route path="topic-pool" element={<LazyPage component={TopicPoolPage} />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

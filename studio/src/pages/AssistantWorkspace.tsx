@@ -1212,6 +1212,7 @@ export default function AssistantWorkspace() {
           }
           const plan = payload.plan && typeof payload.plan === 'object' && !Array.isArray(payload.plan) ? payload.plan as Record<string, unknown> : payload
           plan.content_type = selectedCreationType
+          if (routeState.assetId) plan.asset_id = routeState.assetId
           if (executionProfile) plan.execution_profile = executionProfile
           if (usesImageSettings) {
             if (imageRatio) plan.image_ratio = imageRatio
@@ -1257,7 +1258,7 @@ export default function AssistantWorkspace() {
             plan.video_edit_preferences = Object.fromEntries(Object.entries(videoEditPreferences).filter(([, value]) => value !== undefined && value !== ''))
           }
           if (plan !== payload) payload.plan = plan
-          const optionKeys = ['content_type', 'execution_profile', 'image_ratio', 'image_capability_key', 'assets', 'video_edit_brief', 'video_edit_preferences']
+          const optionKeys = ['asset_id', 'content_type', 'execution_profile', 'image_ratio', 'image_capability_key', 'assets', 'video_edit_brief', 'video_edit_preferences']
           const planOptions = Object.fromEntries(optionKeys.filter((key) => Object.prototype.hasOwnProperty.call(plan, key)).map((key) => [key, plan[key]]))
           commitOptions = { plan: planOptions }
         }
@@ -1289,6 +1290,8 @@ export default function AssistantWorkspace() {
         void queryClient.invalidateQueries({ queryKey: ['projects'] })
       }
       if (mode !== 'creation') setAttachments([])
+      void queryClient.invalidateQueries({ queryKey: ['content-assets'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-stats'] })
       const committedTaskID = stringValue(result.task?.id) ?? stringValue((result as { task_id?: unknown }).task_id)
       const interactionStatus = stringValue((result as { interaction_status?: unknown }).interaction_status) ?? 'created'
       dispatchInteraction({ type: 'commit_result', result: { status: interactionStatus, task_id: committedTaskID } })

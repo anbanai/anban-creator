@@ -21,7 +21,7 @@ vi.mock('@/lib/api', () => ({
       list: listMock,
       refresh: refreshMock,
     },
-    topicPool: { create: vi.fn() },
+    contentAssets: { create: vi.fn() },
   },
 }))
 

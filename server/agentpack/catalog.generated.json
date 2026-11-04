@@ -1528,7 +1528,7 @@
         "interactive-creation-clarification"
       ],
       "ui": {},
-      "digest": "3a39e73a7c54848918767455aaf6f208d23ebf4ddb113ac7a8225e7880180a40"
+      "digest": "cbe4464424f2d9b1db8f53787bc121276937c209d042099d63219e325820f7c7"
     },
     {
       "id": "feedback-analysis",
@@ -3106,7 +3106,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "93a8bac49b8bab16e749c7c11ef7583128f880664f4c9379d5824a1cbfe9d2d8"
+      "digest": "d09d8cd9a3f355de43769d09b12163ea08b9688dabedd05d81058d6ac52461ed"
     },
     {
       "id": "talking-head-editor",
@@ -4179,7 +4179,7 @@
     {
       "id": "topic-radar",
       "channel": "topic-radar",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "kind": "managed",
       "display_name": "选题雷达",
       "description": "从服务端冻结上下文生成带来源证据的选题摘要和短视频脚本，不直接访问外部平台或修改服务端状态。",
@@ -4347,6 +4347,9 @@
                   "type": "string"
                 },
                 "suggestion_id": {
+                  "type": "string"
+                },
+                "asset_id": {
                   "type": "string"
                 }
               },
@@ -4936,6 +4939,13 @@
                 "topic_digest",
                 "topic_script"
               ]
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "candidates",
+                "no_new_candidates"
+              ]
             }
           },
           "oneOf": [
@@ -5116,6 +5126,13 @@
                   "type": "string",
                   "enum": [
                     "topic_digest"
+                  ]
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "candidates",
+                    "no_new_candidates"
                   ]
                 }
               },
@@ -5377,7 +5394,7 @@
       "ui": {
         "renderer": "custom:topic-radar"
       },
-      "digest": "e6520fa554f6a48bce8f03b4ee4bac0cb2eaa1da5d12f0f74399addd15d909ce"
+      "digest": "6227390ffaa6ba653205e347e0d1be8d7916f28154f9c110c011725c3310208b"
     },
     {
       "id": "video-edit",
@@ -6496,7 +6513,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "d282729ac275bd3be4fdb26f0c75868aa227888b1ab3fe1bd320e45aac30fe59"
+      "digest": "39f5e56d3f4886eb1260e07816496786dd8bfd7a4a75d4ee53b44ec22ed2fb60"
     },
     {
       "id": "wechat-picture",

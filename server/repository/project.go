@@ -227,7 +227,7 @@ func (r *gormProjectRepository) GetStats(ctx context.Context, projectID string) 
 			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_tasks,
 			SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running_tasks,
 			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_tasks,
-			(SELECT COUNT(*) FROM topic_pool WHERE project_id = ? AND status = ?) as unused_topics,
+			(SELECT COUNT(DISTINCT content_asset_id) FROM topic_pool WHERE project_id = ? AND status = ? AND `+availableTopicPredicate+`) as unused_topics,
 			MAX(completed_at) as last_activity_at
 		FROM tasks WHERE project_id = ? AND`+publicTaskStatsPredicate+`
 	`, projectID, model.TopicStatusUnused, projectID,
@@ -330,8 +330,9 @@ func (r *gormProjectRepository) GetStatsByProjectIDs(ctx context.Context, projec
 	var topicRows []topicStatsRow
 	if err := r.db.WithContext(ctx).
 		Model(&model.TopicPool{}).
-		Select("project_id, COUNT(*) AS unused_topics").
+		Select("project_id, COUNT(DISTINCT content_asset_id) AS unused_topics").
 		Where("project_id IN ? AND status = ?", projectIDs, model.TopicStatusUnused).
+		Where(availableTopicPredicate).
 		Group("project_id").
 		Scan(&topicRows).Error; err != nil {
 		return nil, err

@@ -71,10 +71,11 @@ func TestTopicAdoptionMarksNormalizedExistingTitleAsDuplicate(t *testing.T) {
 	ctx := context.Background()
 	repo := topicRadarTestRepository(t)
 	sub := seedTopicRadarSubscription(t, repo)
-	original := &model.TopicPool{UserID: sub.UserID, ProjectID: sub.ProjectID, Topic: "  Reusable Topic  "}
-	if err := repo.TopicPools().Create(ctx, original); err != nil {
+	rows, err := NewTopicPoolService(repo, nil).Add(ctx, sub.UserID, sub.ProjectID, []string{"  Reusable Topic  "})
+	if err != nil {
 		t.Fatal(err)
 	}
+	original := rows[0]
 	svc := NewTopicRadarService(repo, nil, nil)
 	digest, err := svc.Run(ctx, RunTopicDigestParams{UserID: sub.UserID, SubscriptionID: sub.ID})
 	if err != nil {

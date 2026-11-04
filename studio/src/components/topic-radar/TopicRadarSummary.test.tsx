@@ -27,7 +27,7 @@ describe('TopicRadarSummary', () => {
     radar.digest.mockImplementation((id: string) => Promise.resolve({ digest: { id }, suggestions: [{ id: 'suggestion', title: id === 'new' ? '最新自动入库选题' : '旧选题' }], adoptions: [{ status: 'adopted' }] }))
     render(<TopicRadarSummary projectId="project-1" />)
     expect(await screen.findByText('最新自动入库选题')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '查看本次分析' })).toHaveAttribute('href', '/topic-radar?project_id=project-1&digest_id=new')
+    expect(screen.getByRole('link', { name: '查看本次分析' })).toHaveAttribute('href', '/topics?project_id=project-1&detail=discover&run=new')
     expect(screen.queryByRole('button', { name: /采纳/ })).not.toBeInTheDocument()
   })
 
@@ -35,6 +35,6 @@ describe('TopicRadarSummary', () => {
     radar.subscriptions.mockResolvedValue({ items: [] })
     render(<TopicRadarSummary projectId="empty-project" />)
     expect(await screen.findByText('为当前人设启用每日选题推荐。')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '打开选题雷达' })).toHaveAttribute('href', '/topic-radar?project_id=empty-project')
+    expect(screen.getByRole('link', { name: '打开选题库' })).toHaveAttribute('href', '/topics?project_id=empty-project')
   })
 })

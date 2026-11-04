@@ -57,6 +57,9 @@ func TestManagedAgentsOwnDynamicLifecycleReporting(t *testing.T) {
 			if pack.ID == "profile-analysis" {
 				wantVersion = "2.1.6"
 			}
+			if pack.ID == "topic-radar" {
+				wantVersion = "1.0.1"
+			}
 			if pack.ID == "video-edit" {
 				wantVersion = "1.0.1"
 			}

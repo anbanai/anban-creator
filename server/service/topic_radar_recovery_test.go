@@ -85,7 +85,11 @@ func TestTopicScriptRetryClearsExecutionOwnership(t *testing.T) {
 	if err := repo.TopicSuggestions().CreateBatch(ctx, []*model.TopicSuggestion{{ID: "suggestion", DigestID: d.ID, ProjectID: sub.ProjectID, Title: "topic", SourceRefs: datatypes.JSON(`[]`), Scores: datatypes.JSON(`{}`)}}); err != nil {
 		t.Fatal(err)
 	}
-	p := RequestTopicScriptParams{UserID: sub.UserID, SuggestionID: "suggestion", TargetPlatform: "douyin"}
+	asset := model.NewContentAsset(sub.UserID, "topic")
+	if err := repo.ContentAssets().Create(ctx, asset); err != nil {
+		t.Fatal(err)
+	}
+	p := RequestTopicScriptParams{UserID: sub.UserID, AssetID: asset.ID, ProjectID: sub.ProjectID, TargetPlatform: "douyin"}
 	job, err := svc.RequestTopicScript(ctx, p)
 	if err != nil {
 		t.Fatal(err)

@@ -21,7 +21,7 @@ func TestFinalizeTopicScriptValidatesArtifactAndCompletesJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	suggestions, _ := repo.TopicSuggestions().ListByDigest(ctx, digest.ID)
-	job, err := rad.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: subscription.UserID, SuggestionID: suggestions[0].ID, TargetPlatform: "douyin"})
+	job, err := rad.RequestTopicScript(ctx, RequestTopicScriptParams{UserID: subscription.UserID, AssetID: suggestions[0].ContentAssetID, ProjectID: suggestions[0].ProjectID, TargetPlatform: "douyin"})
 	if err != nil {
 		t.Fatal(err)
 	}

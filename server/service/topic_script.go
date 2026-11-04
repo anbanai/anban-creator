@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,11 +14,14 @@ import (
 )
 
 type RequestTopicScriptParams struct {
-	UserID          string
-	SuggestionID    string
-	TargetPlatform  string
-	DurationSeconds int
-	AspectRatio     string
+	sourceDigestID     string
+	sourceSuggestionID string
+	UserID             string
+	AssetID            string
+	ProjectID          string
+	TargetPlatform     string
+	DurationSeconds    int
+	AspectRatio        string
 }
 
 func (s *TopicRadarService) RequestTopicScript(ctx context.Context, p RequestTopicScriptParams) (*model.TopicScriptJob, error) {
@@ -28,8 +29,8 @@ func (s *TopicRadarService) RequestTopicScript(ctx context.Context, p RequestTop
 }
 
 func (s *TopicRadarService) requestTopicScript(ctx context.Context, p RequestTopicScriptParams, retryFailed bool) (*model.TopicScriptJob, error) {
-	if strings.TrimSpace(p.UserID) == "" || strings.TrimSpace(p.SuggestionID) == "" || strings.TrimSpace(p.TargetPlatform) == "" {
-		return nil, fmt.Errorf("%w: user_id, suggestion_id and target_platform are required", ErrTopicSubscriptionInvalid)
+	if strings.TrimSpace(p.UserID) == "" || strings.TrimSpace(p.AssetID) == "" || strings.TrimSpace(p.ProjectID) == "" || strings.TrimSpace(p.TargetPlatform) == "" {
+		return nil, fmt.Errorf("%w: user_id, asset_id, project_id and target_platform are required", ErrTopicSubscriptionInvalid)
 	}
 	p.TargetPlatform, p.AspectRatio = strings.TrimSpace(p.TargetPlatform), strings.TrimSpace(p.AspectRatio)
 	if err := validateTopicScriptTarget(p.TargetPlatform, p.DurationSeconds, p.AspectRatio); err != nil {
@@ -41,34 +42,18 @@ func (s *TopicRadarService) requestTopicScript(ctx context.Context, p RequestTop
 	if strings.TrimSpace(p.AspectRatio) == "" {
 		p.AspectRatio = "9:16"
 	}
-	suggestion, err := s.repo.TopicSuggestions().FindByID(ctx, p.SuggestionID)
+	asset, err := s.repo.ContentAssets().FindByID(ctx, p.UserID, p.AssetID)
+	if err != nil {
+		return nil, ErrContentAssetNotFound
+	}
+	if asset.Status == model.ContentAssetStatusArchived {
+		return nil, fmt.Errorf("%w: topic is archived", ErrTopicSubscriptionInvalid)
+	}
+	project, err := s.projectForUser(ctx, p.UserID, p.ProjectID)
 	if err != nil {
 		return nil, err
 	}
-	digest, err := s.repo.TopicDigests().FindByID(ctx, suggestion.DigestID)
-	if err != nil {
-		return nil, err
-	}
-	if digest.UserID != p.UserID || suggestion.ProjectID != digest.ProjectID {
-		return nil, ErrTopicProjectAccessDenied
-	}
-	if _, err := s.projectForUser(ctx, p.UserID, digest.ProjectID); err != nil {
-		return nil, err
-	}
-	if digest.Status != model.TopicDigestStatusSucceeded {
-		return nil, fmt.Errorf("%w: digest must be completed", ErrTopicSubscriptionInvalid)
-	}
-	fingerprintBytes, err := json.Marshal(struct {
-		SuggestionID string `json:"suggestion_id"`
-		Platform     string `json:"platform"`
-		Duration     int    `json:"duration"`
-		AspectRatio  string `json:"aspect_ratio"`
-	}{p.SuggestionID, strings.TrimSpace(p.TargetPlatform), p.DurationSeconds, strings.TrimSpace(p.AspectRatio)})
-	if err != nil {
-		return nil, err
-	}
-	hash := sha256.Sum256(fingerprintBytes)
-	fingerprint := hex.EncodeToString(hash[:])
+	fingerprint := model.TopicScriptFingerprint(p.UserID, p.ProjectID, p.AssetID, p.TargetPlatform, p.DurationSeconds, p.AspectRatio)
 	if existing, findErr := s.repo.TopicScriptJobs().FindByFingerprint(ctx, fingerprint); findErr == nil {
 		if existing.Status != model.TopicScriptJobFailed || !retryFailed {
 			return existing, nil
@@ -92,16 +77,22 @@ func (s *TopicRadarService) requestTopicScript(ctx context.Context, p RequestTop
 	}
 	job := &model.TopicScriptJob{
 		ID:              uuid.NewString(),
-		SuggestionID:    suggestion.ID,
-		DigestID:        digest.ID,
+		DigestID:        p.sourceDigestID,
+		SuggestionID:    p.sourceSuggestionID,
+		ContentAssetID:  p.AssetID,
 		UserID:          p.UserID,
-		ProjectID:       digest.ProjectID,
+		ProjectID:       p.ProjectID,
 		TargetPlatform:  strings.TrimSpace(p.TargetPlatform),
 		DurationSeconds: p.DurationSeconds,
 		AspectRatio:     strings.TrimSpace(p.AspectRatio),
 		Fingerprint:     fingerprint,
 		Status:          model.TopicScriptJobQueued,
 	}
+	snapshot, err := s.freezeTopicScriptInput(ctx, asset, project, job)
+	if err != nil {
+		return nil, err
+	}
+	job.InputSnapshot = snapshot
 	if err := s.repo.TopicScriptJobs().Create(ctx, job); err != nil {
 		if existing, findErr := s.repo.TopicScriptJobs().FindByFingerprint(ctx, fingerprint); findErr == nil {
 			return existing, nil

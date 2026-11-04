@@ -234,8 +234,8 @@ func TestWeComRenderedPayloadBoundary(t *testing.T) {
 		length int
 		want   string
 	}{
-		{name: "exact limit", length: 4079, want: model.TopicNotificationSent},
-		{name: "one byte over", length: 4080, want: model.TopicNotificationInvalid},
+		{name: "exact limit", length: 4082, want: model.TopicNotificationSent},
+		{name: "one byte over", length: 4083, want: model.TopicNotificationInvalid},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			radar := NewTopicRadarService(nil, nil, nil)

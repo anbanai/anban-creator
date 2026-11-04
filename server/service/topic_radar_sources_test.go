@@ -26,8 +26,8 @@ func TestTopicRadarFreezesScopedSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, item := range []*model.TopicPool{
-		{UserID: sub.UserID, ProjectID: sub.ProjectID, Topic: "本项目历史选题", Status: model.TopicStatusUnused},
-		{UserID: "other-user", ProjectID: "other-project", Topic: "不能泄露的选题", Status: model.TopicStatusUnused},
+		{UserID: sub.UserID, ProjectID: sub.ProjectID, Topic: "本项目历史选题", Status: model.TopicStatusUnused, ContentAssetID: topicStringPtr("source-asset")},
+		{UserID: "other-user", ProjectID: "other-project", Topic: "不能泄露的选题", Status: model.TopicStatusUnused, ContentAssetID: topicStringPtr("source-asset")},
 	} {
 		if err := repo.TopicPools().Create(ctx, item); err != nil {
 			t.Fatal(err)
@@ -102,12 +102,12 @@ func TestTopicRadarHistoryScopesBeforeLimitAndMarksMissing(t *testing.T) {
 			ctx := context.Background()
 			sub := seedTopicRadarSubscription(t, repo)
 			for i := 0; i < 101; i++ {
-				if err := repo.TopicPools().Create(ctx, &model.TopicPool{UserID: "another-user", ProjectID: sub.ProjectID, Topic: fmt.Sprintf("foreign-%d", i), Status: model.TopicStatusUnused}); err != nil {
+				if err := repo.TopicPools().Create(ctx, &model.TopicPool{UserID: "another-user", ProjectID: sub.ProjectID, Topic: fmt.Sprintf("foreign-%d", i), Status: model.TopicStatusUnused, ContentAssetID: topicStringPtr(fmt.Sprintf("foreign-asset-%d", i))}); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if ownHistory {
-				if err := repo.TopicPools().Create(ctx, &model.TopicPool{UserID: sub.UserID, ProjectID: sub.ProjectID, Topic: "owned-history", Status: model.TopicStatusUnused}); err != nil {
+				if err := repo.TopicPools().Create(ctx, &model.TopicPool{UserID: sub.UserID, ProjectID: sub.ProjectID, Topic: "owned-history", Status: model.TopicStatusUnused, ContentAssetID: topicStringPtr("source-asset")}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -122,7 +122,7 @@ func TestTopicRadarHistoryScopesBeforeLimitAndMarksMissing(t *testing.T) {
 			}
 			count := 0
 			for _, ref := range frozen.SourceRefs {
-				if ref.Type == "topic_pool" {
+				if ref.Type == "asset" {
 					count++
 					if ref.Title != "owned-history" {
 						t.Fatalf("foreign history leaked: %+v", ref)

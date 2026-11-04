@@ -269,6 +269,7 @@ func validateAssistantCommitScope(ctx context.Context, repo repository.Repositor
 }
 
 type assistantCreationPlan struct {
+	ContentAssetID       string                      `json:"asset_id,omitempty"`
 	Goal                 string                      `json:"goal"`
 	ContentType          string                      `json:"content_type"`
 	Topic                string                      `json:"topic"`
@@ -491,7 +492,8 @@ func commitAssistantCreation(ctx context.Context, userID string, checkpoint *mod
 		executionProfile = "effective"
 	}
 	params := CreateManualParams{
-		UserID: userID, ProjectID: checkpoint.ProjectID, ExecutionProfile: executionProfile,
+		ContentAssetID: plan.ContentAssetID,
+		UserID:         userID, ProjectID: checkpoint.ProjectID, ExecutionProfile: executionProfile,
 		AgentID: selected.Agent.Name, Channel: selected.Channel, TaskKind: taskKind,
 		RequestedTaskType: taskType,
 		ImageRatio:        plan.ImageRatio, ImageCapabilityKey: plan.ImageCapabilityKey,

@@ -18,7 +18,7 @@ func TestTopicPoolAddCanonicalDedupeDoesNotCreateOrphanAssets(t *testing.T) {
 	}{
 		{name: "equivalent titles in one request", topics: []string{"Hello World", "hello  world", " HELLO\tWORLD "}, wantAdded: 1, wantAssets: 1},
 		{name: "equivalent existing manual topic", existing: true, topics: []string{"hello  world"}, wantAdded: 0, wantAssets: 1},
-		{name: "equivalent adopted topic", existing: true, radar: true, topics: []string{"hello  world"}, wantAdded: 0, wantAssets: 0},
+		{name: "equivalent adopted topic", existing: true, radar: true, topics: []string{"hello  world"}, wantAdded: 0, wantAssets: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := topicRadarTestRepository(t)
@@ -34,6 +34,9 @@ func TestTopicPoolAddCanonicalDedupeDoesNotCreateOrphanAssets(t *testing.T) {
 				} else if _, err := svc.Add(ctx, subscription.UserID, subscription.ProjectID, []string{"Hello World"}); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if err := MigrateTopicPoolToContentAssets(ctx, repo.Analytics().DB(), nil); err != nil {
+				t.Fatal(err)
 			}
 			added, err := svc.Add(ctx, subscription.UserID, subscription.ProjectID, tc.topics)
 			if err != nil {

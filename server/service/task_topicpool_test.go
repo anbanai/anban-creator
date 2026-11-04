@@ -56,6 +56,10 @@ func TestCreateFromPlan_ClaimsTopicFromPool_Article(t *testing.T) {
 		t.Fatalf("task.Prompt = %q, want claimed topic %q", task.Prompt, seeded)
 	}
 
+	if task.ContentAssetID == "" {
+		t.Fatal("scheduled task lost canonical asset identity")
+	}
+
 	// The claimed topic must be marked used and bound to the spawned task.
 	used, _, err := topicSvc.List(ctx, userID, projectID, model.TopicStatusUsed, 0, 10)
 	if err != nil {
@@ -69,31 +73,31 @@ func TestCreateFromPlan_ClaimsTopicFromPool_Article(t *testing.T) {
 	}
 }
 
-func TestTopicPoolClaimTopicOwnsTaskBranching(t *testing.T) {
-	_, topicSvc := setupTaskServiceWithTopicPool(t)
+func TestTopicPoolClaimTopicRequiresTaskAndReturnsStableAsset(t *testing.T) {
+	svc, topicSvc := setupTaskServiceWithTopicPool(t)
 	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := createTestProject(t, topicSvc.repo, userID, model.PlatformWechat)
-	if _, err := topicSvc.Add(ctx, userID, projectID, []string{"first", "second"}); err != nil {
-		t.Fatalf("seed topics: %v", err)
-	}
-
-	unbound, err := topicSvc.ClaimTopic(ctx, ClaimTopicRequest{UserID: userID, ProjectID: projectID})
+	userID := uuid.NewString()
+	projectID := createTestProject(t, svc.repo, userID, model.PlatformWechat)
+	topics, err := topicSvc.Add(ctx, userID, projectID, []string{"first", "second"})
 	if err != nil {
-		t.Fatalf("ClaimTopic unbound: %v", err)
+		t.Fatal(err)
 	}
-	if unbound.Topic != "first" || unbound.TopicID == nil || *unbound.TopicID == 0 || unbound.TaskID != "" {
-		t.Fatalf("unbound result = %#v", unbound)
+	if _, err := topicSvc.ClaimTopic(ctx, ClaimTopicRequest{UserID: userID, ProjectID: projectID}); err == nil {
+		t.Fatal("unbound consumption must fail")
 	}
-
-	bound, err := topicSvc.ClaimTopic(ctx, ClaimTopicRequest{
-		UserID: userID, ProjectID: projectID, TaskID: "task-1",
-	})
-	if err != nil {
-		t.Fatalf("ClaimTopic bound: %v", err)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning}
+	if err := svc.repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
 	}
-	if bound.Topic != "second" || bound.TopicID != nil || bound.TaskID != "task-1" {
-		t.Fatalf("bound result = %#v", bound)
+	for i := 0; i < 2; i++ {
+		result, err := topicSvc.ClaimTopic(ctx, ClaimTopicRequest{UserID: userID, ProjectID: projectID, TaskID: task.ID})
+		if err != nil || result.AssetID != *topics[0].ContentAssetID || result.Topic != "first" {
+			t.Fatalf("claim=%+v err=%v", result, err)
+		}
+	}
+	_, total, err := topicSvc.List(ctx, userID, projectID, model.TopicStatusUnused, 0, 10)
+	if err != nil || total != 1 {
+		t.Fatalf("remaining=%d err=%v", total, err)
 	}
 }
 
@@ -413,112 +417,5 @@ func TestCreateManual_ClaimsOnePerTask(t *testing.T) {
 	}
 	if len(used) != 2 {
 		t.Fatalf("expected 2 used topics, got %d", len(used))
-	}
-}
-
-// TestClaimForTask_IdempotentPerTask: claiming twice with the same task ID must
-// return the SAME topic and consume only one — the server-side anti-double-consume
-// guard. Without idempotency, a second claim (server pre-claim + an agent skill
-// calling claim_topic) would consume a second topic and bind both to one task.
-// Idempotency is per-task: a different task still gets the next topic.
-func TestClaimForTask_IdempotentPerTask(t *testing.T) {
-	_, topicSvc := setupTaskServiceWithTopicPool(t)
-	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := createTestProject(t, topicSvc.repo, userID, model.PlatformWechat)
-
-	const t1, t2 = "幂等选题一", "幂等选题二"
-	if _, err := topicSvc.Add(ctx, userID, projectID, []string{t1, t2}); err != nil {
-		t.Fatalf("seed topics: %v", err)
-	}
-
-	const taskA = "task-idempotent-A"
-	first, err := topicSvc.ClaimForTask(ctx, userID, projectID, taskA)
-	if err != nil {
-		t.Fatalf("first ClaimForTask: %v", err)
-	}
-	if first == "" {
-		t.Fatal("first claim returned empty topic")
-	}
-
-	// Second claim with the SAME task ID must return the same topic, not a new one.
-	second, err := topicSvc.ClaimForTask(ctx, userID, projectID, taskA)
-	if err != nil {
-		t.Fatalf("second ClaimForTask: %v", err)
-	}
-	if second != first {
-		t.Fatalf("second claim = %q, want same as first %q (idempotent per task)", second, first)
-	}
-
-	// Only ONE topic consumed despite two claims for taskA.
-	used, _, err := topicSvc.List(ctx, userID, projectID, model.TopicStatusUsed, 0, 10)
-	if err != nil {
-		t.Fatalf("list used: %v", err)
-	}
-	if len(used) != 1 {
-		t.Fatalf("expected 1 used topic after idempotent re-claim, got %d", len(used))
-	}
-
-	// A DIFFERENT task must still get the next (different) topic.
-	const taskB = "task-idempotent-B"
-	third, err := topicSvc.ClaimForTask(ctx, userID, projectID, taskB)
-	if err != nil {
-		t.Fatalf("third ClaimForTask (taskB): %v", err)
-	}
-	if third == "" || third == first {
-		t.Fatalf("third claim = %q, want a different non-empty topic for taskB", third)
-	}
-}
-
-// TestReleaseForTask_ReturnsTopicToPool: releasing a task-bound topic resets it
-// to unused and clears the binding, so a topic orphaned by a failed task-create
-// (claim succeeded, repo.Tasks().Create failed) is reclaimable instead of
-// permanently consumed. Re-claiming the same task gets the topic back.
-func TestReleaseForTask_ReturnsTopicToPool(t *testing.T) {
-	_, topicSvc := setupTaskServiceWithTopicPool(t)
-	ctx := context.Background()
-	userID := uuid.New().String()
-	projectID := createTestProject(t, topicSvc.repo, userID, model.PlatformWechat)
-
-	const seeded = "待回滚的选题"
-	if _, err := topicSvc.Add(ctx, userID, projectID, []string{seeded}); err != nil {
-		t.Fatalf("seed topic: %v", err)
-	}
-
-	const taskA = "task-rollback-A"
-	claimed, err := topicSvc.ClaimForTask(ctx, userID, projectID, taskA)
-	if err != nil {
-		t.Fatalf("ClaimForTask: %v", err)
-	}
-	if claimed != seeded {
-		t.Fatalf("claimed = %q, want %q", claimed, seeded)
-	}
-
-	if err := topicSvc.ReleaseForTask(ctx, taskA); err != nil {
-		t.Fatalf("ReleaseForTask: %v", err)
-	}
-
-	used, _, err := topicSvc.List(ctx, userID, projectID, model.TopicStatusUsed, 0, 10)
-	if err != nil {
-		t.Fatalf("list used: %v", err)
-	}
-	if len(used) != 0 {
-		t.Fatalf("expected 0 used topics after release, got %d", len(used))
-	}
-	unused, _, err := topicSvc.List(ctx, userID, projectID, model.TopicStatusUnused, 0, 10)
-	if err != nil {
-		t.Fatalf("list unused: %v", err)
-	}
-	if len(unused) != 1 || unused[0].Topic != seeded {
-		t.Fatalf("unused topics = %v, want 1 = %q back in pool", unused, seeded)
-	}
-
-	// Re-claiming the same task (e.g. after a retry) returns the topic — it wasn't lost.
-	again, err := topicSvc.ClaimForTask(ctx, userID, projectID, taskA)
-	if err != nil {
-		t.Fatalf("re-claim: %v", err)
-	}
-	if again != seeded {
-		t.Fatalf("re-claimed = %q, want %q", again, seeded)
 	}
 }

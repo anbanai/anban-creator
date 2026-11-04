@@ -683,7 +683,6 @@ func main() {
 	var viralAnalysisHandler *handler.ViralAnalysisHandler
 	var posterHandler *handler.PosterHandler
 	var resourceHandler *handler.ResourceHandler
-	var topicPoolHandler *handler.TopicPoolHandler
 	var contentAssetHandler *handler.ContentAssetHandler
 	var trendsHandler *handler.TrendsHandler
 	var topicRadarHandler *handler.TopicRadarHandler
@@ -779,7 +778,6 @@ func main() {
 		}
 		posterHandler = handler.NewPosterHandler(posterSvc, log)
 		topicPoolSvc = service.NewTopicPoolService(repo, log)
-		topicPoolHandler = handler.NewTopicPoolHandler(topicPoolSvc, log)
 		contentAssetSvc = service.NewContentAssetService(repo)
 		if asynqClient != nil {
 			contentAssetSvc.SetEnqueuer(asynqClient)
@@ -796,6 +794,7 @@ func main() {
 		trendsHandler = handler.NewTrendsHandler(trendSvc, log)
 		topicRadarSvc = service.NewTopicRadarService(repo, asynqClient, nil)
 		topicRadarSvc.SetTaskService(taskSvc)
+		topicRadarSvc.SetPublicBaseURL(cfg.Server.PublicBaseURL)
 		taskSvc.SetTopicRadarFinalizer(topicRadarSvc.FinalizeTopicRadarExecution)
 		topicRadarHandler = handler.NewTopicRadarHandler(topicRadarSvc, repo, log)
 		if taskSvc != nil {
@@ -1170,7 +1169,6 @@ func main() {
 		ViralAnalysisHandler:                viralAnalysisHandler,
 		PosterHandler:                       posterHandler,
 		ResourceHandler:                     resourceHandler,
-		TopicPoolHandler:                    topicPoolHandler,
 		ContentAssetHandler:                 contentAssetHandler,
 		TrendsHandler:                       trendsHandler,
 		TopicRadarHandler:                   topicRadarHandler,

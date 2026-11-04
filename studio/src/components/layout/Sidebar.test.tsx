@@ -85,10 +85,9 @@ describe('Sidebar', () => {
       '插件',
       '设置',
       '内容分析',
-      '选题资产',
+      '选题库',
       '素材库',
       '热点雷达',
-      '选题雷达',
     ])
     expect(navigation.queryByText('创作')).not.toBeInTheDocument()
     expect(navigation.queryByText('自动化')).not.toBeInTheDocument()

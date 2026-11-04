@@ -99,6 +99,9 @@ func renderTopicNotificationText(items []topicNotificationPayload) string {
 				b.WriteString(fmt.Sprintf("- %s\n", label))
 			}
 		}
+		if item.TopicURL != "" {
+			b.WriteString("打开选题：" + item.TopicURL + "\n")
+		}
 		if item.VideoFit != "" {
 			b.WriteString("短视频形式：" + item.VideoFit + "\n")
 		}
@@ -109,11 +112,11 @@ func renderTopicNotificationText(items []topicNotificationPayload) string {
 func notificationRequestBody(provider, text string) ([]byte, error) {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case model.TopicNotificationProviderFeishu:
-		return notification.MarkdownBody(notification.NotifyTypeLark, "选题雷达", text)
+		return notification.MarkdownBody(notification.NotifyTypeLark, "选题库", text)
 	case model.TopicNotificationProviderWeCom:
-		return notification.MarkdownBody(notification.NotifyTypeWeWork, "选题雷达", text)
+		return notification.MarkdownBody(notification.NotifyTypeWeWork, "选题库", text)
 	case model.TopicNotificationProviderDingTalk:
-		return notification.MarkdownBody(notification.NotifyTypeDingTalk, "选题雷达", text)
+		return notification.MarkdownBody(notification.NotifyTypeDingTalk, "选题库", text)
 	default:
 		return nil, fmt.Errorf("unsupported notification provider %q", provider)
 	}

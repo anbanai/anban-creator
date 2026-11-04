@@ -11,7 +11,7 @@ func TestAdoptSuggestionMarksExistingTopicAsDuplicate(t *testing.T) {
 	repo := topicRadarTestRepository(t)
 	ctx := context.Background()
 	subscription := seedTopicRadarSubscription(t, repo)
-	if err := repo.TopicPools().Create(ctx, &model.TopicPool{UserID: subscription.UserID, ProjectID: subscription.ProjectID, Topic: "可持续选题"}); err != nil {
+	if _, err := NewTopicPoolService(repo, nil).Add(ctx, subscription.UserID, subscription.ProjectID, []string{"可持续选题"}); err != nil {
 		t.Fatal(err)
 	}
 	radar := NewTopicRadarService(repo, &topicRadarTestEnqueuer{}, nil)

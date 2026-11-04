@@ -302,6 +302,7 @@ export interface TaskFile {
 }
 
 export interface CreateTaskRequest {
+  asset_id?: string
 	agent_id?: string
 	channel?: OutputChannel
 	task_kind?: string
