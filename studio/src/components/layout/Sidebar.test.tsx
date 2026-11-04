@@ -79,13 +79,13 @@ describe('Sidebar', () => {
     expect(navigation.getAllByRole('link').map((link) => link.textContent)).toEqual([
       '首页',
       '人设',
+      '选题',
       '作品',
       '排期',
       '钱包',
       '插件',
       '设置',
       '内容分析',
-      '选题库',
       '素材库',
       '热点雷达',
     ])

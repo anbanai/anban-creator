@@ -101,10 +101,10 @@ export function ProjectCard({ project, stats, onEdit, onChannelConfig, onUpdateP
             </Tooltip>
           )}
           <Tooltip>
-            <TooltipTrigger render={<Link to={`/topics?project_id=${encodeURIComponent(project.id)}`} className={cn(buttonVariants({ variant: 'ghost', size: 'icon-md' }), actionButtonClass)} aria-label={unusedTopics === undefined ? `选题库：${project.name}` : `选题库：${project.name}，未使用 ${unusedTopics} 个`} />}>
+            <TooltipTrigger render={<Link to={`/topics?project_id=${encodeURIComponent(project.id)}`} className={cn(buttonVariants({ variant: 'ghost', size: 'icon-md' }), actionButtonClass)} aria-label={unusedTopics === undefined ? `选题：${project.name}` : `选题：${project.name}，未使用 ${unusedTopics} 个`} />}>
               <Lightbulb />
             </TooltipTrigger>
-            <TooltipContent>{unusedTopics === undefined ? '选题库' : `选题库：未使用 ${unusedTopics} 个`}</TooltipContent>
+            <TooltipContent>{unusedTopics === undefined ? '选题' : `选题：未使用 ${unusedTopics} 个`}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger render={<Button variant="ghost" size="icon-md" className={actionButtonClass} onClick={() => setMemoryOpen(true)} aria-label={`人设记忆：${project.name}`} />}>

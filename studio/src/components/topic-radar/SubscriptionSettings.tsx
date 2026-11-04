@@ -18,7 +18,7 @@ export function SubscriptionSettings({ subscription, onClose, onSaved, onDeleted
   const save = useMutation({ mutationFn: () => api.topicRadar.updateSubscription(subscription.id, form), onSuccess: async () => { await onSaved(); toast.success('订阅配置已保存'); onClose() }, onError: () => toast.error('保存失败，请检查时间、权重和脚本设置') })
   const remove = useMutation({ mutationFn: () => api.topicRadar.deleteSubscription(subscription.id), onSuccess: async () => { await onDeleted(); toast.success('订阅已删除'); onClose() }, onError: () => toast.error('删除订阅失败，请稍后重试') })
   const patchPolicy = (patch: Partial<NonNullable<TopicSubscriptionSettings['script_policy']>>) => setForm({ ...form, script_policy: { ...form.script_policy, ...patch } })
-  return <><Dialog open onOpenChange={(open) => { if (!open) onClose() }}><DialogContent className="sm:max-w-xl"><DialogHeader><DialogTitle>订阅配置</DialogTitle><DialogDescription>选题分析完成后自动进入选题库；脚本和通知独立处理。</DialogDescription></DialogHeader>
+  return <><Dialog open onOpenChange={(open) => { if (!open) onClose() }}><DialogContent className="sm:max-w-xl"><DialogHeader><DialogTitle>订阅配置</DialogTitle><DialogDescription>选题分析完成后自动加入列表；脚本和通知独立处理。</DialogDescription></DialogHeader>
     <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); save.mutate() }}>
       <label className="grid gap-1">名称<input className={inputClass} required maxLength={120} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
       <label className="flex items-center gap-2"><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} />开启定时分析</label>

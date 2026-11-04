@@ -35,6 +35,6 @@ describe('TopicRadarSummary', () => {
     radar.subscriptions.mockResolvedValue({ items: [] })
     render(<TopicRadarSummary projectId="empty-project" />)
     expect(await screen.findByText('为当前人设启用每日选题推荐。')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '打开选题库' })).toHaveAttribute('href', '/topics?project_id=empty-project')
+    expect(screen.getByRole('link', { name: '打开选题' })).toHaveAttribute('href', '/topics?project_id=empty-project')
   })
 })

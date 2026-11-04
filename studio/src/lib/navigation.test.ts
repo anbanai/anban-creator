@@ -14,13 +14,13 @@ describe('navigation IA', () => {
     expect(mvpNavItems.map((item) => item.label)).toEqual([
       '首页',
       '人设',
+      '选题',
       '作品',
       '排期',
       '钱包',
       '插件',
       '设置',
       '内容分析',
-      '选题库',
       '素材库',
       '热点雷达',
     ])
@@ -30,6 +30,7 @@ describe('navigation IA', () => {
     expect(workspaceNavItems.map((item) => item.to)).toEqual([
       '/',
       '/projects',
+      '/topics',
       '/tasks',
       '/plans',
       '/timeline',
@@ -37,7 +38,6 @@ describe('navigation IA', () => {
       '/plugins',
       '/settings',
       '/content-analytics',
-      '/topics',
       '/media-assets',
       '/trends',
     ])
@@ -57,6 +57,7 @@ describe('navigation IA', () => {
     expect(allNavItems.map((item) => item.to)).toEqual([
       '/',
       '/projects',
+      '/topics',
       '/tasks',
       '/plans',
       '/timeline',
@@ -64,7 +65,6 @@ describe('navigation IA', () => {
       '/plugins',
       '/settings',
       '/content-analytics',
-      '/topics',
       '/media-assets',
       '/trends',
       '/designer',

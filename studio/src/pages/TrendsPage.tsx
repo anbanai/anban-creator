@@ -67,7 +67,7 @@ export default function TrendsPage() {
     mutationFn: ({ projectId: targetProjectId, title }: SaveInput) => api.contentAssets.create({ project_ids: [targetProjectId], title }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['content-assets'] })
-      toast.success("已添加到选题库")
+      toast.success("已添加到选题")
       setSaveTarget(null)
     },
     onError: () => toast.error("收藏失败"),
@@ -148,7 +148,7 @@ export default function TrendsPage() {
                     <TooltipContent>收藏热点</TooltipContent>
                   </Tooltip>
                   <PopoverContent align="end" className="w-80">
-                    <div className="space-y-1"><PopoverTitle>收藏到人设</PopoverTitle><PopoverDescription>选择一个人设，之后可在选题库继续创作。</PopoverDescription></div>
+                    <div className="space-y-1"><PopoverTitle>收藏到人设</PopoverTitle><PopoverDescription>选择一个人设，之后可在选题页面继续创作。</PopoverDescription></div>
                     <ProjectContextControl mode="select" projects={projects} value={projectId || null} onValueChange={(id) => setProjectId(id || "")} loading={projectsQuery.isLoading} placeholder="选择目标人设" ariaLabel="收藏目标人设" />
                     <Button size="sm" className="w-full" disabled={!projectId || save.isPending} onClick={() => projectId && save.mutate({ projectId, title: item.title })}>确认收藏</Button>
                   </PopoverContent>

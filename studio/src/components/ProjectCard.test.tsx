@@ -204,7 +204,7 @@ describe('ProjectCard', () => {
     fireEvent.click(screen.getByRole('button', { name: '归档人设：公众号人设' }))
     expect(onArchive).toHaveBeenCalledWith('project-1')
 
-    expect(screen.getByRole('link', { name: '选题库：公众号人设，未使用 6 个' })).toHaveAttribute('href', '/topics?project_id=project-1')
+    expect(screen.getByRole('link', { name: '选题：公众号人设，未使用 6 个' })).toHaveAttribute('href', '/topics?project_id=project-1')
   })
 
   it('keeps project actions as accessible icon targets', async () => {
@@ -230,7 +230,7 @@ describe('ProjectCard', () => {
   it('does not report zero remaining topics before stats are available', () => {
     render(<ProjectCard project={project()} />)
 
-    const topicPoolButton = screen.getByRole('link', { name: '选题库：公众号人设' })
+    const topicPoolButton = screen.getByRole('link', { name: '选题：公众号人设' })
     expect(topicPoolButton.querySelector('svg')).toBeInTheDocument()
     expect(topicPoolButton).not.toHaveTextContent('0')
   })
