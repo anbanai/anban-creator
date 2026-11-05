@@ -35,6 +35,19 @@ describe("describeTransportError", () => {
     expect(describeTransportError("bootstrap", error, "http://creator.example")).toContain("port=80");
   });
 
+  test("keeps the original message when a retried attempt failed for a domain reason", () => {
+    const error = new TypedTransportError(
+      { operation: "bootstrap", code: "protocol_error", attempts: 1, retryable: false },
+      undefined,
+      undefined,
+      undefined,
+      new Error("bootstrap response exceeds size limit"),
+    );
+    const line = describeTransportError("bootstrap", error, "http://creator.example:8080");
+    expect(line).toContain("failure=protocol_error");
+    expect(line).toContain("message=bootstrap response exceeds size limit");
+  });
+
   test("reports an HTTP rejection without a network cause", () => {
     const error = new Error("bootstrap returned HTTP 426");
     const line = describeTransportError("bootstrap", error, "http://creator.example:8080");

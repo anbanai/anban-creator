@@ -20,12 +20,14 @@ export class TypedTransportError extends Error {
     readonly retryAfterMs?: number,
     public readonly serverCode?: string,
     public readonly networkCode?: string,
+    /** The original failure, kept so a non-transport cause is not lost. */
+    readonly cause?: unknown,
   ) {
     super(`${failure.operation} failed: ${serverCode ?? failure.code}`);
   }
 
   withAttempts(attempts: number): TypedTransportError {
-    return new TypedTransportError({ ...this.failure, attempts }, this.retryAfterMs, this.serverCode, this.networkCode);
+    return new TypedTransportError({ ...this.failure, attempts }, this.retryAfterMs, this.serverCode, this.networkCode, this.cause);
   }
 }
 
@@ -130,7 +132,10 @@ export function describeTransportError(operation: TransferOperation, error: unkn
   const target = describeEndpoint(endpoint);
   if (target) fields.push(target);
   if (!normalized.networkCode) {
-    const message = error instanceof Error ? error.message : "";
+    // A retried request rewraps its cause as protocol_error; the readable text
+    // is the one the attempt actually failed with.
+    const source = error instanceof TypedTransportError && error.cause !== undefined ? error.cause : error;
+    const message = source instanceof Error ? source.message : "";
     if (message) fields.push(`message=${redactLogText(message)}`);
   }
   return `${label} failed: ${fields.join(" ")}`;
@@ -183,7 +188,9 @@ function normalizeError(operation: TransferOperation, error: unknown, timedOut: 
   if (code === "ECONNRESET" || code === "EPIPE") return failure(operation, "connection_reset", 1, true, undefined, undefined, code);
   if (["ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT"].includes(code ?? "")) return failure(operation, "network_timeout", 1, true, undefined, undefined, code);
   if (["EAI_AGAIN", "ENOTFOUND", "ENETUNREACH", "EHOSTUNREACH", "ECONNREFUSED"].includes(code ?? "") || error instanceof TypeError) return failure(operation, "network_unavailable", 1, true, undefined, undefined, code);
-  return failure(operation, "protocol_error", 1, false);
+  // Preserve the original error so a domain failure such as a rejected
+  // bootstrap response is not replaced by a bare protocol_error.
+  return failure(operation, "protocol_error", 1, false, undefined, undefined, undefined, error);
 }
 
 function networkCode(error: unknown): string | undefined {
@@ -198,8 +205,8 @@ function networkCode(error: unknown): string | undefined {
   return undefined;
 }
 
-function failure(operation: TransferOperation, code: TransferErrorCode, attempts: number, retryable: boolean, httpStatus?: number, requestID?: string, networkCode?: string): TypedTransportError {
-  return new TypedTransportError({ operation, code, attempts, retryable, ...(httpStatus ? { http_status: httpStatus } : {}), ...(requestID ? { request_id: requestID } : {}) }, undefined, undefined, networkCode);
+function failure(operation: TransferOperation, code: TransferErrorCode, attempts: number, retryable: boolean, httpStatus?: number, requestID?: string, networkCode?: string, cause?: unknown): TypedTransportError {
+  return new TypedTransportError({ operation, code, attempts, retryable, ...(httpStatus ? { http_status: httpStatus } : {}), ...(requestID ? { request_id: requestID } : {}) }, undefined, undefined, networkCode, cause);
 }
 
 const ALLOWED_NETWORK_CODES = new Set([
