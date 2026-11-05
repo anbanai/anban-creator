@@ -93,26 +93,24 @@ describe('unified topics page', () => {
     const list = await screen.findByRole('region', { name: '选题列表' })
     await within(list).findByText(asset.title)
     expect(screen.queryByRole('combobox', { name: '所属人设筛选' })).not.toBeInTheDocument()
-    expect(screen.getByText('筛选选题').closest('details')).not.toHaveAttribute('open')
+    expect(screen.getByRole('combobox', { name: '人设使用状态' })).toBeInTheDocument()
     expect(within(list).getByText(`${mockProjects[0].name}：未使用`)).toBeInTheDocument()
     expect(within(list).getByRole('link', { name: '脚本：已完成' })).toHaveAttribute('href', '/tasks/script-task')
     expect(screen.queryByRole('navigation', { name: '选题分页' })).not.toBeInTheDocument()
   })
-  it('opens optional filters when requested and exposes persona choice only when useful', async () => {
+  it('shows search and useful persona filters in one toolbar', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([mockProjects[0], secondProject])
     page()
     await screen.findByText(asset.title)
-    const filters = screen.getByText('筛选选题').closest('details')!
-    fireEvent.click(screen.getByText('筛选选题'))
-    expect(filters).toHaveAttribute('open')
-    expect(screen.getByRole('combobox', { name: '所属人设筛选' })).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '人设使用状态' })).toBeInTheDocument()
+    const search = screen.getByRole('textbox', { name: '搜索选题' })
+    const toolbar = search.parentElement!
+    expect(within(toolbar).getByRole('combobox', { name: '所属人设筛选' })).toBeInTheDocument()
+    expect(within(toolbar).getByRole('combobox', { name: '人设使用状态' })).toBeInTheDocument()
   })
   it('omits the persona filter when only one persona exists', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([mockProjects[0]])
     page()
     await screen.findByText(asset.title)
-    fireEvent.click(screen.getByText('筛选选题'))
     expect(screen.queryByRole('combobox', { name: '所属人设筛选' })).not.toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '人设使用状态' })).toBeInTheDocument()
   })
@@ -144,7 +142,6 @@ describe('unified topics page', () => {
     vi.mocked(api.contentAssets.list).mockResolvedValue({ items: [asset], total: 60 })
     page(`/topics?q=关键词&project_id=${mockProjects[0].id}&usage=unused&page=2`)
     await screen.findByText(asset.title)
-    expect(screen.getByText('筛选选题').closest('details')).toHaveAttribute('open')
     const viewport = screen.getByRole('main')
     viewport.scrollTop = 420
     fireEvent.change(screen.getByRole('combobox', { name: '人设使用状态' }), { target: { value: 'used' } })
