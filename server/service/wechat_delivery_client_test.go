@@ -14,7 +14,7 @@ func TestWechatAccountClientFactoryUsesAuthorizerTokenAndRejectsRevokedFallback(
 	f := newPublicationFixture(t)
 	ctx := context.Background()
 	client := &fakeWechatOpenPlatformClient{cachedToken: "authorizer-access"}
-	openPlatform, err := newWechatOpenPlatformService(f.repo, client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com")
+	openPlatform, err := newWechatOpenPlatformService(f.repo, client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com", "https://creator.example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestWechatAccountClientFactoryRejectsAuthorizationsWithoutDraftScope(t *tes
 	f := newPublicationFixture(t)
 	ctx := context.Background()
 	client := &fakeWechatOpenPlatformClient{}
-	openPlatform, err := newWechatOpenPlatformService(f.repo, client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com")
+	openPlatform, err := newWechatOpenPlatformService(f.repo, client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com", "https://creator.example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestWechatAccountClientFactoryAcceptsLegacyDraftScope(t *testing.T) {
 	f := newPublicationFixture(t)
 	ctx := context.Background()
 	client := &fakeWechatOpenPlatformClient{cachedToken: "authorizer-access"}
-	openPlatform, err := newWechatOpenPlatformService(f.repo, client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com")
+	openPlatform, err := newWechatOpenPlatformService(f.repo, client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com", "https://creator.example.com")
 	if err != nil {
 		t.Fatal(err)
 	}

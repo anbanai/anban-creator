@@ -20,7 +20,7 @@
 **两张：Server + Studio。** 使用同一提交构建并使用不可变 tag/digest：
 
 - Server：`deploy/docker/Dockerfile.server`，仓库根目录为 build context。
-- Studio：`deploy/docker/Dockerfile.studio`，仓库根目录为 build context。构建时 `STUDIO_PREVIOUS_IMAGE` 必须传当前线上 Studio 镜像的 digest，保留旧标签页的历史 assets；`VITE_API_BASE_URL=/api/v1`。
+- Studio：`deploy/docker/Dockerfile.studio`，仓库根目录为 build context。构建时 `STUDIO_PREVIOUS_IMAGE` 必须传当前线上 Studio 镜像的 digest，保留旧标签页的历史 assets；`VITE_API_BASE_URL=https://api-creator.anbanai.com/api/v1`。
 - 无须更新现有内容 Agent 镜像、数据库和 Redis 镜像，也无须单独运行语音容器。
 
 ## Server 配置

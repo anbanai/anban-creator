@@ -19,6 +19,11 @@ func TestInstallSubagentsRefreshesFixedCreatorEndpoint(t *testing.T) {
 		initialBearer string
 	}{
 		{
+			name:          "Studio endpoint and correct bearer",
+			initialURL:    "https://creator.anbanai.com/mcp",
+			initialBearer: `bearer_token_env_var = "ANBAN_API_KEY"`,
+		},
+		{
 			name:          "legacy endpoint and correct bearer",
 			initialURL:    "https://api.creator.anbanai.com/mcp",
 			initialBearer: `bearer_token_env_var = "ANBAN_API_KEY"`,
@@ -128,7 +133,7 @@ url = "https://other.example/mcp"
 			if !ok {
 				t.Fatal("parsed config missing exactly one creator table")
 			}
-			if creator.URL != "https://creator.anbanai.com/mcp" {
+			if creator.URL != "https://api-creator.anbanai.com/mcp" {
 				t.Fatalf("creator endpoint after upgrade = %q, want fixed official endpoint", creator.URL)
 			}
 			if creator.BearerTokenEnvVar != "ANBAN_API_KEY" || creator.TimeoutSec != 123 {

@@ -507,6 +507,7 @@ type ServerConfig struct {
 	TLSCertFile   string `yaml:"tls_cert_file"`
 	TLSKeyFile    string `yaml:"tls_key_file"`
 	PublicBaseURL string `yaml:"public_base_url"`
+	StudioBaseURL string `yaml:"studio_base_url"`
 }
 
 type LoggingConfig struct {
@@ -2321,13 +2322,19 @@ func (c *Config) Validate() error {
 	if err := c.WechatOpenPlatform.Validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
-	if c.WechatOpenPlatform.Enabled() && strings.TrimSpace(c.Server.PublicBaseURL) == "" {
-		errs = append(errs, "server.public_base_url is required when WeChat Open Platform authorization is enabled")
-	}
-	if raw := strings.TrimSpace(c.Server.PublicBaseURL); raw != "" {
-		u, err := url.Parse(raw)
-		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-			errs = append(errs, "server.public_base_url must be an HTTPS base URL without credentials, query, or fragment")
+	for _, baseURL := range []struct{ name, value string }{
+		{"public_base_url", c.Server.PublicBaseURL},
+		{"studio_base_url", c.Server.StudioBaseURL},
+	} {
+		raw := strings.TrimSpace(baseURL.value)
+		if c.WechatOpenPlatform.Enabled() && raw == "" {
+			errs = append(errs, "server."+baseURL.name+" is required when WeChat Open Platform authorization is enabled")
+		}
+		if raw != "" {
+			u, err := url.Parse(raw)
+			if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+				errs = append(errs, "server."+baseURL.name+" must be an HTTPS base URL without credentials, query, or fragment")
+			}
 		}
 	}
 	if err := c.Dsh.Validate(); err != nil {

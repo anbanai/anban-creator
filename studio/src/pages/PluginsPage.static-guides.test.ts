@@ -21,7 +21,7 @@ describe('agent-readable plugin guides', () => {
     expect(html).toContain('dsh --profile "$ACTIVE_PROFILE" --dump-config')
     expect(html).toContain('dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh install-presets')
     expect(html).toContain('dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh status')
-    expect(html).toContain('https://creator.anbanai.com/mcp')
+    expect(html).toContain('https://api-creator.anbanai.com/mcp')
     expect(html).toContain('$DSH_HOME/.credentials.yaml')
     expect(html).not.toContain('@anban/dsh-plugin@latest')
   })

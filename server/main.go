@@ -416,7 +416,7 @@ func main() {
 		publishingSvc = service.NewPublishingService(repo, log)
 		if cfg.WechatOpenPlatform.Enabled() {
 			var openPlatformErr error
-			wechatOpenPlatformSvc, openPlatformErr = service.NewWechatOpenPlatformService(repo, cfg.WechatOpenPlatform, cfg.Server.PublicBaseURL, rdb)
+			wechatOpenPlatformSvc, openPlatformErr = service.NewWechatOpenPlatformService(repo, cfg.WechatOpenPlatform, cfg.Server.PublicBaseURL, cfg.Server.StudioBaseURL, rdb)
 			if openPlatformErr != nil {
 				log.Fatal().Err(openPlatformErr).Msg("initialize WeChat Open Platform")
 			}

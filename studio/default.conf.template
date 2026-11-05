@@ -1,9 +1,4 @@
-# Studio frontend — nginx serves the built SPA and reverse-proxies the backend.
-#
-# The web build's axios baseURL resolves to same-origin /api/v1
-# (studio/src/lib/http-client.ts), and task streaming uses SSE over
-# /api/v1/tasks/<id>/stream. So proxying /api/ covers everything. /ws is proxied
-# for parity with the vite dev server (studio has no WS client today).
+# Studio frontend — nginx serves only static files and SPA routes.
 
 # Classify the normalized path; this non-volatile map caches its first result.
 map $uri $share_access_log {
@@ -25,8 +20,6 @@ server {
     # Evaluate before routing so SPA redirects cannot reclassify /share/ as /index.html.
     set $original_share_access_log $share_access_log;
     access_log /var/log/nginx/access.log combined if=$original_share_access_log;
-    # Image upload (cover art, reference images) exceeds nginx's 1m default.
-    client_max_body_size 25m;
 
     # gzip the big JS/CSS/HTML bundles (Vite vendor chunks are several hundred KB
     # raw; gzip typically cuts them ~70%). nginx always gzips text/html; the list
@@ -71,45 +64,9 @@ server {
         access_log off;
     }
 
-    # Backend API (REST + SSE). proxy_buffering off + long read timeout keep
-    # Server-Sent Events streaming live instead of buffering chunks.
-    location /api/ {
-        proxy_pass ${BACKEND_SCHEME}://${BACKEND_HOST}:${BACKEND_PORT};
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_buffering off;
-        proxy_set_header X-Accel-Buffering no;
-        proxy_cache off;
-        proxy_read_timeout 1h;
-        proxy_send_timeout 1h;
-    }
-
-    # MCP Streamable HTTP. Keep this exact path out of the SPA fallback and
-    # stream JSON/SSE responses without proxy buffering.
-    location = /mcp {
-        proxy_pass ${BACKEND_SCHEME}://${BACKEND_HOST}:${BACKEND_PORT};
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_buffering off;
-        proxy_set_header X-Accel-Buffering no;
-        proxy_cache off;
-        proxy_read_timeout 1h;
-        proxy_send_timeout 1h;
-    }
-
-    # WebSocket (parity with the vite dev proxy; unused by studio today).
-    location /ws {
-        proxy_pass ${BACKEND_SCHEME}://${BACKEND_HOST}:${BACKEND_PORT};
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_read_timeout 1h;
+    # Service endpoints belong to independent API / Archestra origins.
+    # Reject stale callers instead of returning the SPA HTML as an API response.
+    location ~ ^/(api|mcp|ws|archestra)(/|$) {
+        return 404;
     }
 }

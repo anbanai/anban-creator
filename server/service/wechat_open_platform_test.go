@@ -106,7 +106,7 @@ func TestWechatOpenPlatformAuthorizationBindsStateAndEncryptsRefreshToken(t *tes
 		grant:    WechatOpenPlatformGrant{AuthorizerAppID: "wx-authorizer", AccessToken: "short-lived-access", RefreshToken: "long-lived-refresh", ExpiresIn: time.Hour, GrantedScopes: []int{11, 7}},
 		identity: WechatAuthorizerIdentity{AccountName: "公众号名称", AvatarURL: "https://example.com/avatar.png", AccountType: 2},
 	}
-	svc, err := newWechatOpenPlatformService(repo, client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com")
+	svc, err := newWechatOpenPlatformService(repo, client, []byte("0123456789abcdef0123456789abcdef"), "https://api-creator.example.com", "https://creator.example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,6 +120,13 @@ func TestWechatOpenPlatformAuthorizationBindsStateAndEncryptsRefreshToken(t *tes
 		t.Fatal(err)
 	}
 	state := redirect.Query().Get("state")
+	if redirect.Host != "api-creator.example.com" || redirect.Path != wechatOpenPlatformCallbackPath {
+		t.Fatalf("authorization callback must use the API origin: %s", redirect)
+	}
+	returned, err := url.Parse(svc.AuthorizationReturnURL(project.ID, "connected"))
+	if err != nil || returned.Host != "creator.example.com" || returned.Path != "/projects" || returned.Query().Get("project_id") != project.ID || returned.Query().Get("wechat_authorization") != "connected" {
+		t.Fatalf("authorization must return to Studio: %v, %v", returned, err)
+	}
 	if state == "" || strings.Contains(client.redirectURI, "auth_code=") {
 		t.Fatalf("authorization redirect URI did not contain only state: %q", client.redirectURI)
 	}
@@ -188,7 +195,7 @@ func TestWechatOpenPlatformAuthorizationStartChecksProjectOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &fakeWechatOpenPlatformClient{}
-	svc, err := newWechatOpenPlatformService(repository.New(db), client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com")
+	svc, err := newWechatOpenPlatformService(repository.New(db), client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com", "https://creator.example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +221,7 @@ func TestWechatAuthorizerTokenRefreshIsSerializedAndRotatesRefreshToken(t *testi
 		t.Fatal(err)
 	}
 	client := &fakeWechatOpenPlatformClient{}
-	svc, err := newWechatOpenPlatformService(repo, client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com")
+	svc, err := newWechatOpenPlatformService(repo, client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com", "https://creator.example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +293,7 @@ func TestWechatAuthorizerTokenRefreshPropagatesRotationToLinkedProjects(t *testi
 		}
 	}
 	client := &fakeWechatOpenPlatformClient{}
-	svc, err := newWechatOpenPlatformService(repo, client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com")
+	svc, err := newWechatOpenPlatformService(repo, client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com", "https://creator.example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +334,7 @@ func TestWechatOpenPlatformEventVerifiesSignaturesAndDecryptsTicket(t *testing.T
 		t.Fatal(err)
 	}
 	client := &fakeWechatOpenPlatformClient{}
-	svc, err := newWechatOpenPlatformService(repository.New(db), client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com")
+	svc, err := newWechatOpenPlatformService(repository.New(db), client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com", "https://creator.example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +389,7 @@ func TestWechatOpenPlatformUpdateAuthorizedRefreshesAuthorizerInfo(t *testing.T)
 		grant:    WechatOpenPlatformGrant{AuthorizerAppID: "wx-authorizer"},
 		identity: WechatAuthorizerIdentity{AccountName: "更新后的公众号", AvatarURL: "https://example.com/new-avatar.png", AccountType: 2, GrantedScopes: []int{11, 7}},
 	}
-	svc, err := newWechatOpenPlatformService(repo, client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com")
+	svc, err := newWechatOpenPlatformService(repo, client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com", "https://creator.example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +436,7 @@ func TestWechatOpenPlatformUnauthorizedEventRevokesAndClearsTokenIdempotently(t 
 	client := &fakeWechatOpenPlatformClient{
 		grant: WechatOpenPlatformGrant{AuthorizerAppID: "wx-authorizer"}, cached: true, cachedToken: "authorizer-access",
 	}
-	svc, err := newWechatOpenPlatformService(repo, client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com")
+	svc, err := newWechatOpenPlatformService(repo, client, []byte("0123456789abcdef0123456789abcdef"), "https://creator.example.com", "https://creator.example.com")
 	if err != nil {
 		t.Fatal(err)
 	}

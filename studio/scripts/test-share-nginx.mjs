@@ -1,21 +1,14 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 test('Nginx protects share routes after path normalization and SPA fallback', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'anban-share-nginx-'))
   const name = `anban-share-nginx-${process.pid}`
   const docker = (...args) => execFileSync('docker', args, { encoding: 'utf8', timeout: 30_000 })
   try {
-    await writeFile(join(directory, 'upstream.conf'), 'server { listen 8081; access_log off; location / { default_type application/json; return 200 \'{"ok":true}\'; } }\n')
     docker('run', '-d', '--rm', '--pull=never', '--name', name, '-p', '127.0.0.1::80',
-      '-e', 'BACKEND_SCHEME=http', '-e', 'BACKEND_HOST=127.0.0.1', '-e', 'BACKEND_PORT=8081', '-e', 'NGINX_ENVSUBST_FILTER=BACKEND_',
-      '-v', `${fileURLToPath(new URL('../default.conf.template', import.meta.url))}:/etc/nginx/templates/default.conf.template:ro`,
-      '-v', `${join(directory, 'upstream.conf')}:/etc/nginx/conf.d/upstream.conf:ro`, 'nginx:1.24-alpine')
+      '-v', `${fileURLToPath(new URL('../default.conf.template', import.meta.url))}:/etc/nginx/conf.d/default.conf:ro`, 'nginx:1.24-alpine')
     const address = docker('port', name, '80/tcp').trim()
     const base = `http://${address}`
     let ready = false
@@ -41,15 +34,18 @@ test('Nginx protects share routes after path normalization and SPA fallback', as
     for (const path of paths) {
       await t.test(path, async () => {
         const response = await fetch(`${base}${path}`)
-        assert.equal(response.status, 200)
-        if (path.startsWith('/api/')) assert.deepEqual(await response.json(), { ok: true })
+        if (path.startsWith('/api/')) assert.equal(response.status, 404)
         else {
+          assert.equal(response.status, 200)
           assert.match(await response.text(), /<html/)
           assert.equal(response.headers.get('cache-control'), 'no-store, must-revalidate')
           assert.equal(response.headers.get('x-robots-tag'), 'noindex, nofollow')
           assert.equal(response.headers.get('referrer-policy'), 'no-referrer')
         }
       })
+    }
+    for (const path of ['/api', '/api/v1/tasks', '/mcp', '/mcp/', '/ws', '/ws/events', '/archestra', '/archestra/']) {
+      assert.equal((await fetch(`${base}${path}`)).status, 404, `${path} must not be served by Studio`)
     }
     const ordinary = await fetch(`${base}/plugins?ordinary-log-control=1`)
     assert.equal(ordinary.status, 200)
@@ -59,6 +55,6 @@ test('Nginx protects share routes after path normalization and SPA fallback', as
     assert.match(logs, /GET \/plugins\?ordinary-log-control=1 HTTP\/1.1/, 'ordinary requests must remain logged')
     assert.doesNotMatch(logs, /private-share-/, 'normalized share paths must never expose tokens in access logs')
   } finally {
-    try { docker('rm', '-f', name) } finally { await rm(directory, { recursive: true, force: true }) }
+    docker('rm', '-f', name)
   }
 })

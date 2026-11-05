@@ -159,7 +159,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "fdf9f245858f58297e6b3a1671b7f35277af71e3ff30105961e8ec4ae2629325"
+      "digest": "5bcac1fac3eeee181d931c0c3fcd760bad7daedadf677f3838bd2817d172856b"
     },
     {
       "id": "content-planning",
@@ -1297,7 +1297,7 @@
       "ui": {
         "renderer": "custom:content-planning"
       },
-      "digest": "8de2d1687cf7cea726d0f530816d9babcd39ce3b905b8cece33a63f103448911"
+      "digest": "2fb7966d232235e4fefb494dcec7a7275cbe5a253cef3ec0b59ce42ae3a7aa2d"
     },
     {
       "id": "creation-planner",
@@ -1334,7 +1334,7 @@
         "interactive-creation-clarification"
       ],
       "ui": {},
-      "digest": "b25a3fd3c5e11a35cc4a6c4d8e28e85963a466646d9668fd75f76b7481f35c5f"
+      "digest": "02dad990557ef299697cf86d17f78656a92da3a606eedcb530f4fe432af6071e"
     },
     {
       "id": "feedback-analysis",
@@ -1415,7 +1415,7 @@
         }
       ],
       "ui": {},
-      "digest": "897f2ba8e88b8de251b8769b1f12f7d7b74fae1d26047951d060ffc31077b208"
+      "digest": "b19ca509ba294237febbc21d41377901b7270db660d4d96b7d54f4a72067f08d"
     },
     {
       "id": "hypit",
@@ -1625,7 +1625,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "4e2cef89afbe9c47aed84a95c980ca09f4a78ba38a624768a86f6d2dce06211c"
+      "digest": "77d0d7364bf90d7e873672d6e7cfcd63e2bcec3996431854cdab27a302e3bd93"
     },
     {
       "id": "local-life",
@@ -1773,7 +1773,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "3cc5f4738b8d6cc5c76809e65db856b31614a406305251047a83a3d01597e1a0"
+      "digest": "d0f1780459d0b61be75d795a896702fc21b1cd93a6b5f94091118c1126c6ff92"
     },
     {
       "id": "moments",
@@ -1881,7 +1881,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "62933c66d9b000190d5274d3a63f0bb8e18589090d18c8b256c24696eeb9a44f"
+      "digest": "41684b8fd4daf561e424b58b479f582da9d8b8175a028e218471708d6a8b3242"
     },
     {
       "id": "montage",
@@ -2038,7 +2038,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "03a99a4959e2ab969c7e847e59523fca67c09fc5821b79538394443b3c16d75f"
+      "digest": "de93a3f29706ceb9d969cf2d725a67283934c8a98c72fc104a9acf79b512e4bb"
     },
     {
       "id": "postmortem-review",
@@ -2075,7 +2075,7 @@
         "interactive-postmortem-review"
       ],
       "ui": {},
-      "digest": "320efb3e8e3f9666f02ca66e0ca4f1186e2e4b162070b51c802e01ceac8c7624"
+      "digest": "6a29b49e315faee66ef875fd01cabf541508b3ed5ae088bbdf0a0580c5b22406"
     },
     {
       "id": "profile-analysis",
@@ -2381,7 +2381,7 @@
       "ui": {
         "renderer": "custom:profile-analysis"
       },
-      "digest": "3b87ba12cdb4c16d8c1e2b96afe19b5307e1afd7d406a7e565371c3ce5aef82d"
+      "digest": "8b9d6fa5eaeb168ad9178b39ce0a39829ba95ef40ca3a8a61e026d560049f7ad"
     },
     {
       "id": "project-creator",
@@ -2653,7 +2653,7 @@
       "ui": {
         "renderer": "custom:project-creator"
       },
-      "digest": "8bc3104094076a744b85e685c489956f3048dcd8281d0e4ce8f2f6c04bb461e3"
+      "digest": "0bfd1c2ee545e7e65fc64f22ac9f7190bfee60a14fd9e30b0581944455b0d5c1"
     },
     {
       "id": "seednote",
@@ -2911,7 +2911,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "47611b95b9b86d52be625a22ed3351afe470c32738a943bf5d0521c3d47c8906"
+      "digest": "020a7486c1148a89a4a8ec5d17a979081357f1799beb7052e98d4d8d372d3e75"
     },
     {
       "id": "talking-head-editor",
@@ -3172,7 +3172,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "0c50bbcbdf802e829f7d48b6a0fea70484573f83d528254917647580d9649556"
+      "digest": "62acf9edb49b91f0afd958fc7298877ca6fbd3989a2a935099eb8418383ed670"
     },
     {
       "id": "video-edit",
@@ -3325,7 +3325,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "a1f8face31ebef9fa6240db7f0da087947a8bfd46d67347e3165233f477444fc"
+      "digest": "a2d4f68fc654b951b59dbd6adfbd600ebb82d9cae27e253c721799790263236e"
     },
     {
       "id": "viral-ip-video-editor",
@@ -3612,7 +3612,7 @@
         }
       ],
       "ui": {},
-      "digest": "92da8fbdb275219d450faad239f9569a6b1e4c852992ab7988ce119cda33cbe5"
+      "digest": "a97f85e3f8047096e0834f9df1de326553eafa3e173c0d1ef58c23da2d994406"
     },
     {
       "id": "wechat-article",
@@ -3876,7 +3876,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "b07c0df2117a04be89e2e651f889c86975fda11c0197f86be4f750137f2de09a"
+      "digest": "d1bd6f47a8215a51fd7d345189f3ac3a77d3cb3c4a456a21f901a8087b41bd1d"
     },
     {
       "id": "wechat-picture",
@@ -4054,7 +4054,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "5fc329a3d686007d964327ab3a17f82a915aec50df5b9e7e68f1f7a1e2c60184"
+      "digest": "a9066e9e76b1de7a5b153ce7400ebaff85d14687dd763621ca379cf9b947f2f7"
     },
     {
       "id": "whiteboard-animation",
@@ -4232,7 +4232,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "9a6c0486d04c0f69c45c4ba6f2868a2b1a4bb3d555e82747c96f79a71da134c9"
+      "digest": "420e34ec62d3b9e8a13b1c6cea47e78fe9f51cb5d81f78493e2c6b91d1471a99"
     }
   ]
 }

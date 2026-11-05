@@ -105,12 +105,13 @@ type WechatOpenPlatformService struct {
 	messageToken   string
 	encodingAESKey string
 	publicBaseURL  string
+	studioBaseURL  string
 	tokenCipher    cipher.AEAD
 	now            func() time.Time
 	refreshMu      sync.Mutex
 }
 
-func newWechatOpenPlatformService(repo repository.Repository, client wechatOpenPlatformClient, encryptionKey []byte, publicBaseURL string) (*WechatOpenPlatformService, error) {
+func newWechatOpenPlatformService(repo repository.Repository, client wechatOpenPlatformClient, encryptionKey []byte, publicBaseURL, studioBaseURL string) (*WechatOpenPlatformService, error) {
 	if repo == nil || client == nil {
 		return nil, ErrWechatOpenPlatformDisabled
 	}
@@ -125,11 +126,13 @@ func newWechatOpenPlatformService(repo repository.Repository, client wechatOpenP
 	if err != nil {
 		return nil, err
 	}
-	parsed, err := url.Parse(strings.TrimSpace(publicBaseURL))
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return nil, fmt.Errorf("WeChat Open Platform requires an HTTPS public base URL")
+	for _, baseURL := range []struct{ name, value string }{{"public", publicBaseURL}, {"Studio", studioBaseURL}} {
+		parsed, err := url.Parse(strings.TrimSpace(baseURL.value))
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return nil, fmt.Errorf("WeChat Open Platform requires an HTTPS %s base URL", baseURL.name)
+		}
 	}
-	return &WechatOpenPlatformService{repo: repo, client: client, publicBaseURL: strings.TrimRight(publicBaseURL, "/"), tokenCipher: aead, now: time.Now}, nil
+	return &WechatOpenPlatformService{repo: repo, client: client, publicBaseURL: strings.TrimRight(strings.TrimSpace(publicBaseURL), "/"), studioBaseURL: strings.TrimRight(strings.TrimSpace(studioBaseURL), "/"), tokenCipher: aead, now: time.Now}, nil
 }
 
 func (s *WechatOpenPlatformService) SetRuntimeConfig(componentAppID, messageToken, encodingAESKey string) {
@@ -263,9 +266,9 @@ func (s *WechatOpenPlatformService) AuthorizationReturnURL(projectID, outcome st
 	if s == nil {
 		return "/projects"
 	}
-	page, err := url.Parse(s.publicBaseURL + "/projects")
+	page, err := url.Parse(s.studioBaseURL + "/projects")
 	if err != nil {
-		return s.publicBaseURL + "/projects"
+		return s.studioBaseURL + "/projects"
 	}
 	query := page.Query()
 	query.Set("wechat_authorization", outcome)

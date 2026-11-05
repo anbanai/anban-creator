@@ -95,12 +95,6 @@ func NewRouter(svc *Services) *fiber.App {
 		IdleTimeout:       120 * time.Second,
 		StreamRequestBody: true,
 	})
-	if svc.Repo != nil && svc.StorageProvider != nil {
-		articleAssets := handler.NewArticleAssetHandler(svc.Repo, svc.StorageProvider, svc.Logger)
-		app.Get("/api/v1/article-assets/:id", articleAssets.Get)
-		app.Delete("/api/v1/article-assets/:id", appmiddleware.AuthMiddleware(svc.JWTService, svc.Repo, svc.Logger), articleAssets.Delete)
-	}
-
 	// ---------------------------------------------------------------------------
 	// Global middleware (in order)
 	// ---------------------------------------------------------------------------
@@ -121,6 +115,13 @@ func NewRouter(svc *Services) *fiber.App {
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "Idempotency-Key", "Last-Event-ID"},
 	}
 	app.Use(cors.New(corsConfig))
+	// Published article images must remain embeddable outside the API origin.
+	// Apply CORS here without Helmet's same-origin resource policy below.
+	if svc.Repo != nil && svc.StorageProvider != nil {
+		articleAssets := handler.NewArticleAssetHandler(svc.Repo, svc.StorageProvider, svc.Logger)
+		app.Get("/api/v1/article-assets/:id", articleAssets.Get)
+		app.Delete("/api/v1/article-assets/:id", appmiddleware.AuthMiddleware(svc.JWTService, svc.Repo, svc.Logger), articleAssets.Delete)
+	}
 
 	// Security headers.
 	app.Use(helmet.New())

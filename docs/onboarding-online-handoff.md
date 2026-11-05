@@ -10,7 +10,7 @@
 
 在 `studio` 启动 `bun run dev -- --config preview.online.config.ts`；需要离线语音时沿用 `ANBAN_PREVIEW_WHISPER_ROOT`。本机登录地址 `http://127.0.0.1:5175/login`，通用空白入口 `http://127.0.0.1:5175/onboarding-online.html`。
 
-专用配置固定监听回环地址5175，通过 HTTPS 转接 `https://creator.anbanai.com` 的 `/api` 与 `/ws`，保留证书校验。实测旧 `api.creator.anbanai.com` 入口返回503，官网入口正常。本次未改生产环境配置。普通5173、离线预览5174不切到线上。HMR 在5175关闭，避免开发时重置正在编辑的对话；代码更新后手动刷新。
+专用配置固定监听回环地址5175，浏览器直接请求 `https://api-creator.anbanai.com/api/v1`，不设置 API 或 WebSocket 代理。独立 API 入口需要允许本机预览地址的 CORS 请求。普通5173、离线预览5174不切到线上。HMR 在5175关闭，避免开发时重置正在编辑的对话；代码更新后手动刷新。
 
 用户在现有 Studio 登录界面登录；不提取、打印或复制登录凭据。浏览器使用现有认证/刷新流程，DeepSeek 密钥仍只在本机服务端。
 

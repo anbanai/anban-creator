@@ -876,7 +876,7 @@ func TestDockerBuildInputsUseDeclaredImageTags(t *testing.T) {
 				"image: anban-creator-sidecar-ilink:latest",
 				"dockerfile: deploy/docker/Dockerfile.sidecar-ilink",
 				"dockerfile: deploy/docker/Dockerfile.studio",
-				"VITE_API_BASE_URL: /api/v1",
+				"VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080/api/v1}",
 			},
 		},
 	} {
@@ -1169,13 +1169,12 @@ func TestStudioDockerfileUsesRootBuildContext(t *testing.T) {
 		"WORKDIR /app",
 		"COPY studio/package.json studio/bun.lock ./",
 		"COPY studio/ .",
-		"COPY studio/default.conf.template /etc/nginx/templates/default.conf.template",
+		"COPY studio/default.conf.template /etc/nginx/conf.d/default.conf",
 		"RUN bun install --frozen-lockfile",
-		"ARG VITE_API_BASE_URL=/api/v1",
+		"ARG VITE_API_BASE_URL=https://api-creator.anbanai.com/api/v1",
 		"ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}",
 		"RUN bun run build",
 		"FROM nginx:alpine",
-		"ENV BACKEND_HOST=server",
 		"COPY --from=build /app/dist /usr/share/nginx/html",
 		"EXPOSE 80",
 		"CMD [\"nginx\", \"-g\", \"daemon off;\"]",
@@ -1266,7 +1265,7 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"ANBAN_ILINK_BASE_URL: \"http://sidecar-ilink:18070\"",
 		"server:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.server",
 		"studio:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.studio",
-		"studio:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.studio\n      args:\n        VITE_API_BASE_URL: /api/v1",
+		"studio:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.studio\n      args:\n        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080/api/v1}",
 	} {
 		if !strings.Contains(compose, want) {
 			t.Fatalf("docker-compose.yml missing centralized Docker build contract %q", want)

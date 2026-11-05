@@ -1,3 +1,4 @@
+import { apiURL } from '@/lib/api-base'
 import { parseSSE, type SSEEvent } from '@/lib/sse'
 import { streamAssistantInteraction } from '@/lib/api/interactive'
 
@@ -70,7 +71,7 @@ export async function* streamInteractiveSession(sessionId: string, token: string
   while (!signal?.aborted) {
     let response: Response
     try {
-      response = await fetch(options.endpoint ?? `/api/v1/interactive/sessions/${encodeURIComponent(sessionId)}/events`, {
+      response = await fetch(options.endpoint ?? apiURL(`/interactive/sessions/${encodeURIComponent(sessionId)}/events`), {
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: 'text/event-stream',

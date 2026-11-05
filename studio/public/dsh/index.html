@@ -80,7 +80,7 @@ dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh install-presets</code></pr
     <p>Bundle activation alone leaves Presets unchanged. If Preset installation fails after a successful Bundle install, keep the Bundle, resolve the reported error, and rerun <code>install-presets</code>.</p>
 
     <h2>Credential configuration</h2>
-    <p>The Creator MCP endpoint is fixed at <code>https://creator.anbanai.com/mcp</code> and is not a profile option. The official DSH credential precedence is inherited process environment (read-only, highest priority), then <code>$DSH_HOME/.credentials.yaml</code> (managed, writable), then invocation-project <code>.env</code>, then <code>$DSH_HOME/.env</code>. For persistent Web use, write the key into the managed document without echoing it.</p>
+    <p>The Creator MCP endpoint is fixed at <code>https://api-creator.anbanai.com/mcp</code> and is not a profile option. The official DSH credential precedence is inherited process environment (read-only, highest priority), then <code>$DSH_HOME/.credentials.yaml</code> (managed, writable), then invocation-project <code>.env</code>, then <code>$DSH_HOME/.env</code>. For persistent Web use, write the key into the managed document without echoing it.</p>
     <pre><code>ANBAN_API_KEY: &lt;user-provided-key&gt;</code></pre>
     <p>On POSIX keep that file at mode <code>0600</code>. Do not put the key or a serialized Authorization header in a Preset, a command argument, a log, a screenshot, a test fixture, or a generated artifact. DeepSeek Harness model onboarding configures model-provider credentials, not third-party credentials like this one.</p>
     <pre><code>chmod 600 "$DSH_HOME/.credentials.yaml"</code></pre>

@@ -1,3 +1,4 @@
+import { resolveApiBase } from '@/lib/api-base'
 import { http, unwrap } from '@/lib/http-client'
 import type { PublicShare, TaskShareStatus } from '@/types/task-share'
 
@@ -12,7 +13,7 @@ export class ShareReadError extends Error {
 }
 
 function apiBase() {
-  return new URL(import.meta.env.VITE_API_BASE_URL || '/api/v1', window.location.origin)
+  return new URL(resolveApiBase(), window.location.origin)
 }
 
 export function shareImageURL(path: string, token: string): string | undefined {

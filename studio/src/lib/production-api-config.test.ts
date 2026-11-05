@@ -1,12 +1,14 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { loadEnv } from 'vite'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+afterEach(() => vi.unstubAllEnvs())
 
 describe('production Studio API endpoint', () => {
-  it('uses the same-origin API gateway instead of the retired API subdomain', () => {
-    const env = readFileSync(resolve(process.cwd(), '.env.production'), 'utf8')
-
-    expect(env).toContain('VITE_API_BASE_URL=/api/v1')
-    expect(env).not.toContain('api.creator.anbanai.com')
+  it('sends production requests to the independent API origin', () => {
+    vi.stubEnv('VITE_API_BASE_URL', undefined)
+    const env = loadEnv('production', process.cwd(), 'VITE_')
+    const endpoint = new URL(env.VITE_API_BASE_URL)
+    expect(endpoint.origin).toBe('https://api-creator.anbanai.com')
+    expect(endpoint.pathname).toBe('/api/v1')
   })
 })

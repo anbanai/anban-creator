@@ -91,7 +91,7 @@ type wechatSDKOpenPlatformClient struct {
 	cache    *wechatOpenPlatformRedisCache
 }
 
-func NewWechatOpenPlatformService(repo repository.Repository, settings serverconfig.WechatOpenPlatformConfig, publicBaseURL string, redisClient *redis.Client) (*WechatOpenPlatformService, error) {
+func NewWechatOpenPlatformService(repo repository.Repository, settings serverconfig.WechatOpenPlatformConfig, publicBaseURL, studioBaseURL string, redisClient *redis.Client) (*WechatOpenPlatformService, error) {
 	if !settings.Enabled() {
 		return nil, ErrWechatOpenPlatformDisabled
 	}
@@ -108,7 +108,7 @@ func NewWechatOpenPlatformService(repo repository.Repository, settings servercon
 		Token: settings.MessageToken, EncodingAESKey: settings.EncodingAESKey, Cache: cache,
 	}
 	client := &wechatSDKOpenPlatformClient{platform: wechat.NewWechat().GetOpenPlatform(openConfig), cache: cache}
-	service, err := newWechatOpenPlatformService(repo, client, encryptionKey, publicBaseURL)
+	service, err := newWechatOpenPlatformService(repo, client, encryptionKey, publicBaseURL, studioBaseURL)
 	if err != nil {
 		return nil, err
 	}

@@ -56,7 +56,7 @@ Agent 的创作规则只修改 `harness/packs/hypit/agent.claude.md`，随后 `m
 2. **数据库和调度**：备份数据库，验证 Server 启动时的增量迁移，确认 `projects.hypit_defaults`、`tasks.hypit_input`、`tasks.hypit_runtime_snapshot`、`plans.hypit_input` 及既有执行、交付、计费表完整。确认 `task.hypit` 三档 1600 / 2000 / 6000 积分 SKU、管理员测试余额、Redis 和计划调度可用。
 3. **账户和配置**：保持 `hypit.enabled: false`，准备原生 `hypit.runtime-local@1` Profile、`media.local`、软件渲染与两个 Worker 的 `html.local`，以及所需生成、转录 Provider 的 endpoints / bindings 和环境凭据引用。准备 Claude 执行账户、execution-token secret、Agent 可访问的 Server / MCP 地址及 TLS CA。能力接口的 `configured` 只表示配置齐备，账户实际能力、余额和硬配额须另外验证；不得把 Provider 密钥写入工程或日志。
 4. **执行资源**：每任务 Linux amd64、4 CPU、8 GiB 内存和 20 GiB 持久工作空间；任务卷必须允许执行。完整归档校验会临时展开工程并保存媒体快照，`/tmp` 另需至少 10 GiB 可写磁盘临时空间，不能使用受 8 GiB 内存限制的内存型 tmpfs 承载最大工程；Docker 需预留容器可写层磁盘，Kubernetes 需预留磁盘型 emptyDir / 节点 ephemeral-storage。Docker 部署配置 socket、宿主组和网络；Kubernetes 配置 ServiceAccount / RBAC、PVC、镜像拉取 Secret、CA 和节点资源。验证取消、Worker 退出、精确冻结超时及卷丢失时的失败行为。
-5. **存储和传输**：配置 OSS 直传、STS / RAM、浏览器 CORS、对象读取及签名权限，持久保存工程和交付文件。实际验证 256 MiB 素材、512 MiB 成片、2 GiB 工程的上传和下载。Runner 优先使用内部 Server 地址；若经过公开 ingress 或 Studio 代理，必须为授权 artifact 路径单独配置请求大小、30 分钟传输时限和关闭请求缓冲。现有 Studio nginx 全局上限为 `25m`，不能直接承载大工程；不要无限放宽其他 API。
+5. **存储和传输**：配置 OSS 直传、STS / RAM、浏览器 CORS、对象读取及签名权限，持久保存工程和交付文件。实际验证 256 MiB 素材、512 MiB 成片、2 GiB 工程的上传和下载。Runner 优先使用内部 Server 地址；若经过 API 的公开 ingress，必须为授权 artifact 路径单独配置请求大小、30 分钟传输时限和关闭请求缓冲。Studio nginx 仅服务静态前端，不承载 API 或工程文件上传；不要无限放宽其他 API。
 6. **真实验收**：内部管理员启用后，完成上传参考、链接参考、定时任务、中断恢复、再次改编五类真实任务。保存任务 ID、镜像 digest、脱敏配置摘要、成片和质量报告；验证完整解码并人工检查音画，确认未修改素材复用、未知付费请求不重复提交。工程须在新任务通过官方 check / plan。实际生成费用按原生请求回执和 Provider 账单独立对账，目前没有统一实际金额汇总。
 7. **对外启用及回滚**：完成下述依赖安全核查、真实业务验收和商业授权后再开放。出问题时关闭入口、恢复上一 digest，保留任务卷、对象和请求回执，避免丢失恢复依据。
 

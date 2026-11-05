@@ -103,5 +103,6 @@ func (h *TaskShareHandler) Image(c fiber.Ctx) error {
 		return taskShareError(c, err)
 	}
 	c.Set("Content-Type", result.MIMEType)
+	c.Set("Cross-Origin-Resource-Policy", "cross-origin")
 	return c.SendStream(result.Body, int(result.Size))
 }

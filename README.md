@@ -257,6 +257,27 @@ make server-build
 ./bin/anban-creator-server -config server/config.yaml
 ```
 
+Studio, API and Archestra use independent origins:
+
+- Studio: `https://creator.anbanai.com` (static SPA only).
+- API and MCP: `https://api-creator.anbanai.com` (`/api/v1` and `/mcp`).
+- Archestra: `https://archestra.anbanai.com` (its own ingress/service).
+
+Set `VITE_API_BASE_URL` at **build time** to the browser-reachable API URL,
+including `/api/v1`. Local development and Compose use `http://localhost:8080/api/v1`;
+production defaults to `https://api-creator.anbanai.com/api/v1`. Studio Nginx
+has no upstreams or `BACKEND_*` variables. The API ingress owns uploads, SSE
+streaming (no buffering, suitable read timeouts), MCP and any WebSocket routes.
+Keep the Studio origin in the Server's `cors.allowed_origins`.
+`server.public_base_url` / `ANBAN_PUBLIC_BASE_URL` is the API origin;
+`server.studio_base_url` / `ANBAN_STUDIO_BASE_URL` is the frontend origin for
+authorization return redirects. Archestra must never route through Studio.
+
+For an existing deployment, update the API ingress and Server configuration,
+WeChat callback domains, and installed plugins' MCP endpoint before rolling out
+the static-only Studio image. Previously persisted URLs under the old Studio
+API origin require a separate data migration; changing defaults does not rewrite them.
+
 Frontend build:
 
 ```bash

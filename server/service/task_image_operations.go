@@ -270,7 +270,7 @@ func (s *TaskImageOperationsService) publishArticleImage(ctx context.Context, us
 func articleAssetBaseURL(raw string) (string, error) {
 	raw = strings.TrimRight(strings.TrimSpace(raw), "/")
 	if raw == "" {
-		raw = "https://creator.anbanai.com"
+		raw = "https://api-creator.anbanai.com"
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {

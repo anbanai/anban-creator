@@ -1,3 +1,5 @@
+import { apiURL } from '@/lib/api-base'
+
 export interface SSEEvent {
   event: string
   data: string
@@ -46,7 +48,7 @@ export async function* streamTaskProgress(
   token: string,
   signal?: AbortSignal,
 ): AsyncGenerator<SSEEvent> {
-  const response = await fetch(`/api/v1/tasks/${taskId}/stream`, {
+  const response = await fetch(apiURL(`/tasks/${encodeURIComponent(taskId)}/stream`), {
     headers: { Authorization: `Bearer ${token}` },
     signal,
   })

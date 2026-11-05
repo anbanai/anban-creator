@@ -15,6 +15,7 @@ import (
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/helmet"
 	"github.com/google/uuid"
 	"gorm.io/datatypes"
 	"gorm.io/driver/sqlite"
@@ -129,6 +130,7 @@ func TestTaskShareHandlerAnonymousContentAndImage(t *testing.T) {
 	}
 	h := NewTaskShareHandler(service.NewTaskShareService(repo, store))
 	app := fiber.New()
+	app.Use(helmet.New())
 	app.Use(func(c fiber.Ctx) error { c.Locals("user_id", c.Get("X-User-ID")); return c.Next() })
 	app.Put("/tasks/:id/share", h.Put)
 	app.Delete("/tasks/:id/share", h.Revoke)
@@ -174,6 +176,9 @@ func TestTaskShareHandlerAnonymousContentAndImage(t *testing.T) {
 	response.Body.Close()
 	if response.StatusCode != 200 || !bytes.Equal(data, imageData.Bytes()) || response.Header.Get("Content-Type") != "image/png" || response.Header.Get("Cache-Control") != "no-store" || response.Header.Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatalf("stream = %d %v, bytes=%d", response.StatusCode, response.Header, len(data))
+	}
+	if response.Header.Get("Cross-Origin-Resource-Policy") != "cross-origin" {
+		t.Fatalf("public images must be embeddable by the separate Studio origin: %v", response.Header)
 	}
 	request = httptest.NewRequest("DELETE", "/tasks/task/share", nil)
 	request.Header.Set("X-User-ID", "owner")

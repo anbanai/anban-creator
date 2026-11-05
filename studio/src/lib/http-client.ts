@@ -1,13 +1,10 @@
 import axios from 'axios'
+import { resolveApiBase } from './api-base'
 import type { ApiResponse } from '@/types'
 
 const TOKEN_KEY = 'anban_creator_token'
 const REFRESH_TOKEN_KEY = 'anban_creator_refresh_token'
 const USER_KEY = 'anban_creator_user'
-function resolveApiBase(): string {
-  if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL
-  return '/api/v1'
-}
 
 export const http = axios.create({
   baseURL: resolveApiBase(),

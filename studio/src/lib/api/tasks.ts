@@ -1,3 +1,4 @@
+import { apiURL } from '@/lib/api-base'
 import { http, isApiNotFoundError, unwrap } from '@/lib/http-client'
 import type { AgentExecutionProfileID, Task, TaskFile, CreateTaskRequest, CloneTaskRequest, PaginatedResponse, BulkTasksResponse, InputAttachment, WechatPublication } from '@/types'
 
@@ -107,7 +108,7 @@ export const tasksApi = {
   files: (id: string) =>
     unwrap<TaskFile[]>(http.get(`/tasks/${id}/files`)),
 
-  streamUrl: (id: string) => `${import.meta.env.VITE_API_BASE_URL || '/api/v1'}/tasks/${id}/stream`,
+  streamUrl: (id: string) => apiURL(`/tasks/${encodeURIComponent(id)}/stream`),
 
   downloadFileBlob: async (taskId: string, fileId: string): Promise<Blob> => {
     const response = await http.get(`/tasks/${taskId}/files/${fileId}/download`, {

@@ -279,7 +279,7 @@ func TestTaskImageUploadPublishesUserAssistedImageOnPlatform(t *testing.T) {
 	if result.PlatformURL == "" || result.PlatformURL != result.RenderURL || result.WechatURL != "" || result.MediaID != "" {
 		t.Fatalf("user-assisted result = %#v, want only typed platform/render URL", result)
 	}
-	assetID := strings.TrimPrefix(result.PlatformURL, "https://creator.anbanai.com/api/v1/article-assets/")
+	assetID := strings.TrimPrefix(result.PlatformURL, "https://api-creator.anbanai.com/api/v1/article-assets/")
 	asset, err := f.repo.Assets().FindByID(context.Background(), assetID)
 	if err != nil || asset.Purpose != model.AssetPurposeArticleImage {
 		t.Fatalf("persistent article asset = %#v, err = %v", asset, err)

@@ -53,7 +53,7 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "插件内的 MCP server key 固定为 `creator`")
 	assertFileNotExists(t, filepath.Join(root, "harness", "CLAUDE.md"))
 	assertFileContains(t, filepath.Join(root, "harness", "docs", "plugin-development.md"), "Plugin developer notes")
-	assertJSONMCPServerURL(t, filepath.Join(root, "harness", ".mcp.json"), "creator", "https://creator.anbanai.com/mcp")
+	assertJSONMCPServerURL(t, filepath.Join(root, "harness", ".mcp.json"), "creator", "https://api-creator.anbanai.com/mcp")
 	assertFileNotContains(t, filepath.Join(root, "harness", ".mcp.json"), "user_config.api_url")
 	assertFileContains(t, filepath.Join(root, "harness", ".mcp.json"), "Bearer ${user_config.api_key}")
 	assertTrackedFilesDoNotContainLegacyNames(t, root)
@@ -62,7 +62,7 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 
 func TestAnbanCreatorNamingContractUsesFixedMCPEndpoint(t *testing.T) {
 	root := repoRoot(t)
-	const endpoint = "https://creator.anbanai.com/mcp"
+	const endpoint = "https://api-creator.anbanai.com/mcp"
 
 	cases := []struct {
 		name      string
@@ -119,6 +119,7 @@ func TestAnbanCreatorNamingContractUsesFixedMCPEndpoint(t *testing.T) {
 				"ANBAN_API_URL",
 				"user_config.api_url",
 				"https://api.creator.anbanai.com/mcp",
+				"https://creator.anbanai.com/mcp",
 			} {
 				if strings.Contains(body, obsolete) {
 					t.Errorf("%s still contains obsolete MCP connection term %q", tc.path, obsolete)
@@ -133,7 +134,7 @@ func TestAnbanSetupExamplesUseFixedHostedEndpoint(t *testing.T) {
 	body := readTextFile(t, path)
 
 	for _, required := range []string{
-		"https://creator.anbanai.com/mcp",
+		"https://api-creator.anbanai.com/mcp",
 		"list_projects",
 		"网络可达性",
 		"Claude Code：检查插件 `api_key`",
@@ -157,6 +158,7 @@ func TestConfigurableSetupEndpointGuidanceScanner(t *testing.T) {
 		{name: "legitimate negative wording", body: "固定端点不是 API URL 配置项。", want: false},
 		{name: "obsolete manifest field", body: "修改 api_url 后重启。", want: true},
 		{name: "obsolete environment variable", body: "设置 ANBAN_API_URL 后重启。", want: true},
+		{name: "obsolete Studio endpoint", body: "连接 https://creator.anbanai.com/mcp。", want: true},
 		{name: "obsolete hosted endpoint", body: "连接 https://api.creator.anbanai.com/mcp。", want: true},
 		{name: "custom endpoint guidance", body: "使用自定义 API 地址。", want: true},
 		{name: "format diagnostic", body: "检查 API URL 格式。", want: true},
@@ -207,6 +209,7 @@ func configurableSetupEndpointGuidance(body string) []string {
 		"api_url",
 		"ANBAN_API_URL",
 		"https://api.creator.anbanai.com/mcp",
+		"https://creator.anbanai.com/mcp",
 		"自定义 API 地址",
 		"检查 API URL 格式",
 	} {

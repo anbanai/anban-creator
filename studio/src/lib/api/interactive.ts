@@ -1,3 +1,4 @@
+import { apiURL } from '@/lib/api-base'
 import { http, unwrap } from '@/lib/http-client'
 
 const INTERACTIVE_COMMAND_TIMEOUT_MS = 15 * 60 * 1000
@@ -130,7 +131,7 @@ export function streamAssistantInteraction(interactionId: string, token: string,
     while (!signal?.aborted) {
       let response: Response
       try {
-        response = await fetch(`/api/v1/assistant/interactions/${encodeURIComponent(interactionId)}/events`, {
+        response = await fetch(apiURL(`/assistant/interactions/${encodeURIComponent(interactionId)}/events`), {
           headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream', ...(cursor ? { 'Last-Event-ID': cursor } : {}) },
           signal,
         })
