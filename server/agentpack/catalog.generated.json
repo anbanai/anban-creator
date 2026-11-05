@@ -2090,10 +2090,22 @@
           "required": true
         },
         {
+          "role": "sfx_library_results",
+          "path": "output/sfx-library-results.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
           "role": "bgm_plan",
           "path": "output/bgm-plan.json",
           "mime_type": "application/json",
           "required": true
+        },
+        {
+          "role": "bgm_candidates",
+          "path": "output/bgm-candidates.json",
+          "mime_type": "application/json",
+          "required": false
         },
         {
           "role": "bgm_plan_md",
@@ -2524,7 +2536,7 @@
       "ui": {
         "renderer": "custom:ip-explainer"
       },
-      "digest": "20fc45ff8ade36ae2c9568593bdc32b055fde5cca305b61787de0ef2ffeb3fe9"
+      "digest": "f9afc442f7ce9cfee0f301be6e0bf7eeb5c5e2b42f0ad304873f6a825470aa87"
     },
     {
       "id": "local-life",
@@ -3864,6 +3876,12 @@
           "required": true
         },
         {
+          "role": "sfx_library_results",
+          "path": "output/sfx-library-results.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
           "role": "final_picture",
           "path": "output/final-picture.mp4",
           "mime_type": "video/mp4",
@@ -4097,6 +4115,11 @@
           "mime_type": "video/mp4"
         },
         {
+          "role": "sfx_library_results",
+          "path": "output/sfx-library-results.json",
+          "mime_type": "application/json"
+        },
+        {
           "role": "rough_cut",
           "path": "output/rough-cut.mp4",
           "mime_type": "video/mp4"
@@ -4212,7 +4235,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "f1f1bc9dca4d85563b2d3a26cc21f83a1e35f6f008effba47e580800bbc68037"
+      "digest": "588cb2fbaed05217cc821775ac0206a31c5fbc43028aa216fc05244ff01c8e33"
     },
     {
       "id": "topic-radar",
@@ -5643,6 +5666,12 @@
           "required": false
         },
         {
+          "role": "bgm_candidates",
+          "path": "output/bgm-candidates.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
           "role": "semantic_master",
           "path": "output/semantic-master.json",
           "mime_type": "application/json",
@@ -6100,6 +6129,11 @@
           "mime_type": "application/json"
         },
         {
+          "role": "bgm_candidates",
+          "path": "output/bgm-candidates.json",
+          "mime_type": "application/json"
+        },
+        {
           "role": "semantic_master",
           "path": "output/semantic-master.json",
           "mime_type": "application/json"
@@ -6286,7 +6320,7 @@
         }
       ],
       "ui": {},
-      "digest": "bde2e12194ba8f1a808ec41331bbceba7f0b9a73dc498385900587785fad5f1e"
+      "digest": "d6b3c20c5f0c399917604e738633d8062ed52eabcacc3ab77003849749018dc8"
     },
     {
       "id": "wechat-article",

@@ -17,8 +17,6 @@ var upstreamSkillRepos = []string{
 	"GPT-Image2-Skill",
 	"motion-graphics",
 	"ecommerce-visual-copywriting-skill",
-	"pixabay-search-skill",
-	"sfxmint-mcp",
 }
 
 // isUpstreamSkillPath reports whether path belongs to an upstream Skill
