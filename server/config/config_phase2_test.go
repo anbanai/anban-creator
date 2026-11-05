@@ -79,6 +79,22 @@ func TestRateLimitConfigDefaults(t *testing.T) {
 	assertRateLimitConfig(t, cfg.RateLimit, want)
 }
 
+func TestArchestraConfigDefaultsAndValidation(t *testing.T) {
+	cfg, err := loadClaudeConfigYAML(t, validClaudeConfigYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Archestra.A2ABaseURL != "http://archestra-platform.anbanai-prod.svc.cluster.local:9000" || cfg.Archestra.Timeout != 30*time.Second {
+		t.Fatalf("archestra defaults = %#v", cfg.Archestra)
+	}
+	for _, raw := range []string{"https://example.test/path?token=bad", "ftp://example.test", "https://user:pass@example.test"} {
+		body := strings.Replace(validClaudeConfigYAML, "database:\n", "archestra:\n  a2a_base_url: \""+raw+"\"\n  timeout: 1s\ndatabase:\n", 1)
+		if _, err := loadClaudeConfigYAML(t, body); err == nil || !strings.Contains(err.Error(), "archestra.a2a_base_url") {
+			t.Fatalf("URL %q accepted: %v", raw, err)
+		}
+	}
+}
+
 func TestRateLimitConfigLoadsYAMLAndEnvironmentValues(t *testing.T) {
 	t.Setenv("ANBAN_TEST_RATE_LIMIT_API_REQUESTS", "42")
 	body := strings.Replace(validClaudeConfigYAML, "claude:\n", `rate_limit:

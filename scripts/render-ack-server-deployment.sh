@@ -99,6 +99,12 @@ fi
 : "${agent_service_account:?agent_service_account must be set (must match claude.kubernetes.service_account and the ACK RBAC manifest)}"
 : "${dsh_image_repo:?dsh_image_repo must be set when the Server config uses ANBAN_DSH_IMAGE}"
 
+# Archestra is optional at runtime. Keep the in-cluster URL and optional Secret
+# identity deterministic while allowing release environments to override them.
+archestra_a2a_base_url=${archestra_a2a_base_url:-http://archestra-platform.anbanai-prod.svc.cluster.local:9000}
+archestra_a2a_secret_name=${archestra_a2a_secret_name:-archestra-a2a-token}
+archestra_a2a_secret_key=${archestra_a2a_secret_key:-token}
+
 if ! is_valid_dsh_image_reference "$dsh_image_repo"; then
   echo "dsh_image_repo must be a valid container image reference without whitespace" >&2
   exit 1
@@ -107,6 +113,7 @@ fi
 export image_repo
 export namespace
 export agent_service_account
+export archestra_a2a_base_url archestra_a2a_secret_name archestra_a2a_secret_key
 export wechat_article_agent_image_repo wechat_picture_agent_image_repo
 export seednote_agent_image_repo montage_agent_image_repo viral_ip_video_editor_agent_image_repo video_edit_agent_image_repo talking_head_editor_agent_image_repo moments_agent_image_repo
 export ecommerce_agent_image_repo profile_analysis_agent_image_repo

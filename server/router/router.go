@@ -60,6 +60,7 @@ type Services struct {
 	AgentPackHandler                    *handler.AgentPackHandler
 	BillingHandler                      *handler.BillingHandler
 	BillingAdminHandler                 *handler.BillingAdminHandler
+	ArchestraAdminHandler               *handler.ArchestraAdminHandler
 	ProjectHandler                      *handler.ProjectHandler
 	FeedbackDashboardHandler            *handler.FeedbackDashboardHandler
 	TimelineHandler                     *handler.TimelineHandler
@@ -308,6 +309,14 @@ func NewRouter(svc *Services) *fiber.App {
 			adminStudioBilling.Get("/topups", svc.BillingAdminHandler.TopUpOperations)
 			adminStudioBilling.Get("/entries", svc.BillingAdminHandler.Entries)
 		}
+	}
+	if svc.ArchestraAdminHandler != nil {
+		archestraAdmin := apiV1.Group("/admin/archestra")
+		archestraAdmin.Get("/agents", svc.ArchestraAdminHandler.Agents)
+		archestraAdmin.Post("/agents/:agentId/messages", svc.ArchestraAdminHandler.Message)
+		archestraAdmin.Get("/tasks/:taskId", svc.ArchestraAdminHandler.Task)
+		archestraAdmin.Post("/tasks/:taskId/approval", svc.ArchestraAdminHandler.Approval)
+		archestraAdmin.Post("/tasks/:taskId/cancel", svc.ArchestraAdminHandler.Cancel)
 	}
 
 	if svc.AuthHandler != nil {
