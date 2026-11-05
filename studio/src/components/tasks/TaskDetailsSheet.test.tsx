@@ -616,7 +616,7 @@ describe('TaskConfigurationDetails', () => {
     expect(screen.getByText('最大上下文').nextElementSibling).toHaveTextContent('9,223,372,036,854,775,807')
     expect(screen.getByText('思考模式').nextElementSibling).toHaveTextContent('开启')
     expect(screen.queryByText('must-not-render')).not.toBeInTheDocument()
-    expect(screen.queryByText('kimi-k3[1m]')).not.toBeInTheDocument()
+    expect(screen.queryByText('kimi-k3.1-pro[1m]')).not.toBeInTheDocument()
   })
 
   it('keeps ecommerce task overrides but does not leak current project defaults into a snapshot', () => {

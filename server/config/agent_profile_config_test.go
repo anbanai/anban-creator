@@ -57,7 +57,7 @@ func TestAgentProfilesUseCompleteClaudeEnvs(t *testing.T) {
 				t.Fatalf("balanced profile = %#v", balanced)
 			}
 			quality := configured.Claude.ExecutionProfiles["quality"]
-			if quality.Provider != "moonshot" || quality.Envs[model.ClaudeEnvModel] != "kimi-k3[1m]" || quality.Envs["CLAUDE_CODE_ALWAYS_ENABLE_EFFORT"] != "true" {
+			if quality.Provider != "moonshot" || quality.Envs[model.ClaudeEnvModel] != "kimi-k3.1-pro[1m]" || quality.Envs["CLAUDE_CODE_ALWAYS_ENABLE_EFFORT"] != "true" {
 				t.Fatalf("quality profile = %#v", quality)
 			}
 		})

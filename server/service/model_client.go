@@ -355,7 +355,7 @@ func isKimiThinkingModel(model string) bool {
 		name = name[:index]
 	}
 	switch name {
-	case "kimi-k3", "kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking", "kimi-k2-thinking-turbo",
+	case "kimi-k3.1-pro", "kimi-k3", "kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking", "kimi-k2-thinking-turbo",
 		"kimi-k2-0905-preview", "kimi-k2-turbo-preview":
 		return true
 	default:

@@ -81,6 +81,21 @@ models:
     operator_evidence: "operator-confirmed:tokenplayer:deepseek-v4.1-flash=deepseek/deepseek-flash"
     effective_at: "2026-07-29T00:00:00+08:00"
 
+  moonshot/kimi-k3.1-pro:
+    pricing_type: "token"
+    currency: "CNY"
+    unit: 1000000
+    input: "20.00"
+    cache_read_input: "2.00"
+    cache_creation_input: "20.00"
+    output: "100.00"
+    operator_evidence: "https://platform.moonshot.cn/docs/pricing/chat"
+    effective_at: "2026-07-29T00:00:00+08:00"
+
+  # Retained so frozen AgentProfileSnapshots and in-flight tasks that still
+  # name kimi-k3 keep resolving a price during and after the kimi-k3.1-pro
+  # rollout. Removing this row makes those executions settle as
+  # unreconciled/missing_provider_usage.
   moonshot/kimi-k3:
     pricing_type: "token"
     currency: "CNY"
@@ -115,6 +130,18 @@ models:
     effective_at: "2026-07-29T00:00:00+08:00"
 
   # TokenPlayer routes use the corresponding Moonshot model prices.
+  tokenplayer_anthropic/kimi-k3.1-pro:
+    pricing_type: "token"
+    currency: "CNY"
+    unit: 1000000
+    input: "20.00"
+    cache_read_input: "2.00"
+    cache_creation_input: "20.00"
+    output: "100.00"
+    operator_evidence: "https://platform.moonshot.cn/docs/pricing/chat"
+    effective_at: "2026-07-29T00:00:00+08:00"
+
+  # See moonshot/kimi-k3: retained for frozen snapshots during the rollout.
   tokenplayer_anthropic/kimi-k3:
     pricing_type: "token"
     currency: "CNY"
@@ -148,6 +175,18 @@ models:
     operator_evidence: "https://platform.moonshot.cn/docs/pricing/chat"
     effective_at: "2026-07-29T00:00:00+08:00"
 
+  tokenplayer_openai/kimi-k3.1-pro:
+    pricing_type: "token"
+    currency: "CNY"
+    unit: 1000000
+    input: "20.00"
+    cache_read_input: "2.00"
+    cache_creation_input: "20.00"
+    output: "100.00"
+    operator_evidence: "https://platform.moonshot.cn/docs/pricing/chat"
+    effective_at: "2026-07-29T00:00:00+08:00"
+
+  # See moonshot/kimi-k3: retained for frozen snapshots during the rollout.
   tokenplayer_openai/kimi-k3:
     pricing_type: "token"
     currency: "CNY"

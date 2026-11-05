@@ -33,7 +33,7 @@ func TestAgentProfileHandlerListsCapabilitiesWithoutRuntimeConfiguration(t *test
 	registry, err := service.NewAgentProfileRegistry([]service.AgentExecutionProfile{
 		handlerTestProfile("effective", "性价比", "低成本", "deepseek", "deepseek-v4-pro", model.TierFree),
 		handlerTestProfile("balanced", "平衡型", "平衡", "volcengine_ark", "doubao-seed-evolving", model.TierPro),
-		handlerTestProfile("quality", "极致效果", "旗舰", "moonshot", "kimi-k3[1m]", model.TierEnterprise),
+		handlerTestProfile("quality", "极致效果", "旗舰", "moonshot", "kimi-k3.1-pro[1m]", model.TierEnterprise),
 	})
 	if err != nil {
 		t.Fatal(err)

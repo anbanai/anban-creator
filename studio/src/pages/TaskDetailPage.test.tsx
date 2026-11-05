@@ -285,7 +285,7 @@ describe('TaskDetailPage', () => {
     vi.mocked(api.agentProfiles.list).mockResolvedValue([
       { id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-flash', description: '适合日常创作', min_tier: 'free', available: true },
       { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', model_name: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
-      { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
+      { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3.1-pro[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
     ])
     vi.mocked(api.imageCapabilities.list).mockResolvedValue({
       tier: 'pro',
@@ -647,7 +647,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('推理强度').nextElementSibling).toHaveTextContent('high')
     expect(screen.queryByText('moonshot')).not.toBeInTheDocument()
     expect(screen.queryByText('kimi-k2.7-code')).not.toBeInTheDocument()
-    expect(screen.queryByText('kimi-k3[1m]')).not.toBeInTheDocument()
+    expect(screen.queryByText('kimi-k3.1-pro[1m]')).not.toBeInTheDocument()
   })
 
   it('shows balanced context after results and opens logs in one action', async () => {

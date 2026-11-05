@@ -185,7 +185,8 @@ func TestVisionRequestDisablesKimiThinking(t *testing.T) {
 		model        string
 		wantThinking bool
 	}{
-		{name: "kimi k3 disables thinking", model: "kimi-k3", wantThinking: true},
+		{name: "kimi k3.1 pro disables thinking", model: "kimi-k3.1-pro", wantThinking: true},
+		{name: "legacy kimi k3 still disables thinking for frozen snapshots", model: "kimi-k3", wantThinking: true},
 		{name: "kimi k2.6 disables thinking", model: "kimi-k2.6", wantThinking: true},
 		{name: "non-kimi model keeps provider defaults", model: "vision-route"},
 	} {
@@ -230,7 +231,7 @@ func TestVideoRequestDisablesKimiThinking(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewOpenAILLMClient(server.URL+"/v1", "fixture-api-key", "kimi-k3", time.Second).(*openaiLLMClient)
+	client := NewOpenAILLMClient(server.URL+"/v1", "fixture-api-key", "kimi-k3.1-pro", time.Second).(*openaiLLMClient)
 	if _, err := client.CompleteWithVideoURLResult(context.Background(), "", "describe", "https://example.com/video.mp4"); err != nil {
 		t.Fatal(err)
 	}
@@ -245,12 +246,12 @@ func TestKimiThinkingModelCoverage(t *testing.T) {
 		model string
 		want  bool
 	}{
-		{model: "kimi-k3", want: true},
-		{model: " kimi-k3[1m] ", want: true},
+		{model: "kimi-k3.1-pro", want: true},
+		{model: " kimi-k3.1-pro[1m] ", want: true},
 		{model: "kimi-k2.5", want: true},
 		{model: "kimi-k2.6", want: true},
 		{model: "kimi-k2-thinking", want: true},
-		{model: "kimi-k3-code", want: false},
+		{model: "kimi-k3.1-pro-code", want: false},
 		{model: "gpt-5", want: false},
 		{model: "", want: false},
 	} {

@@ -19,7 +19,7 @@ func TestTokenPlayerProfilesUseMoonshotCosts(t *testing.T) {
 			model string
 			cost  int64
 		}{
-			{model: "kimi-k3", cost: 142_000_000},
+			{model: "kimi-k3.1-pro", cost: 142_000_000},
 			{model: "kimi-k2.7-code", cost: 41_300_000},
 			{model: "kimi-k2.7-code-highspeed", cost: 82_600_000},
 		} {
