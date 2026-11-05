@@ -35,10 +35,12 @@ export default function AdminArchestraPage() {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const pollTimer = useRef<number | undefined>(undefined)
+  const sessionVersion = useRef(0)
 
   const selectedAgent = useMemo(() => agents.find(agent => agent.id === agentID), [agents, agentID])
   const approval = task?.approval_requests?.find(item => !item.resolved)
-  const busy = sending || Boolean(task && ACTIVE_STATES.has(task.state)) || Boolean(approval)
+  const taskInProgress = Boolean(task && (ACTIVE_STATES.has(task.state) || task.state === INPUT_REQUIRED))
+  const busy = sending || taskInProgress || Boolean(approval)
 
   const clearPoll = useCallback(() => {
     if (pollTimer.current !== undefined) window.clearTimeout(pollTimer.current)
@@ -60,7 +62,8 @@ export default function AdminArchestraPage() {
     return () => { mounted = false; clearPoll() }
   }, [clearPoll])
 
-  const applyTask = useCallback((next: ArchestraTask) => {
+  const applyTask = useCallback((next: ArchestraTask, version = sessionVersion.current) => {
+    if (version !== sessionVersion.current) return
     setTask(next)
     if (next.context_id) setContextID(next.context_id)
     if (next.response) {
@@ -70,12 +73,13 @@ export default function AdminArchestraPage() {
     }
   }, [])
 
-  const pollTask = useCallback((nextTaskID: string, nextAgentID: string) => {
+  const pollTask = useCallback((nextTaskID: string, nextAgentID: string, version = sessionVersion.current) => {
     clearPoll()
     const poll = async () => {
       try {
         const next = await archestraApi.task(nextTaskID, nextAgentID)
-        applyTask(next)
+        if (version !== sessionVersion.current) return
+        applyTask(next, version)
         if (ACTIVE_STATES.has(next.state)) {
           pollTimer.current = window.setTimeout(poll, 1000)
         }
@@ -86,13 +90,14 @@ export default function AdminArchestraPage() {
     void poll()
   }, [applyTask, clearPoll])
 
-  const handleResult = useCallback((result: { message?: { text?: string; context_id?: string }; task?: ArchestraTask }, nextAgentID: string) => {
+  const handleResult = useCallback((result: { message?: { text?: string; context_id?: string }; task?: ArchestraTask }, nextAgentID: string, version = sessionVersion.current) => {
+    if (version !== sessionVersion.current) return
     if (result.message?.context_id) setContextID(result.message.context_id)
     if (result.message?.text) setMessages(current => [...current, { id: `agent:${Date.now()}`, role: 'agent', text: result.message!.text! }])
     if (result.task) {
-      applyTask(result.task)
+      applyTask(result.task, version)
       setTaskID(result.task.task_id)
-      if (ACTIVE_STATES.has(result.task.state)) pollTask(result.task.task_id, nextAgentID)
+      if (ACTIVE_STATES.has(result.task.state)) pollTask(result.task.task_id, nextAgentID, version)
     }
   }, [applyTask, pollTask])
 
@@ -103,10 +108,11 @@ export default function AdminArchestraPage() {
     setInput('')
     setError('')
     setSending(true)
+    const version = sessionVersion.current
     setMessages(current => [...current, { id: `user:${Date.now()}`, role: 'user', text }])
     try {
       const result = await archestraApi.sendMessage(agentID, { text, ...(contextID ? { context_id: contextID } : {}) })
-      handleResult(result, agentID)
+      handleResult(result, agentID, version)
     } catch (err) {
       setError(getApiErrorMessage(err, '发送消息失败'))
     } finally {
@@ -118,11 +124,12 @@ export default function AdminArchestraPage() {
     if (!taskID || !agentID) return
     setError('')
     setSending(true)
+    const version = sessionVersion.current
     try {
       const result = await archestraApi.approval(taskID, { agent_id: agentID, context_id: contextID || undefined, approval_id: request.approval_id, approved })
+      if (version !== sessionVersion.current) return
       setTask(current => current ? { ...current, approval_requests: current.approval_requests?.map(item => item.approval_id === request.approval_id ? { ...item, resolved: true } : item) } : current)
-      handleResult(result, agentID)
-      if (result.task && ACTIVE_STATES.has(result.task.state)) pollTask(result.task.task_id, agentID)
+      handleResult(result, agentID, version)
     } catch (err) {
       setError(getApiErrorMessage(err, '提交审批决定失败'))
     } finally {
@@ -134,8 +141,9 @@ export default function AdminArchestraPage() {
     if (!taskID || !agentID) return
     clearPoll()
     setSending(true)
+    const version = ++sessionVersion.current
     try {
-      applyTask(await archestraApi.cancel(taskID, agentID))
+      applyTask(await archestraApi.cancel(taskID, agentID), version)
     } catch (err) {
       setError(getApiErrorMessage(err, '取消任务失败'))
     } finally {
@@ -144,6 +152,7 @@ export default function AdminArchestraPage() {
   }
 
   const clearConversation = () => {
+    sessionVersion.current += 1
     clearPoll()
     setMessages([])
     setContextID('')
@@ -161,10 +170,10 @@ export default function AdminArchestraPage() {
           <p className="mt-1 text-sm text-muted-foreground">通过 Anban Server 连接 Token 可访问的 Agent，当前对话只保存在本页。</p>
         </div>
         <div className="flex items-center gap-2">
-          <select aria-label="选择 Agent" value={agentID} onChange={event => { setAgentID(event.target.value); clearConversation() }} disabled={loadingAgents || agents.length === 0} className="h-9 max-w-64 rounded-md border border-input bg-background px-3 text-sm">
+          <select aria-label="选择 Agent" value={agentID} onChange={event => { setAgentID(event.target.value); clearConversation() }} disabled={loadingAgents || agents.length === 0 || sending} className="h-9 max-w-64 rounded-md border border-input bg-background px-3 text-sm">
             {agents.length === 0 ? <option value="">暂无可用 Agent</option> : agents.map(agent => <option key={agent.id} value={agent.id}>{agent.name || agent.id}</option>)}
           </select>
-          <button type="button" onClick={clearConversation} className="inline-flex h-9 items-center gap-2 rounded-md border border-input px-3 text-sm hover:bg-muted"><Trash2 className="size-4" />清空</button>
+          <button type="button" onClick={clearConversation} disabled={sending} className="inline-flex h-9 items-center gap-2 rounded-md border border-input px-3 text-sm hover:bg-muted disabled:pointer-events-none disabled:opacity-50"><Trash2 className="size-4" />清空</button>
         </div>
       </header>
 
@@ -183,7 +192,7 @@ export default function AdminArchestraPage() {
         </section>
 
         <aside className="space-y-4">
-          <section className="rounded-lg border border-border bg-card p-4"><div className="flex items-center justify-between"><h2 className="text-sm font-medium">任务状态</h2>{task && ACTIVE_STATES.has(task.state) && <button type="button" onClick={() => void cancel()} disabled={sending} className="inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs hover:bg-muted"><CircleStop className="size-3.5" />取消</button>}</div><dl className="mt-3 space-y-2 text-sm"><div className="flex justify-between gap-3"><dt className="text-muted-foreground">Task</dt><dd className="max-w-44 truncate font-mono text-xs">{taskID || '未创建'}</dd></div><div className="flex justify-between gap-3"><dt className="text-muted-foreground">Context</dt><dd className="max-w-44 truncate font-mono text-xs">{contextID || '未创建'}</dd></div><div className="flex justify-between gap-3"><dt className="text-muted-foreground">状态</dt><dd>{taskLabel(task)}</dd></div></dl>{task?.status_message && <p className="mt-3 border-t border-border pt-3 text-xs text-muted-foreground">{task.status_message}</p>}</section>
+          <section className="rounded-lg border border-border bg-card p-4"><div className="flex items-center justify-between"><h2 className="text-sm font-medium">任务状态</h2>{task && (ACTIVE_STATES.has(task.state) || task.state === INPUT_REQUIRED) && <button type="button" onClick={() => void cancel()} disabled={sending} className="inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs hover:bg-muted disabled:pointer-events-none disabled:opacity-50"><CircleStop className="size-3.5" />取消</button>}</div><dl className="mt-3 space-y-2 text-sm"><div className="flex justify-between gap-3"><dt className="text-muted-foreground">Task</dt><dd className="max-w-44 truncate font-mono text-xs">{taskID || '未创建'}</dd></div><div className="flex justify-between gap-3"><dt className="text-muted-foreground">Context</dt><dd className="max-w-44 truncate font-mono text-xs">{contextID || '未创建'}</dd></div><div className="flex justify-between gap-3"><dt className="text-muted-foreground">状态</dt><dd>{taskLabel(task)}</dd></div></dl>{task?.status_message && <p className="mt-3 border-t border-border pt-3 text-xs text-muted-foreground">{task.status_message}</p>}</section>
           {approval && <section className="rounded-lg border border-amber-300/60 bg-amber-50/60 p-4 dark:bg-amber-950/20"><h2 className="text-sm font-medium">需要管理员审批</h2><p className="mt-2 text-sm">{approval.text || 'Agent 请求执行一项需要确认的操作。'}</p>{approval.tool_name && <p className="mt-2 font-mono text-xs text-muted-foreground">{approval.tool_name}</p>}<div className="mt-4 flex gap-2"><button type="button" onClick={() => void decide(approval, true)} disabled={sending} className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"><Check className="size-4" />批准</button><button type="button" onClick={() => void decide(approval, false)} disabled={sending} className="inline-flex items-center gap-2 rounded-md border border-input px-3 py-2 text-sm hover:bg-background disabled:opacity-50"><X className="size-4" />拒绝</button></div></section>}
           {task?.state === COMPLETED && <section className="rounded-lg border border-emerald-300/60 bg-emerald-50/60 p-4 text-sm dark:bg-emerald-950/20">任务已完成，结果已显示在对话中。</section>}
           {task?.state === FAILED && <section className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">任务执行失败，请查看状态信息或重新发送。</section>}

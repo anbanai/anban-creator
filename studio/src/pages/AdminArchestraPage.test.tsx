@@ -57,4 +57,17 @@ describe('AdminArchestraPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '清空' }))
     expect(screen.queryByText('hello')).not.toBeInTheDocument()
   })
+
+  it('allows canceling a task that is waiting for approval', async () => {
+    api.sendMessage.mockResolvedValue({ task: { task_id: 'task-1', context_id: 'ctx-1', state: 'TASK_STATE_INPUT_REQUIRED', approval_requests: [{ approval_id: 'approval-1', text: 'Approve?', resolved: false }] } })
+    api.cancel.mockResolvedValue({ task_id: 'task-1', context_id: 'ctx-1', state: 'TASK_STATE_CANCELED' })
+    renderPage()
+    await screen.findByRole('option', { name: 'Writer' })
+    fireEvent.change(screen.getByRole('textbox', { name: '消息' }), { target: { value: 'run' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+    expect(await screen.findByText('Approve?')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(api.cancel).toHaveBeenCalledWith('task-1', 'agent-1'))
+    expect(await screen.findByText('任务已取消。')).toBeInTheDocument()
+  })
 })
