@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { bootstrap, executionProfileFingerprint, preflightBootstrapFiles, readAgentPackCatalogWithDigest, resolveAgentPackForTaskType, validateAgentPackCatalog, validateAgentPackCatalogDigest, validateBootstrapResponse, type AgentPackCatalog, type BootstrapResponse } from "../src/bootstrap.js";
 import type { JobConfig } from "../src/config.js";
 import { buildQueryOptions } from "../src/runner.js";
+import { TypedTransportError } from "../src/transport.js";
 
 const tokenFor = (claims: Record<string, string>) => `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature`;
 
@@ -153,6 +154,58 @@ describe("validateBootstrapResponse", () => {
       await expect(bootstrap(config, "workload-token", undefined, new URL("../../harness/agent-pack-catalog.json", import.meta.url).pathname)).rejects.toThrow(
         "bootstrap returned HTTP 426: agent_runtime_upgrade_required: agent runtime contract upgrade required",
       );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("retries a transient bootstrap connection failure before giving up", async () => {
+    const originalFetch = globalThis.fetch;
+    let attempts = 0;
+    globalThis.fetch = (async () => {
+      attempts += 1;
+      if (attempts < 3) throw Object.assign(new TypeError("fetch failed"), { cause: { code: "EAI_AGAIN" } });
+      return new Response("", { status: 503 });
+    }) as typeof fetch;
+    try {
+      const config: JobConfig = {
+        serverURL: "https://creator.example.test",
+        executionID: "execution-1",
+        workspace: "/workspace",
+        workloadTokenFile: "/token",
+        allowHTTPServer: false,
+      };
+      const catalogPath = new URL("../../harness/agent-pack-catalog.json", import.meta.url).pathname;
+      // HTTP 503 is not retried, so reaching it proves the earlier attempts
+      // were retried rather than replaced.
+      await expect(bootstrap(config, "workload-token", undefined, catalogPath)).rejects.toThrow("HTTP 503");
+      expect(attempts).toBe(3);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("exhausts bootstrap retries with a flattened network cause", async () => {
+    const originalFetch = globalThis.fetch;
+    let attempts = 0;
+    globalThis.fetch = (async () => {
+      attempts += 1;
+      throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } });
+    }) as typeof fetch;
+    try {
+      const config: JobConfig = {
+        serverURL: "https://creator.example.test",
+        executionID: "execution-1",
+        workspace: "/workspace",
+        workloadTokenFile: "/token",
+        allowHTTPServer: false,
+      };
+      const catalogPath = new URL("../../harness/agent-pack-catalog.json", import.meta.url).pathname;
+      const error = await bootstrap(config, "workload-token", undefined, catalogPath).catch((caught) => caught);
+      expect(attempts).toBe(4);
+      expect(error).toBeInstanceOf(TypedTransportError);
+      expect((error as TypedTransportError).failure).toMatchObject({ operation: "bootstrap", code: "network_unavailable", attempts: 4, retryable: true });
+      expect((error as TypedTransportError).networkCode).toBe("ENOTFOUND");
     } finally {
       globalThis.fetch = originalFetch;
     }

@@ -1,4 +1,4 @@
-export type TransferOperation = "prepare" | "put" | "stream" | "manifest" | "complete" | "progress";
+export type TransferOperation = "bootstrap" | "prepare" | "put" | "stream" | "manifest" | "complete" | "progress";
 export type TransferErrorCode = "connection_reset" | "network_timeout" | "network_unavailable"
   | "rate_limited" | "service_unavailable" | "invalid_request" | "unauthorized"
   | "execution_conflict" | "signature_expired" | "integrity_mismatch"
@@ -103,6 +103,76 @@ export function transportErrorFromResponse(operation: TransferOperation, respons
 
 export function asTransferFailure(operation: TransferOperation, error: unknown): TransferFailure {
   return normalizeError(operation, error, false, false).failure;
+}
+
+/**
+ * Renders a failure as a single log line for the container's stderr.
+ *
+ * undici reports every transport failure as the same "fetch failed" TypeError
+ * and keeps the discriminating code (ENOTFOUND, ECONNREFUSED, ...) in the
+ * cause chain. Kubernetes stores only the stderr tail as the termination
+ * message, so the code has to be flattened into the text we print.
+ *
+ * Only allowlisted values are rendered: the mapped failure category, the
+ * network code, an HTTP status, the operation, and the target host and port.
+ * A free-form message is included only when no network code exists, so a
+ * transient network failure never leaks request details.
+ */
+export function describeTransportError(operation: TransferOperation, error: unknown, endpoint?: string): string {
+  const normalized = normalizeError(operation, error, false, false);
+  // A typed error already knows which phase it belongs to; the caller's label
+  // is only a fallback for errors that never entered a retried request.
+  const label = error instanceof TypedTransportError ? error.failure.operation : operation;
+  const fields = [`failure=${normalized.failure.code}`];
+  if (normalized.networkCode) fields.push(`network_code=${normalized.networkCode}`);
+  if (normalized.failure.http_status) fields.push(`http_status=${normalized.failure.http_status}`);
+  if (normalized.serverCode) fields.push(`server_code=${normalized.serverCode}`);
+  const target = describeEndpoint(endpoint);
+  if (target) fields.push(target);
+  if (!normalized.networkCode) {
+    const message = error instanceof Error ? error.message : "";
+    if (message) fields.push(`message=${redactLogText(message)}`);
+  }
+  return `${label} failed: ${fields.join(" ")}`;
+}
+
+const MAX_LOG_MESSAGE = 300;
+
+/**
+ * True when an error carries a discriminating transport cause, i.e. flattening
+ * it adds information. Domain errors keep their own descriptive message.
+ */
+export function isTransportFailure(error: unknown): boolean {
+  if (error instanceof TypedTransportError) return true;
+  return error instanceof TypeError && networkCode(error) !== undefined;
+}
+
+/** Renders an error for the log, flattening only transport failures. */
+export function describeErrorForLog(operation: TransferOperation, error: unknown, endpoint?: string): string {
+  if (!isTransportFailure(error)) {
+    return error instanceof Error ? error.message : "agent job failed";
+  }
+  return describeTransportError(operation, error, endpoint);
+}
+
+/** Strips credentials and URL query strings before text enters the log. */
+function redactLogText(value: string): string {
+  return value
+    .replace(/\bBearer\s+[^\s"']+/gi, "Bearer [redacted]")
+    .replace(/\b(?:token|access_token|api_key|apikey|secret|signature|password)=[^\s&"']*/gi, "[redacted]")
+    .replace(/(https?:\/\/[^\s?#"']+)\?[^\s"']*/gi, "$1?[redacted]")
+    .slice(0, MAX_LOG_MESSAGE);
+}
+
+/** The runtime command line already carries the endpoint, so it is not a secret. */
+function describeEndpoint(endpoint?: string): string | undefined {
+  if (!endpoint) return undefined;
+  try {
+    const url = new URL(endpoint);
+    return `host=${url.hostname} port=${url.port || (url.protocol === "https:" ? "443" : "80")}`;
+  } catch {
+    return undefined;
+  }
 }
 
 function normalizeError(operation: TransferOperation, error: unknown, timedOut: boolean, cancelled: boolean): TypedTransportError {

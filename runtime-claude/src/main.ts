@@ -35,7 +35,7 @@ import {
   runClaude,
   type RunnerReporter,
 } from "./runner.js";
-import { asTransferFailure } from "./transport.js";
+import { asTransferFailure, describeErrorForLog } from "./transport.js";
 import { materializeBootstrapFiles, prepareWorkspace } from "./workspace.js";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -524,10 +524,15 @@ export async function runJob(
   }
 }
 
+/**
+ * A failure reported to the Server has to carry the same flattened diagnostic
+ * as the container's stderr. A bare "fetch failed" would otherwise be the only
+ * surviving description of a pre-Agent transport failure.
+ */
 function failure(workspace: string, error: unknown): ExecutionResult {
   return {
     success: false,
-    error: error instanceof Error ? error.message : "agent execution failed",
+    error: describeErrorForLog("complete", error),
     work_dir: workspace,
     terminal_reason: "platform_error",
   };
@@ -629,6 +634,21 @@ function abortAfter(timeout: number, parent?: AbortSignal): AbortController {
   return controller;
 }
 
+/**
+ * Reads the Server origin from the raw arguments for diagnostics only.
+ * parseJobConfig throws on malformed input, which would replace the real
+ * failure with an argument error, so this never validates.
+ */
+function jobServerURL(args: string[]): string | undefined {
+  const index = args.indexOf("--server-url");
+  if (index < 0 || index + 1 >= args.length) return undefined;
+  try {
+    return new URL(args[index + 1]).origin;
+  } catch {
+    return undefined;
+  }
+}
+
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
@@ -640,8 +660,11 @@ if (
       if (!result.success) process.exitCode = 1;
     })
     .catch((error) => {
+      // This single line is what Kubernetes keeps as the container's
+      // termination message, so it must carry the network cause rather than
+      // undici's generic "fetch failed".
       process.stderr.write(
-        `${error instanceof Error ? error.message : "agent job failed"}\n`,
+        `${describeErrorForLog("bootstrap", error, jobServerURL(args))}\n`,
       );
       process.exitCode = exitCodeForError(error);
     });

@@ -1,5 +1,6 @@
 import { validateHypitEnvironment } from "./hypit.js";
 import { validateRuntimeEnvironment } from "./runtime-environment.js";
+import { retryRequest, type TransferOperation } from "./transport.js";
 import { createHash } from "node:crypto";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -213,17 +214,8 @@ export async function readWorkloadToken(path: string): Promise<string> {
 
 export async function bootstrap(config: JobConfig, token: string, signal?: AbortSignal, catalogPath = DEFAULT_AGENT_PACK_CATALOG_PATH): Promise<ResolvedBootstrapResponse> {
   const localCatalog = await readAgentPackCatalogWithDigest(catalogPath);
-  const response = await fetch(`${config.serverURL}/api/v1/agent/bootstrap`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "X-Anban-Agent-Contract-Version": String(AGENT_RUNTIME_CONTRACT_VERSION),
-      "X-Anban-Agent-Pack-Catalog-Digest": localCatalog.digest,
-    },
-    signal,
-    redirect: "error",
-  });
-  const body = await readBoundedText(response, MAX_BOOTSTRAP_RESPONSE_BYTES, "bootstrap response");
+  const response = await fetchBootstrap(config.serverURL, token, localCatalog.digest, signal);
+  const body = response.body;
   if (!response.ok) throw bootstrapHTTPError(response.status, body);
   let envelope: { code: number; msg?: string; data?: unknown };
   try {
@@ -245,6 +237,45 @@ export async function bootstrap(config: JobConfig, token: string, signal?: Abort
     throw error;
   }
 }
+
+/**
+ * Bootstrap is the runtime's first and only pre-Agent request, and the Job runs
+ * with backoffLimit 0, so a single transient DNS or connect failure would
+ * otherwise fail the whole task. Retrying is safe because the Server treats a
+ * repeated bootstrap from the same execution and runtime instance as
+ * idempotent (runtime identity and the execution transition are upserts).
+ * HTTP rejections such as an Agent Pack catalog mismatch are not retried: they
+ * are reported as protocol failures, which retryRequest never repeats.
+ *
+ * The response body is read inside the attempt so a stalled download is bounded
+ * by the same per-attempt timeout as the connect.
+ */
+async function fetchBootstrap(serverURL: string, token: string, catalogDigest: string, signal?: AbortSignal): Promise<BootstrapHTTPResponse> {
+  const endpoint = `${serverURL}/api/v1/agent/bootstrap`;
+  return retryRequest(BOOTSTRAP_OPERATION, async (requestSignal) => {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Anban-Agent-Contract-Version": String(AGENT_RUNTIME_CONTRACT_VERSION),
+        "X-Anban-Agent-Pack-Catalog-Digest": catalogDigest,
+      },
+      signal: requestSignal,
+      redirect: "error",
+    });
+    const body = await readBoundedText(response, MAX_BOOTSTRAP_RESPONSE_BYTES, "bootstrap response");
+    return { status: response.status, ok: response.ok, body };
+  }, { signal: signal ?? new AbortController().signal, timeoutMs: BOOTSTRAP_TIMEOUT_MS, maxAttempts: 4 });
+}
+
+interface BootstrapHTTPResponse {
+  status: number;
+  ok: boolean;
+  body: string;
+}
+
+const BOOTSTRAP_OPERATION: TransferOperation = "bootstrap";
+const BOOTSTRAP_TIMEOUT_MS = 10_000;
 
 function bootstrapHTTPError(status: number, body: string): Error {
   let code = "";

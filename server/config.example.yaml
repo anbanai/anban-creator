@@ -649,6 +649,8 @@ claude:
   # 托管 Agent 执行器类型：docker 用于单机容器；kubernetes 用于生产队列。
   executor: "${ANBAN_AGENT_EXECUTOR}"
   # 失败运行时保留多久供排查（秒），之后由 reconciler 清理。
+  # Agent 容器的 stderr 尾就是 k8s 的 termination message，是 bootstrap 失败时
+  # 唯一的现场证据；保留窗口内才能 kubectl logs/describe。生产建议不低于 1800。
   runtime_diagnostic_retention_seconds: 600
   # 每个 Agent 使用独立的 canonical runtime 镜像。
   runtime_images:
