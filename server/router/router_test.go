@@ -711,7 +711,7 @@ func TestAgentExecutionProfileRouteAuthenticatesStudioUser(t *testing.T) {
 	profiles, err := service.NewAgentProfileRegistry([]service.AgentExecutionProfile{
 		routerTestAgentProfile("effective", "性价比", "deepseek", "deepseek-flash", model.TierFree),
 		routerTestAgentProfile("balanced", "平衡型", "volcengine_ark", "doubao-seed-evolving", model.TierPro),
-		routerTestAgentProfile("quality", "极致效果", "moonshot", "kimi-k3", model.TierEnterprise),
+		routerTestAgentProfile("quality", "极致效果", "moonshot", "kimi-k3.1-pro", model.TierEnterprise),
 	})
 	if err != nil {
 		t.Fatal(err)

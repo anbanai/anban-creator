@@ -48,7 +48,7 @@ func testProfileConfig() map[string]srvconfig.ClaudeExecutionProfileConfig {
 	return map[string]srvconfig.ClaudeExecutionProfileConfig{
 		"effective": configuredAgentProfile("deepseek", "low cost", "https://api.deepseek.test/anthropic", "deepseek-secret", "deepseek-flash", "deepseek-flash"),
 		"balanced":  configuredAgentProfile("zhipu", "balanced", "https://open.bigmodel.test/api/anthropic", "zhipu-secret", "glm-5.2", "glm-5.2"),
-		"quality":   configuredAgentProfile("moonshot", "maximum", "https://api.moonshot.test/anthropic", "moonshot-secret", "kimi-k3[1m]", "kimi-k3"),
+		"quality":   configuredAgentProfile("moonshot", "maximum", "https://api.moonshot.test/anthropic", "moonshot-secret", "kimi-k3.1-pro[1m]", "kimi-k3.1-pro"),
 	}
 }
 
@@ -56,7 +56,7 @@ func testAgentProfiles() []AgentExecutionProfile {
 	return []AgentExecutionProfile{
 		testExecutionProfile("effective", configuredAgentProfile("deepseek", "", "https://api.deepseek.example/anthropic", "deepseek-secret", "deepseek-flash", "deepseek-flash"), model.TierFree),
 		testExecutionProfile("balanced", configuredAgentProfile("volcengine_ark", "", "https://ark.example/anthropic", "doubao-secret", "doubao-seed-evolving", "doubao-seed-evolving"), model.TierPro),
-		testExecutionProfile("quality", configuredAgentProfile("moonshot", "", "https://api.moonshot.example/anthropic", "moonshot-secret", "kimi-k3[1m]", "kimi-k3"), model.TierEnterprise),
+		testExecutionProfile("quality", configuredAgentProfile("moonshot", "", "https://api.moonshot.example/anthropic", "moonshot-secret", "kimi-k3.1-pro[1m]", "kimi-k3.1-pro"), model.TierEnterprise),
 	}
 }
 
@@ -73,7 +73,7 @@ func testCostCatalog() billing.CostCatalog {
 	return billing.CostCatalog{Models: map[string]billing.ModelCostConfig{
 		"deepseek/deepseek-flash": {PricingType: "token"},
 		"zhipu/glm-5.2":           {PricingType: "token"},
-		"moonshot/kimi-k3":        {PricingType: "token"},
+		"moonshot/kimi-k3.1-pro":  {PricingType: "token"},
 		"moonshot/kimi-k2.7-code": {PricingType: "token"},
 	}}
 }
@@ -271,7 +271,7 @@ func TestResolveRuntimeMergesOnlyCurrentToken(t *testing.T) {
 	profiles["quality"].Envs[model.ClaudeEnvModel] = "new-model"
 	profiles["quality"].Envs["CLAUDE_CODE_EFFORT_LEVEL"] = "low"
 	profiles["quality"].Envs["MAX_THINKING_TOKENS"] = "1"
-	profiles["quality"].ModelUsageAliases["new-model"] = "kimi-k3"
+	profiles["quality"].ModelUsageAliases["new-model"] = "kimi-k3.1-pro"
 	registry, err = NewAgentProfileRegistryFromConfig(profiles, testCostCatalog())
 	if err != nil {
 		t.Fatal(err)
@@ -285,7 +285,7 @@ func TestResolveRuntimeMergesOnlyCurrentToken(t *testing.T) {
 	}
 	for key, want := range map[string]string{
 		model.ClaudeEnvBaseURL:     "https://api.moonshot.test/anthropic",
-		model.ClaudeEnvModel:       "kimi-k3[1m]",
+		model.ClaudeEnvModel:       "kimi-k3.1-pro[1m]",
 		"CLAUDE_CODE_EFFORT_LEVEL": "high",
 		"MAX_THINKING_TOKENS":      "32768",
 	} {

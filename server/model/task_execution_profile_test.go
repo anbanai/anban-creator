@@ -134,11 +134,11 @@ func TestAgentProfileSnapshotFingerprintCrossRuntimeVector(t *testing.T) {
 		Protocol:      "anthropic",
 		Envs: map[string]string{
 			"ANTHROPIC_BASE_URL":                    "https://api.moonshot.cn/anthropic",
-			"ANTHROPIC_MODEL":                       "kimi-k3[1m]",
-			"ANTHROPIC_DEFAULT_OPUS_MODEL":          "kimi-k3[1m]",
-			"ANTHROPIC_DEFAULT_FABLE_MODEL":         "kimi-k3[1m]",
-			"ANTHROPIC_DEFAULT_SONNET_MODEL":        "kimi-k3[1m]",
-			"ANTHROPIC_DEFAULT_HAIKU_MODEL":         "kimi-k3[1m]",
+			"ANTHROPIC_MODEL":                       "kimi-k3.1-pro[1m]",
+			"ANTHROPIC_DEFAULT_OPUS_MODEL":          "kimi-k3.1-pro[1m]",
+			"ANTHROPIC_DEFAULT_FABLE_MODEL":         "kimi-k3.1-pro[1m]",
+			"ANTHROPIC_DEFAULT_SONNET_MODEL":        "kimi-k3.1-pro[1m]",
+			"ANTHROPIC_DEFAULT_HAIKU_MODEL":         "kimi-k3.1-pro[1m]",
 			"CLAUDE_CODE_EFFORT_LEVEL":              "high",
 			"CLAUDE_CODE_ALWAYS_ENABLE_EFFORT":      "true",
 			"CLAUDE_CODE_MAX_CONTEXT_TOKENS":        "1048576",
@@ -149,17 +149,17 @@ func TestAgentProfileSnapshotFingerprintCrossRuntimeVector(t *testing.T) {
 			"CLAUDE_CODE_AUTO_COMPACT_WINDOW":       "1048576",
 			"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE":       "80",
 			"CLAUDE_CODE_DISABLE_1M_CONTEXT":        "false",
-			"CLAUDE_CODE_SUBAGENT_MODEL":            "kimi-k3[1m]",
+			"CLAUDE_CODE_SUBAGENT_MODEL":            "kimi-k3.1-pro[1m]",
 			"ENABLE_TOOL_SEARCH":                    "true",
 		},
-		ModelUsageAliases: map[string]string{"kimi-k3[1m]": "kimi-k3"},
+		ModelUsageAliases: map[string]string{"kimi-k3.1-pro[1m]": "kimi-k3.1-pro"},
 	}
 
 	got, err := AgentProfileFingerprint(snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = "ddeb3859ae9f15f7fd674caa0982326d05cce496d2426a8be892845643d31aa7"
+	const want = "57236dcfb0d9769f710d720bf3f227d70d04f106698596fc7d93f1efd8fc8b39"
 	if got != want {
 		t.Fatalf("fingerprint = %q, want cross-runtime vector %q", got, want)
 	}

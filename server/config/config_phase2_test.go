@@ -345,8 +345,8 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 	if got := len(cfg.Claude.ExecutionProfiles["balanced"].ModelUsageAliases); got != 0 {
 		t.Errorf("balanced model_usage_aliases length = %d, want 0", got)
 	}
-	if got := cfg.Claude.ExecutionProfiles["quality"].ModelUsageAliases; len(got) != 1 || got["kimi-k3[1m]"] != "kimi-k3" {
-		t.Errorf("quality model_usage_aliases = %#v, want only kimi-k3[1m]: kimi-k3", got)
+	if got := cfg.Claude.ExecutionProfiles["quality"].ModelUsageAliases; len(got) != 1 || got["kimi-k3.1-pro[1m]"] != "kimi-k3.1-pro" {
+		t.Errorf("quality model_usage_aliases = %#v, want only kimi-k3.1-pro[1m]: kimi-k3.1-pro", got)
 	}
 	effective := cfg.Claude.ExecutionProfiles["effective"]
 	effective.Envs["ENABLE_TOOL_SEARCH"] = "mutated"

@@ -1771,7 +1771,7 @@ func TestTaskServiceCloneRefreezesCurrentProfileConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(clones) != 1 || clones[0].AgentProfileSnapshot.Envs[model.ClaudeEnvModel] != "kimi-k3[1m]" || clones[0].AgentProfileFingerprint == historicalFingerprint {
+	if len(clones) != 1 || clones[0].AgentProfileSnapshot.Envs[model.ClaudeEnvModel] != "kimi-k3.1-pro[1m]" || clones[0].AgentProfileFingerprint == historicalFingerprint {
 		t.Fatalf("clone did not freeze current profile: %#v", clones)
 	}
 }

@@ -623,11 +623,11 @@ claude:
       envs:
         ANTHROPIC_BASE_URL: "${ANBAN_MOONSHOT_ANTHROPIC_BASE_URL:-https://api.moonshot.cn/anthropic}"
         ANTHROPIC_AUTH_TOKEN: "${ANBAN_MOONSHOT_API_KEY}"
-        ANTHROPIC_MODEL: "kimi-k3[1m]"
-        ANTHROPIC_DEFAULT_OPUS_MODEL: "kimi-k3[1m]"
-        ANTHROPIC_DEFAULT_FABLE_MODEL: "kimi-k3[1m]"
-        ANTHROPIC_DEFAULT_SONNET_MODEL: "kimi-k3[1m]"
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-k3[1m]"
+        ANTHROPIC_MODEL: "kimi-k3.1-pro[1m]"
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "kimi-k3.1-pro[1m]"
+        ANTHROPIC_DEFAULT_FABLE_MODEL: "kimi-k3.1-pro[1m]"
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "kimi-k3.1-pro[1m]"
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-k3.1-pro[1m]"
         CLAUDE_CODE_EFFORT_LEVEL: "high"
         CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: "true"
         CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1048576"
@@ -641,9 +641,9 @@ claude:
         CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80"
         CLAUDE_CODE_DISABLE_1M_CONTEXT: "false"
         ENABLE_TOOL_SEARCH: "true"
-        CLAUDE_CODE_SUBAGENT_MODEL: "kimi-k3[1m]"
+        CLAUDE_CODE_SUBAGENT_MODEL: "kimi-k3.1-pro[1m]"
       model_usage_aliases:
-        "kimi-k3[1m]": "kimi-k3"
+        "kimi-k3.1-pro[1m]": "kimi-k3.1-pro"
   # Agent Job/容器访问 server MCP/API 的地址。Kubernetes 生产环境通常使用集群内 Service URL。
   agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-http://creator-api-svc:8080}"
   # 托管 Agent 执行器类型：docker 用于单机容器；kubernetes 用于生产队列。

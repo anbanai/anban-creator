@@ -135,7 +135,7 @@ vi.mock('@/lib/api', async () => {
         list: vi.fn().mockResolvedValue([
           { id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-flash', description: '适合日常创作', min_tier: 'free', available: true },
           { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', model_name: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
-          { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
+          { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3.1-pro[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
         ]),
       },
       imageCapabilities: {

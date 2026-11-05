@@ -7,7 +7,7 @@ import { ExecutionProfileSelector } from './ExecutionProfileSelector'
 const profiles = [
   { id: 'effective' as const, display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-v4-pro', description: '日常创作', min_tier: 'free' as const, available: true },
   { id: 'balanced' as const, display_name: '平衡型', provider: 'volcengine_ark', model_name: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro' as const, available: true },
-  { id: 'quality' as const, display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise' as const, available: false, unavailable_reason: 'requires_enterprise' },
+  { id: 'quality' as const, display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3.1-pro[1m]', description: '复杂高质量创作', min_tier: 'enterprise' as const, available: false, unavailable_reason: 'requires_enterprise' },
 ]
 
 describe('ExecutionProfileSelector', () => {
@@ -21,7 +21,7 @@ describe('ExecutionProfileSelector', () => {
     expect(screen.queryByText('volcengine_ark')).not.toBeInTheDocument()
     expect(screen.queryByText('moonshot')).not.toBeInTheDocument()
     expect(screen.queryByText('doubao-seed-evolving')).not.toBeInTheDocument()
-    expect(screen.queryByText('kimi-k3[1m]')).not.toBeInTheDocument()
+    expect(screen.queryByText('kimi-k3.1-pro[1m]')).not.toBeInTheDocument()
     expect(screen.getByText('全部用户')).toBeInTheDocument()
     expect(screen.getByText('Pro 版及以上')).toBeInTheDocument()
     expect(screen.getByText('企业版')).toBeInTheDocument()

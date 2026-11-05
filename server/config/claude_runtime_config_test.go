@@ -24,19 +24,19 @@ claude:
       envs:
         ANTHROPIC_BASE_URL: "https://api.moonshot.cn/anthropic"
         ANTHROPIC_AUTH_TOKEN: "profile-secret-token"
-        ANTHROPIC_MODEL: "kimi-k3[1m]"
-        ANTHROPIC_DEFAULT_OPUS_MODEL: "kimi-k3[1m]"
-        ANTHROPIC_DEFAULT_FABLE_MODEL: "kimi-k3[1m]"
-        ANTHROPIC_DEFAULT_SONNET_MODEL: "kimi-k3[1m]"
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-k3[1m]"
+        ANTHROPIC_MODEL: "kimi-k3.1-pro[1m]"
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "kimi-k3.1-pro[1m]"
+        ANTHROPIC_DEFAULT_FABLE_MODEL: "kimi-k3.1-pro[1m]"
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "kimi-k3.1-pro[1m]"
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-k3.1-pro[1m]"
         MAX_THINKING_TOKENS: "0"
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
         CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0"
         CLAUDE_CODE_AUTO_COMPACT_WINDOW: "262144"
         ENABLE_TOOL_SEARCH: "false"
       model_usage_aliases:
-        kimi-k3: kimi-k3
-        kimi-k3[1m]: kimi-k3
+        kimi-k3.1-pro: kimi-k3.1-pro
+        kimi-k3.1-pro[1m]: kimi-k3.1-pro
   executor: docker
   execution_token_secret: 0123456789abcdef0123456789abcdef
   runtime_images:
@@ -60,13 +60,13 @@ func validClaudeConfigForTest() ClaudeConfig {
 				Envs: map[string]string{
 					model.ClaudeEnvBaseURL:           "https://api.moonshot.cn/anthropic",
 					model.ClaudeEnvAuthToken:         "profile-secret-token",
-					model.ClaudeEnvModel:             "kimi-k3[1m]",
-					"ANTHROPIC_DEFAULT_OPUS_MODEL":   "kimi-k3[1m]",
-					"ANTHROPIC_DEFAULT_FABLE_MODEL":  "kimi-k3[1m]",
-					"ANTHROPIC_DEFAULT_SONNET_MODEL": "kimi-k3[1m]",
-					"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "kimi-k3[1m]",
+					model.ClaudeEnvModel:             "kimi-k3.1-pro[1m]",
+					"ANTHROPIC_DEFAULT_OPUS_MODEL":   "kimi-k3.1-pro[1m]",
+					"ANTHROPIC_DEFAULT_FABLE_MODEL":  "kimi-k3.1-pro[1m]",
+					"ANTHROPIC_DEFAULT_SONNET_MODEL": "kimi-k3.1-pro[1m]",
+					"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "kimi-k3.1-pro[1m]",
 				},
-				ModelUsageAliases: map[string]string{"kimi-k3": "kimi-k3", "kimi-k3[1m]": "kimi-k3"},
+				ModelUsageAliases: map[string]string{"kimi-k3.1-pro": "kimi-k3.1-pro", "kimi-k3.1-pro[1m]": "kimi-k3.1-pro"},
 			},
 		},
 		Executor: "docker", ExecutionTokenSecret: "0123456789abcdef0123456789abcdef",
@@ -91,7 +91,7 @@ func TestClaudeConfigAcceptsOnlyProfileEnvs(t *testing.T) {
 		t.Fatal(err)
 	}
 	profile := cfg.Claude.ExecutionProfiles["quality"]
-	if profile.Envs[model.ClaudeEnvModel] != "kimi-k3[1m]" || profile.Envs["MAX_THINKING_TOKENS"] != "0" || profile.Envs["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] != "1" || profile.Envs["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] != "0" || profile.Envs["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] != "262144" || profile.Envs["ENABLE_TOOL_SEARCH"] != "false" {
+	if profile.Envs[model.ClaudeEnvModel] != "kimi-k3.1-pro[1m]" || profile.Envs["MAX_THINKING_TOKENS"] != "0" || profile.Envs["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] != "1" || profile.Envs["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] != "0" || profile.Envs["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] != "262144" || profile.Envs["ENABLE_TOOL_SEARCH"] != "false" {
 		t.Fatalf("profile envs = %#v", profile.Envs)
 	}
 }

@@ -100,6 +100,7 @@ func TestProviderCostCatalogV4(t *testing.T) {
 		"deepseek/deepseek-flash":                       {"token", "USD", 140_000, 2_800, 140_000, 280_000},
 		"tokenplayer_anthropic/deepseek-v4.1-flash":     {"token", "USD", 140_000, 2_800, 140_000, 280_000},
 		"deepseek/deepseek-v4-pro":                      {"token", "USD", 660_000, 22_000, 660_000, 1_980_000},
+		"moonshot/kimi-k3.1-pro":                        {"token", "CNY", 20_000_000, 2_000_000, 20_000_000, 100_000_000},
 		"moonshot/kimi-k3":                              {"token", "CNY", 20_000_000, 2_000_000, 20_000_000, 100_000_000},
 		"moonshot/kimi-k2.7-code":                       {"token", "CNY", 6_500_000, 1_300_000, 6_500_000, 27_000_000},
 		"moonshot/kimi-k2.7-code-highspeed":             {"token", "CNY", 13_000_000, 2_600_000, 13_000_000, 54_000_000},
@@ -111,7 +112,7 @@ func TestProviderCostCatalogV4(t *testing.T) {
 		"wangcai_openai/gpt-image-2.5-flare":            {pricingType: "openai_image_usage", currency: "USD"},
 	}
 	for _, provider := range []string{"tokenplayer_anthropic", "tokenplayer_openai"} {
-		for _, model := range []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"} {
+		for _, model := range []string{"kimi-k3.1-pro", "kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"} {
 			want[provider+"/"+model] = want["moonshot/"+model]
 		}
 	}
@@ -375,6 +376,7 @@ func initialCatalogMetadataContractError(bundle *Bundle) error {
 		"deepseek/deepseek-flash":                       "https://api-docs.deepseek.com/quick_start/pricing/",
 		"tokenplayer_anthropic/deepseek-v4.1-flash":     "operator-confirmed:tokenplayer:deepseek-v4.1-flash=deepseek/deepseek-flash",
 		"deepseek/deepseek-v4-pro":                      "https://api-docs.deepseek.com/quick_start/pricing/",
+		"moonshot/kimi-k3.1-pro":                        "https://platform.moonshot.cn/docs/pricing/chat",
 		"moonshot/kimi-k3":                              "https://platform.moonshot.cn/docs/pricing/chat",
 		"moonshot/kimi-k2.7-code":                       "https://platform.moonshot.cn/docs/pricing/chat",
 		"moonshot/kimi-k2.7-code-highspeed":             "https://platform.moonshot.cn/docs/pricing/chat",
@@ -386,7 +388,7 @@ func initialCatalogMetadataContractError(bundle *Bundle) error {
 		"wangcai_openai/gpt-image-2.5-flare":            "operator-confirmed:wangcai-openai:gpt-image-2.5-flare=inherits-gpt-image-2-t-prices:2026-07-13",
 	}
 	for _, provider := range []string{"tokenplayer_anthropic", "tokenplayer_openai"} {
-		for _, model := range []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"} {
+		for _, model := range []string{"kimi-k3.1-pro", "kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"} {
 			wantEvidence[provider+"/"+model] = wantEvidence["moonshot/"+model]
 		}
 	}

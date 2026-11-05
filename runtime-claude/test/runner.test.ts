@@ -62,15 +62,15 @@ const validBootstrap = () => ({
     envs: {
       ANTHROPIC_BASE_URL: "https://api.moonshot.cn/anthropic",
       ANTHROPIC_AUTH_TOKEN: "secret",
-      ANTHROPIC_MODEL: "kimi-k3[1m]",
-      ANTHROPIC_DEFAULT_OPUS_MODEL: "kimi-k3[1m]",
-      ANTHROPIC_DEFAULT_FABLE_MODEL: "kimi-k3[1m]",
-      ANTHROPIC_DEFAULT_SONNET_MODEL: "kimi-k3[1m]",
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-k3[1m]",
+      ANTHROPIC_MODEL: "kimi-k3.1-pro[1m]",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "kimi-k3.1-pro[1m]",
+      ANTHROPIC_DEFAULT_FABLE_MODEL: "kimi-k3.1-pro[1m]",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "kimi-k3.1-pro[1m]",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-k3.1-pro[1m]",
       MAX_THINKING_TOKENS: "0",
       ENABLE_TOOL_SEARCH: "false",
     },
-    model_usage_aliases: { "kimi-k3[1m]": { provider: "moonshot", model: "kimi-k3" } },
+    model_usage_aliases: { "kimi-k3.1-pro[1m]": { provider: "moonshot", model: "kimi-k3.1-pro" } },
   },
 });
 
@@ -327,10 +327,10 @@ describe("validateManagedInit", () => {
 
   test("keeps all mapped terminal model rows", () => {
     const got = terminalModelUsage({
-      "kimi-k3[1m]": { inputTokens: 3, outputTokens: 5, cacheReadInputTokens: 7, cacheCreationInputTokens: 11 },
+      "kimi-k3.1-pro[1m]": { inputTokens: 3, outputTokens: 5, cacheReadInputTokens: 7, cacheCreationInputTokens: 11 },
       "kimi-k2.7-code": { inputTokens: 13, outputTokens: 17, cacheReadInputTokens: 19, cacheCreationInputTokens: 23 },
     }, {
-      "kimi-k3[1m]": { provider: "moonshot", model: "kimi-k3" },
+      "kimi-k3.1-pro[1m]": { provider: "moonshot", model: "kimi-k3.1-pro" },
       "kimi-k2.7-code": { provider: "moonshot", model: "kimi-k2.7-code" },
     });
     expect(got.cost_status).toBe("reconciled");
@@ -341,9 +341,9 @@ describe("validateManagedInit", () => {
     const got = terminalModelUsage({
       mapped: { inputTokens: 3, outputTokens: 5, cacheReadInputTokens: 7, cacheCreationInputTokens: 11 },
       unknown: { inputTokens: 13, outputTokens: 17, cacheReadInputTokens: 19, cacheCreationInputTokens: 23 },
-    }, { mapped: { provider: "moonshot", model: "kimi-k3" } });
+    }, { mapped: { provider: "moonshot", model: "kimi-k3.1-pro" } });
     expect(got.cost_status).toBe("unreconciled");
-    expect(got.usage).toEqual([{ provider: "moonshot", model: "kimi-k3", input_tokens: 3, output_tokens: 5, cache_read_input_tokens: 7, cache_creation_input_tokens: 11 }]);
+    expect(got.usage).toEqual([{ provider: "moonshot", model: "kimi-k3.1-pro", input_tokens: 3, output_tokens: 5, cache_read_input_tokens: 7, cache_creation_input_tokens: 11 }]);
     expect(got.cost_diagnostics).toEqual([{ code: "unmapped_model_usage_alias", raw_model: "unknown" }]);
   });
 
@@ -352,11 +352,11 @@ describe("validateManagedInit", () => {
       mapped: { inputTokens: 3, outputTokens: 5, cacheReadInputTokens: 7, cacheCreationInputTokens: 11 },
       broken: null,
     } as unknown as Parameters<typeof terminalModelUsage>[0], {
-      mapped: { provider: "moonshot", model: "kimi-k3" },
+      mapped: { provider: "moonshot", model: "kimi-k3.1-pro" },
       broken: { provider: "moonshot", model: "kimi-k2.7-code" },
     });
     expect(got.cost_status).toBe("unreconciled");
-    expect(got.usage).toEqual([{ provider: "moonshot", model: "kimi-k3", input_tokens: 3, output_tokens: 5, cache_read_input_tokens: 7, cache_creation_input_tokens: 11 }]);
+    expect(got.usage).toEqual([{ provider: "moonshot", model: "kimi-k3.1-pro", input_tokens: 3, output_tokens: 5, cache_read_input_tokens: 7, cache_creation_input_tokens: 11 }]);
     expect(got.cost_diagnostics).toEqual([{ code: "invalid_model_usage_tokens", raw_model: "broken" }]);
   });
 });
@@ -607,7 +607,7 @@ describe("buildQueryOptions", () => {
     expect(options).not.toHaveProperty("thinking");
     expect(options).not.toHaveProperty("model");
     expect(options.env).toMatchObject({
-      ANTHROPIC_MODEL: "kimi-k3[1m]",
+      ANTHROPIC_MODEL: "kimi-k3.1-pro[1m]",
       MAX_THINKING_TOKENS: "0",
       ENABLE_TOOL_SEARCH: "false",
     });

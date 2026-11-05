@@ -53,8 +53,8 @@ func profileWithControls(controls model.AgentClaudeControls) AgentExecutionProfi
 	return AgentExecutionProfile{
 		ID: "quality", DisplayName: "极致效果", Provider: "moonshot", Protocol: "anthropic", Envs: envs,
 		ModelUsageAliases: map[string]string{
-			"kimi-default": "kimi-k3", "kimi-opus": "kimi-k3", "kimi-fable": "kimi-k3",
-			"kimi-sonnet": "kimi-k3", "kimi-haiku": "kimi-k3",
+			"kimi-default": "kimi-k3.1-pro", "kimi-opus": "kimi-k3.1-pro", "kimi-fable": "kimi-k3.1-pro",
+			"kimi-sonnet": "kimi-k3.1-pro", "kimi-haiku": "kimi-k3.1-pro",
 		},
 		MinTier: model.TierEnterprise, Available: true,
 	}
@@ -116,7 +116,7 @@ func TestAgentBootstrapJSONUsesUnifiedEnvsContractOnly(t *testing.T) {
 	raw, err := json.Marshal(AgentBootstrapResponse{ExecutionProfile: AgentRuntimeProfile{
 		ProfileID: snapshot.ProfileID, Provider: snapshot.Provider, Protocol: snapshot.Protocol,
 		DisplayName: snapshot.DisplayName, ProfileFingerprint: fingerprint, Envs: profile.RuntimeEnv(),
-		ModelUsageAliases: map[string]serveragent.ModelUsageIdentity{"kimi-k3[1m]": {Provider: "moonshot", Model: "kimi-k3"}},
+		ModelUsageAliases: map[string]serveragent.ModelUsageIdentity{"kimi-k3.1-pro[1m]": {Provider: "moonshot", Model: "kimi-k3.1-pro"}},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -144,9 +144,9 @@ func TestAgentBootstrapJSONUsesUnifiedEnvsContractOnly(t *testing.T) {
 	if !ok {
 		t.Fatalf("model_usage_aliases = %#v", executionProfile["model_usage_aliases"])
 	}
-	alias, ok := aliases["kimi-k3[1m]"].(map[string]any)
-	if !ok || alias["provider"] != "moonshot" || alias["model"] != "kimi-k3" {
-		t.Fatalf("model alias identity = %#v", aliases["kimi-k3[1m]"])
+	alias, ok := aliases["kimi-k3.1-pro[1m]"].(map[string]any)
+	if !ok || alias["provider"] != "moonshot" || alias["model"] != "kimi-k3.1-pro" {
+		t.Fatalf("model alias identity = %#v", aliases["kimi-k3.1-pro[1m]"])
 	}
 	envs, ok := executionProfile["envs"].(map[string]any)
 	if !ok || envs["ANTHROPIC_BASE_URL"] == "" || envs["ANTHROPIC_AUTH_TOKEN"] == "" {
@@ -190,7 +190,7 @@ func TestAgentBootstrapUsesFrozenExecutionProfileRuntime(t *testing.T) {
 	if response.ExecutionProfile.Envs[model.ClaudeEnvModel] != "kimi-default" || response.ExecutionProfile.ProfileFingerprint != fingerprint || response.ExecutionProfile.Envs["MAX_THINKING_TOKENS"] != "0" || response.ExecutionProfile.Envs["ENABLE_TOOL_SEARCH"] != "false" {
 		t.Fatalf("profile runtime response = %#v", response.ExecutionProfile)
 	}
-	wantAlias := serveragent.ModelUsageIdentity{Provider: "moonshot", Model: "kimi-k3"}
+	wantAlias := serveragent.ModelUsageIdentity{Provider: "moonshot", Model: "kimi-k3.1-pro"}
 	if len(response.ExecutionProfile.ModelUsageAliases) != 5 || response.ExecutionProfile.ModelUsageAliases["kimi-default"] != wantAlias {
 		t.Fatalf("model aliases = %#v", response.ExecutionProfile.ModelUsageAliases)
 	}

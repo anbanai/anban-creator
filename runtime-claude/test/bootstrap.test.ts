@@ -11,11 +11,11 @@ const tokenFor = (claims: Record<string, string>) => `header.${Buffer.from(JSON.
 const validProfileEnvs = () => ({
   ANTHROPIC_BASE_URL: "https://api.moonshot.cn/anthropic",
   ANTHROPIC_AUTH_TOKEN: "secret",
-  ANTHROPIC_MODEL: "kimi-k3[1m]",
-  ANTHROPIC_DEFAULT_OPUS_MODEL: "kimi-k3[1m]",
-  ANTHROPIC_DEFAULT_FABLE_MODEL: "kimi-k3[1m]",
-  ANTHROPIC_DEFAULT_SONNET_MODEL: "kimi-k3[1m]",
-  ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-k3[1m]",
+  ANTHROPIC_MODEL: "kimi-k3.1-pro[1m]",
+  ANTHROPIC_DEFAULT_OPUS_MODEL: "kimi-k3.1-pro[1m]",
+  ANTHROPIC_DEFAULT_FABLE_MODEL: "kimi-k3.1-pro[1m]",
+  ANTHROPIC_DEFAULT_SONNET_MODEL: "kimi-k3.1-pro[1m]",
+  ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-k3.1-pro[1m]",
   CLAUDE_CODE_EFFORT_LEVEL: "high",
   CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: "true",
   CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1048576",
@@ -26,7 +26,7 @@ const validProfileEnvs = () => ({
   CLAUDE_CODE_AUTO_COMPACT_WINDOW: "1048576",
   CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80",
   CLAUDE_CODE_DISABLE_1M_CONTEXT: "false",
-  CLAUDE_CODE_SUBAGENT_MODEL: "kimi-k3[1m]",
+  CLAUDE_CODE_SUBAGENT_MODEL: "kimi-k3.1-pro[1m]",
   ENABLE_TOOL_SEARCH: "true",
 });
 
@@ -53,7 +53,7 @@ const validResponse = (): BootstrapResponse => {
       profile_fingerprint: "",
       envs: validProfileEnvs(),
       model_usage_aliases: {
-        "kimi-k3[1m]": { provider: "moonshot", model: "kimi-k3" },
+        "kimi-k3.1-pro[1m]": { provider: "moonshot", model: "kimi-k3.1-pro" },
       },
     },
     agent_flag: "anban:wechat-article",
@@ -418,7 +418,7 @@ describe("validateBootstrapResponse", () => {
   });
 
   test("matches the Server fingerprint canonicalization vector", () => {
-    expect(executionProfileFingerprint(validResponse().execution_profile)).toBe("ddeb3859ae9f15f7fd674caa0982326d05cce496d2426a8be892845643d31aa7");
+    expect(executionProfileFingerprint(validResponse().execution_profile)).toBe("57236dcfb0d9769f710d720bf3f227d70d04f106698596fc7d93f1efd8fc8b39");
   });
 
   test("preserves the current auth token bytes", () => {
@@ -621,11 +621,11 @@ describe("validateBootstrapResponse", () => {
 
   test("rejects unknown alias fields and provider mismatch", () => {
     const extra = validResponse();
-    (extra.execution_profile.model_usage_aliases["kimi-k3[1m]"] as Record<string, unknown>).endpoint = "https://example.invalid";
+    (extra.execution_profile.model_usage_aliases["kimi-k3.1-pro[1m]"] as Record<string, unknown>).endpoint = "https://example.invalid";
     expect(() => validateBootstrapResponse("execution-1", extra)).toThrow("model usage aliases");
 
     const mismatch = validResponse();
-    mismatch.execution_profile.model_usage_aliases["kimi-k3[1m]"].provider = "other";
+    mismatch.execution_profile.model_usage_aliases["kimi-k3.1-pro[1m]"].provider = "other";
     expect(() => validateBootstrapResponse("execution-1", mismatch)).toThrow("model usage aliases");
   });
 

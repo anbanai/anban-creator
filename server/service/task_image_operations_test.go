@@ -1309,7 +1309,7 @@ func TestTaskImageAnalyzeLogsProviderTimeoutDiagnostics(t *testing.T) {
 		RequestWritten: true, RequestWriteMS: 12,
 	}
 	svc := NewTaskImageOperationsService(f.tasks, nil, &fakeTaskImageUnderstandingClient{err: providerErr}, nil, TaskImageOperationsConfig{
-		UnderstandingProvider: "tokenplayer_openai", UnderstandingModel: "kimi-k3",
+		UnderstandingProvider: "tokenplayer_openai", UnderstandingModel: "kimi-k3.1-pro",
 		UnderstandingTimeout: 3 * time.Minute,
 	}, &logger)
 
