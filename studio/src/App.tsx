@@ -32,6 +32,7 @@ const TasksPage = lazyWithRecovery(() => import('@/pages/TasksPage'))
 const TaskDetailPage = lazyWithRecovery(() => import('@/pages/TaskDetailPage'))
 const BillingPage = lazyWithRecovery(() => import('@/pages/BillingPage'))
 const AdminBillingPage = lazyWithRecovery(() => import('@/pages/AdminBillingPage'))
+const AdminArchestraPage = lazyWithRecovery(() => import('@/pages/AdminArchestraPage'))
 const UsagePage = lazyWithRecovery(() => import('@/pages/UsagePage'))
 const SettingsPage = lazyWithRecovery(() => import('@/pages/SettingsPage'))
 const DesignerPage = lazyWithRecovery(() => import('@/pages/DesignerPage'))
@@ -203,6 +204,14 @@ function AppRoutes() {
             element={(
               <AdminRoute>
                 <LazyPage component={AdminBillingPage} />
+              </AdminRoute>
+            )}
+          />
+          <Route
+            path="admin/archestra"
+            element={(
+              <AdminRoute>
+                <LazyPage component={AdminArchestraPage} />
               </AdminRoute>
             )}
           />

@@ -29,7 +29,7 @@ describe('administrator routes', () => {
     },
   )
 
-  it.each(['timeline', 'designer', 'templates', 'admin/billing'])(
+  it.each(['timeline', 'designer', 'templates', 'admin/billing', 'admin/archestra'])(
     'protects /%s with AdminRoute',
     (path) => {
       expect(routeDefinition(path)).toContain('<AdminRoute>')

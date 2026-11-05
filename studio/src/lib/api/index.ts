@@ -35,6 +35,7 @@ import { contentAssetsApi } from './content-assets'
 import { assistantApi } from './assistant'
 import { articleAssetsApi } from './article-assets'
 import { userMediaApi } from './user-media'
+import { archestraApi } from './archestra'
 
 export const api = {
   designer: designerApi,
@@ -75,4 +76,5 @@ export const api = {
   contentAssets: contentAssetsApi,
   articleAssets: articleAssetsApi,
   userMedia: userMediaApi,
+  archestra: archestraApi,
 }

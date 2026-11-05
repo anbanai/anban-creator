@@ -25,6 +25,13 @@ rate_limit:
     requests: ${ANBAN_RATE_LIMIT_ADMIN_REQUESTS:-10}
     window: ${ANBAN_RATE_LIMIT_ADMIN_WINDOW:-1m}
 
+# Optional Admin-only Archestra A2A proxy. The token is injected by Kubernetes
+# and is never exposed to Studio or written to logs.
+archestra:
+  a2a_base_url: "${ANBAN_ARCHESTRA_A2A_BASE_URL:-http://archestra-platform.anbanai-prod.svc.cluster.local:9000}"
+  a2a_token: "${ANBAN_ARCHESTRA_A2A_TOKEN:-}"
+  timeout: ${ANBAN_ARCHESTRA_A2A_TIMEOUT:-30s}
+
 # Article resource rollout ceiling. Keep legacy until compatibility resources
 # pass canary review; MCP requests cannot exceed this setting.
 article_resources:

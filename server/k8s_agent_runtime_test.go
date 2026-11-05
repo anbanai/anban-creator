@@ -341,6 +341,7 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		"ANBAN_AGENT_NAS_STORAGE_CLASS":           "nas-sc-creator",
 		"ANBAN_AGENT_PROJECT_MEMORY_CLAIM":        "creator-project-memory",
 		"ANBAN_AGENT_TASK_WORKSPACE_SIZE":         "10Gi",
+		"ANBAN_ARCHESTRA_A2A_BASE_URL":            "${archestra_a2a_base_url}",
 		"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":       "https://api.moonshot.cn/anthropic",
 		"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":          "https://open.bigmodel.cn/api/anthropic",
 	} {
@@ -397,6 +398,7 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	}
 	assertDeploymentSecretEnv(t, deployment, "ANBAN_BILLING_ADMIN_API_KEY", "anban-billing-admin-api-key", "api-key")
 	assertDeploymentSecretEnv(t, deployment, "ANBAN_AGENT_EXECUTION_TOKEN_SECRET", "anban-agent-execution-token", "token-secret")
+	assertOptionalDeploymentSecretEnv(t, deployment, "ANBAN_ARCHESTRA_A2A_TOKEN", "${archestra_a2a_secret_name}", "${archestra_a2a_secret_key}")
 	assertOptionalDeploymentSecretEnv(t, deployment, "ANBAN_DEEPSEEK_SEARCH_API_KEY", "anban-agent-profile-providers", "deepseek-search-api-key")
 	assertOptionalDeploymentSecretEnv(t, deployment, "ANBAN_DOUBAO_SEARCH_API_KEY", "anban-agent-profile-providers", "doubao-search-api-key")
 	for envName, secretKey := range map[string]string{
@@ -495,6 +497,12 @@ func TestACKRenderIncludesTokenReviewRBAC(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "${") {
 		t.Fatal("combined ACK release contains unresolved template variables")
+	}
+	if !strings.Contains(string(raw), "name: ANBAN_ARCHESTRA_A2A_BASE_URL\n              value: \"http://archestra-platform.anbanai-prod.svc.cluster.local:9000\"") {
+		t.Fatal("combined ACK release must use the default Archestra A2A URL")
+	}
+	if !strings.Contains(string(raw), "name: \"archestra-a2a-token\"") || !strings.Contains(string(raw), "key: \"token\"") {
+		t.Fatal("combined ACK release must use the default optional Archestra token Secret")
 	}
 	for index, document := range docs {
 		var parsed map[string]any

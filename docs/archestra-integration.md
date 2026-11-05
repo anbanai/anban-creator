@@ -61,6 +61,26 @@ archestra:
     ARCHESTRA_API_BASE_URL: https://archestra.anbanai.com
 ```
 
+## Studio 管理员测试页
+
+Studio 的 `/admin/archestra` 页面只对管理员显示。浏览器只调用 Anban Server；Server
+在固定的 A2A 地址上代理 Agent 列表、对话、任务查询、审批和取消操作，不把平台 Token
+或 Archestra 地址返回给浏览器。
+
+Server 默认使用集群内的 `http://archestra-platform.anbanai-prod.svc.cluster.local:9000`
+和可选 Secret `archestra-a2a-token/token`。发布机可以在渲染 ACK 清单时覆盖
+`archestra_a2a_base_url`、`archestra_a2a_secret_name` 和 `archestra_a2a_secret_key`；
+Token 缺失时 Server 仍能启动，管理员页面显示服务未配置。
+
+创建平台 Token Secret 的示例：
+
+```bash
+kubectl -n anbanai-prod create secret generic archestra-a2a-token \
+  --from-literal=token='REPLACE_WITH_ARCHESTRA_PLATFORM_TOKEN'
+```
+
+该 Token 必须是 Archestra A2A 可用的平台 Token；LLM 虚拟 Key 不能用于 A2A。
+
 ## 发布与验证
 
 1. 发布 Studio 流水线（源码 `main`），等待

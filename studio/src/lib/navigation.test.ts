@@ -1,4 +1,4 @@
-import { Lightbulb, ShieldUser, Sparkles } from 'lucide-react'
+import { Lightbulb, MessageCircle, ShieldUser, Sparkles } from 'lucide-react'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -51,6 +51,7 @@ describe('navigation IA', () => {
     expect(adminNavItems.map((item) => item.label)).toEqual([
       '模板库',
       '充值管理',
+      'Archestra 测试',
     ])
     expect(adminNavItems.every((item) => item.adminOnly)).toBe(true)
   })
@@ -72,7 +73,9 @@ describe('navigation IA', () => {
       '/trends',
       '/templates',
       '/admin/billing',
+      '/admin/archestra',
     ])
+    expect(adminNavItems.find((item) => item.to === '/admin/archestra')?.icon).toBe(MessageCircle)
     expect(visibleNavItems(allNavItems, false)).toEqual(mvpNavItems)
     expect(visibleNavItems(allNavItems, true)).toEqual([
       ...workspaceNavItems,

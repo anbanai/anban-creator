@@ -13,6 +13,7 @@ import {
   Flame,
   ShieldUser,
   ImageIcon,
+  MessageCircle,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -47,6 +48,7 @@ export const workspaceNavItems: NavItem[] = [
 export const adminNavItems: NavItem[] = [
   { to: '/templates', label: '模板库', icon: LayoutGrid, adminOnly: true },
   { to: '/admin/billing', label: '充值管理', icon: Coins, adminOnly: true },
+  { to: '/admin/archestra', label: 'Archestra 测试', icon: MessageCircle, adminOnly: true },
 ]
 
 export const allNavItems: NavItem[] = [

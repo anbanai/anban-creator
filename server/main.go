@@ -1113,6 +1113,8 @@ func main() {
 	interactiveHandler := handler.NewInteractiveHandler(interactiveSvc)
 	assistantHandler := handler.NewAssistantHandler(interactiveSvc, taskSvc, repo)
 	assistantHandler.SetInteractionService(assistantInteractionSvc)
+	archestraClient := service.NewArchestraClient(cfg.Archestra, nil)
+	archestraAdminHandler := handler.NewArchestraAdminHandler(repo, archestraClient, log)
 
 	// 16. Build Services struct.
 	svcs := &router.Services{
@@ -1151,6 +1153,7 @@ func main() {
 		AgentPackHandler:                    agentPackHandler,
 		BillingHandler:                      fixedBilling.Handler,
 		BillingAdminHandler:                 fixedBilling.AdminHandler,
+		ArchestraAdminHandler:               archestraAdminHandler,
 		TimelineHandler:                     timelineHandler,
 		APIKeyHandler:                       apiKeyHandler,
 		FileHandler:                         fileHandler,

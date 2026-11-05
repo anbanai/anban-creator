@@ -62,6 +62,30 @@ type Config struct {
 	Trends             TrendsConfig                    `yaml:"trends"`
 	Search             SearchConfig                    `yaml:"search"`
 	Dsh                DshConfig                       `yaml:"dsh"`
+	Archestra          ArchestraConfig                 `yaml:"archestra"`
+}
+
+// ArchestraConfig configures the Server-owned A2A proxy. The token is never
+// serialized or returned to Studio.
+type ArchestraConfig struct {
+	A2ABaseURL string        `yaml:"a2a_base_url"`
+	A2AToken   string        `yaml:"a2a_token" json:"-"`
+	Timeout    time.Duration `yaml:"timeout"`
+}
+
+func (c ArchestraConfig) Validate() error {
+	raw := strings.TrimSpace(c.A2ABaseURL)
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("archestra.a2a_base_url must be an absolute HTTP(S) URL without credentials, query, or fragment")
+	}
+	if c.Timeout <= 0 {
+		return fmt.Errorf("archestra.timeout must be positive")
+	}
+	return nil
 }
 
 // RateLimitConfig configures the independent request limits for API tiers.
@@ -1624,6 +1648,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"trends":               true,
 		"search":               true,
 		"dsh":                  true,
+		"archestra":            true,
 		"onboarding":           true,
 	}
 	for key := range top {
@@ -1710,6 +1735,12 @@ func (c *Config) applyDefaults() {
 	applyRateLimitTierDefaults(&c.RateLimit.SendCode, 5, 10*time.Minute)
 	applyRateLimitTierDefaults(&c.RateLimit.Agent, 300, time.Minute)
 	applyRateLimitTierDefaults(&c.RateLimit.Admin, 10, time.Minute)
+	if strings.TrimSpace(c.Archestra.A2ABaseURL) == "" {
+		c.Archestra.A2ABaseURL = "http://archestra-platform.anbanai-prod.svc.cluster.local:9000"
+	}
+	if c.Archestra.Timeout <= 0 {
+		c.Archestra.Timeout = 30 * time.Second
+	}
 	if strings.TrimSpace(c.Trends.Provider) == "" {
 		c.Trends.Provider = "default"
 	}
@@ -2452,6 +2483,9 @@ func (c *Config) Validate() error {
 		}
 	}
 	if err := c.Dsh.Validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if err := c.Archestra.Validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
 	if c.Dsh.Enabled && strings.EqualFold(strings.TrimSpace(c.Dsh.Executor), "kubernetes") && strings.TrimSpace(c.Claude.Kubernetes.ServiceAccount) == "" {
