@@ -32,6 +32,14 @@ func newAssistantTestRepo(t *testing.T) repository.Repository {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Shared-cache in-memory SQLite returns SQLITE_LOCKED instead of honoring
+	// busy timeouts when concurrent goroutines use separate connections.
+	// Serialize the pool so assistant workspace tests stay deterministic.
+	sqlDB.SetMaxOpenConns(1)
 	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Task{}, &model.TaskFile{}, &model.Asset{}, &model.UploadSession{}, &model.AssistantCheckpoint{}, &model.AssistantSession{}, &model.AssistantSessionLease{}, &model.AssistantWorkspace{}, &model.AnalyticsState{}, &model.AnalyticsContent{}, &model.AnalyticsObservation{}, &model.AnalyticsRawPayload{}, &model.AnalyticsBucket{}, &model.AnalyticsIdempotency{}, &model.FeedbackJob{}, &model.FeedbackLease{}, &model.FeedbackInsight{}); err != nil {
 		t.Fatal(err)
 	}
@@ -1095,6 +1103,14 @@ func TestAssistantCommitScopeChecksAnalyticsRevisionOnlyForReview(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Shared-cache in-memory SQLite returns SQLITE_LOCKED instead of honoring
+	// busy timeouts when concurrent goroutines use separate connections.
+	// Serialize the pool so assistant workspace tests stay deterministic.
+	sqlDB.SetMaxOpenConns(1)
 	if err := db.AutoMigrate(&model.Project{}, &model.Task{}, &model.AnalyticsState{}); err != nil {
 		t.Fatal(err)
 	}
@@ -1904,5 +1920,29 @@ func TestAssistantAdmittedTaskCannotConsumeChangedPlan(t *testing.T) {
 	result, err := svc.CommitAssistant(context.Background(), "user-1", sid, AssistantCommitRequest{CheckpointID: changed.ID, CheckpointDigest: changed.PayloadDigest, IdempotencyKey: "approved-B"}, &TaskService{repo: repo}, repo)
 	if err == nil {
 		t.Fatalf("silently committed plan B using task %s whose frozen prompt is A: %#v", task.ID, result)
+	}
+}
+
+func TestAssistantBootstrapReportsInitializationPending(t *testing.T) {
+	svc := newAssistantWorkspaceTestService(newAssistantTestRepo(t))
+	svc.SetStartupReady(false)
+	bootstrap, err := svc.AssistantBootstrap(context.Background(), "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range bootstrap.Modes {
+		if mode.Available || !strings.Contains(mode.DisabledReason, "初始化") {
+			t.Fatalf("startup mode = %#v", mode)
+		}
+	}
+	svc.SetStartupReady(true)
+	bootstrap, err = svc.AssistantBootstrap(context.Background(), "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range bootstrap.Modes {
+		if strings.Contains(mode.DisabledReason, "初始化") {
+			t.Fatalf("startup failure hint retained after recovery: %#v", mode)
+		}
 	}
 }

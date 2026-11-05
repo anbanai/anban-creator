@@ -24,6 +24,7 @@ import (
 
 const (
 	DirectUploadPurposeProjectReference         = "project_reference"
+	DirectUploadPurposeDesignerReference        = "designer_reference"
 	DirectUploadPurposeProjectPortraitReference = "project_portrait_reference"
 	DirectUploadPurposeTemplateThumbnail        = "template_thumbnail"
 	DirectUploadPurposeTaskReference            = "task_reference"
@@ -48,6 +49,8 @@ const (
 	taskArtifactCleanupGrace      = time.Hour
 	taskArtifactCleanupRetryDelay = 30 * time.Minute
 )
+
+const mediaLibraryStoragePrefix = config.DefaultMediaLibraryPrefix + "users"
 
 var (
 	ErrUploadSessionNotFound      = model.ErrUploadSessionNotFound
@@ -160,6 +163,7 @@ type directUploadPurposePolicy struct {
 
 var directUploadPolicies = map[string]directUploadPurposePolicy{
 	DirectUploadPurposeProjectReference:         {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
+	DirectUploadPurposeDesignerReference:        {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeProjectPortraitReference: {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeTemplateThumbnail:        {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeTaskReference:            {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
@@ -196,6 +200,14 @@ func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo re
 	policy, ok := directUploadPolicies[purpose]
 	if !ok {
 		return nil, fmt.Errorf("unsupported upload purpose %q", purpose)
+	}
+	var mediaPrefix string
+	if purpose == DirectUploadPurposeMediaLibrary {
+		var err error
+		mediaPrefix, err = config.NormalizeMediaLibraryPrefix(cfg.Storage.MediaLibraryPrefix)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if req.Size <= 0 {
 		return nil, fmt.Errorf("file size is required")
@@ -286,6 +298,7 @@ func PrepareDirectUpload(ctx context.Context, store directUploadStorage, repo re
 		Status:      model.UploadSessionPending,
 		ExpiresAt:   expiresAt,
 	}
+	session.MediaLibraryPrefix = mediaPrefix
 	if err := repo.Create(ctx, session); err != nil {
 		return nil, fmt.Errorf("record upload session: %w", err)
 	}
@@ -607,6 +620,13 @@ func finalizedUploadSessionKey(session *model.UploadSession) (string, error) {
 	if userID == "" || sessionID == "" || fileName == "" || fileName == "." || fileName == "/" || path.Base(userID) != userID || path.Base(sessionID) != sessionID || fileName != session.FileName {
 		return "", errors.New("upload session identity is invalid")
 	}
+	if session.Purpose == DirectUploadPurposeMediaLibrary {
+		prefix, err := config.NormalizeMediaLibraryPrefix(session.MediaLibraryPrefix)
+		if err != nil {
+			return "", err
+		}
+		return path.Join(prefix, "users", userID, sessionID, fileName), nil
+	}
 	return path.Join("assets/users", userID, sessionID, fileName), nil
 }
 
@@ -766,7 +786,7 @@ func uploadSessionKeyFromURL(raw string) (string, bool) {
 		return "", false
 	}
 	key = strings.TrimPrefix(key, "/")
-	if path.Clean(key) != key || (!strings.HasPrefix(key, "uploads/pending/") && !strings.HasPrefix(key, "assets/users/")) {
+	if path.Clean(key) != key || uploadSessionIDFromKey(key) == "" {
 		return "", false
 	}
 	return key, true
@@ -779,6 +799,14 @@ func uploadSessionIDFromKey(key string) string {
 	}
 	if parts[0] == "uploads" && parts[1] == "pending" || parts[0] == "assets" && parts[1] == "users" {
 		return parts[3]
+	}
+	// Custom media-library prefixes may have any depth. This only extracts a
+	// candidate session ID; callers must verify owner, purpose and exact asset key.
+	if len(parts) >= 5 && parts[len(parts)-4] == "users" {
+		prefix := strings.Join(parts[:len(parts)-4], "/") + "/"
+		if normalized, err := config.NormalizeMediaLibraryPrefix(prefix); err == nil && normalized == prefix {
+			return parts[len(parts)-2]
+		}
 	}
 	return ""
 }

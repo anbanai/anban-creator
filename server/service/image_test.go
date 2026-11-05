@@ -410,3 +410,42 @@ func TestImageServiceRejectsProviderImageURLOnPrivateHTTPHost(t *testing.T) {
 		t.Fatalf("private provider URL = path %q err %v; want URL policy rejection", path, err)
 	}
 }
+
+func TestRecordImageProviderCostTracksReportedUsage(t *testing.T) {
+	svc := &ImageService{}
+	tracker := NewToolUsage()
+	ctx := WithToolUsage(context.Background(), tracker)
+
+	svc.recordImageProviderCost(ctx, "task-1", &ImageResult{
+		Provider: "openai",
+		Model:    "gpt-image-1",
+		Usage: &appimage.ImageGenerationUsage{
+			TextInputTokens: 4, ImageInputTokens: 6, TextCachedInputTokens: 1,
+			ImageOutputTokens: 8, TotalTokens: 18,
+		},
+	})
+
+	snapshot := tracker.Snapshot()
+	if snapshot.ProviderCalls != 1 || !snapshot.UsageReported {
+		t.Fatalf("usage snapshot = %#v, want one reported provider call", snapshot)
+	}
+	if snapshot.InputTokens != 9 || snapshot.CachedInputTokens != 1 || snapshot.OutputTokens != 8 || snapshot.TotalTokens != 18 {
+		t.Fatalf("token snapshot = %#v, want input 9, cached 1, output 8, total 18", snapshot)
+	}
+}
+
+func TestRecordImageProviderCostTracksCallWithoutUsage(t *testing.T) {
+	svc := &ImageService{}
+	tracker := NewToolUsage()
+	ctx := WithToolUsage(context.Background(), tracker)
+
+	svc.recordImageProviderCost(ctx, "task-1", &ImageResult{Provider: "gemini", Model: "gemini-image"})
+
+	snapshot := tracker.Snapshot()
+	if snapshot.ProviderCalls != 1 || snapshot.UsageReported {
+		t.Fatalf("usage snapshot = %#v, want one call without reported usage", snapshot)
+	}
+	if snapshot.InputTokens != 0 || snapshot.OutputTokens != 0 || snapshot.TotalTokens != 0 {
+		t.Fatalf("token snapshot = %#v, want no token data", snapshot)
+	}
+}

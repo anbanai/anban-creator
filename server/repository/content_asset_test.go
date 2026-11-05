@@ -160,6 +160,28 @@ func TestContentAssetAndRunListsApplyOwnerScopedFiltersAndPagination(t *testing.
 	}
 }
 
+func TestContentAssetProjectFilterIncludesScriptOnlyAssociations(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	asset := model.NewContentAsset("owner", "脚本关联选题")
+	if err := repo.ContentAssets().Create(ctx, asset); err != nil {
+		t.Fatal(err)
+	}
+	job := &model.TopicScriptJob{
+		ID: "script-job-0000000000000000000000000000001", SuggestionID: "suggestion", DigestID: "digest",
+		UserID: "owner", ProjectID: "script-persona", TargetPlatform: "douyin", DurationSeconds: 60,
+		AspectRatio: "9:16", Fingerprint: "fingerprint", Status: model.TopicScriptJobSucceeded, ContentAssetID: asset.ID,
+	}
+	if err := db.Create(job).Error; err != nil {
+		t.Fatal(err)
+	}
+	assets, total, err := repo.ContentAssets().ListWithFilters(ctx, ContentAssetListFilter{UserID: "owner", ProjectID: "script-persona", Offset: 0, Limit: 25})
+	if err != nil || total != 1 || len(assets) != 1 || assets[0].ID != asset.ID {
+		t.Fatalf("script-associated assets=%#v total=%d err=%v", assets, total, err)
+	}
+}
+
 func TestStageTransitionRejectsStoppedRunAndUpdatesCannotRewriteFrozenInput(t *testing.T) {
 	repo := New(setupTestDB(t))
 	ctx := context.Background()

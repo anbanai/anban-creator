@@ -74,20 +74,16 @@ func applyAgentPackIdentity(execution *model.TaskExecution, agentID string) erro
 	}
 	requestedKind := strings.TrimSpace(agentID)
 	pack, ok := agentpack.Default().ForAgent(agentID)
-	if !ok || pack.Kind != agentpack.KindManaged {
+	if !ok || !pack.SupportsServerTask() {
 		// Some internal callers provide a workflow kind while constructing a
 		// frozen managed execution. Resolve that kind to its owning Pack without
 		// accepting the retired public article identity.
-		if candidate, found := agentpack.Default().ForTaskType(agentID); found && candidate.Kind == agentpack.KindManaged {
+		if candidate, found := agentpack.Default().ForTaskType(agentID); found && candidate.SupportsServerTask() {
 			pack, ok = candidate, true
 			agentID = pack.Agent.Name
-		} else if agentID == model.PlatformMontage {
-			pack, ok = agentpack.Default().ForAgent(model.AgentIDMontage)
-			agentID = model.AgentIDMontage
 		}
 	}
-	legacyPlugin := ok && pack.Kind == agentpack.KindPlugin && (agentID == model.AgentIDHypit || agentID == model.AgentIDMontage)
-	if !ok || pack.Kind != agentpack.KindManaged && !legacyPlugin {
+	if !ok || !pack.SupportsServerTask() {
 		return fmt.Errorf("managed Agent %q has no Agent Pack", agentID)
 	}
 	execution.AgentPackID = pack.ID
@@ -233,7 +229,7 @@ func hasCompleteAgentPackIdentity(execution *model.TaskExecution) bool {
 
 func isContentTaskKind(taskKind string) bool {
 	switch strings.TrimSpace(taskKind) {
-	case model.TaskKindContentResearch, model.TaskKindContentValidation, model.TaskKindContentScript, model.TaskKindViralAnalysis, model.TaskKindProfileAnalysis, model.TaskKindFeedbackAnalysis:
+	case model.TaskKindContentResearch, model.TaskKindContentValidation, model.TaskKindContentScript, model.TaskKindViralAnalysis, model.TaskKindProfileAnalysis, model.TaskKindFeedbackAnalysis, model.TaskKindTopicDigest, model.TaskKindTopicScript:
 		return false
 	default:
 		return strings.TrimSpace(taskKind) != ""

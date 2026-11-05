@@ -19,6 +19,9 @@ func generatingSkillContractPaths(t *testing.T, root string) []string {
 		if entry.IsDir() || entry.Name() != "SKILL.md" {
 			return nil
 		}
+		if isUpstreamSkillFile(path) {
+			return nil
+		}
 		body, err := os.ReadFile(path)
 		if err != nil {
 			return err

@@ -19,6 +19,7 @@ import (
 // FileHandler handles authenticated file read endpoints.
 type FileHandler struct {
 	store          storage.Provider
+	designer       *service.DesignerService
 	uploadSessions repository.UploadSessionRepository
 	logger         *zerolog.Logger
 }
@@ -32,6 +33,11 @@ func NewFileHandler(store storage.Provider, logger *zerolog.Logger) *FileHandler
 // staging objects after validating the matching upload session.
 func (h *FileHandler) SetUploadSessionRepository(repo repository.UploadSessionRepository) {
 	h.uploadSessions = repo
+}
+
+// SetDesignerService enables reads of the caller's persisted Designer results.
+func (h *FileHandler) SetDesignerService(designer *service.DesignerService) {
+	h.designer = designer
 }
 
 // contentTypes maps common file extensions to MIME types.
@@ -82,7 +88,18 @@ func (h *FileHandler) ServeFile(c fiber.Ctx) error {
 			return err
 		}
 	} else if !isUserOwnedStorageKey(userID, cleanKey) {
-		return Forbidden(c, "you do not have access to this file")
+		allowed := false
+		if h.designer != nil {
+			var err error
+			allowed, err = h.designer.CanReadGeneratedFile(c.Context(), userID, cleanKey)
+			if err != nil {
+				h.logger.Error().Err(err).Msg("failed to validate Designer file access")
+				return Error(c, fiber.StatusInternalServerError, "failed to validate file access")
+			}
+		}
+		if !allowed {
+			return Forbidden(c, "you do not have access to this file")
+		}
 	}
 
 	var body io.ReadCloser

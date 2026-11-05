@@ -3,6 +3,13 @@ import { describe, expect, it, vi } from 'vitest'
 import { render } from '@/test/test-utils'
 import LoginPage from './LoginPage'
 
+const setTheme = vi.fn()
+
+vi.mock('next-themes', async () => ({
+  ...(await vi.importActual<typeof import('next-themes')>('next-themes')),
+  useTheme: () => ({ resolvedTheme: 'dark', setTheme }),
+}))
+
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
   return { ...actual, useNavigate: () => vi.fn() }
@@ -15,11 +22,18 @@ vi.mock('@/contexts/AuthContext', () => ({
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 describe('LoginPage field guidance', () => {
+  it('follows the system theme without showing a theme toggle', () => {
+    render(<LoginPage />)
+
+    expect(setTheme).toHaveBeenCalledWith('system')
+    expect(screen.queryByRole('button', { name: /切换到.*色模式/ })).not.toBeInTheDocument()
+  })
+
   it('explains the optional invite field', () => {
     window.history.pushState({}, '', '/login?invite=abc123')
     render(<LoginPage />)
 
-    expect(screen.getAllByText('✦ Anban Studio')).toHaveLength(2)
+    expect(screen.getAllByRole('img', { name: 'Anban AI' })).toHaveLength(2)
 
     expect(screen.getByText('来自邀请链接，登录时无需输入。')).toBeInTheDocument()
 

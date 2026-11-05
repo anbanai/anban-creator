@@ -18,6 +18,7 @@ import { lazyWithRecovery } from '@/lib/lazy-with-recovery'
 
 // Lazy-loaded pages
 const LoginPage = lazyWithRecovery(() => import('@/pages/LoginPage'))
+const LandingPage = lazyWithRecovery(() => import('@/pages/LandingPage'))
 const RegisterPage = lazyWithRecovery(() => import('@/pages/RegisterPage'))
 const DashboardPage = lazyWithRecovery(() => import('@/pages/DashboardPage'))
 const AssistantWorkspace = lazyWithRecovery(() => import('@/pages/AssistantWorkspace'))
@@ -33,11 +34,11 @@ const BillingPage = lazyWithRecovery(() => import('@/pages/BillingPage'))
 const AdminBillingPage = lazyWithRecovery(() => import('@/pages/AdminBillingPage'))
 const UsagePage = lazyWithRecovery(() => import('@/pages/UsagePage'))
 const SettingsPage = lazyWithRecovery(() => import('@/pages/SettingsPage'))
+const DesignerPage = lazyWithRecovery(() => import('@/pages/DesignerPage'))
 const TemplatesPage = lazyWithRecovery(() => import('@/pages/TemplatesPage'))
 const PluginsPage = lazyWithRecovery(() => import('@/pages/PluginsPage'))
-const ContentAssetsPage = lazyWithRecovery(() => import('@/pages/ContentAssetsPage'))
+const TopicsPage = lazyWithRecovery(() => import('@/pages/TopicsPage'))
 const UserMediaLibraryPage = lazyWithRecovery(() => import('@/pages/UserMediaLibraryPage'))
-const ContentAutopilotSettingsPage = lazyWithRecovery(() => import('@/pages/ContentAutopilotSettingsPage'))
 const ContentAnalyticsPage = lazyWithRecovery(() => import('@/pages/ContentAnalyticsPage'))
 const TrendsPage = lazyWithRecovery(() => import('@/pages/TrendsPage'))
 const PublicSharePage = lazyWithRecovery(() => import('@/pages/PublicSharePage'))
@@ -102,6 +103,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const location = useLocation()
 
   if (!isAuthenticated) {
+    if (location.pathname === '/') {
+      return <LazyPage component={LandingPage} />
+    }
     return <Navigate to="/login" state={{ from: location }} replace />
   }
 
@@ -185,6 +189,7 @@ function AppRoutes() {
           <Route path="tasks" element={<LazyPage component={TasksPage} />} />
           <Route path="tasks/new" element={<LazyPage component={TaskCreatePage} />} />
           <Route path="tasks/:id" element={<LazyPage component={TaskDetailPage} />} />
+          <Route path="designer" element={<AdminRoute><LazyPage component={DesignerPage} /></AdminRoute>} />
           <Route
             path="templates"
             element={(
@@ -206,9 +211,8 @@ function AppRoutes() {
           <Route path="usage" element={<LazyPage component={UsagePage} />} />
           <Route path="settings" element={<LazyPage component={SettingsPage} />} />
           <Route path="content-analytics" element={<LazyPage component={ContentAnalyticsPage} />} />
-          <Route path="content-assets" element={<LazyPage component={ContentAssetsPage} />} />
+          <Route path="topics" element={<LazyPage component={TopicsPage} />} />
           <Route path="media-assets" element={<LazyPage component={UserMediaLibraryPage} />} />
-          <Route path="content-assets/settings" element={<LazyPage component={ContentAutopilotSettingsPage} />} />
           <Route path="trends" element={<LazyPage component={TrendsPage} />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />

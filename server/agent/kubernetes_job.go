@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -23,9 +24,6 @@ const (
 	kubernetesMemoryMountName                  = "memory"
 	kubernetesTokenVolumeName                  = "workload-token"
 	kubernetesTmpVolumeName                    = "tmp"
-	kubernetesServerCAVolumeName               = "server-ca"
-	kubernetesServerCAMountPath                = "/var/run/secrets/anban-server-ca"
-	kubernetesServerCAFile                     = kubernetesServerCAMountPath + "/ca.crt"
 	kubernetesRuntimeHomePath                  = "/workspace/" + RuntimeHomeDirName
 	kubernetesTokenMountPath                   = "/var/run/secrets/anban"
 	kubernetesTokenFile                        = kubernetesTokenMountPath + "/token"
@@ -138,8 +136,6 @@ func buildKubernetesJobWithResources(cfg kubernetesJobConfig, execution *model.T
 						TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
 						Env: []corev1.EnvVar{
 							{Name: "HOME", Value: kubernetesRuntimeHomePath},
-							{Name: "SSL_CERT_FILE", Value: kubernetesServerCAFile},
-							{Name: "NODE_EXTRA_CA_CERTS", Value: kubernetesServerCAFile},
 						},
 						Command: []string{"anban"},
 						Args: []string{
@@ -166,7 +162,6 @@ func buildKubernetesJobWithResources(cfg kubernetesJobConfig, execution *model.T
 							{Name: kubernetesMemoryMountName, MountPath: containerAgentMemoryMountPath(execution.RuntimeAdapter), SubPath: "projects/" + projectID(task)},
 							{Name: kubernetesTmpVolumeName, MountPath: "/tmp"},
 							{Name: kubernetesTokenVolumeName, MountPath: kubernetesTokenMountPath, ReadOnly: true},
-							{Name: kubernetesServerCAVolumeName, MountPath: kubernetesServerCAMountPath, ReadOnly: true},
 						},
 					}},
 					Volumes: []corev1.Volume{
@@ -181,15 +176,14 @@ func buildKubernetesJobWithResources(cfg kubernetesJobConfig, execution *model.T
 								Path:              "token",
 							}}},
 						}}},
-						{Name: kubernetesServerCAVolumeName, VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
-							SecretName:  cfg.ServerCASecret,
-							DefaultMode: int32Ptr(corev1.SecretVolumeSourceDefaultMode),
-							Items:       []corev1.KeyToPath{{Key: "ca.crt", Path: "ca.crt"}},
-						}}},
 					},
 				},
 			},
 		},
+	}
+	container := &job.Spec.Template.Spec.Containers[0]
+	if parsed, err := url.Parse(strings.TrimSpace(cfg.ServerURL)); err == nil && parsed.Scheme == "http" {
+		container.Args = append(container.Args, "--allow-http-server")
 	}
 	if strings.TrimSpace(cfg.ImagePullSecret) != "" {
 		job.Spec.Template.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: cfg.ImagePullSecret}}

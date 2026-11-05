@@ -100,12 +100,14 @@ export function DshQuestionComposer({
   submitted = false,
   answers = [],
   disabled = false,
+  closed,
 }: {
   questions: DshQuestion[]
   onSubmit: (answer: DshQuestionAnswer) => Promise<void>
   submitted?: boolean
   answers?: DshQuestionAnswerItem[]
   disabled?: boolean
+  closed?: 'failed' | 'expired'
 }) {
   const [drafts, setDrafts] = useState<DraftAnswer[]>(() => questions.map((question) => ({
     selected: answers.find((answer) => answer.id === question.id)?.selected
@@ -136,7 +138,7 @@ export function DshQuestionComposer({
   if (questions.length === 0) return null
 
   const isSubmitted = submitted || submittedState
-  const interactionDisabled = disabled || busy
+  const interactionDisabled = disabled || busy || Boolean(closed)
 
   const question = questions[index]
   const draft = drafts[index]
@@ -252,6 +254,7 @@ export function DshQuestionComposer({
           {question.header && <p className="mb-1 text-xs text-muted-foreground">{question.header}</p>}
           <h2 className="text-sm font-semibold leading-6">{question.question}</h2>
           {isSubmitted && <p className="mt-1 text-xs text-emerald-600">已回答</p>}
+          {closed && <p role="status" className="mt-1 text-xs text-muted-foreground">{closed === 'failed' ? '问题未能送达，请直接发送消息继续。' : '问题已过期，请按页面提示恢复对话。'}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <span className="mr-1 text-xs tabular-nums text-muted-foreground">{index + 1} / {questions.length}</span>
@@ -259,7 +262,7 @@ export function DshQuestionComposer({
             type="button" variant="ghost" size="icon-sm"
             aria-label={minimized ? '展开问题卡片' : '收起问题卡片'}
             title={minimized ? '展开问题卡片' : '收起问题卡片'}
-            aria-expanded={!minimized} disabled={interactionDisabled}
+            aria-expanded={!minimized} disabled={busy}
             onClick={() => setMinimized((value) => !value)}
           >
             {minimized ? <ChevronUp /> : <ChevronDown />}
@@ -285,7 +288,7 @@ export function DshQuestionComposer({
 
       {!minimized && !isSubmitted && (
         <>
-          {disabled && <p className="border-t border-border px-4 py-2 text-xs text-muted-foreground sm:px-5">会话已结束，重新开始后才能继续回答。</p>}
+          {disabled && <p className="border-t border-border px-4 py-2 text-xs text-muted-foreground sm:px-5">当前暂不能提交，已填写的答案会保留。</p>}
           <div className="max-h-[min(52dvh,420px)] space-y-3 overflow-y-auto px-3 pb-3 sm:px-4">
             {planReview && (
               <div className="rounded-md border border-primary/20 bg-primary/5 p-3">

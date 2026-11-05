@@ -72,20 +72,20 @@ describe('Sidebar', () => {
   it('renders only the approved MVP navigation for regular users', () => {
     renderSidebar()
 
-    expect(screen.getByText('Anban Studio')).toBeInTheDocument()
-    expect(screen.getByText('内容智能创作系统')).toBeInTheDocument()
+    expect(screen.getByText('Anban AI')).toBeInTheDocument()
+    expect(screen.getByText('内容智能运营系统')).toBeInTheDocument()
 
     const navigation = within(screen.getByRole('navigation', { name: '主导航' }))
     expect(navigation.getAllByRole('link').map((link) => link.textContent)).toEqual([
       '首页',
       '人设',
+      '选题',
       '作品',
       '排期',
       '钱包',
       '插件',
       '设置',
       '内容分析',
-      '选题资产',
       '素材库',
       '热点雷达',
     ])
@@ -107,7 +107,10 @@ describe('Sidebar', () => {
     renderSidebar()
     expect(screen.getByRole('link', { name: '模板库' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '时间线' })).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: '设计师' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '设计师' })).toHaveAttribute('href', '/designer')
+    const designer = screen.getByRole('link', { name: '设计师' })
+    expect(screen.getByText('工作空间').compareDocumentPosition(designer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(designer.compareDocumentPosition(screen.getByText('管理与接入')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByRole('link', { name: '插件' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument()
     expect(screen.queryByText('平台与设置')).not.toBeInTheDocument()

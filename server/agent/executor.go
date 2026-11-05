@@ -66,6 +66,15 @@ func BuildUserPrompt(p UserPromptParams) string {
 		topic := p.Topic
 		if model.IsMontagePlatform(p.TaskType) {
 			topic = strings.ReplaceAll(strings.ReplaceAll(topic, "\r\n", "\n"), "\r", "\n")
+			lines := strings.Split(topic, "\n")
+			kept := lines[:0]
+			for _, line := range lines {
+				if strings.HasPrefix(strings.TrimSpace(line), "Video aspect ratio:") {
+					continue
+				}
+				kept = append(kept, line)
+			}
+			topic = strings.Join(kept, "\n")
 			topic = strings.ReplaceAll(topic, "\n", "\n> ")
 		}
 		base = fmt.Sprintf("Run the full %s creation workflow; create content about: %s", p.TaskType, topic)
@@ -78,7 +87,7 @@ func BuildUserPrompt(p UserPromptParams) string {
 		if p.HasReferenceImage {
 			materialReference = "Video material reference: " + TaskReferenceImagePath
 		}
-		base += "\n\nVideo aspect ratio: " + p.ImageRatio + "\n" + materialReference
+		base += "\n\n" + materialReference
 	}
 	if p.TaskID != "" || p.ProjectID != "" {
 		parts := make([]string, 0, 2)
@@ -183,10 +192,9 @@ type ExecutionOptions struct {
 	OnProgress     func(taskID string, message string) // callback for SSE
 	HeartbeatFunc  func(taskID string)                 // periodic heartbeat for stuck-task detection
 	LogWriter      *TaskLogWriter                      // optional per-task log file writer; nil = no log file
-	// Montage runtime configuration is only used for montage tasks. Env
-	// may contain secrets and must only be injected into the agent process env,
-	// never written to workspace files, MCP profile responses, or logs.
-	MontageEnv              map[string]string
+	// Montage runtime configuration. The Agent environment is resolved by the
+	// Server's bootstrap with the shared runtime environment contract; these
+	// fields only carry non-secret workspace manifests.
 	MontageToolPolicy       map[string]srvconfig.MontageToolCapabilityPolicy
 	MontagePipelineDefaults map[string]map[string]any
 }
@@ -288,12 +296,41 @@ func writeMontageInputJSON(workDir string, task *model.Task) error {
 		return nil
 	}
 	input := task.MontageInput.Data()
+	if err := validateFrozenMontageInput(input); err != nil {
+		return fmt.Errorf("invalid frozen montage input: %w", err)
+	}
 	data, err := json.MarshalIndent(input, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal montage input: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(workDir, "montage-input.json"), data, 0o644); err != nil {
 		return fmt.Errorf("write montage-input.json: %w", err)
+	}
+	return nil
+}
+
+func validateFrozenMontageInput(input model.MontageInput) error {
+	if !model.IsPinnedMontagePipeline(strings.TrimSpace(input.PipelineKey)) || strings.TrimSpace(input.PipelineKey) == "framework-smoke" {
+		return fmt.Errorf("pipeline_key is missing or not in the pinned catalog")
+	}
+	style := strings.TrimSpace(input.Preferences.PlaybookKey)
+	if !model.IsPinnedMontagePlaybook(style) {
+		return fmt.Errorf("playbook_key is not in the pinned catalog")
+	}
+	profile := input.OutputProfile
+	if profile == nil {
+		return fmt.Errorf("output_profile is required")
+	}
+	var known model.MontageOutputProfile
+	ok := false
+	for _, item := range model.PinnedMontageOutputProfiles() {
+		if item.Key == profile.Key {
+			known, ok = item, true
+			break
+		}
+	}
+	if !ok || input.OutputProfileKey != profile.Key || profile.Width != known.Width || profile.Height != known.Height || profile.AspectRatio != known.AspectRatio {
+		return fmt.Errorf("output_profile does not match a pinned profile")
 	}
 	return nil
 }
@@ -340,20 +377,6 @@ func writeJSONFile(path string, value any) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
-}
-
-func montageEnvForTask(opts *ExecutionOptions) map[string]string {
-	if opts == nil || opts.Task == nil || !model.IsMontagePlatform(opts.Task.Type) {
-		return nil
-	}
-	env := make(map[string]string, len(opts.MontageEnv))
-	for key, value := range opts.MontageEnv {
-		if strings.TrimSpace(value) == "" {
-			continue
-		}
-		env[key] = value
-	}
-	return env
 }
 
 func CompactToolResultContent(content any) string {

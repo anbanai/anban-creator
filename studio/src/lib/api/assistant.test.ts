@@ -9,6 +9,53 @@ vi.mock('@/lib/http-client', () => ({
 
 afterEach(() => vi.clearAllMocks())
 
+it('allows snapshot recovery to wait for runtime initialization', async () => {
+  vi.mocked(http.get).mockResolvedValue({ data: { data: { generation: 2 } } })
+  await assistantApi.getInteractionSnapshot('recovering-interaction')
+  expect(http.get).toHaveBeenCalledWith('/assistant/interactions/recovering-interaction', { timeout: 15 * 60 * 1000 })
+})
+
+it.each([false, true])('does not send an old question to a replacement runtime (explicit retry: %s)', async (forceNewAttempt) => {
+  const snapshot = { interaction_id: 'stale-question', generation: 3, lifecycle: 'active', available_actions: ['send_message'] }
+  vi.mocked(http.get).mockResolvedValue({ data: { data: snapshot } })
+  vi.mocked(http.post).mockResolvedValue({ data: { data: { accepted: true } } })
+
+  await expect(assistantApi.workspaceAnswer('stale-question', 'creation', 'old-call', [{ id: 'topic', selected: ['AI'] }], 2, forceNewAttempt)).rejects.toMatchObject({
+    response: { status: 409, data: { error_code: 'assistant_interaction_generation_changed', data: snapshot } },
+  })
+  expect(http.post).not.toHaveBeenCalled()
+})
+
+it('confirms the displayed draft without looking up or substituting a newer revision', async () => {
+  vi.mocked(http.get).mockResolvedValue({ data: { data: { drafts: [{ draft_id: 'newer', revision: 9, ready: true }] } } })
+  vi.mocked(http.post).mockResolvedValue({ data: { data: { status: 'created', task_id: 'task-1' } } })
+  await assistantApi.workspaceCommit('viewed-interaction', 'creation', { draft_id: 'viewed', revision: 3, idempotency_key: 'viewed-key', options: { plan: { image_ratio: '1:1' } } })
+  expect(http.get).not.toHaveBeenCalled()
+  expect(http.post).toHaveBeenCalledWith('/assistant/interactions/viewed-interaction/commit', { draft_id: 'viewed', revision: 3, idempotency_key: 'viewed-key', options: { plan: { image_ratio: '1:1' } } }, { timeout: 15 * 60 * 1000 })
+})
+
+it('withdraws the explicit displayed draft using the durable continue endpoint', async () => {
+  const snapshot = { interaction_id: 'continue/i', lifecycle: 'active', drafts: [] }
+  vi.mocked(http.post).mockResolvedValue({ data: { data: snapshot } })
+  expect(await assistantApi.continueInteraction('continue/i', { draft_id: 'viewed', revision: 3 })).toEqual(snapshot)
+  expect(http.post).toHaveBeenCalledWith('/assistant/interactions/continue%2Fi/continue', { draft_id: 'viewed', revision: 3 }, { timeout: 15 * 60 * 1000 })
+})
+
+it('reports missing drafts when checkpointing or committing an empty snapshot', async () => {
+  vi.mocked(http.get).mockResolvedValue({ data: { data: {
+    interaction_id: 'empty-interaction', mode_id: 'profile', lifecycle: 'active', generation: 1,
+    runtime_status: 'running', expires_at: '', last_activity_at: '', available_actions: ['send_message'],
+  } } })
+
+  await expect(assistantApi.workspaceCheckpoint('empty-interaction', 'profile', {
+    schema_version: '1.0', payload: {}, summary: '', status: 'draft',
+  })).rejects.toThrow('当前计划尚未保存，请重试暂存')
+  await expect(assistantApi.workspaceCommit('empty-interaction', 'profile', {
+    checkpoint_id: 'missing', checkpoint_digest: '', idempotency_key: 'commit-empty',
+  })).rejects.toThrow('当前计划尚未保存，请恢复计划')
+  expect(http.post).not.toHaveBeenCalled()
+})
+
 it('creates Assistant sessions with mode and selected context only', async () => {
   vi.mocked(http.post).mockResolvedValue({ data: { data: { id: 'session-1' } } })
 
@@ -129,9 +176,9 @@ it('reuses an answer attempt after an ambiguous request failure until acceptance
     .mockResolvedValueOnce({ data: { data: { accepted: true } } })
   const answers = [{ id: 'choice', selected: ['yes'] }]
 
-  await expect(assistantApi.workspaceAnswer('retry-interaction', 'profile', 'call-1', answers)).rejects.toThrow('request timed out')
-  await assistantApi.workspaceAnswer('retry-interaction', 'profile', 'call-1', answers)
-  await assistantApi.workspaceAnswer('retry-interaction', 'profile', 'call-1', answers)
+  await expect(assistantApi.workspaceAnswer('retry-interaction', 'profile', 'call-1', answers, 4)).rejects.toThrow('request timed out')
+  await assistantApi.workspaceAnswer('retry-interaction', 'profile', 'call-1', answers, 4)
+  await assistantApi.workspaceAnswer('retry-interaction', 'profile', 'call-1', answers, 4)
 
   const payloads = vi.mocked(http.post).mock.calls.map(([, payload]) => payload as { attempt_id: string })
   expect(payloads[0]?.attempt_id).toBe(payloads[1]?.attempt_id)
@@ -145,9 +192,45 @@ it('uses a new answer attempt only for an explicit resend decision', async () =>
     .mockResolvedValueOnce({ data: { data: { accepted: true } } })
   const answers = [{ id: 'choice', selected: ['yes'] }]
 
-  await expect(assistantApi.workspaceAnswer('explicit-retry', 'profile', 'call-1', answers)).rejects.toThrow('outcome unknown')
-  await assistantApi.workspaceAnswer('explicit-retry', 'profile', 'call-1', answers, true)
+  await expect(assistantApi.workspaceAnswer('explicit-retry', 'profile', 'call-1', answers, 4)).rejects.toThrow('outcome unknown')
+  await assistantApi.workspaceAnswer('explicit-retry', 'profile', 'call-1', answers, 4, true)
 
   const payloads = vi.mocked(http.post).mock.calls.map(([, payload]) => payload as { attempt_id: string })
   expect(payloads[0]?.attempt_id).not.toBe(payloads[1]?.attempt_id)
+})
+
+
+it('prepares an interaction and passes the final context on its first message', async () => {
+  const snapshot = { interaction_id: 'prepared-interaction', mode_id: 'profile', lifecycle: 'prepared', generation: 1, runtime_status: 'not_started', drafts: [] }
+  vi.mocked(http.post).mockResolvedValueOnce({ data: { data: snapshot } }).mockResolvedValueOnce({ data: { data: { accepted: true } } })
+  vi.mocked(http.get).mockResolvedValueOnce({ data: { data: snapshot } })
+
+  const workspace = await assistantApi.createWorkspace({ mode_id: 'profile', prepare_only: true }, 'prepare-key')
+  expect(workspace).toMatchObject({ id: 'prepared-interaction', lifecycle: 'prepared', runtime_status: 'not_started' })
+  expect(http.post).toHaveBeenNthCalledWith(1, '/assistant/interactions', expect.objectContaining({ prepare_only: true }), expect.objectContaining({ headers: { 'Idempotency-Key': 'prepare-key' } }))
+  await assistantApi.workspaceMessage(workspace.id, 'review', '复盘作品', false, { mode_id: 'review', project_id: 'project-1', content_id: 'work-1' })
+  expect(http.post).toHaveBeenNthCalledWith(2, '/assistant/interactions/prepared-interaction/messages', {
+    generation: 1, client_message_id: expect.any(String), text: '复盘作品', mode_id: 'review', project_id: 'project-1', content_id: 'work-1',
+  }, { timeout: 15 * 60 * 1000 })
+})
+
+it('preserves first-message context when retrying after activation and a lost response', async () => {
+  vi.mocked(http.get).mockResolvedValue({ data: { data: { generation: 1, lifecycle: 'active' } } })
+  vi.mocked(http.post).mockRejectedValueOnce(new Error('response lost')).mockResolvedValueOnce({ data: { data: { accepted: true } } })
+  await expect(assistantApi.workspaceMessage('activation-retry', 'creation', '开始创作', false, { mode_id: 'creation', project_id: 'project-1', content_id: '' })).rejects.toThrow('response lost')
+  await assistantApi.workspaceMessage('activation-retry', 'creation', '开始创作')
+  expect(vi.mocked(http.post).mock.calls[1][1]).toEqual(vi.mocked(http.post).mock.calls[0][1])
+})
+
+
+it('drops a definitively rejected context before retrying the restored active conversation', async () => {
+  vi.mocked(http.get).mockResolvedValue({ data: { data: { generation: 1, lifecycle: 'active' } } })
+  const rejected = Object.assign(new Error('context mismatch'), { response: { status: 409, data: { error_code: 'assistant_message_not_accepted' } } })
+  vi.mocked(http.post).mockRejectedValueOnce(rejected).mockResolvedValueOnce({ data: { data: { accepted: true } } })
+  await expect(assistantApi.workspaceMessage('context-rejection', 'creation', '开始创作', false, { mode_id: 'creation', project_id: 'wrong-project', content_id: '' })).rejects.toThrow('context mismatch')
+  await assistantApi.workspaceMessage('context-rejection', 'creation', '开始创作')
+  const first = vi.mocked(http.post).mock.calls[0][1] as { client_message_id: string }
+  const retry = vi.mocked(http.post).mock.calls[1][1] as { client_message_id: string }
+  expect(retry).not.toHaveProperty('project_id')
+  expect(retry.client_message_id).not.toBe(first.client_message_id)
 })

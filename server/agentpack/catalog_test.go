@@ -1,6 +1,7 @@
 package agentpack
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -98,9 +99,174 @@ tagging:
 	}
 }
 
+func TestArtifactStageRequiredOnFinalSerializesToCatalogJSON(t *testing.T) {
+	root := writePackFixture(t, `
+id: demo-pack
+version: 1.0.0
+kind: plugin
+display_name: Demo Pack
+description: Demo plugin workflow
+agent:
+  name: demo
+  claude_source: agent.claude.md
+  codex_source: agent.codex.toml
+  skills: [demo-skill]
+  max_turns: 60
+runtime:
+  profile: demo
+  adapter: standard
+surfaces: [plugin]
+artifacts:
+  - {role: final_video, path: output/final.mp4, mime_type: video/mp4, required: true}
+  - {role: explainer_input_assessment, path: output/explainer-input-assessment.json, mime_type: application/json, required: false}
+  - {role: semantic_master, path: output/semantic-master.json, mime_type: application/json, required: false}
+artifact_stages:
+  - id: explainer_preflight
+    trigger: output/explainer-input-assessment.json
+    required: [output/explainer-input-assessment.json, output/semantic-master.json]
+    required_on_final: true
+  - id: final_delivery
+    trigger: output/final.mp4
+    terminal: true
+`)
+
+	catalog, err := LoadCatalog(root)
+	if err != nil {
+		t.Fatalf("LoadCatalog: %v", err)
+	}
+	pack, ok := catalog.Pack("demo-pack")
+	if !ok || len(pack.ArtifactStages) != 2 || !pack.ArtifactStages[0].RequiredOnFinal {
+		t.Fatalf("artifact stages = %#v", pack.ArtifactStages)
+	}
+
+	encoded, err := json.Marshal(pack)
+	if err != nil {
+		t.Fatalf("marshal catalog pack: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"required_on_final":true`) {
+		t.Fatalf("catalog JSON omitted required_on_final: %s", encoded)
+	}
+}
+
 func TestVideoEditIsASupportedAgentChannel(t *testing.T) {
 	if !isSupportedChannel("video-edit") {
 		t.Fatal("video-edit channel is not supported by the Agent Pack catalog")
+	}
+}
+
+func TestTopicRadarIsASupportedAgentChannel(t *testing.T) {
+	if !isSupportedChannel("topic-radar") {
+		t.Fatal("topic-radar channel is not supported by the Agent Pack catalog")
+	}
+}
+
+func TestTopicRadarSchemasMatchFinalizerArtifacts(t *testing.T) {
+	pluginRoot := filepath.Clean(filepath.Join("..", "..", "harness"))
+	catalog, err := LoadCatalog(pluginRoot)
+	if err != nil {
+		t.Fatalf("LoadCatalog repository Packs: %v", err)
+	}
+	pack, ok := catalog.Pack("topic-radar")
+	if !ok {
+		t.Fatal("topic-radar Pack missing")
+	}
+
+	digest := map[string]any{
+		"schema_version": "1.0",
+		"task_id":        "task-1", "execution_id": "execution-1", "kind": "topic_digest",
+		"status": "ready", "source": "topic-radar", "data_at": "2026-10-31T04:25:22Z", "missing": []any{}, "quality_status": "ready",
+		"generated_at": "2026-10-31T04:25:22Z",
+		"suggestions": []any{map[string]any{
+			"title":          "A topic",
+			"introduction":   "An introduction",
+			"source_summary": "A source",
+			"source_refs": []any{map[string]any{
+				"type": "article",
+				"url":  "https://example.com/source",
+				"hot":  1.5,
+			}},
+			"scores":    map[string]any{"traffic_potential": 0.8},
+			"video_fit": "high",
+		}},
+	}
+	if err := ValidateOutput(pack, digest); err != nil {
+		t.Fatalf("digest finalizer artifact rejected: %v", err)
+	}
+
+	script := map[string]any{
+		"schema_version": "1.0",
+		"task_id":        "task-1", "execution_id": "execution-1", "kind": "topic_script",
+		"status": "ready", "source": "topic-radar", "data_at": "2026-10-31T04:25:22Z", "missing": []any{}, "quality_status": "ready",
+		"target":      map[string]any{"platform": "douyin", "duration_seconds": 5, "aspect_ratio": "9:16"},
+		"source_refs": []any{map[string]any{"type": "article", "url": "https://example.com/source"}},
+		"title":       "A script",
+		"hook":        "A hook",
+		"scenes": []any{map[string]any{
+			"duration_seconds": 5,
+			"visual":           "A visual",
+			"voiceover":        "A voiceover",
+		}},
+		"cta": "A call to action",
+	}
+	if err := ValidateOutput(pack, script); err != nil {
+		t.Fatalf("script finalizer artifact rejected: %v", err)
+	}
+	for name, artifact := range map[string]map[string]any{"digest": digest, "script": script} {
+		for _, field := range []string{"task_id", "execution_id", "kind", "status", "source", "data_at", "missing", "quality_status"} {
+			t.Run(name+" missing "+field, func(t *testing.T) {
+				copy := make(map[string]any, len(artifact))
+				for key, value := range artifact {
+					copy[key] = value
+				}
+				delete(copy, field)
+				if err := ValidateOutput(pack, copy); err == nil {
+					t.Fatalf("missing %s accepted", field)
+				}
+			})
+		}
+	}
+	for _, field := range []string{"target", "source_refs"} {
+		copy := make(map[string]any, len(script))
+		for key, value := range script {
+			copy[key] = value
+		}
+		delete(copy, field)
+		if err := ValidateOutput(pack, copy); err == nil {
+			t.Fatalf("script missing %s accepted", field)
+		}
+	}
+
+	input := map[string]any{
+		"schema_version": "1.0",
+		"task_id":        "task-1",
+		"execution_id":   "execution-1",
+		"task_kind":      "topic_digest",
+		"snapshot": map[string]any{
+			"snapshot_id":   "snapshot-1",
+			"snapshot_hash": "hash-1",
+			"captured_at":   "2026-10-31T04:25:22Z",
+		},
+		"source_records": []any{map[string]any{
+			"type": "article",
+			"hot":  1.5,
+		}},
+	}
+	if err := ValidateTaskInput(pack, input); err != nil {
+		t.Fatalf("task input with numeric hot rejected: %v", err)
+	}
+	input["source_records"] = []any{map[string]any{"type": "article", "hot": true}}
+	if err := ValidateTaskInput(pack, input); err == nil {
+		t.Fatal("task input with boolean hot unexpectedly accepted")
+	}
+
+	legacy := map[string]any{
+		"schema_version": "1.0",
+		"task_id":        "task-1",
+		"task_kind":      "topic_digest",
+		"status":         "ready",
+	}
+	if err := ValidateOutput(pack, legacy); err == nil {
+		t.Fatal("legacy metadata envelope unexpectedly accepted as finalizer artifact")
 	}
 }
 
@@ -1031,8 +1197,8 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if err != nil {
 		t.Fatalf("LoadCatalog repository Packs: %v", err)
 	}
-	if len(catalog.Packs) != 18 {
-		t.Fatalf("Pack count = %d, want 18", len(catalog.Packs))
+	if len(catalog.Packs) != 20 {
+		t.Fatalf("Pack count = %d, want 20", len(catalog.Packs))
 	}
 	autoVideoEditor, ok := catalog.Pack("talking-head-editor")
 	if !ok {

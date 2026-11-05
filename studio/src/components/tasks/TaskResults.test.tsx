@@ -60,7 +60,9 @@ describe('result selection',()=>{
     const { unmount } = render(<TaskResults task={manualPicture} files={pictureFiles} />)
     expect(screen.getByText('请复制完整图文到公众号后台完成草稿创建')).toBeInTheDocument()
     expect(screen.queryByText('此任务已启用公众号自动交付。')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '查看作品' }))
+    const viewWorkButton = screen.getByRole('button', { name: '查看作品' })
+    expect(viewWorkButton.querySelector('svg')).toHaveClass('lucide-gallery-horizontal-end')
+    fireEvent.click(viewWorkButton)
     expect(await screen.findByRole('button', { name: '复制图文内容' })).toBeInTheDocument()
     unmount()
     const automaticPicture = {

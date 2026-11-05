@@ -122,7 +122,7 @@ func TestApplyResearchResultMergesAssetsAndDeduplicatesEvidence(t *testing.T) {
 	evidence := model.PlanningResearchEvidence{PlanningIdentity: result.PlanningIdentity, Sources: []model.PlanningSource{{ID: "source-1", URL: "https://example.com/source", FetchedAt: "2026-10-21T00:00:00Z", Facts: []string{"fact"}}}}
 	apply := func() error {
 		return repo.WithTx(ctx, func(tx repository.Repository) error {
-			return applyResearchResult(ctx, tx, userID, primary.ID, result, evidence)
+			return applyResearchResult(ctx, tx, userID, "", primary.ID, result, evidence)
 		})
 	}
 	if err := apply(); err != nil {

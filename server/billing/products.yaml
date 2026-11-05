@@ -300,6 +300,49 @@ skus:
     price_source: "task.viral-analysis.quality"
     delivery: "content_script_artifacts_verified"
 
+  - id: "task.topic_digest.effective"
+    operation: "task.topic_digest"
+    execution_profile: "effective"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    price_source: "task.viral-analysis.effective"
+    delivery: "topic_digest_artifacts_verified"
+  - id: "task.topic_digest.balanced"
+    operation: "task.topic_digest"
+    execution_profile: "balanced"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    price_source: "task.viral-analysis.balanced"
+    delivery: "topic_digest_artifacts_verified"
+  - id: "task.topic_digest.quality"
+    operation: "task.topic_digest"
+    execution_profile: "quality"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    price_source: "task.viral-analysis.quality"
+    delivery: "topic_digest_artifacts_verified"
+  - id: "task.topic_script.effective"
+    operation: "task.topic_script"
+    execution_profile: "effective"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    price_source: "task.viral-analysis.effective"
+    delivery: "topic_script_artifacts_verified"
+  - id: "task.topic_script.balanced"
+    operation: "task.topic_script"
+    execution_profile: "balanced"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    price_source: "task.viral-analysis.balanced"
+    delivery: "topic_script_artifacts_verified"
+  - id: "task.topic_script.quality"
+    operation: "task.topic_script"
+    execution_profile: "quality"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    price_source: "task.viral-analysis.quality"
+    delivery: "topic_script_artifacts_verified"
+
   - id: "task.profile-analysis.effective"
     operation: "task.profile_analysis"
     execution_profile: "effective"
@@ -322,7 +365,7 @@ skus:
   - id: "image.standard"
     operation: "image.generate"
     charge_policy: "image_operation"
-    price_credits: 300
+    price_credits: 400
     route: "image_generation.capabilities.standard"
     delivery: "persisted_image"
   - id: "image.professional"

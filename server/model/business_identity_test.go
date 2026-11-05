@@ -26,12 +26,12 @@ func TestBusinessIdentitySetsRejectUndeclaredValues(t *testing.T) {
 }
 
 func TestAdminOnlyProjectPlatforms(t *testing.T) {
-	for _, platform := range []string{PlatformMoments, PlatformEcommerce, PlatformHypit} {
+	for _, platform := range []string{PlatformMoments, PlatformHypit} {
 		if !IsAdminOnlyProjectPlatform(platform) {
 			t.Errorf("IsAdminOnlyProjectPlatform(%q) = false", platform)
 		}
 	}
-	for _, platform := range []string{PlatformWechat, PlatformSeednote, PlatformMontage} {
+	for _, platform := range []string{PlatformWechat, PlatformSeednote, PlatformEcommerce, PlatformMontage} {
 		if IsAdminOnlyProjectPlatform(platform) {
 			t.Errorf("IsAdminOnlyProjectPlatform(%q) = true", platform)
 		}

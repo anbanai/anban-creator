@@ -179,6 +179,172 @@ url = "https://other.example/mcp"
 	}
 }
 
+func TestInstallSubagentsMigratesIPExplainerRegistration(t *testing.T) {
+	for _, header := range []string{
+		"[agents.talking-head-montage]",
+		`[agents."talking-head-montage"]`,
+		"[agents . talking-head-montage]",
+		"[agents.talking-head-montage]\n[agents.talking-head-montage.options]",
+	} {
+		t.Run(header, func(t *testing.T) {
+			testHome := t.TempDir()
+			agentsDir := filepath.Join(testHome, ".codex", "agents")
+			if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			configPath := filepath.Join(testHome, ".codex", "config.toml")
+			initial := `model = "keep-model"
+instructions = """
+[agents.talking-head-montage]
+This is quoted documentation, not a registration.
+"""
+
+` + header + `
+description = "old plugin registration"
+config_file = "~/.codex/agents/talking-head-montage.toml"
+
+[agents."personal[helper]"]
+config_file = "~/bracket-agent.toml"
+
+[agents.'helper#with.dots']
+config_file = "~/literal-agent.toml"
+
+[agents.personal-helper]
+description = "preserve this unrelated agent"
+config_file = "~/personal-helper.toml"
+`
+			if err := os.WriteFile(configPath, []byte(initial), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			retiredFile := filepath.Join(agentsDir, "talking-head-montage.toml")
+			if err := os.WriteFile(retiredFile, []byte("name = \"talking-head-montage\"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			pluginRoot := filepath.Join(repoRoot(t), "harness")
+			var previous []byte
+			for run := 0; run < 2; run++ {
+				cmd := exec.Command("bash", filepath.Join(pluginRoot, "install", "install-subagents.sh"))
+				cmd.Env = []string{"HOME=" + testHome, "ANBAN_PLUGIN_ROOT=" + pluginRoot, "PATH=" + os.Getenv("PATH")}
+				if output, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("install run %d: %v\n%s", run, err, output)
+				}
+				body, err := os.ReadFile(configPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var parsed map[string]any
+				if _, err := toml.Decode(string(body), &parsed); err != nil {
+					t.Fatal(err)
+				}
+				agents := parsed["agents"].(map[string]any)
+				if _, exists := agents["talking-head-montage"]; exists {
+					t.Fatal("retired workflow is still discoverable")
+				}
+				current, ok := agents["ip-explainer"].(map[string]any)
+				if !ok || current["config_file"] != "~/.codex/agents/ip-explainer.toml" {
+					t.Fatalf("new workflow registration is missing or wrong: %v", current)
+				}
+				instructions, _ := parsed["instructions"].(string)
+				if parsed["model"] != "keep-model" || !strings.Contains(instructions, "[agents.talking-head-montage]") {
+					t.Fatal("installer changed unrelated top-level settings or quoted documentation")
+				}
+				for name, want := range map[string]string{"personal[helper]": "~/bracket-agent.toml", "helper#with.dots": "~/literal-agent.toml"} {
+					agent, ok := agents[name].(map[string]any)
+					if !ok || agent["config_file"] != want {
+						t.Fatalf("unrelated quoted agent %s changed: %v", name, agent)
+					}
+				}
+				other := agents["personal-helper"].(map[string]any)
+				if other["config_file"] != "~/personal-helper.toml" {
+					t.Fatal("installer changed an unrelated agent")
+				}
+				if _, err := os.Stat(retiredFile); !os.IsNotExist(err) {
+					t.Fatalf("retired native Agent file remains: %v", err)
+				}
+				if _, err := os.Stat(filepath.Join(agentsDir, "ip-explainer.toml")); err != nil {
+					t.Fatalf("new native Agent file was not installed: %v", err)
+				}
+				if run > 0 && !bytes.Equal(body, previous) {
+					t.Fatal("reinstall changed an already migrated registration")
+				}
+				previous = body
+			}
+		})
+	}
+}
+
+func TestInstallSubagentsRejectedMigrationPreservesInstalledFiles(t *testing.T) {
+	for _, initial := range []string{
+		"[agents.talking-head-montage]\nconfig_file = 'old.toml'\n[mcp_servers.\"creator\"]\nurl = 'https://example.com/mcp'\n",
+		"[agents]\ntalking-head-montage = {config_file = 'old.toml'}\n",
+		"agents.talking-head-montage.config_file = 'old.toml'\n",
+		`[agents.talking-head-montage]
+description = """
+Literal: \"""
+"""
+[agents.personal-helper]
+config_file = "~/personal-helper.toml"
+`,
+		`[agents.talking-head-montage.'"""']
+value = "retired child"
+[agents.personal-helper]
+config_file = "~/personal-helper.toml"
+`,
+		`[agents.talking-head-montage]
+config_file = "old.toml"
+[custom]
+instructions = """
+Literal: \"""
+[mcp_servers.creator]
+url = "https://unrelated.example/quoted-documentation"
+bearer_token_env_var = "QUOTED_DOCUMENTATION"
+"""
+[mcp_servers.creator]
+url = "https://creator.anbanai.com/mcp"
+bearer_token_env_var = "ANBAN_API_KEY"
+`,
+		"invalid = [\n",
+	} {
+		t.Run(initial, func(t *testing.T) {
+			testHome := t.TempDir()
+			codexDir := filepath.Join(testHome, ".codex")
+			agentsDir := filepath.Join(codexDir, "agents")
+			if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			configPath := filepath.Join(codexDir, "config.toml")
+			if err := os.WriteFile(configPath, []byte(initial), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"talking-head-montage", "article"} {
+				if err := os.WriteFile(filepath.Join(agentsDir, name+".toml"), []byte("original "+name), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			pluginRoot := filepath.Join(repoRoot(t), "harness")
+			cmd := exec.Command("bash", filepath.Join(pluginRoot, "install", "install-subagents.sh"))
+			cmd.Env = []string{"HOME=" + testHome, "ANBAN_PLUGIN_ROOT=" + pluginRoot, "PATH=" + os.Getenv("PATH")}
+			if output, err := cmd.CombinedOutput(); err == nil {
+				t.Fatalf("accepted invalid/unsupported migration: %s", output)
+			}
+			body, err := os.ReadFile(configPath)
+			if err != nil || string(body) != initial {
+				t.Fatalf("config changed: %v", err)
+			}
+			entries, err := os.ReadDir(agentsDir)
+			if err != nil || len(entries) != 2 {
+				t.Fatalf("installed file set changed: %v %v", entries, err)
+			}
+			for _, name := range []string{"talking-head-montage", "article"} {
+				body, err := os.ReadFile(filepath.Join(agentsDir, name+".toml"))
+				if err != nil || string(body) != "original "+name {
+					t.Fatalf("installed %s changed on rejected migration: %v", name, err)
+				}
+			}
+		})
+	}
+}
+
 func TestInstallSubagentsCreatesMissingConfigFromRegistration(t *testing.T) {
 	home := t.TempDir()
 	tmpDir := filepath.Join(home, "tmp")

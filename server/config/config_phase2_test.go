@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -219,6 +220,20 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewConfig(config.example.yaml): %v", err)
 	}
+	if cfg.Dsh.ServerURL != cfg.AgentServerURL() || cfg.Dsh.MCPURL != cfg.AgentServerURL()+"/mcp" {
+		t.Fatalf("example DSH server/MCP = %q / %q, want internal Agent server %q", cfg.Dsh.ServerURL, cfg.Dsh.MCPURL, cfg.AgentServerURL())
+	}
+	if cfg.Storage.MediaLibraryPrefix != DefaultMediaLibraryPrefix {
+		t.Fatalf("loaded media prefix = %q", cfg.Storage.MediaLibraryPrefix)
+	}
+	customBody := strings.Replace(body, `media_library_prefix: "assets/media-library/"`, `media_library_prefix: "tenant/library/"`, 1)
+	if err := os.WriteFile(path, []byte(customBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	custom, err := NewConfig(path)
+	if err != nil || custom.Storage.MediaLibraryPrefix != "tenant/library/" {
+		t.Fatalf("load custom prefix: %v", err)
+	}
 	if len(cfg.ModelRoutes.ImageGeneration.Capabilities) != 2 || len(cfg.Claude.ExecutionProfiles) != 3 {
 		t.Fatalf("catalog sizes: image_capabilities=%d profiles=%d", len(cfg.ModelRoutes.ImageGeneration.Capabilities), len(cfg.Claude.ExecutionProfiles))
 	}
@@ -259,6 +274,14 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 		for _, preset := range capability.GenerationFeatures.SizePresets {
 			if !fixedImageGenerationSize.MatchString(preset) {
 				t.Fatalf("enabled image capability %q exposes non-fixed generation size %q", key, preset)
+			}
+		}
+		if (key == "standard" || key == "professional") && !slices.Equal(capability.GenerationFeatures.SizePresets, []string{"1:1:2K", "3:4:2K", "4:3:2K", "16:9:2K", "9:16:2K"}) {
+			t.Errorf("image capability %q must offer the five common designer sizes", key)
+		}
+		if key == "standard" || key == "professional" {
+			if capability.Provider != "wangcai_openai" || !capability.GenerationFeatures.HasBackground || !slices.Equal(capability.GenerationFeatures.QualityLevels, []string{"auto", "high", "medium", "low"}) || !slices.Equal(capability.GenerationFeatures.OutputFormats, []string{"png", "jpeg", "webp"}) {
+				t.Errorf("image capability %q must support all quality levels, transparent backgrounds and three output formats", key)
 			}
 		}
 	}

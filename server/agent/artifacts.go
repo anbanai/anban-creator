@@ -162,7 +162,7 @@ func validateTaskArtifacts(task *model.Task, files map[string]bool, meaningful i
 		return result
 	}
 	if task != nil && model.IsTalkingHeadEditorPlatform(task.Type) {
-		finalRequired := []string{"final.mp4", "edit-decision-list.json", "transcript.json", "edit-strategy.md", "visual-plan.json", "sfx-cues.json", "bgm-plan.json", "audio-source-manifest.json", "delivery-manifest.json", "quality-evidence.json", "content-tags.json"}
+		finalRequired := []string{"final.mp4", "edit-decision-list.json", "composition-lint.json", "transcript.json", "final-audio-transcript.json", "audio-content-check.json", "sync-evidence.json", "generated-video-manifest.json", "generated-video-review.json", "generated-video-lint.json", "independent-validation-plan.json", "independent-validation.json", "progress-state.json", "edit-strategy.md", "visual-plan.json", "sfx-cues.json", "bgm-plan.json", "audio-source-manifest.json", "delivery-manifest.json", "quality-evidence.json", "content-tags.json"}
 		sampleRequired := []string{"rough-cut.mp4", "transcript.json", "edit-decision-list.json", "edit-strategy.md", "semantic-cut.mp4", "motion-sample.mp4", "visual-plan.json", "motion-review.json", "motion-source-manifest.json"}
 		sampleOnly := files["motion-sample.mp4"] && !files["final.mp4"]
 		required := finalRequired

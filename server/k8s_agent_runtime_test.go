@@ -324,30 +324,25 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	}
 	env := deploymentEnvMap(t, deployment)
 	for name, want := range map[string]string{
-		"ANBAN_AGENT_EXECUTOR":                  "kubernetes",
-		"ANBAN_CLAUDE_AGENT_SERVER_URL":         "https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443",
-		"ANBAN_AGENT_NAMESPACE":                 "${namespace}",
-		"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":      "${wechat_article_agent_image_repo}",
-		"ANBAN_AGENT_IMAGE_WECHAT_PICTURE":      "${wechat_picture_agent_image_repo}",
-		"ANBAN_AGENT_IMAGE_SEEDNOTE":            "${seednote_agent_image_repo}",
-		"ANBAN_AGENT_IMAGE_MONTAGE":             "${montage_agent_image_repo}",
+		"ANBAN_AGENT_EXECUTOR":                    "kubernetes",
+		"ANBAN_CLAUDE_AGENT_SERVER_URL":           "http://${micro_service_name}-svc.${namespace}.svc.cluster.local:8080",
+		"ANBAN_AGENT_NAMESPACE":                   "${namespace}",
+		"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":        "${wechat_article_agent_image_repo}",
+		"ANBAN_AGENT_IMAGE_WECHAT_PICTURE":        "${wechat_picture_agent_image_repo}",
+		"ANBAN_AGENT_IMAGE_SEEDNOTE":              "${seednote_agent_image_repo}",
+		"ANBAN_AGENT_IMAGE_MONTAGE":               "${montage_agent_image_repo}",
 		"ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR": "${viral_ip_video_editor_agent_image_repo}",
-		"ANBAN_AGENT_IMAGE_VIDEO_EDIT":          "${video_edit_agent_image_repo}",
-		"ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR": "${talking_head_editor_agent_image_repo}",
-		"ANBAN_AGENT_IMAGE_LOCAL_LIFE":          "${local_life_agent_image_repo}",
-		"ANBAN_DSH_IMAGE":                       "${dsh_image_repo}",
-		"ANBAN_AGENT_SERVICE_ACCOUNT":           "${agent_service_account}",
-		"ANBAN_AGENT_SERVER_CA_SECRET":          "anban-internal-ca",
-		"ANBAN_AGENT_IMAGE_PULL_SECRET":         "${imagePullSecret}",
-		"ANBAN_AGENT_NAS_STORAGE_CLASS":         "nas-sc-creator",
-		"ANBAN_AGENT_PROJECT_MEMORY_CLAIM":      "creator-project-memory",
-		"ANBAN_AGENT_TASK_WORKSPACE_SIZE":       "10Gi",
-		"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":     "https://api.moonshot.cn/anthropic",
-		"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":        "https://open.bigmodel.cn/api/anthropic",
-		"ANBAN_SERVER_TLS_CERT_FILE":            "/var/run/secrets/anban-server-tls/tls.crt",
-		"ANBAN_SERVER_TLS_KEY_FILE":             "/var/run/secrets/anban-server-tls/tls.key",
-		"SSL_CERT_FILE":                         "/var/run/secrets/anban-internal-ca/ca.crt",
-		"NODE_EXTRA_CA_CERTS":                   "/var/run/secrets/anban-internal-ca/ca.crt",
+		"ANBAN_AGENT_IMAGE_VIDEO_EDIT":            "${video_edit_agent_image_repo}",
+		"ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR":   "${talking_head_editor_agent_image_repo}",
+		"ANBAN_AGENT_IMAGE_LOCAL_LIFE":            "${local_life_agent_image_repo}",
+		"ANBAN_DSH_IMAGE":                         "${dsh_image_repo}",
+		"ANBAN_AGENT_SERVICE_ACCOUNT":             "${agent_service_account}",
+		"ANBAN_AGENT_IMAGE_PULL_SECRET":           "${imagePullSecret}",
+		"ANBAN_AGENT_NAS_STORAGE_CLASS":           "nas-sc-creator",
+		"ANBAN_AGENT_PROJECT_MEMORY_CLAIM":        "creator-project-memory",
+		"ANBAN_AGENT_TASK_WORKSPACE_SIZE":         "10Gi",
+		"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":       "https://api.moonshot.cn/anthropic",
+		"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":          "https://open.bigmodel.cn/api/anthropic",
 	} {
 		if got := env[name]; got != want {
 			t.Fatalf("server env %s = %q, want %q", name, got, want)
@@ -417,8 +412,6 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 			t.Fatalf("server deployment retains removed %s", obsolete)
 		}
 	}
-	assertDeploymentTLSVolume(t, deployment, "anban-server-tls", "/var/run/secrets/anban-server-tls", "anban-server-tls", []string{"tls.crt", "tls.key"})
-	assertDeploymentTLSVolume(t, deployment, "anban-internal-ca", "/var/run/secrets/anban-internal-ca", "anban-internal-ca", []string{"ca.crt"})
 
 	configExample, err := os.ReadFile("config.example.yaml")
 	if err != nil {
@@ -441,7 +434,6 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 			`kubernetes_namespace: "${ANBAN_AGENT_NAMESPACE:-anbanai-prod}"`,
 			`kubernetes_image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET:-acr-secret}"`,
 			`kubernetes_project_memory_claim: "${ANBAN_AGENT_PROJECT_MEMORY_CLAIM:-creator-project-memory}"`,
-			`server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET:-anban-internal-ca}"`,
 			`execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"`,
 		} {
 			if !strings.Contains(body.text, want) {
@@ -449,21 +441,23 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 			}
 		}
 	}
-	for _, forbidden := range []string{"workspace_mount_path", "workspace_pvc_name", "pod_revision", "pod_ttl_seconds", "exec_timeout_seconds"} {
+	for _, forbidden := range []string{"workspace_mount_path", "workspace_pvc_name", "pod_revision", "pod_ttl_seconds", "exec_timeout_seconds", "tls_cert_file", "tls_key_file", "server_ca_secret"} {
 		if strings.Contains(string(configExample), forbidden) {
-			t.Fatalf("obsolete reusable-Pod config key %q remains", forbidden)
+			t.Fatalf("obsolete runtime config key %q remains", forbidden)
 		}
 	}
-	for _, want := range []string{
-		"port: 8443",
-		"targetPort: 8080",
-		"secretName: anban-server-tls",
-		"mountPath: /var/run/secrets/anban-server-tls",
-		"secretName: anban-internal-ca",
-		"mountPath: /var/run/secrets/anban-internal-ca",
-	} {
+	for _, want := range []string{"name: http-8080", "port: 8080", "targetPort: 8080"} {
 		if !strings.Contains(string(serverDeployment), want) {
-			t.Fatalf("server deployment missing TLS contract %q", want)
+			t.Fatalf("server deployment missing internal HTTP contract %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"8443", "ANBAN_SERVER_TLS_CERT_FILE", "ANBAN_SERVER_TLS_KEY_FILE",
+		"ANBAN_AGENT_SERVER_CA_SECRET", "SSL_CERT_FILE", "NODE_EXTRA_CA_CERTS",
+		"anban-server-tls", "anban-internal-ca",
+	} {
+		if strings.Contains(string(serverDeployment), forbidden) {
+			t.Fatalf("server deployment retains internal TLS dependency %q", forbidden)
 		}
 	}
 }
@@ -615,6 +609,7 @@ func TestAgentRuntimeReleaseRejectsMalformedDshImageReference(t *testing.T) {
 		"AGENT_IMAGE_ECOMMERCE=registry.example.com/ecommerce:release",
 		"AGENT_IMAGE_PROFILE_ANALYSIS=registry.example.com/profile-analysis:release",
 		"AGENT_IMAGE_FEEDBACK_ANALYSIS=registry.example.com/feedback-analysis:release",
+		"AGENT_IMAGE_TOPIC_RADAR=registry.example.com/topic-radar:release",
 		"AGENT_IMAGE_WHITEBOARD_ANIMATION=registry.example.com/whiteboard-animation:release",
 		"AGENT_IMAGE_HYPIT=registry.example.com/hypit:release",
 		"DSH_IMAGE=registry.example.com/runtime-dsh: broken@sha256:" + strings.Repeat("a", 64),
@@ -682,6 +677,7 @@ func ackRenderEnv(manifestPath string) []string {
 		"ecommerce_agent_image_repo=registry.example.com/creator-ecommerce:release",
 		"profile_analysis_agent_image_repo=registry.example.com/creator-profile-analysis:release",
 		"feedback_analysis_agent_image_repo=registry.example.com/creator-feedback-analysis:release",
+		"topic_radar_agent_image_repo=registry.example.com/creator-topic-radar:release",
 		"whiteboard_animation_agent_image_repo=registry.example.com/creator-whiteboard-animation:release",
 		"hypit_agent_image_repo=registry.example.com/creator-hypit:release",
 		"local_life_agent_image_repo=registry.example.com/creator-local-life:release",
@@ -775,41 +771,6 @@ func deploymentEnvMap(t *testing.T, doc deploymentDoc) map[string]string {
 		env[pair.Name] = pair.Value
 	}
 	return env
-}
-
-func assertDeploymentTLSVolume(t *testing.T, doc deploymentDoc, volumeName, mountPath, secretName string, keys []string) {
-	t.Helper()
-	container := doc.Spec.Template.Spec.Containers[0]
-	foundMount := false
-	for _, mount := range container.VolumeMounts {
-		if mount.Name == volumeName {
-			foundMount = mount.MountPath == mountPath && mount.ReadOnly
-			break
-		}
-	}
-	if !foundMount {
-		t.Fatalf("server volume mount %q must be read-only at %q", volumeName, mountPath)
-	}
-	for _, volume := range doc.Spec.Template.Spec.Volumes {
-		if volume.Name != volumeName {
-			continue
-		}
-		if volume.Secret.SecretName != secretName {
-			t.Fatalf("server volume %q secret = %q, want %q", volumeName, volume.Secret.SecretName, secretName)
-		}
-		gotKeys := make([]string, 0, len(volume.Secret.Items))
-		for _, item := range volume.Secret.Items {
-			if item.Key != item.Path {
-				t.Fatalf("server volume %q item %q path = %q, want same name", volumeName, item.Key, item.Path)
-			}
-			gotKeys = append(gotKeys, item.Key)
-		}
-		if strings.Join(gotKeys, ",") != strings.Join(keys, ",") {
-			t.Fatalf("server volume %q keys = %v, want %v", volumeName, gotKeys, keys)
-		}
-		return
-	}
-	t.Fatalf("server volume %q is missing", volumeName)
 }
 
 func splitKubernetesYAMLDocuments(text string) []string {

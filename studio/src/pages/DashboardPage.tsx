@@ -9,6 +9,7 @@ import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attac
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import QueryErrorState from '@/components/QueryErrorState'
+import { TopicRadarSummary } from '@/components/topic-radar/TopicRadarSummary'
 import { TaskComposerParameters } from '@/components/tasks/TaskComposerParameters'
 import { SeednoteTemplateGallery } from '@/components/templates/SeednoteTemplateGallery'
 import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
@@ -341,6 +342,8 @@ export default function DashboardPage() {
           <p className="mt-3 text-sm leading-6 text-muted-foreground">围绕人设定位开始创作，并在作品交付后查看表现与复盘线索。</p>
         </div>
 
+        <TopicRadarSummary projectId={selectedProjectId} />
+
         <div ref={composerRef} className="mx-auto w-full max-w-3xl">
           <AgentPromptInput
             value={{ prompt, attachments }}
@@ -381,7 +384,6 @@ export default function DashboardPage() {
                     onChange: setExecutionProfile,
                     loading: profilesQuery.isLoading || billingCatalogQuery.isLoading,
                     disabled: profilesQuery.isError || billingCatalogQuery.isError,
-                    catalog: billingCatalogQuery.data,
                     taskType: selectedProject?.platform,
                   }}
                   image={usesImageSettings ? {
@@ -422,8 +424,8 @@ export default function DashboardPage() {
         </section>
 
         {reusableAssetsQuery.data?.items.length ? <section aria-label="值得继续复用的选题" className="mx-auto w-full max-w-3xl rounded-xl border border-border bg-card p-4">
-          <div className="flex items-center justify-between gap-3"><div><p className="text-sm font-medium">值得继续复用的选题</p><p className="mt-1 text-xs text-muted-foreground">来自已研究或正在生产的选题资产，平台评分以 Server 分析快照为准。</p></div><Link to="/content-assets" className="text-xs font-medium text-primary hover:underline">查看全部</Link></div>
-          <div className="mt-3 divide-y divide-border">{reusableAssetsQuery.data.items.slice(0, 3).map((item) => <Link key={item.asset.id} to="/content-assets" className="block py-3 text-sm hover:text-primary">
+          <div className="flex items-center justify-between gap-3"><div><p className="text-sm font-medium">值得继续复用的选题</p><p className="mt-1 text-xs text-muted-foreground">来自已研究或正在生产的选题资产，平台评分以 Server 分析快照为准。</p></div><Link to="/topics" className="text-xs font-medium text-primary hover:underline">查看全部</Link></div>
+          <div className="mt-3 divide-y divide-border">{reusableAssetsQuery.data.items.slice(0, 3).map((item) => <Link key={item.asset.asset_id} to={`/topics?asset_id=${encodeURIComponent(item.asset.asset_id)}`} className="block py-3 text-sm hover:text-primary">
             <div className="flex items-center justify-between gap-3"><span className="min-w-0 truncate font-medium">{item.asset.title}</span><span className="shrink-0 text-xs text-muted-foreground">{item.recommended_platform || '待选择平台'} · {item.score ? (item.score.status === 'scored' ? `${item.score.score.toFixed(0)} 分` : item.score.status === 'exploratory' ? `探索信号 ${item.score.score.toFixed(0)}` : '数据不足') : '数据不足'}</span></div>
             <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"><span>{item.recommendation_reason || '等待更多证据'}</span>{item.estimated_cost_credits > 0 && <span>预计 {item.estimated_cost_credits.toLocaleString()} 积分</span>}{item.evidence_as_of && <span>数据截至 {new Date(item.evidence_as_of).toLocaleDateString('zh-CN')}</span>}{item.automation_status && <span>{item.automation_status === 'running' ? '自动生产中' : item.automation_status === 'paused' ? '已暂停' : item.automation_status === 'completed' ? '已完成' : item.automation_stage || item.automation_status}</span>}</div>
           </Link>)}</div>

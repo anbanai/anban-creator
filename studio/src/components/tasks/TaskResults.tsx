@@ -1,7 +1,7 @@
 import type { Task, TaskFile } from '@/types'
 import { FilePreviewGallery } from '@/components/FilePreview'
 import { Button } from '@/components/common/button'
-import { Eye, FileText } from 'lucide-react'
+import { FileText, GalleryHorizontalEnd } from 'lucide-react'
 
 // Presentation only: never promote a process/retained file to a deliverable.
 export function selectResultFiles(files: TaskFile[], executionId?: string) {
@@ -33,7 +33,7 @@ export function TaskResults({task, files}: {task:Task;files:TaskFile[]}) {
     {automaticWechatDelivery && <div role="status" className="border-l-2 border-emerald-600 bg-emerald-600/5 px-3 py-2 text-sm">此任务已启用公众号自动交付。</div>}
     {main.length > 0 ? <FilePreviewGallery previewTitle="作品预览" files={main} relatedFiles={files} articleAuthor={task.project_snapshot?.author} taskId={task.id} taskType={task.type} articleImageDeliveryBlocked={task.outcome?.visual?.status === 'partial'} manualPictureCopyAvailable={pictureManualCopyAvailable} renderTrigger={(file,open)=><div className="flex flex-wrap items-center justify-between gap-4 rounded-lg bg-muted/40 p-4">
       <div className="flex items-center gap-3"><FileText className="size-7 text-primary"/><div><h3 className="font-medium">{file.mime_type.startsWith('video/') ? '最终视频' : file.mime_type==='text/html' ? '排版后的完整文章' : '完整正文'}{main.length>1 ? ` · ${main.indexOf(file)+1}` : ''}</h3><p className="text-xs text-muted-foreground mt-1">打开即可阅读、复制或下载</p></div></div>
-      <Button onClick={open}><Eye className="size-4"/>查看作品</Button>
+      <Button onClick={open}><GalleryHorizontalEnd className="size-4"/>查看作品</Button>
     </div>}/> : <p className="text-sm text-muted-foreground">本次作品见下方文件。暂未识别到单独的完整正文。</p>}
     {publication && ['blocked','failed','ambiguous'].includes(publication.status) && <div role="note" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"><strong>公众号交付还需处理</strong><p className="mt-1">{publication.status==='ambiguous' ? '公众号端的结果尚待核实，请先检查，避免重复提交。' : '内容可先查看；公众号草稿或发布步骤尚未成功，请展开下方过程查看原因。'}</p></div>}
     {!!other.length && <details className="group"><summary className="cursor-pointer text-sm text-muted-foreground py-2">配图与其他交付文件（{other.length}）</summary><div className="mt-3 grid gap-3 sm:grid-cols-2"><FilePreviewGallery files={other} relatedFiles={files} taskId={task.id} taskType={task.type} articleImageDeliveryBlocked={task.outcome?.visual?.status === 'partial'} manualPictureCopyAvailable={pictureManualCopyAvailable} compact/></div></details>}

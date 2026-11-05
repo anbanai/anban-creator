@@ -1,20 +1,29 @@
-FROM golang:alpine AS builder
+FROM crpi-671lgv9lrdyll4t9.cn-chengdu.personal.cr.aliyuncs.com/bx_anbanai/golang:alpine AS builder
 
 WORKDIR /build/server
 
+
+# libvips backs the image-understanding downscale path (govips), which requires
+# cgo and the vips development headers at build time.
+RUN apk add --no-cache build-base vips-dev
 
 COPY server/go.mod server/go.sum ./
 RUN go mod download
 
 COPY server ./
 RUN set -eux; \
-    CGO_ENABLED=0 go build -ldflags="-s -w" -o /anban-creator-server .
+    CGO_ENABLED=1 go build -ldflags="-s -w" -o /anban-creator-server .
 
-FROM node:24.22.0-alpine3.24
+FROM crpi-671lgv9lrdyll4t9.cn-chengdu.personal.cr.aliyuncs.com/bx_anbanai/node:24.22.0-alpine3.24
 
+
+# The runtime image must ship the libvips shared object the builder linked
+# against. MALLOC_ARENA_MAX keeps glib from fragmenting per-thread arenas under
+# the concurrent image workload (see govips' memory notes).
+ENV MALLOC_ARENA_MAX=2
 
 RUN set -eux; \
-    apk add --no-cache ca-certificates docker-cli ffmpeg tzdata; \
+    apk add --no-cache ca-certificates docker-cli ffmpeg tzdata vips; \
     mkdir -p \
       /app/data/files \
       /app/data/workspace \
@@ -28,6 +37,10 @@ COPY --from=builder /build/server/billing/products.yaml /app/conf/billing/produc
 COPY --from=builder /build/server/billing/costs.yaml /app/conf/billing/costs.yaml
 COPY --from=builder /build/server/billing/promotions.yaml /app/conf/billing/promotions.yaml
 RUN test "$(node --version)" = "v24.22.0"
+# Fail the build when the runtime libvips soname does not match the builder:
+# a missing shared library aborts before the config loader ever runs.
+RUN set -eux; \
+    /app/anban-creator-server -config /nonexistent-config.yaml 2>&1 | grep -q "failed to load config"
 USER 1000:1000
 
 WORKDIR /app

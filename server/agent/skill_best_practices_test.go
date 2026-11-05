@@ -24,7 +24,7 @@ func TestDistributedSkillsFollowAgentSkillsBestPractices(t *testing.T) {
 			if d.IsDir() || filepath.Base(path) != "SKILL.md" {
 				return nil
 			}
-			if isUpstreamHumanizerSkillPath(path) {
+			if isUpstreamSkillFile(path) {
 				return nil
 			}
 			assertAgentSkillBestPractice(t, path)
@@ -34,14 +34,6 @@ func TestDistributedSkillsFollowAgentSkillsBestPractices(t *testing.T) {
 			t.Fatalf("walk %s skills: %v", distro, err)
 		}
 	}
-}
-
-func isUpstreamHumanizerSkillPath(path string) bool {
-	return filepath.Base(path) == "SKILL.md" && isUpstreamHumanizerPath(path)
-}
-
-func isUpstreamHumanizerPath(path string) bool {
-	return strings.Contains(filepath.ToSlash(path), "/harness/skills/humanizer/")
 }
 
 func TestDistributedSkillsDoNotShipAuxiliaryReadmes(t *testing.T) {
@@ -61,7 +53,7 @@ func TestDistributedSkillsDoNotShipAuxiliaryReadmes(t *testing.T) {
 			if d.IsDir() {
 				return nil
 			}
-			if isUpstreamHumanizerPath(path) {
+			if isUpstreamSkillPath(path) {
 				return nil
 			}
 			if auxiliaryNames[filepath.Base(path)] {
@@ -168,8 +160,8 @@ func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 		"moments":        {"content-tagging", "moments"},
 		"hypit":          {"content-reuse", "content-tagging"},
 		"montage":        {"content-reuse", "content-tagging", "montage"},
-		"seednote":       {"content-reuse", "content-tagging", "seednote-research", "seednote-writing", "seednote-visual-design"},
-		"wechat-article": {"content-reuse", "content-tagging", "content-writing", "article-visual-design", "article-cover-design", "article-research"},
+		"seednote":       {"content-reuse", "content-tagging", "seednote-research", "redfox-research", "seednote-writing", "seednote-visual-design"},
+		"wechat-article": {"content-reuse", "content-tagging", "content-writing", "article-visual-design", "article-cover-design", "article-research", "redfox-research"},
 	}
 
 	for agentName, want := range expected {
@@ -236,6 +228,9 @@ func TestClaudeCodeSkillsHaveRuntimeOwner(t *testing.T) {
 			continue
 		}
 		name := entry.Name()
+		if isUpstreamSkillPath(filepath.Join(skillsRoot, name)) {
+			continue // Upstream submodules keep their own upstream ownership and are not Anban entrypoints.
+		}
 		if _, err := os.Stat(filepath.Join(skillsRoot, name, "SKILL.md")); os.IsNotExist(err) {
 			continue
 		}
@@ -288,6 +283,7 @@ func TestArticleCodexAgentDeclaresOwnedSkills(t *testing.T) {
 		"article-visual-design",
 		"article-cover-design",
 		"article-research",
+		"redfox-research",
 		"trending-topics",
 		"trend-rider",
 		"topic-evaluator",
@@ -401,6 +397,9 @@ func TestLongSkillReferencesUseDirectProgressiveDisclosure(t *testing.T) {
 				return err
 			}
 			if d.IsDir() || filepath.Base(path) != "SKILL.md" {
+				return nil
+			}
+			if isUpstreamSkillFile(path) {
 				return nil
 			}
 			skillBody := readRepoFile(t, path)

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -46,10 +47,175 @@ type TrendQueryResult struct {
 	Items       []TrendPlatformResult `json:"items"`
 	RequestedAt time.Time             `json:"requested_at"`
 	TTLSeconds  int64                 `json:"ttl_seconds"`
+	Provider    string                `json:"provider"`
 }
 
 type TrendFetcher interface {
 	Fetch(ctx context.Context, platform string) ([]TrendItem, string, error)
+}
+
+type RedFoxTrendFetcher struct {
+	client   *http.Client
+	endpoint string
+	apiKey   string
+	cacheTTL time.Duration
+	mu       sync.Mutex
+	items    map[string][]TrendItem
+	cachedAt time.Time
+	group    singleflight.Group
+}
+
+func NewRedFoxTrendFetcher(cfg config.TrendsRedFoxConfig) *RedFoxTrendFetcher {
+	return NewRedFoxTrendFetcherWithTTL(cfg, 10*time.Minute)
+}
+
+func NewRedFoxTrendFetcherWithTTL(cfg config.TrendsRedFoxConfig, cacheTTL time.Duration) *RedFoxTrendFetcher {
+	timeout := cfg.Timeout
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	if cacheTTL <= 0 {
+		cacheTTL = 10 * time.Minute
+	}
+	return &RedFoxTrendFetcher{
+		client:   &http.Client{Timeout: timeout},
+		endpoint: strings.TrimRight(strings.TrimSpace(cfg.Endpoint), "/"),
+		apiKey:   strings.TrimSpace(cfg.APIKey),
+		cacheTTL: cacheTTL,
+		items:    make(map[string][]TrendItem),
+	}
+}
+
+func (f *RedFoxTrendFetcher) Fetch(ctx context.Context, platform string) ([]TrendItem, string, error) {
+	if f == nil || f.client == nil || f.endpoint == "" || f.apiKey == "" {
+		return nil, "", fmt.Errorf("redfox trend provider is not configured")
+	}
+	f.mu.Lock()
+	if !f.cachedAt.IsZero() && time.Since(f.cachedAt) < f.cacheTTL {
+		if cached, ok := f.items[platform]; ok {
+			f.mu.Unlock()
+			return append([]TrendItem(nil), cached...), "redfox", nil
+		}
+	}
+	if !f.cachedAt.IsZero() && time.Since(f.cachedAt) >= f.cacheTTL {
+		f.items = make(map[string][]TrendItem)
+		f.cachedAt = time.Time{}
+	}
+	f.mu.Unlock()
+
+	result, err, _ := f.group.Do("all", func() (any, error) {
+		return f.fetchAll(ctx)
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	_ = result
+	f.mu.Lock()
+	items, ok := f.items[platform]
+	f.mu.Unlock()
+	if !ok {
+		return nil, "", fmt.Errorf("redfox trend response has no supported platform %q", platform)
+	}
+	return append([]TrendItem(nil), items...), "redfox", nil
+}
+
+func (f *RedFoxTrendFetcher) fetchAll(ctx context.Context) (any, error) {
+	body := []byte(`{"source":"anban"}`)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-KEY", f.apiKey)
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("redfox trend request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read redfox trend response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("redfox trend request returned HTTP %d", resp.StatusCode)
+	}
+	itemsByPlatform, err := parseRedFoxTrendPayload(data)
+	if err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	for key, values := range itemsByPlatform {
+		f.items[key] = values
+	}
+	f.cachedAt = time.Now().UTC()
+	f.mu.Unlock()
+	return nil, nil
+}
+
+func parseRedFoxTrendPayload(data []byte) (map[string][]TrendItem, error) {
+	var response struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data []struct {
+			HotSpotList []struct {
+				Platform string `json:"platName"`
+				Title    string `json:"title"`
+				URL      string `json:"url"`
+				Hot      any    `json:"maxHotScore"`
+			} `json:"hotSpotList"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &response); err != nil {
+		return nil, fmt.Errorf("decode redfox trend response: %w", err)
+	}
+	if response.Code != 2000 {
+		message := strings.TrimSpace(response.Msg)
+		if message == "" {
+			message = fmt.Sprintf("code %d", response.Code)
+		}
+		return nil, fmt.Errorf("redfox trend API error: %s", message)
+	}
+	result := make(map[string][]TrendItem)
+	for _, group := range response.Data {
+		for _, spot := range group.HotSpotList {
+			platform := normalizeRedFoxPlatform(spot.Platform)
+			if platform == "" || strings.TrimSpace(spot.Title) == "" {
+				continue
+			}
+			items := result[platform]
+			title := strings.ReplaceAll(strings.TrimSpace(spot.Title), " ", "")
+			url := strings.ReplaceAll(strings.TrimSpace(spot.URL), " ", "%20")
+			hot := ""
+			if spot.Hot != nil {
+				hot = fmt.Sprint(spot.Hot)
+			}
+			items = append(items, TrendItem{Title: title, Hot: hot, URL: url, Rank: len(items) + 1})
+			result[platform] = items
+		}
+	}
+	if len(result) == 0 {
+		return nil, fmt.Errorf("redfox trend response contains no supported items")
+	}
+	return result, nil
+}
+
+func normalizeRedFoxPlatform(raw string) string {
+	switch strings.TrimSpace(raw) {
+	case "微博":
+		return "weibo"
+	case "抖音":
+		return "douyin"
+	case "知乎":
+		return "zhihu"
+	case "B站", "哔哩哔哩":
+		return "bilibili"
+	case "百度":
+		return "baidu"
+	case "头条", "今日头条":
+		return "toutiao"
+	default:
+		return ""
+	}
 }
 
 type HTTPTrendFetcher struct {
@@ -178,6 +344,7 @@ type TrendService struct {
 	redis        *redis.Client
 	ttl          time.Duration
 	fetcher      TrendFetcher
+	provider     string
 	logger       *zerolog.Logger
 	group        singleflight.Group
 	localLocksMu sync.Mutex
@@ -191,13 +358,21 @@ func NewTrendService(repo repository.Repository, rdb *redis.Client, cfg config.T
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 8 * time.Second
 	}
-	return &TrendService{repo: repo, redis: rdb, ttl: cfg.TTL, fetcher: NewHTTPTrendFetcher(cfg.Timeout), logger: logger, localLocks: make(map[string]*sync.Mutex)}
+	var fetcher TrendFetcher = NewHTTPTrendFetcher(cfg.Timeout)
+	if strings.EqualFold(strings.TrimSpace(cfg.Provider), "redfox") {
+		fetcher = NewRedFoxTrendFetcherWithTTL(cfg.RedFox, cfg.TTL)
+	}
+	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	if provider == "" {
+		provider = "default"
+	}
+	return &TrendService{repo: repo, redis: rdb, ttl: cfg.TTL, fetcher: fetcher, provider: provider, logger: logger, localLocks: make(map[string]*sync.Mutex)}
 }
 func NewTrendServiceWithFetcher(repo repository.Repository, rdb *redis.Client, ttl time.Duration, fetcher TrendFetcher, logger *zerolog.Logger) *TrendService {
 	if ttl <= 0 {
 		ttl = 10 * time.Minute
 	}
-	return &TrendService{repo: repo, redis: rdb, ttl: ttl, fetcher: fetcher, logger: logger, localLocks: make(map[string]*sync.Mutex)}
+	return &TrendService{repo: repo, redis: rdb, ttl: ttl, fetcher: fetcher, provider: "default", logger: logger, localLocks: make(map[string]*sync.Mutex)}
 }
 
 func (s *TrendService) List(ctx context.Context, platforms []string, limit int, force bool) (*TrendQueryResult, error) {
@@ -211,7 +386,11 @@ func (s *TrendService) List(ctx context.Context, platforms []string, limit int, 
 	if limit > 100 {
 		limit = 100
 	}
-	result := &TrendQueryResult{RequestedAt: time.Now().UTC(), TTLSeconds: int64(s.ttl / time.Second), Items: make([]TrendPlatformResult, 0, len(selected))}
+	provider := s.provider
+	if provider == "" {
+		provider = "default"
+	}
+	result := &TrendQueryResult{RequestedAt: time.Now().UTC(), TTLSeconds: int64(s.ttl / time.Second), Provider: provider, Items: make([]TrendPlatformResult, 0, len(selected))}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	for _, platform := range selected {
@@ -272,7 +451,11 @@ func (s *TrendService) getPlatform(ctx context.Context, platform string, limit i
 	now := time.Now().UTC()
 	if err == nil {
 		result = snapshotResult(snapshot, s.ttl, limit, now)
-		if !force && now.Before(snapshot.FetchedAt.Add(s.ttl)) {
+		providerMatches := s.snapshotMatchesProvider(snapshot)
+		if !providerMatches {
+			result.Stale = true
+		}
+		if !force && providerMatches && now.Before(snapshot.FetchedAt.Add(s.ttl)) {
 			return result
 		}
 	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -286,7 +469,7 @@ func (s *TrendService) getPlatform(ctx context.Context, platform string, limit i
 	snapshot, err = s.repo.TrendSnapshots().FindByPlatform(ctx, platform)
 	if err == nil {
 		result = snapshotResult(snapshot, s.ttl, limit, time.Now().UTC())
-		if !time.Now().UTC().Before(snapshot.FetchedAt.Add(s.ttl)) {
+		if !s.snapshotMatchesProvider(snapshot) || !time.Now().UTC().Before(snapshot.FetchedAt.Add(s.ttl)) {
 			result.Stale = true
 		}
 	} else {
@@ -301,6 +484,17 @@ func (s *TrendService) getPlatform(ctx context.Context, platform string, limit i
 		result.LastError = refreshErr.Error()
 	}
 	return result
+}
+
+func (s *TrendService) snapshotMatchesProvider(snapshot *model.TrendSnapshot) bool {
+	if snapshot == nil {
+		return false
+	}
+	provider := strings.ToLower(strings.TrimSpace(s.provider))
+	if provider == "redfox" {
+		return strings.EqualFold(strings.TrimSpace(snapshot.Source), "redfox")
+	}
+	return !strings.EqualFold(strings.TrimSpace(snapshot.Source), "redfox")
 }
 
 func snapshotResult(snapshot *model.TrendSnapshot, ttl time.Duration, limit int, now time.Time) TrendPlatformResult {
@@ -331,7 +525,7 @@ func (s *TrendService) refresh(ctx context.Context, platform string, force bool,
 			// waited for the platform lock. Reuse that result.
 			return nil
 		}
-		if !force && now.Before(current.FetchedAt.Add(s.ttl)) {
+		if !force && s.snapshotMatchesProvider(current) && now.Before(current.FetchedAt.Add(s.ttl)) {
 			return nil
 		}
 	}

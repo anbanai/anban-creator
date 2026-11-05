@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 )
 
 const (
@@ -53,18 +54,21 @@ const (
 // ContentAsset is a user-owned reusable content idea. It is intentionally
 // independent of a single project so related platform projects can share it.
 type ContentAsset struct {
-	ID              string         `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID          string         `gorm:"type:char(36);index;not null" json:"user_id"`
-	Title           string         `gorm:"type:varchar(500);not null" json:"title"`
-	CoreQuestion    string         `gorm:"type:text" json:"core_question,omitempty"`
-	Audience        string         `gorm:"type:text" json:"audience,omitempty"`
-	SemanticKernel  string         `gorm:"type:text" json:"semantic_kernel,omitempty"`
-	Keywords        datatypes.JSON `gorm:"type:json" json:"keywords,omitempty"`
-	Lifecycle       string         `gorm:"type:varchar(20);not null;default:'evergreen'" json:"lifecycle"`
-	Status          string         `gorm:"type:varchar(20);not null;default:'candidate';index" json:"status"`
-	EvidenceQuality string         `gorm:"type:varchar(20)" json:"evidence_quality,omitempty"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
+	TitleKey        string            `gorm:"type:varchar(500);index" json:"-"`
+	ProjectUses     []TopicProjectUse `gorm:"-" json:"project_uses"`
+	Outputs         []TopicOutput     `gorm:"-" json:"outputs"`
+	ID              string            `gorm:"type:char(36);primaryKey" json:"asset_id"`
+	UserID          string            `gorm:"type:char(36);index;not null" json:"user_id"`
+	Title           string            `gorm:"type:varchar(500);not null" json:"title"`
+	CoreQuestion    string            `gorm:"type:text" json:"core_question,omitempty"`
+	Audience        string            `gorm:"type:text" json:"audience,omitempty"`
+	SemanticKernel  string            `gorm:"type:text" json:"semantic_kernel,omitempty"`
+	Keywords        datatypes.JSON    `gorm:"type:json" json:"keywords,omitempty"`
+	Lifecycle       string            `gorm:"type:varchar(20);not null;default:'evergreen'" json:"lifecycle"`
+	Status          string            `gorm:"type:varchar(20);not null;default:'candidate';index" json:"status"`
+	EvidenceQuality string            `gorm:"type:varchar(20)" json:"evidence_quality,omitempty"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
 func (ContentAsset) TableName() string { return "content_assets" }
@@ -302,4 +306,9 @@ func (ContentAutopilotPolicy) TableName() string { return "content_autopilot_pol
 
 func NewContentAutopilotPolicy(userID string) *ContentAutopilotPolicy {
 	return &ContentAutopilotPolicy{UserID: userID, FailureMode: ContentAutopilotFailurePause, Revision: 1}
+}
+
+func (a *ContentAsset) BeforeSave(_ *gorm.DB) error {
+	a.TitleKey = NormalizeTopicDedupeKey(a.Title)
+	return nil
 }

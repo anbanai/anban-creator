@@ -6,7 +6,7 @@ import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { assistantPrimaryPlatform } from '@/lib/assistant-creation-types'
-import { profileLabAgents, projectAgentIDs } from '@/lib/project-capabilities'
+import { normalizeProjectTypeSelection, primaryProjectPlatform, projectAgentIDs, projectCreationTypes } from '@/lib/project-capabilities'
 import { platformIcon, platformIconColor } from '@/lib/PlatformIcon'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverDescription, PopoverTitle, PopoverTrigger } from '@/components/ui/popover'
@@ -25,7 +25,11 @@ export function PersonaCreationSettings({ project, disabled }: { project: Pick<P
     setSaving(true)
     setError('')
     try {
-      const platform = assistantPrimaryPlatform(project.platform, agents)
+      const platform = agents.includes('ecommerce')
+        ? 'ecommerce'
+        : project.platform === 'ecommerce'
+          ? primaryProjectPlatform(agents) || undefined
+          : assistantPrimaryPlatform(project.platform, agents)
       const updated = await api.projects.update(project.id, {
         agent_ids: agents,
         ...(platform && platform !== project.platform ? { platform } : {}),
@@ -60,12 +64,13 @@ export function PersonaCreationSettings({ project, disabled }: { project: Pick<P
           <span className="text-[11px] text-muted-foreground">可多选</span>
         </div>
         <PopoverDescription className="truncate text-xs leading-5">{project.name}</PopoverDescription>
+        <p className="text-[11px] text-muted-foreground">电商设计需单独配置，其他类型可多选。</p>
       </div>
       <div role="group" aria-label="创作类型" className="assistant-scroll min-h-0 space-y-0.5 overflow-y-auto overscroll-contain px-1.5 pb-1.5">
-        {profileLabAgents.filter(agent => user?.is_admin || agent.id !== 'hypit').map(agent => {
+        {projectCreationTypes.filter(agent => user?.is_admin || agent.id !== 'hypit').map(agent => {
           const selected = agents.includes(agent.id)
           const Icon = platformIcon[agent.id] ?? (agent.id === 'video-edit' ? Scissors : agent.id === 'local-life' ? Clapperboard : Layers3)
-          return <button key={agent.id} type="button" aria-label={agent.label} aria-pressed={selected} disabled={saving} onClick={() => setAgents(current => selected ? current.filter(id => id !== agent.id) : [...current, agent.id])} className={`flex min-h-9 w-full min-w-0 items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-50 pointer-coarse:min-h-11 ${selected ? 'bg-muted/60 hover:bg-muted' : 'hover:bg-muted/60'}`}>
+          return <button key={agent.id} type="button" aria-label={agent.label} aria-pressed={selected} disabled={saving} onClick={() => setAgents(current => normalizeProjectTypeSelection(current, selected ? current.filter(id => id !== agent.id) : [...current, agent.id]))} className={`flex min-h-9 w-full min-w-0 items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-50 pointer-coarse:min-h-11 ${selected ? 'bg-muted/60 hover:bg-muted' : 'hover:bg-muted/60'}`}>
             <span aria-hidden="true" className={platformIconColor[agent.id] ?? 'text-muted-foreground'}><Icon className="size-4 shrink-0" /></span>
             <span className="min-w-0 flex-1 text-[13px] leading-5">{agent.label}</span>
             <Check aria-hidden="true" className={`size-3.5 shrink-0 ${selected ? 'text-foreground' : 'invisible'}`} />

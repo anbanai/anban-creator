@@ -197,6 +197,7 @@ export function switchTaskFormDefaults(
     execution_profile: current.execution_profile,
     topic: current.topic,
     prompt: current.prompt,
+    asset_id: current.asset_id,
     quantity: current.quantity,
     skip_reference_image: current.skip_reference_image,
     reference_image: cloneValue(current.reference_image),
@@ -268,17 +269,19 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
     target_platform: ecommerce?.target_platform ?? '',
     selling_points: ecommerce?.selling_points ?? '',
     language: ecommerce?.language ?? '',
-    hypit_input: task.hypit_input ? cloneValue(initialHypitInput(task.prompt, task.hypit_input)) : undefined,
-    montage_input: task.montage_input
+    hypit_input: task.type === 'hypit' && task.hypit_input
+      ? cloneValue(initialHypitInput(task.prompt, task.hypit_input))
+      : undefined,
+    montage_input: task.type === 'montage' && task.montage_input
       ? cloneValue(initialMontageInput(task.prompt, task.montage_input))
       : undefined,
-    local_life_input: task.local_life_input
+    local_life_input: task.type === 'local-life' && task.local_life_input
       ? cloneValue(initialLocalLifeInput(task.prompt, task.local_life_input))
       : undefined,
-    video_edit_input: task.video_edit_input
+    video_edit_input: task.type === 'video-edit' && task.video_edit_input
       ? cloneValue({ ...task.video_edit_input, brief: task.video_edit_input.brief || task.prompt })
       : undefined,
-    talking_head_editor_input: task.talking_head_editor_input
+    talking_head_editor_input: task.type === 'talking-head-editor' && task.talking_head_editor_input
       ? cloneValue({ ...task.talking_head_editor_input, brief: task.talking_head_editor_input.brief || task.prompt })
       : undefined,
   }
@@ -294,6 +297,7 @@ export function taskFormValuesToRequest(values: TaskFormDefaults, hypitDefaults?
       execution_profile: values.execution_profile as AgentExecutionProfileID,
       prompt,
       project_id: values.project_id,
+    ...(values.asset_id ? { asset_id: values.asset_id } : {}),
       quantity: values.quantity,
       input_attachments: [],
       agent_input: cloneValue(values.agent_input),
@@ -308,6 +312,7 @@ export function taskFormValuesToRequest(values: TaskFormDefaults, hypitDefaults?
     topic: values.topic,
     prompt,
     project_id: values.project_id,
+    ...(values.asset_id ? { asset_id: values.asset_id } : {}),
     quantity: values.quantity,
     image_ratio: values.image_ratio,
     image_capability_key: values.image_capability_key || undefined,

@@ -66,9 +66,9 @@ func TestImageCapabilityTierPricesRemainDistinct(t *testing.T) {
 		standardPrice     int64
 		professionalPrice int64
 	}{
-		{tier: "free", standardPrice: 300, professionalPrice: 500},
-		{tier: "pro", standardPrice: 270, professionalPrice: 450},
-		{tier: "enterprise", standardPrice: 240, professionalPrice: 400},
+		{tier: "free", standardPrice: 400, professionalPrice: 500},
+		{tier: "pro", standardPrice: 360, professionalPrice: 450},
+		{tier: "enterprise", standardPrice: 320, professionalPrice: 400},
 	}
 	for _, tt := range tests {
 		t.Run(tt.tier, func(t *testing.T) {
@@ -105,6 +105,7 @@ func TestProviderCostCatalogV4(t *testing.T) {
 		"moonshot/kimi-k2.7-code-highspeed":             {"token", "CNY", 13_000_000, 2_600_000, 13_000_000, 54_000_000},
 		"zhipu/glm-5.2":                                 {"token", "CNY", 8_000_000, 2_000_000, 8_000_000, 28_000_000},
 		"volcengine_ark/doubao-seedream-5-0-pro-260628": {pricingType: "output_pixel_tier", currency: "CNY"},
+		"tokenplayer/doubao-seedream-5-0-pro-260628":    {pricingType: "output_pixel_tier", currency: "CNY"},
 		"wangcai_openai/gpt-image-2-t":                  {pricingType: "openai_image_usage", currency: "USD"},
 		"wangcai_openai/gpt-image-2.5-sunburst":         {pricingType: "openai_image_usage", currency: "USD"},
 		"wangcai_openai/gpt-image-2.5-flare":            {pricingType: "openai_image_usage", currency: "USD"},
@@ -379,6 +380,7 @@ func initialCatalogMetadataContractError(bundle *Bundle) error {
 		"moonshot/kimi-k2.7-code-highspeed":             "https://platform.moonshot.cn/docs/pricing/chat",
 		"zhipu/glm-5.2":                                 "https://open.bigmodel.cn/pricing",
 		"volcengine_ark/doubao-seedream-5-0-pro-260628": "pricing-snapshot:volcengine-ark:seedream-output-pixel-prices:2026-07-13",
+		"tokenplayer/doubao-seedream-5-0-pro-260628":    "operator-confirmed:tokenplayer:doubao-seedream-5-0-pro-260628=volcengine_ark/doubao-seedream-5-0-pro-260628",
 		"wangcai_openai/gpt-image-2-t":                  "pricing-snapshot:wangcai-openai:gpt-image-2-t-usage-prices:2026-07-13",
 		"wangcai_openai/gpt-image-2.5-sunburst":         "operator-confirmed:wangcai-openai:gpt-image-2.5-sunburst=inherits-gpt-image-2-t-prices:2026-07-13",
 		"wangcai_openai/gpt-image-2.5-flare":            "operator-confirmed:wangcai-openai:gpt-image-2.5-flare=inherits-gpt-image-2-t-prices:2026-07-13",
@@ -426,7 +428,7 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		priceCredits     int64
 	}
 	want := map[string]skuSnapshot{
-		"image.standard":     {operation: "image.generate", chargePolicy: "image_operation", priceCredits: 300, route: "image_generation.capabilities.standard", delivery: "persisted_image"},
+		"image.standard":     {operation: "image.generate", chargePolicy: "image_operation", priceCredits: 400, route: "image_generation.capabilities.standard", delivery: "persisted_image"},
 		"image.professional": {operation: "image.generate", chargePolicy: "image_operation", priceCredits: 500, route: "image_generation.capabilities.professional", delivery: "persisted_image"},
 		"mcp.search_web":     {operation: "mcp.search_web", chargePolicy: "standalone_operation", priceCredits: 0, route: "search.web", delivery: "search_results"},
 		"mcp.fetch_web_page": {operation: "mcp.fetch_web_page", chargePolicy: "standalone_operation", priceCredits: 0, route: "search.fetch", delivery: "fetched_page"},
@@ -466,7 +468,7 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		}
 	}
 	for _, profile := range []string{"effective", "balanced", "quality"} {
-		for _, kind := range []string{"content_research", "content_validation", "content_script"} {
+		for _, kind := range []string{"content_research", "content_validation", "content_script", "topic_digest", "topic_script"} {
 			want["task."+kind+"."+profile] = skuSnapshot{operation: "task." + kind, executionProfile: profile, chargePolicy: "task_admission", priceCredits: 1200, delivery: kind + "_artifacts_verified"}
 		}
 		want["task.viral-analysis."+profile] = skuSnapshot{

@@ -264,6 +264,7 @@ type InteractiveService struct {
 	idleTimeout       time.Duration
 	maxHistory        int
 	enabled           bool
+	startupPending    bool
 	agents            []InteractiveAgent
 	adminOnly         bool
 	maxSessions       int
@@ -385,6 +386,15 @@ func interactiveAgentsFromCatalog(available bool) []InteractiveAgent {
 	}
 	return agents
 }
+
+// SetStartupReady keeps session admission and the bootstrap hint consistent.
+func (s *InteractiveService) SetStartupReady(ready bool) {
+	s.mu.Lock()
+	s.enabled = ready
+	s.startupPending = !ready
+	s.mu.Unlock()
+}
+
 func (s *InteractiveService) SetEnabled(v bool)   { s.mu.Lock(); s.enabled = v; s.mu.Unlock() }
 func (s *InteractiveService) SetAdminOnly(v bool) { s.mu.Lock(); s.adminOnly = v; s.mu.Unlock() }
 
@@ -465,6 +475,10 @@ func (s *InteractiveService) assistantReviewWorkContent(ctx context.Context, use
 	s.mu.RLock()
 	tasks := s.taskSvc
 	s.mu.RUnlock()
+	return assistantReviewWorkContent(ctx, tasks, userID, taskID, availableBytes)
+}
+
+func assistantReviewWorkContent(ctx context.Context, tasks *TaskService, userID, taskID string, availableBytes int) (string, error) {
 	if tasks == nil {
 		return "", ErrInteractivePersistence
 	}
@@ -3366,7 +3380,7 @@ func (f ExecRuntimeFactory) start(ctx context.Context, sessionID, presetID, runt
 const dshBridgeProviderAPIKeyEnv = "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY"
 
 func dshBridgeRuntimeEnvironment(dshHome, providerAPIKey string) []string {
-	keys := []string{"PATH", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "TZ", "SYSTEMROOT", "WINDIR", "NODE_EXTRA_CA_CERTS"}
+	keys := []string{"PATH", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "TZ", "SYSTEMROOT", "WINDIR"}
 	env := make([]string, 0, len(keys)+5)
 	for _, key := range keys {
 		if value, ok := os.LookupEnv(key); ok {

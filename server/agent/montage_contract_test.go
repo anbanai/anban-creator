@@ -44,10 +44,13 @@ func TestMontageWorkspaceInputFileIsWritten(t *testing.T) {
 	workDir := t.TempDir()
 	task := &model.Task{Type: model.PlatformMontage}
 	task.SetMontageInput(model.MontageInput{
-		Brief:       "make a launch video",
-		PipelineKey: "social-short",
+		Brief:            "make a launch video",
+		PipelineKey:      "hybrid",
+		OutputProfileKey: "youtube_shorts",
+		OutputProfile:    &model.MontageOutputProfile{Key: "youtube_shorts", DisplayName: "YouTube Shorts", Width: 1080, Height: 1920, AspectRatio: "9:16"},
 		Preferences: model.MontagePreferences{
 			DurationSeconds: 30,
+			PlaybookKey:     "flat-motion-graphics",
 		},
 	})
 
@@ -66,14 +69,37 @@ func TestMontageWorkspaceInputFileIsWritten(t *testing.T) {
 	if got.Brief != "make a launch video" {
 		t.Fatalf("Brief = %q, want make a launch video", got.Brief)
 	}
-	if got.PipelineKey != "social-short" {
-		t.Fatalf("PipelineKey = %q, want social-short", got.PipelineKey)
+	if got.PipelineKey != "hybrid" {
+		t.Fatalf("PipelineKey = %q, want hybrid", got.PipelineKey)
 	}
 	if got.Preferences.DurationSeconds != 30 {
 		t.Fatalf("Preferences = %+v, want duration 30", got.Preferences)
 	}
-	if strings.Contains(string(data), "aspect_ratio") {
-		t.Fatalf("montage-input.json contains non-authoritative aspect ratio: %s", data)
+	if got.OutputProfile == nil || got.OutputProfile.Key != "youtube_shorts" || got.OutputProfile.AspectRatio != "9:16" || got.OutputProfile.Width != 1080 || got.OutputProfile.Height != 1920 {
+		t.Fatalf("OutputProfile = %#v, want frozen YouTube Shorts profile", got.OutputProfile)
+	}
+	if got.Preferences.PlaybookKey != "flat-motion-graphics" {
+		t.Fatalf("PlaybookKey = %q, want flat-motion-graphics", got.Preferences.PlaybookKey)
+	}
+}
+
+func TestMontageWorkspaceInputRejectsMissingFrozenOutputConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		input model.MontageInput
+	}{
+		{name: "missing pipeline", input: model.MontageInput{OutputProfile: &model.MontageOutputProfile{Key: "tiktok", Width: 1080, Height: 1920, AspectRatio: "9:16"}}},
+		{name: "missing output profile", input: model.MontageInput{PipelineKey: "hybrid"}},
+		{name: "invalid output dimensions", input: model.MontageInput{PipelineKey: "hybrid", OutputProfile: &model.MontageOutputProfile{Key: "tiktok", Width: 1920, Height: 1080, AspectRatio: "9:16"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workDir := t.TempDir()
+			task := &model.Task{Type: model.PlatformMontage}
+			task.SetMontageInput(tc.input)
+			if err := writeMontageInputJSON(workDir, task); err == nil {
+				t.Fatal("writeMontageInputJSON succeeded with invalid frozen configuration")
+			}
+		})
 	}
 }
 
@@ -82,9 +108,6 @@ func TestMontageRuntimeManifestFilesAreWrittenWithoutSecrets(t *testing.T) {
 	task := &model.Task{Type: model.PlatformMontage}
 	opts := &ExecutionOptions{
 		Task: task,
-		MontageEnv: map[string]string{
-			"NEW_PROVIDER_TOKEN": "future-secret",
-		},
 		MontageToolPolicy: map[string]srvconfig.MontageToolCapabilityPolicy{
 			"video_generation": {Preferred: []string{"fal"}},
 		},
@@ -104,28 +127,6 @@ func TestMontageRuntimeManifestFilesAreWrittenWithoutSecrets(t *testing.T) {
 	defaults := readRepoFile(t, filepath.Join(workDir, "montage-pipeline-defaults.json"))
 	if !strings.Contains(defaults, "cinematic") || !strings.Contains(defaults, "budget_usd") {
 		t.Fatalf("montage-pipeline-defaults.json = %s, want configured defaults", defaults)
-	}
-	combined := policy + defaults
-	if strings.Contains(combined, "future-secret") {
-		t.Fatalf("runtime manifests leaked environment secret: %s", combined)
-	}
-}
-
-func TestMontageEnvForTaskAcceptsFutureKeysAndSkipsEmptyValues(t *testing.T) {
-	opts := &ExecutionOptions{
-		Task: &model.Task{Type: model.PlatformMontage},
-		MontageEnv: map[string]string{
-			"NEW_PROVIDER_TOKEN": "future-secret",
-			"EMPTY_PROVIDER_KEY": "",
-		},
-	}
-
-	got := montageEnvForTask(opts)
-	if got["NEW_PROVIDER_TOKEN"] != "future-secret" {
-		t.Fatalf("env = %#v, want future provider key", got)
-	}
-	if _, ok := got["EMPTY_PROVIDER_KEY"]; ok {
-		t.Fatalf("env = %#v, want empty value omitted", got)
 	}
 }
 
@@ -185,9 +186,10 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 		"montage-tool-policy.json",
 		"montage-pipeline-defaults.json",
 		"montage-project.json",
-		"Video aspect ratio: <ratio>",
-		"$VIDEO_ASPECT_RATIO",
-		"不得读取 `montage_input.preferences.aspect_ratio`",
+		"output_profile",
+		"不得从 Cloud 消息、项目默认值、delivery_targets 或自然语言推断或覆盖这些值",
+		"output_profile_key",
+		"aspect_ratio",
 		"output/cover.png",
 		"output/cover-quality.json",
 		"portrait-cover-design Skill",
@@ -211,9 +213,10 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 		"montage-tool-policy.json",
 		"montage-pipeline-defaults.json",
 		"montage-project.json",
-		"Video aspect ratio: <ratio>",
-		"$VIDEO_ASPECT_RATIO",
-		"不得读取 montage_input.preferences.aspect_ratio",
+		"output_profile",
+		"不得从 Cloud 消息、项目默认值、delivery_targets 或自然语言推断或覆盖这些值",
+		"output_profile_key",
+		"aspect_ratio",
 		"output/cover.png",
 		"output/cover-quality.json",
 		"portrait-cover-design Skill",
@@ -244,6 +247,28 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 		if !strings.Contains(reg, want) {
 			t.Fatalf("codex agents registration missing %q", want)
 		}
+	}
+}
+
+func TestMontageSkillUsesFrozenCreationConfiguration(t *testing.T) {
+	root := repoRoot(t)
+	skill := readRepoFile(t, filepath.Join(root, "harness", "skills", "montage", "SKILL.md"))
+	for _, want := range []string{
+		"montage-input.json",
+		"`pipeline_key`",
+		"`preferences.playbook_key`",
+		"`output_profile_key`",
+		"`output_profile`",
+		"invalid_montage_configuration",
+		"output/failure-state.json",
+		"output/failure-diagnosis.md",
+	} {
+		if !strings.Contains(skill, want) {
+			t.Fatalf("montage skill missing frozen configuration contract %q", want)
+		}
+	}
+	if strings.Contains(skill, `"pipeline_key": "default"`) {
+		t.Fatal("montage skill must not use the legacy default pipeline manifest example")
 	}
 }
 

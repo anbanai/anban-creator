@@ -17,7 +17,7 @@ import (
 func baseKubernetesConfigForTest() Config {
 	claude := validClaudeConfigForTest()
 	claude.Executor = "kubernetes"
-	claude.AgentServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+	claude.AgentServerURL = "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080"
 	claude.ExecutionTokenSecret = "0123456789abcdef0123456789abcdef"
 	claude.RuntimeImages = RuntimeImages{
 		"wechat-article":                  "registry.example.com/creator-agent-wechat-article@sha256:" + strings.Repeat("a", 64),
@@ -42,7 +42,6 @@ func baseKubernetesConfigForTest() Config {
 		ResourceProfiles:   completeKubernetesResourceProfilesForTest(),
 	}
 	cfg := Config{
-		Server:   ServerConfig{TLSCertFile: "/tls/tls.crt", TLSKeyFile: "/tls/tls.key"},
 		Database: DatabaseConfig{DSN: "dsn"},
 		JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
 		Asynq:    AsynqConfig{ContentGenerateTimeout: time.Hour},
@@ -178,9 +177,6 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 	if cfg.Dsh.KubernetesImagePullSecret != "acr-secret" {
 		t.Fatalf("DSH image pull secret = %q, want acr-secret", cfg.Dsh.KubernetesImagePullSecret)
 	}
-	if cfg.Claude.Kubernetes.ServerCASecret != "anban-internal-ca" {
-		t.Fatalf("server CA secret = %q, want anban-internal-ca", cfg.Claude.Kubernetes.ServerCASecret)
-	}
 	if cfg.Claude.Kubernetes.ProjectMemoryClaim != "creator-project-memory" {
 		t.Fatalf("project memory claim = %q, want creator-project-memory", cfg.Claude.Kubernetes.ProjectMemoryClaim)
 	}
@@ -203,7 +199,7 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 
 func completeKubernetesResourceProfilesForTest() map[string]KubernetesResourceConfig {
 	profiles := make(map[string]KubernetesResourceConfig)
-	for _, taskType := range executableKubernetesTaskTypes() {
+	for _, taskType := range KubernetesTaskTypes() {
 		profiles[taskType] = KubernetesResourceConfig{
 			Requests: map[string]string{"cpu": "500m", "memory": "512Mi"},
 			Limits:   map[string]string{"cpu": "1", "memory": "1Gi"},
@@ -212,21 +208,19 @@ func completeKubernetesResourceProfilesForTest() map[string]KubernetesResourceCo
 	return profiles
 }
 
-func executableKubernetesTaskTypes() []string {
-	types := make([]string, 0)
-	for _, pack := range agentpack.Default().Packs {
-		if pack.Kind != agentpack.KindManaged || pack.Channel == "" || (pack.Interaction != nil && pack.Interaction.UserQuestions) {
-			continue
+func TestKubernetesTaskTypesRegistersPluginTaskPacks(t *testing.T) {
+	for _, taskType := range []string{model.PlatformEcommerce, model.PlatformMoments} {
+		pack, ok := agentpack.Default().Pack(taskType)
+		if !ok {
+			t.Fatalf("Pack %q missing", taskType)
 		}
-		for _, taskKind := range pack.Bindings.TaskKinds {
-			if taskKind == model.TaskKindContentGeneration {
-				types = append(types, pack.Channel)
-			} else {
-				types = append(types, model.TaskTypeForTaskKind(taskKind))
-			}
+		if pack.Kind != agentpack.KindPlugin || !pack.HasTaskSurface() {
+			t.Fatalf("Pack %q = %#v, want plugin Pack with task surface", taskType, pack)
+		}
+		if !slices.Contains(KubernetesTaskTypes(), taskType) {
+			t.Errorf("KubernetesTaskTypes() missing plugin task Pack %q", taskType)
 		}
 	}
-	return types
 }
 
 func TestKubernetesResourcesForTaskRequiresExactProfile(t *testing.T) {
@@ -341,8 +335,7 @@ func TestNewConfigRejectsRemovedPreStartRetryLimit(t *testing.T) {
 database:
   dsn: "dsn"
 server:
-  tls_cert_file: "/tls/tls.crt"
-  tls_key_file: "/tls/tls.key"
+  port: 8080
 jwt:
   secret_key: "secret"
 storage:
@@ -361,7 +354,7 @@ claude:
     viral-ip-video-editor: "registry.example.com/creator-agent-viral-ip-video-editor@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     whiteboard-animation: "registry.example.com/creator-agent-whiteboard-animation@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
   execution_token_secret: "0123456789abcdef0123456789abcdef"
-  agent_server_url: "https://creator-api-svc:8443"
+  agent_server_url: "http://creator-api-svc:8080"
   kubernetes:
     service_account: "creator-agent-runner"
     nas_storage_class: "nas-sc-creator"
@@ -418,12 +411,21 @@ func TestValidateKubernetesRequiresAgentServerURL(t *testing.T) {
 	}
 }
 
-func TestValidateKubernetesRequiresHTTPSAgentServerURL(t *testing.T) {
-	cfg := baseKubernetesConfigForTest()
-	cfg.Claude.AgentServerURL = "http://creator-api-svc:8080"
-	err := cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "claude.agent_server_url must use https://") {
-		t.Fatalf("Validate() error = %v, want Kubernetes HTTPS requirement", err)
+func TestValidateKubernetesServerTransportWithoutLocalCertificates(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		serverURL string
+	}{
+		{name: "internal HTTP", serverURL: "http://creator-api-svc:8080"},
+		{name: "Ingress HTTPS", serverURL: "https://creator.example.com"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := baseKubernetesConfigForTest()
+			cfg.Claude.AgentServerURL = tc.serverURL
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("Validate() error = %v, want no local certificate requirement", err)
+			}
+		})
 	}
 }
 
@@ -527,7 +529,7 @@ func TestValidateDshKubernetesUsesClaudeServiceAccount(t *testing.T) {
 	cfg.Dsh.KubernetesNamespace = "anbanai-prod"
 	cfg.Dsh.KubernetesProjectMemoryClaim = "creator-project-memory"
 	cfg.Dsh.KubernetesProjectMemoryMount = "/workspace/project"
-	cfg.Dsh.ServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+	cfg.Dsh.ServerURL = "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080"
 	cfg.Dsh.ServerInstanceID = "server-1"
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "claude.kubernetes.service_account is required when dsh.executor is kubernetes") {
 		t.Fatalf("Validate() error = %v, want Claude ServiceAccount requirement for DSH", err)
@@ -542,7 +544,7 @@ func TestValidateDshKubernetesRequiresClaudeNamespace(t *testing.T) {
 	cfg.Dsh.KubernetesNamespace = "other-namespace"
 	cfg.Dsh.KubernetesProjectMemoryClaim = "creator-project-memory"
 	cfg.Dsh.KubernetesProjectMemoryMount = "/workspace/project"
-	cfg.Dsh.ServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+	cfg.Dsh.ServerURL = "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080"
 	cfg.Dsh.ServerInstanceID = "server-1"
 
 	err := cfg.Validate()
@@ -559,7 +561,7 @@ func TestValidateDshKubernetesRejectsMalformedDigestImageReference(t *testing.T)
 	cfg.Dsh.KubernetesNamespace = "anbanai-prod"
 	cfg.Dsh.KubernetesProjectMemoryClaim = "creator-project-memory"
 	cfg.Dsh.KubernetesProjectMemoryMount = "/workspace/project"
-	cfg.Dsh.ServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+	cfg.Dsh.ServerURL = "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080"
 	cfg.Dsh.ServerInstanceID = "server-1"
 
 	err := cfg.Validate()
@@ -596,7 +598,7 @@ func TestValidateDshKubernetesAcceptsTaggedAndImmutableImageReferences(t *testin
 			cfg.Dsh.KubernetesNamespace = "anbanai-prod"
 			cfg.Dsh.KubernetesProjectMemoryClaim = "creator-project-memory"
 			cfg.Dsh.KubernetesProjectMemoryMount = "/workspace/project"
-			cfg.Dsh.ServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+			cfg.Dsh.ServerURL = "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080"
 			cfg.Dsh.ServerInstanceID = "server-1"
 
 			if err := cfg.Validate(); err != nil {
@@ -620,7 +622,7 @@ func TestValidateDshKubernetesRejectsMalformedAndWhitespaceImageReferences(t *te
 			cfg.Dsh.KubernetesNamespace = "anbanai-prod"
 			cfg.Dsh.KubernetesProjectMemoryClaim = "creator-project-memory"
 			cfg.Dsh.KubernetesProjectMemoryMount = "/workspace/project"
-			cfg.Dsh.ServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+			cfg.Dsh.ServerURL = "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080"
 			cfg.Dsh.ServerInstanceID = "server-1"
 
 			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "dsh.image must be a valid container image reference without whitespace") {
@@ -658,8 +660,8 @@ func TestValidateKubernetesAllowsZeroCompletionGrace(t *testing.T) {
 
 func TestAgentServerURLUsesConfiguredKubernetesServiceURL(t *testing.T) {
 	cfg := baseKubernetesConfigForTest()
-	cfg.Claude.AgentServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443/"
-	if got := cfg.AgentServerURL(); got != "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443" {
+	cfg.Claude.AgentServerURL = "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080/"
+	if got := cfg.AgentServerURL(); got != "http://creator-api-svc.anbanai-prod.svc.cluster.local:8080" {
 		t.Fatalf("AgentServerURL() = %q", got)
 	}
 }

@@ -29,6 +29,20 @@ func testLogger() *zerolog.Logger {
 	return &l
 }
 
+func TestWrapSDKErrorPreservesSafeProviderDiagnostics(t *testing.T) {
+	provider := &OpenAIProvider{}
+	response := &http.Response{Header: make(http.Header)}
+	response.Header.Set("x-request-id", "request-safe-id")
+	err := provider.wrapSDKError(&openai.Error{StatusCode: http.StatusServiceUnavailable, Response: response})
+	var generateErr *GenerateError
+	if !errors.As(err, &generateErr) {
+		t.Fatalf("error = %T, want GenerateError", err)
+	}
+	if generateErr.Code != "server_error" || generateErr.HTTPStatusCode != http.StatusServiceUnavailable || generateErr.ProviderRequestID != "request-safe-id" {
+		t.Fatalf("diagnostics = %#v", generateErr)
+	}
+}
+
 func TestMapToImageSize(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -57,6 +71,8 @@ func TestMapToImageSize(t *testing.T) {
 		{"gpt-image-1 pixel passthrough HD", "1920x1080", "gpt-image-1", "1920x1080"},
 		{"chatgpt-image-latest pixel passthrough", "4096x4096", "chatgpt-image-latest", "4096x4096"},
 		{"gpt-image-2 exact portrait video ratio", "9:16", "gpt-image-2", "864x1536"},
+		{"sunburst fixed portrait preset", "9:16:2K", "gpt-image-2.5-sunburst", "864x1536"},
+		{"flare fixed portrait preset", "9:16:2K", "gpt-image-2.5-flare", "864x1536"},
 		{"gpt-image-2 exact landscape video ratio", "16:9", "gpt-image-2", "1536x864"},
 		{"gpt-image-2 square stays standard", "1:1", "gpt-image-2", "1024x1024"},
 		{"gpt-image-2 exact reduced ratio", "21:9", "gpt-image-2", "1456x624"},

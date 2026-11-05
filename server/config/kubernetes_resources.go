@@ -11,11 +11,20 @@ import (
 )
 
 // KubernetesTaskTypes lists the persisted task types registered for managed Jobs.
-// Shared content_generation kinds persist their channel; video_edit persists video-edit.
+// Shared content_generation kinds persist their channel; video_edit persists
+// video-edit. Plugin Packs that declare the task surface persist their Pack id
+// as the task type.
 func KubernetesTaskTypes() []string {
 	types := make(map[string]struct{})
 	for _, pack := range agentpack.Default().Packs {
-		if pack.Kind != agentpack.KindManaged || pack.Channel == "" || (pack.Interaction != nil && pack.Interaction.UserQuestions) {
+		if !pack.SupportsServerTask() {
+			continue
+		}
+		if pack.Kind == agentpack.KindPlugin {
+			types[pack.ID] = struct{}{}
+			continue
+		}
+		if pack.Channel == "" || (pack.Interaction != nil && pack.Interaction.UserQuestions) {
 			continue
 		}
 		for _, kind := range pack.Bindings.TaskKinds {

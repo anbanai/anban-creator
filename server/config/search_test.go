@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anbanai/anban-creator/server/model"
+	"gopkg.in/yaml.v3"
 )
 
 func TestSearchConfigValidationRequiresSelectedProviderCredentials(t *testing.T) {
@@ -58,6 +61,90 @@ func TestSearchConfigDefaultsEditionSpecificEndpoints(t *testing.T) {
 	}
 	if cfg.Search.Providers.DeepSeek.SearchEndpoint != "https://api.deepseek.com/v1/tools/search" {
 		t.Fatalf("deepseek endpoint = %q", cfg.Search.Providers.DeepSeek.SearchEndpoint)
+	}
+}
+
+func TestTrendsConfigDefaultsToDefaultProvider(t *testing.T) {
+	cfg := Config{}
+	cfg.applyDefaults()
+	if cfg.Trends.Provider != "default" {
+		t.Fatalf("trends provider = %q, want default", cfg.Trends.Provider)
+	}
+	if cfg.Trends.RedFox.Endpoint != "https://redfox.hk/story/api/hotKeyword/list" {
+		t.Fatalf("redfox endpoint = %q", cfg.Trends.RedFox.Endpoint)
+	}
+	if cfg.Trends.RedFox.Timeout != 8*time.Second {
+		t.Fatalf("redfox timeout = %s, want 8s", cfg.Trends.RedFox.Timeout)
+	}
+}
+
+func TestTrendsConfigValidationRequiresRedFoxCredentialsWhenSelected(t *testing.T) {
+	cfg := Config{Trends: TrendsConfig{
+		Provider: "redfox",
+		TTL:      time.Minute,
+		Timeout:  time.Second,
+		RedFox:   TrendsRedFoxConfig{Endpoint: "https://redfox.example.test/hot"},
+	}}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "trends.redfox.api_key") {
+		t.Fatalf("validation error = %v, want redfox api key error", err)
+	}
+}
+
+func TestTrendsConfigValidationRejectsUnknownProvider(t *testing.T) {
+	cfg := Config{Trends: TrendsConfig{Provider: "unknown", TTL: time.Minute, Timeout: time.Second}}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), `trends.provider "unknown" is unsupported`) {
+		t.Fatalf("validation error = %v", err)
+	}
+}
+
+func TestAgentEnvConfigIsIndependentFromTrendsConfig(t *testing.T) {
+	cfg, err := loadClaudeConfigYAML(t, validClaudeConfigYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Trends = TrendsConfig{Provider: "default", TTL: time.Minute, Timeout: time.Second, RedFox: TrendsRedFoxConfig{Endpoint: "https://trends.example.test/hot", APIKey: "trends-key"}}
+	cfg.WechatArticle.Env = map[string]string{
+		"REDFOX_API_KEY":      "agent-key",
+		"REDFOX_API_BASE_URL": "https://agent.example.test",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("independent Server and Agent RedFox config rejected: %v", err)
+	}
+	cfg.applyDefaults()
+	if cfg.Trends.RedFox.APIKey != "trends-key" || cfg.WechatArticle.Env["REDFOX_API_KEY"] != "agent-key" {
+		t.Fatalf("credentials were not kept independent: trends=%q agent=%q", cfg.Trends.RedFox.APIKey, cfg.WechatArticle.Env["REDFOX_API_KEY"])
+	}
+}
+
+func TestBusinessAgentEnvBlocksUseAgentIDsAndStaySeparateFromTrends(t *testing.T) {
+	var cfg Config
+	err := yaml.Unmarshal([]byte(`
+trends:
+  provider: default
+  redfox:
+    api_key: trends-server-key
+wechat-article:
+  env:
+    REDFOX_API_KEY: article-agent-key
+seednote:
+  env:
+    REDFOX_API_KEY: seednote-agent-key
+content-planning:
+  env:
+    REDFOX_API_KEY: research-agent-key
+`), &cfg)
+	if err != nil {
+		t.Fatalf("unmarshal business Agent env blocks: %v", err)
+	}
+	envs := cfg.AgentRuntimeEnvs()
+	if envs[model.AgentIDArticle]["REDFOX_API_KEY"] != "article-agent-key" ||
+		envs[model.AgentIDSeednote]["REDFOX_API_KEY"] != "seednote-agent-key" ||
+		envs[model.AgentIDContentPlanning]["REDFOX_API_KEY"] != "research-agent-key" {
+		t.Fatalf("Agent env blocks were not mapped by Agent ID: %#v", envs)
+	}
+	if cfg.Trends.RedFox.APIKey != "trends-server-key" {
+		t.Fatalf("Server trend credential was changed by Agent env blocks: %q", cfg.Trends.RedFox.APIKey)
 	}
 }
 

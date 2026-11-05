@@ -368,7 +368,11 @@ func (r *agentCompleteRequest) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-const agentRuntimeContractVersion = 7
+// agentRuntimeContractVersion tracks the bootstrap wire contract. Bump it
+// whenever a payload field changes meaning or validation: the runtime sends its
+// own constant, so an outdated Agent image fails with an explicit upgrade error
+// instead of failing later inside the container.
+const agentRuntimeContractVersion = 8
 
 // ProgressPlan handles POST /api/v1/agent/progress-plan.
 func (h *AgentHandler) ProgressPlan(c fiber.Ctx) error {

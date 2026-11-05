@@ -22,11 +22,15 @@ jobs:
           cache-dependency-path: server/go.sum
       - name: Download dependencies
         run: go -C server mod download
+      # govips (image-understanding downscale) needs libvips headers; the Server
+      # binary is no longer CGO-free, so every Go step below requires it.
+      - name: Install libvips
+        run: sudo apt-get update && sudo apt-get install -y libvips-dev
       - name: Check generated Agent Pack Catalog
         run: make agent-pack-check
-      - name: Build static Go binaries
+      - name: Build Go binary
         env:
-          CGO_ENABLED: "0"
+          CGO_ENABLED: "1"
         run: go -C server build -o /tmp/anban-creator-server .
       - name: Check formatting
         run: |
@@ -94,6 +98,14 @@ jobs:
         run: bun run test
       - name: Build
         run: npm run build
+      - name: Test real SDK startup and assistant presets
+        run: bun run test:startup
+      - name: Test startup with production dependencies
+        run: |
+          npm prune --omit=dev
+          npm run patch:dependencies
+          node test/fixtures/project-creator-start.mjs
+          node test/fixtures/assistant-presets-start.mjs
 
   frontend:
     runs-on: ubuntu-latest

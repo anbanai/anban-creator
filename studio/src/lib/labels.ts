@@ -40,7 +40,7 @@ export const taskTypeLabelCN: Record<string, string> = {
   'wechat-picture': '公众号贴图',
   seednote: '种草笔记',
   moments: '朋友圈',
-  ecommerce: '电商出图',
+  ecommerce: '电商设计',
   'viral-analysis': '爆文拆解',
   'content-research': '内容研究',
   'content-validation': '文本验证',
@@ -55,7 +55,7 @@ export const taskTypeLabelCN: Record<string, string> = {
 
 // --- Content Types ---
 
-// 电商平台类型统一用「电商出图」，与 contentTypeOptions / platformLabels /
+// 电商平台类型统一用「电商设计」，与 contentTypeOptions / platformLabels /
 // taskTypeLabelCN / TemplateCard 等一致。「电商素材包/模块」指的是交付物（按模块
 // 计费的素材包），是另一个语义，保持不变。
 export const contentTypeLabel: Record<string, string> = {
@@ -63,7 +63,7 @@ export const contentTypeLabel: Record<string, string> = {
   'wechat-article': '公众号文章',
   'wechat-picture': '公众号贴图',
   moments: '朋友圈',
-  ecommerce: '电商出图',
+  ecommerce: '电商设计',
   'viral-analysis': '爆文拆解',
   'content-research': '内容研究',
   'content-validation': '文本验证',
@@ -178,14 +178,14 @@ export const contentTypeOptions = [
   { value: 'local-life', label: '素材混剪' },
   { value: 'video-edit', label: '全自动视频剪辑' },
   { value: 'talking-head-editor', label: '口播精剪' },
-  { value: 'ecommerce', label: '电商出图' },
+  { value: 'ecommerce', label: '电商设计' },
 ]
 
 export const platformLabels: Record<string, string> = {
   seednote: '种草笔记',
   wechat: '公众号',
   moments: '朋友圈',
-  ecommerce: '电商出图',
+  ecommerce: '电商设计',
   montage: '视频生成',
   'whiteboard-animation': '白板动画',
   hypit: '视频复刻',

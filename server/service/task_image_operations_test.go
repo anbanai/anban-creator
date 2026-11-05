@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"image"
@@ -1296,5 +1297,128 @@ func TestTaskImageAnalysisCostEvidenceLifecycle(t *testing.T) {
 				t.Fatalf("token evidence = %#v, want cache read %d", cost.recorded, tt.wantCacheRead)
 			}
 		})
+	}
+}
+
+func TestTaskImageAnalyzeLogsProviderTimeoutDiagnostics(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	var logs bytes.Buffer
+	logger := zerolog.New(&logs)
+	providerErr := &imageUnderstandingProviderError{
+		Code: "provider_timeout", TimeoutSource: "route_timeout",
+		RequestWritten: true, RequestWriteMS: 12,
+	}
+	svc := NewTaskImageOperationsService(f.tasks, nil, &fakeTaskImageUnderstandingClient{err: providerErr}, nil, TaskImageOperationsConfig{
+		UnderstandingProvider: "tokenplayer_openai", UnderstandingModel: "kimi-k3",
+		UnderstandingTimeout: 3 * time.Minute,
+	}, &logger)
+
+	_, err := svc.Analyze(context.Background(), AnalyzeTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID,
+		FilePath: "output/source-a.png", Prompt: "inspect",
+	})
+	if err == nil || !strings.Contains(err.Error(), "provider_timeout") {
+		t.Fatalf("analyze error = %v, want provider timeout", err)
+	}
+	line := strings.TrimSpace(logs.String())
+	var event map[string]any
+	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		t.Fatalf("decode log %q: %v", line, err)
+	}
+	if event["message"] != "image understanding provider call failed" ||
+		event["error_code"] != "provider_timeout" ||
+		event["timeout_source"] != "route_timeout" ||
+		event["request_written"] != true ||
+		event["request_write_ms"] != float64(12) ||
+		event["timeout_ms"] != float64(180000) {
+		t.Fatalf("log event = %#v", event)
+	}
+	if event["operation_id"] == "" || event["image_data_url_bytes"] == float64(0) {
+		t.Fatalf("log event lost correlation/size fields: %#v", event)
+	}
+}
+
+func TestTaskImageOperationsAnalyzeDownscalesBeforeProvider(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	understanding := &fakeTaskImageUnderstandingClient{}
+	logger := zerolog.Nop()
+	svc := NewTaskImageOperationsService(f.tasks, nil, understanding, nil, TaskImageOperationsConfig{MaxImageEdge: 512}, &logger)
+	source := taskImagePNG(2000, 1500)
+	svc.downloadAnalysisImage = func(context.Context, string, int64) ([]byte, error) { return source, nil }
+
+	if _, err := svc.Analyze(context.Background(), AnalyzeTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID,
+		ImageURL: "https://example.com/large.png", Prompt: "inspect",
+	}); err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+
+	const jpegPrefix = "data:image/jpeg;base64,"
+	if !strings.HasPrefix(understanding.source, jpegPrefix) {
+		t.Fatalf("provider source = %.32q, want a JPEG data URL", understanding.source)
+	}
+	encoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(understanding.source, jpegPrefix))
+	if err != nil {
+		t.Fatalf("decode data url: %v", err)
+	}
+	config, err := jpeg.DecodeConfig(bytes.NewReader(encoded))
+	if err != nil {
+		t.Fatalf("decode downscaled jpeg: %v", err)
+	}
+	if config.Width > 512 || config.Height > 512 {
+		t.Fatalf("provider image is %dx%d, want long edge <= 512", config.Width, config.Height)
+	}
+	if len(encoded) >= len(source) {
+		t.Fatalf("provider image %d bytes, source %d bytes; want a smaller payload", len(encoded), len(source))
+	}
+}
+
+func TestTaskImageOperationsAnalyzeFallsBackToOriginalWhenDownscaleFails(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	understanding := &fakeTaskImageUnderstandingClient{}
+	logger := zerolog.Nop()
+	svc := NewTaskImageOperationsService(f.tasks, nil, understanding, nil, TaskImageOperationsConfig{MaxImageEdge: 512}, &logger)
+	// A PNG cut immediately after IHDR still reports its dimensions to
+	// DecodeConfig but carries no image data, which is the failure the fallback
+	// exists for.
+	source := taskImagePNG(2000, 1500)[:33]
+	svc.downloadAnalysisImage = func(context.Context, string, int64) ([]byte, error) { return source, nil }
+
+	if _, err := svc.Analyze(context.Background(), AnalyzeTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID,
+		ImageURL: "https://example.com/broken.png", Prompt: "inspect",
+	}); err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+
+	const pngPrefix = "data:image/png;base64,"
+	if !strings.HasPrefix(understanding.source, pngPrefix) {
+		t.Fatalf("provider source = %.32q, want the original PNG data URL", understanding.source)
+	}
+	encoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(understanding.source, pngPrefix))
+	if err != nil {
+		t.Fatalf("decode data url: %v", err)
+	}
+	if !bytes.Equal(encoded, source) {
+		t.Fatal("provider source does not match the original bytes")
+	}
+}
+
+func TestTaskImageOperationsAnalyzeKeepsOriginalWhenDownscaleDisabled(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	understanding := &fakeTaskImageUnderstandingClient{}
+	logger := zerolog.Nop()
+	svc := NewTaskImageOperationsService(f.tasks, nil, understanding, nil, TaskImageOperationsConfig{MaxImageEdge: 0}, &logger)
+	source := taskImagePNG(2000, 1500)
+	svc.downloadAnalysisImage = func(context.Context, string, int64) ([]byte, error) { return source, nil }
+
+	if _, err := svc.Analyze(context.Background(), AnalyzeTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID,
+		ImageURL: "https://example.com/large.png", Prompt: "inspect",
+	}); err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if want := imageDataURL("image/png", source); understanding.source != want {
+		t.Fatalf("provider source = %.32q, want the untouched PNG data URL", understanding.source)
 	}
 }

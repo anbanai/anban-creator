@@ -3,6 +3,29 @@ import { describe, expect, it } from 'vitest'
 import { AssistantDraftSummary } from './AssistantDraftSummary'
 
 describe('AssistantDraftSummary', () => {
+  it.each(['direct', 'payload'] as const)('shows the six profile dimensions and limits from a %s draft', (shape) => {
+    const payload = {
+      project: { name: '春茶笔记', platform: 'wechat', instructions: '只分享亲自尝试过的泡茶方法' },
+      profile: { dimensions: {
+        identity: { content: { positioning: '记录真实喝茶体验' } },
+        style: { content: { tone: '亲切自然' } },
+        audience: { content: { target_audience: '刚开始接触茶的新手' } },
+        platforms: { content: { description: '以公众号长文为主' } },
+        preferences: { content: { constraints: ['避免夸大健康功效'] } },
+        memory: { content: { notes: ['每周分享一款茶'] } },
+      }, analysis_limits: ['受众画像尚待实际数据验证'], follow_up_questions: ['后续是否增加短视频？'] },
+    }
+    render(<AssistantDraftSummary mode="profile" draft={shape === 'direct'
+      ? { revision: 1, ...payload }
+      : { revision: 1, project: { name: '过时名称' }, payload }} />)
+
+    for (const text of ['春茶笔记', '公众号', '只分享亲自尝试过的泡茶方法', '记录真实喝茶体验', '亲切自然', '刚开始接触茶的新手', '以公众号长文为主', '避免夸大健康功效', '每周分享一款茶', '受众画像尚待实际数据验证', '后续是否增加短视频？']) {
+      expect(screen.getByText(text)).toBeVisible()
+    }
+    expect(screen.queryByText('过时名称')).not.toBeInTheDocument()
+    expect(screen.queryByText('dimensions')).not.toBeInTheDocument()
+  })
+
   it('shows the authoritative creation plan with readable labels and a structured outline', () => {
     render(<AssistantDraftSummary mode="creation" draft={{
       revision: 1,
@@ -38,6 +61,20 @@ describe('AssistantDraftSummary', () => {
     expect(screen.getByText('图像能力')).toBeInTheDocument()
     expect(screen.getByText('增强')).toBeInTheDocument()
     expect(screen.queryByText('target_audience')).not.toBeInTheDocument()
+  })
+
+  it('keeps requirements, constraints and overrides visible while collapsing inherited context and execution defaults', () => {
+    render(<AssistantDraftSummary mode="creation" draft={{ revision: 2, payload: { plan: {
+      goal: '发布春茶教程', requirements: ['列出三种水温', '保留用户给出的价格'], constraints: ['不夸大健康功效'],
+      expected_result: '一篇可直接复查的文章', assets: [{ file_name: '春茶照片.jpg', url: 'https://example.com/tea.jpg' }],
+      missing_inputs: ['活动日期'], agent_decisions: ['由助手决定配图顺序'], temporary_overrides: ['本次用清单结构'],
+      profile_context: ['沿用亲切语气'], execution_profile: 'effective',
+    } } }} />)
+    for (const text of ['列出三种水温', '保留用户给出的价格', '不夸大健康功效', '一篇可直接复查的文章', '春茶照片.jpg', '活动日期', '由助手决定配图顺序', '本次用清单结构']) expect(screen.getByText(text)).toBeVisible()
+    expect(screen.getByText('沿用亲切语气')).not.toBeVisible()
+    expect(screen.getByText('性价比')).not.toBeVisible()
+    expect(screen.getByText('沿用的人设信息').closest('details')).not.toHaveAttribute('open')
+    expect(screen.getByText('执行设置').closest('details')).not.toHaveAttribute('open')
   })
 
   it('shows review recommendations, their evidence and limits without exposing raw JSON', () => {

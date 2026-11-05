@@ -69,7 +69,7 @@ func setupTaskTestDB(t *testing.T) *gorm.DB {
 		&model.LoginSession{}, &model.TaskFile{}, &model.Project{},
 		&model.TaskFileObjectCleanup{},
 		&model.BillingSettlementOutbox{},
-		&model.TopicPool{},
+		&model.TopicPool{}, &model.ContentAsset{}, &model.ContentAssetLink{},
 		&model.IlinkBinding{}, &model.IlinkNotification{}, &model.UploadSession{}, &model.Asset{}, &model.UserMediaAsset{},
 		&model.ProjectChannelConfig{}, &model.WechatPublicationAttempt{},
 		&model.WechatPublication{}, &model.WechatPublicationBinding{},

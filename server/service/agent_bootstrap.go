@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path"
 	"path/filepath"
 	"reflect"
@@ -92,11 +93,14 @@ type AgentBootstrapConfig struct {
 	MontageToolPolicy       map[string]srvconfig.MontageToolCapabilityPolicy
 	MontagePipelineDefaults map[string]map[string]any
 	Hypit                   srvconfig.HypitConfig
-	MontageEnv              map[string]string
 	VideoEdit               srvconfig.VideoEditConfig
 	TalkingHeadEditor       srvconfig.TalkingHeadEditorConfig
-	Registry                *AgentProfileRegistry
-	ProjectMemory           ProjectMemoryReader
+	// AgentEnvs is the complete runtime environment per Agent Pack ID. The
+	// Server resolves every credential an Agent may receive into this map; the
+	// runtime never derives it from business identity.
+	AgentEnvs     map[string]map[string]string
+	Registry      *AgentProfileRegistry
+	ProjectMemory ProjectMemoryReader
 }
 
 type AgentBootstrapService struct {
@@ -508,6 +512,11 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, err
 	}
 	files = append(files, planningFiles...)
+	topicRadarFiles, err := s.buildTopicRadarFiles(execution, task)
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, topicRadarFiles...)
 	attachmentFiles, err := s.buildAttachmentFiles(ctx, execution.ID, task, attachments, credentialDeadline)
 	if err != nil {
 		return nil, err
@@ -640,6 +649,12 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	if !regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`).MatchString(pack.Agent.Name) {
 		return nil, fmt.Errorf("%w: Agent Pack %q has invalid agent name", ErrAgentBootstrapConflict, packID)
 	}
+	agentEnv := s.runtimeEnv(pack.ID)
+	if err := model.ValidateRuntimeEnvironment(pack.ID, agentEnv); err != nil {
+		// A configuration defect is not a transient dependency failure: surface
+		// it as a Server error so operators do not retry a task that cannot work.
+		return nil, fmt.Errorf("Agent Pack %q runtime environment is invalid: %w", pack.ID, err)
+	}
 	return &AgentBootstrapResponse{
 		ExecutionToken: token, ExecutionID: execution.ID, TaskID: task.ID, TaskType: bootstrapTaskType,
 		AgentID: execution.AgentID, Channel: execution.Channel, TaskKind: execution.TaskKind,
@@ -653,7 +668,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		},
 		AgentFlag:            "anban:" + pack.Agent.Name,
 		AgentMemoryDirectory: ".claude/agent-memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath,
-		Env: s.runtimeEnv(task), Files: files, ArtifactTransport: ArtifactTransport{Mode: s.artifactTransportMode()},
+		Env: agentEnv, Files: files, ArtifactTransport: ArtifactTransport{Mode: s.artifactTransportMode()},
 		recoveryImages: recoveryImages,
 	}, nil
 }
@@ -817,54 +832,45 @@ func (s *AgentBootstrapService) signedReferenceAssetURL(ctx context.Context, ass
 	return signed, nil
 }
 
-func (s *AgentBootstrapService) montageEnv(task *model.Task) map[string]string {
-	if task != nil && model.IsHypitPlatform(task.Type) {
-		env := map[string]string{}
-		for k, v := range s.cfg.Hypit.Env {
-			if v != "" {
-				env[k] = v
-			}
-		}
-		return env
-	}
-	if task == nil || !model.IsMontagePlatform(task.Type) {
+// runtimeEnv returns the frozen runtime environment for the resolved Agent
+// Pack. The Server is the only authority on which credentials an Agent
+// receives; the runtime enforces transport invariants, not business identity.
+//
+// Returning a copy keeps the bootstrap response immutable: downstream code
+// cannot mutate the configured map for later executions in the same process.
+func (s *AgentBootstrapService) runtimeEnv(packID string) map[string]string {
+	env := maps.Clone(s.cfg.AgentEnvs[packID])
+	if len(env) == 0 {
 		return nil
-	}
-	env := make(map[string]string, len(s.cfg.MontageEnv))
-	for key, value := range s.cfg.MontageEnv {
-		if strings.TrimSpace(value) != "" {
-			env[key] = value
-		}
 	}
 	return env
 }
 
-func (s *AgentBootstrapService) runtimeEnv(task *model.Task) map[string]string {
-	if task != nil && model.IsVideoEditPlatform(task.Type) {
-		env := make(map[string]string, len(s.cfg.VideoEdit.Env)+1)
-		for key, value := range s.cfg.VideoEdit.Env {
-			if strings.TrimSpace(value) != "" {
-				env[key] = value
-			}
-		}
-		if key := strings.TrimSpace(s.cfg.VideoEdit.ElevenLabsAPIKey); key != "" {
-			env["ELEVENLABS_API_KEY"] = key
-		}
-		return env
+// buildTopicRadarFiles materializes the frozen Topic Radar task input the
+// Pack contract requires. The stored AgentInput intentionally leaves
+// execution_id empty at admission; the runtime binds it per execution.
+func (s *AgentBootstrapService) buildTopicRadarFiles(execution *model.TaskExecution, task *model.Task) ([]BootstrapFile, error) {
+	if execution == nil || task == nil {
+		return nil, nil
 	}
-	if task != nil && model.IsTalkingHeadEditorPlatform(task.Type) {
-		env := make(map[string]string, len(s.cfg.TalkingHeadEditor.Env)+1)
-		for key, value := range s.cfg.TalkingHeadEditor.Env {
-			if strings.TrimSpace(value) != "" {
-				env[key] = value
-			}
-		}
-		if key := strings.TrimSpace(s.cfg.TalkingHeadEditor.VideoUseAPIKey); key != "" {
-			env["VIDEO_USE_API_KEY"] = key
-		}
-		return env
+	if task.Type != model.TaskTypeTopicDigest && task.Type != model.TaskTypeTopicScript {
+		return nil, nil
 	}
-	return s.montageEnv(task)
+	var input map[string]any
+	if stored := task.AgentInput.Data(); len(stored) > 0 {
+		input = maps.Clone(stored)
+	}
+	if input == nil {
+		return nil, errors.New("topic radar input is empty")
+	}
+	input["task_id"] = task.ID
+	input["execution_id"] = execution.ID
+	input["task_kind"] = task.TaskKind
+	body, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("marshal topic radar input: %w", err)
+	}
+	return []BootstrapFile{{Path: "input/topic-radar.json", Text: string(body), Mode: 0444}}, nil
 }
 
 func (s *AgentBootstrapService) buildMontageFiles(ctx context.Context, task *model.Task, credentialDeadline time.Time) ([]BootstrapFile, error) {
@@ -1063,7 +1069,7 @@ func (s *AgentBootstrapService) buildTalkingHeadEditorFiles(ctx context.Context,
 	}
 	files = append(files, BootstrapFile{Path: "talking-head-editor-input.json", Text: string(raw), Mode: 0644})
 	policy := map[string]any{
-		"skills":            []string{"auto-editor", "video-use", "erduo-broll-loop-engineering"},
+		"skills":            []string{"auto-editor", "video-use", "erduo-broll-loop-engineering", "talking-head-sound-design", "content-tagging"},
 		"video_use_api_key": "server-injected",
 		"review_gate":       "motion-sample",
 		"review_decision":   task.ReviewDecision,

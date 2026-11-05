@@ -1,5 +1,39 @@
 # Studio 更新发布
 
+## Server 和内部 MCP 使用 HTTP
+
+Server 仅监听 HTTP 8080，域名 TLS 由 Ingress 终止。Claude Agent、MCP
+启动健康检查和 DSH 默认使用同一个内部 Service 地址，不依赖后端域名证书或私有 CA。
+
+更新现有 ConfigMap 中的后端配置时，删除 `server.tls_cert_file`、
+`server.tls_key_file` 和 `claude.kubernetes.server_ca_secret`，并将以下字段
+合并到原有配置中（保留其余业务配置）：
+
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 8080
+  public_base_url: https://api-creator.anbanai.com
+  studio_base_url: https://creator.anbanai.com
+claude:
+  agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-http://creator-api-svc.anbanai-prod.svc.cluster.local:8080}"
+dsh:
+  server_url: ""
+  mcp_url: ""
+```
+
+DSH 的空 `server_url` 继承 `claude.agent_server_url`，空 `mcp_url` 使用该地址的
+`/mcp` 路径。显式配置的旧 HTTPS 地址需要同步删除或改为内部 HTTP 地址。
+`server/Deployment.yaml` 只引用现有 ConfigMap；修改配置示例或更新镜像不会更新线上
+ConfigMap。配置使用 `subPath` 挂载，更新后需要重新创建 Server Pod 才会生效。
+Kubernetes API 的 ServiceAccount token 和集群 CA 挂载继续保留。
+
+Studio 生产构建使用 `VITE_API_BASE_URL=https://api-creator.anbanai.com/api/v1`。
+浏览器 REST、SSE 和插件 MCP 直接访问独立 API 入口；后端 CORS 允许
+`https://creator.anbanai.com`。`server.studio_base_url` 用于授权完成回跳和选题通知链接。
+Studio Nginx 只提供静态文件，不配置 `BACKEND_*`、`ARCHESTRA_*` 或 Archestra Ingress。
+Archestra 的独立入口与旧 Ingress 迁移见 [Archestra 接入说明](archestra-integration.md)。
+
 ## Claude 与 DSH 独立模型配置
 
 Claude 托管 Agent 和 DSH 交互会话使用两套独立的模型路由。Claude 只读取
@@ -75,7 +109,7 @@ docker build -f deploy/docker/Dockerfile.studio \
 docker push "$NEW_STUDIO_IMAGE"
 ```
 
-然后保持 `version_switch=base`，渲染并 apply 模板。Deployment 和 Service 的名字保持不变：
+然后保持 `version_switch=base`，渲染并 apply 模板。Deployment、Service 和 Ingress 的名字保持不变：
 
 ```bash
 export version_switch=base
@@ -83,6 +117,13 @@ envsubst < studio/Deployment.yaml > /tmp/studio-rendered.yaml
 kubectl apply -f /tmp/studio-rendered.yaml
 kubectl -n "$namespace" rollout status deployment/creator-studio-web-base --timeout=10m
 ```
+
+同一份清单里的 `creator-studio-web-archestra` Ingress 会把
+`archestra.anbanai.com` 路由到 Studio Service 的 `8080` 端口，由 ALB Ingress
+Controller 创建/更新转发规则，不需要再手动改 ALB 控制台。该 Ingress 通过
+`listen-ports: '[{"HTTPS": 443}]'` 只挂 HTTPS，复用 443 监听器上的
+`*.anbanai.com` 证书。完整接入说明见
+[archestra-integration.md](archestra-integration.md)。
 
 ## 已知边界
 
@@ -146,8 +187,11 @@ Montage image. Set `VIRAL_IP_VIDEO_EDITOR_AGENT_IMAGE` for release-manifest
 generation; the ACK renderer maps `images["viral-ip-video-editor"]` to
 `ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR`.
 
-Local/Compose deployments provide `ANBAN_AGENT_IMAGE_VIDEO_EDIT` and
-`VIDEO_EDIT_ELEVENLABS_API_KEY` through `.env`. Kubernetes reads the Scribe key
+Local/Compose deployments take the `video-edit` image from
+`claude.runtime_images` in `server/config.yaml` (the YAML default matches the
+image built by `make docker-up`) and set `video_edit.elevenlabs_api_key` in
+`server/config.yaml` (or export `VIDEO_EDIT_ELEVENLABS_API_KEY`). Kubernetes
+reads the Scribe key
 from the optional `video-edit-elevenlabs` Secret's `api-key` entry; create that
 Secret in the Server namespace before dispatching video-edit tasks. The Server
 requires the credential even when a task uses the default subtitle mode.
@@ -158,3 +202,31 @@ video-edit executions.
 只有在发布流水线已经单独 apply `deploy/k8s/ack-agent-runtime.yaml` 时，
 才使用 `--server-only`。Server 与 Agent 镜像仍必须从同一提交构建并更新
 到清单中；Catalog 不一致会被 Runtime 拒绝执行。
+
+## 设计师质量与背景透明度
+
+此版本的标准图像配置改用已有 `wangcai_openai` 图像接口，默认模型为
+`gpt-image-2-t`；标准和增强仍各自使用 `image.standard`、
+`image.professional` 的积分价格。上游成本继续按实际 provider/model 记账。
+
+**已有部署必须同步修改实际挂载的配置。** 只升级镜像或修改
+`server/config.example.yaml` 不会更新 ConfigMap、Secret 或本地 `config.yaml`。
+将 `model_routes.image_generation.capabilities.standard` 的
+`provider`、`model`、`base_url`、`api_key`、`response_format` 和
+`generation_features` 按示例配置更新，复用增强接口的地址和凭证；
+若已有 `ANBAN_IMAGE_MODEL_STANDARD`，替换原 Seedream 模型值为网关支持的
+GPT Image 模型，并确认该 provider/model 存在于 `billing/costs.yaml`。
+标准和增强均需声明四档 `quality_levels: [auto, high, medium, low]`、
+`has_background: true`、`output_formats: [png, jpeg, webp]`。
+不要只打开功能声明而继续使用不支持质量和透明底的旧接口。
+
+`background_opacity` 是 0–100 的白色背景不透明度，只在
+`background: transparent` 时提交。Server 先请求无损 PNG 透明底图，
+再叠加白色背景并保存选定格式；主体不透明像素保持不变。
+PNG、WebP 保留透明通道，JPEG 导出为白底。若接口返回全不透明图片，
+本次生成失败并走现有退款流程，不将整张图片变透明来模拟背景透明度。
+
+新字段由启动时 AutoMigrate 添加；手工迁移环境可执行
+`server/migrations/20261104_designer_background_opacity.sql`。
+发布后核对 `/api/v1/image-capabilities` 的两种模式均返回上述功能，
+再检查四档质量、透明度滑条、三种格式以及参考图点击放大。

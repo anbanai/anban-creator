@@ -96,11 +96,18 @@ type TaskService struct {
 	imageCapabilities    *ImageCapabilityResolver
 	reuseRunFinalizer    func(context.Context, *model.Task) error
 	researchJobFinalizer func(context.Context, *model.Task) error
+	topicRadarFinalizer  func(context.Context, *model.Task, *model.TaskExecution) error
 }
 
 func (s *TaskService) SetResearchJobFinalizer(finalizer func(context.Context, *model.Task) error) {
 	if s != nil {
 		s.researchJobFinalizer = finalizer
+	}
+}
+
+func (s *TaskService) SetTopicRadarFinalizer(finalizer func(context.Context, *model.Task, *model.TaskExecution) error) {
+	if s != nil {
+		s.topicRadarFinalizer = finalizer
 	}
 }
 
@@ -487,6 +494,9 @@ type CreateManualParams struct {
 	ReuseRunID        string
 	ReuseStageID      string
 	ResearchJobID     string
+	// Topic jobs are admitted only by the server-owned workflow.
+	topicDigestID    string
+	topicScriptJobID string
 	// FrozenTaskType and PreserveFrozenConfig are internal clone controls. They
 	// keep a clone on the source task contract even when the project changes.
 	FrozenTaskType       string
@@ -696,6 +706,29 @@ func validateUserMediaInputAttachments(ctx context.Context, repo repository.Repo
 // Style/author/theme dimensions are snapshotted from the project at creation.
 // Editing the project later does not change existing pending/running tasks.
 func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([]*model.Task, error) {
+	return s.createManual(ctx, p, false)
+}
+
+type taskCreationPreflightError struct{ error }
+
+func (e *taskCreationPreflightError) Unwrap() error { return e.error }
+
+type taskCreationInputError struct {
+	error
+	field string
+}
+
+func (e *taskCreationInputError) Unwrap() error { return e.error }
+
+// Only assistant confirmation needs the error phase to decide whether its
+// durable claim can be released. Ordinary CreateManual callers keep raw errors.
+func (s *TaskService) createManual(ctx context.Context, p CreateManualParams, trackCreationPhase bool) (created []*model.Task, resultErr error) {
+	persistenceStarted := false
+	defer func() {
+		if trackCreationPhase && resultErr != nil && !persistenceStarted {
+			resultErr = &taskCreationPreflightError{resultErr}
+		}
+	}()
 	if strings.TrimSpace(p.ExecutionProfile) == "" {
 		return nil, fmt.Errorf("execution_profile is required")
 	}
@@ -818,7 +851,17 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		effectiveImageRatio = model.DefaultImageRatioForChannel(channel)
 	}
 	if len(model.SupportedImageRatiosForChannel(channel)) > 0 && !model.IsBusinessImageRatioAllowedForChannel(channel, effectiveImageRatio) {
-		return nil, fmt.Errorf("%s for channel %s: %s", model.ValidImageRatioHint, channel, effectiveImageRatio)
+		err := fmt.Errorf("%s for channel %s: %s", model.ValidImageRatioHint, channel, effectiveImageRatio)
+		if trackCreationPhase {
+			return nil, &taskCreationInputError{error: err, field: "plan.image_ratio"}
+		}
+		return nil, err
+	}
+	if taskType == model.TaskTypeTopicDigest || taskType == model.TaskTypeTopicScript {
+		if (taskType == model.TaskTypeTopicDigest && p.topicDigestID == "") || (taskType == model.TaskTypeTopicScript && p.topicScriptJobID == "") {
+			return nil, fmt.Errorf("%w: topic radar requires server-owned admission", ErrInvalidAgentInput)
+		}
+		quantity = 1
 	}
 	agentInput, err := validateAndCloneAgentInput(taskType, p.AgentInput)
 	if err != nil {
@@ -1022,23 +1065,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			reuseRunKey = &reuseRunID
 		}
 
-		// Topic pool: when the caller supplied no prompt and the project is a
-		// topic-driven platform (article/seednote/moments), claim the next unused topic
-		// from the pool as this task's prompt — mirroring CreateFromPlan. Ecommerce
-		// is product-image based with no topic semantics, so it is skipped. The pool
-		// may run out mid-batch; remaining tasks keep an empty prompt and fall back
-		// to the agent's auto-research path. The generation skill respects an
-		// already-set topic, so it will not re-claim during execution.
 		taskPrompt := p.Prompt
-		if taskPrompt == "" && !p.PreserveFrozenConfig && s.topicPoolSvc != nil &&
-			((taskType == model.TaskTypeWechatArticle || taskType == model.TaskTypeWechatPicture) || taskType == model.PlatformSeednote || taskType == model.PlatformMoments) {
-			claimed, claimErr := s.topicPoolSvc.ClaimForTask(ctx, p.UserID, p.ProjectID, taskID)
-			if claimErr != nil {
-				s.logger.Warn().Err(claimErr).Str("task_id", taskID).Msg("claim topic from pool failed, leaving prompt empty")
-			} else if claimed != "" {
-				taskPrompt = claimed
-			}
-		}
 
 		// Seednote image composition: honor caller's explicit choice, otherwise rely
 		// on the model's column defaults (content on, tail off).
@@ -1121,6 +1148,11 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			task.SetInputAttachments(cloneEntryAttachments(p.InputAttachments))
 		}
 		if agentInput != nil {
+			if taskType == model.TaskTypeTopicDigest || taskType == model.TaskTypeTopicScript {
+				agentInput["task_id"] = task.ID
+				agentInput["execution_id"] = ""
+				agentInput["task_kind"] = task.TaskKind
+			}
 			task.SetAgentInput(agentInput)
 		}
 		if model.IsHypitPlatform(taskType) && p.HypitInput != nil {
@@ -1145,14 +1177,8 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 
 		tasks = append(tasks, task)
 	}
+	persistenceStarted = true
 	if err := s.persistTasksWithFixedAdmission(ctx, tasks, p.HasContentImage, p); err != nil {
-		if s.topicPoolSvc != nil {
-			for _, task := range tasks {
-				if relErr := s.topicPoolSvc.ReleaseForTask(ctx, task.ID); relErr != nil {
-					s.logger.Error().Err(relErr).Str("task_id", task.ID).Msg("failed to release topic during batch rollback")
-				}
-			}
-		}
 		return nil, fmt.Errorf("create tasks: %w", err)
 	}
 
@@ -1252,6 +1278,14 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 		return nil
 	}
 	createTask := func(repo repository.Repository, task *model.Task) error {
+		if s.topicPoolSvc != nil || task.ContentAssetID != "" {
+			if err := bindTaskTopic(ctx, repo, task, manualAdmission); err != nil {
+				return err
+			}
+		}
+		if err := bindTopicManagedTask(ctx, repo, task, manualAdmission); err != nil {
+			return err
+		}
 		if task.ResearchJobID != "" {
 			if err := repo.ContentAssets().BindResearchJobTask(ctx, task); err != nil {
 				return err
@@ -1270,6 +1304,14 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 		}
 		if err := repo.Tasks().Create(ctx, task); err != nil {
 			return err
+		}
+		if task.ContentAssetID != "" {
+			if err := repo.ContentAssets().ProjectTopicAssociation(ctx, task.UserID, task.ProjectID, task.ContentAssetID, task.ID, topicTaskIsProduction(task), task.CreatedAt); err != nil {
+				return err
+			}
+			if err := repo.ContentAssets().CreateLink(ctx, &model.ContentAssetLink{ID: generateTaskID(), UserID: task.UserID, AssetID: task.ContentAssetID, ProjectID: task.ProjectID, ContentKind: "task", ContentID: task.ID, Platform: task.ProjectSnapshot.Data().Platform, Relation: model.ContentAssetLinkDerivative}); err != nil {
+				return err
+			}
 		}
 		if !explicitlyDisableContentImage {
 			return nil
@@ -1590,27 +1632,11 @@ func (s *TaskService) createFromPlanWithEntryInputs(ctx context.Context, plan *m
 		s.freezeProjectChannelConfig(ctx, project.ID, channel, &projectSnapshot)
 		task.SetProjectSnapshot(projectSnapshot)
 	}
-	// Try to claim a topic from the topic pool if no prompt is set.
-	if prompt == "" && s.topicPoolSvc != nil && plan.ProjectID != "" {
-		claimed, err := s.topicPoolSvc.ClaimForTask(ctx, plan.UserID, plan.ProjectID, taskID)
-		if err != nil {
-			s.logger.Warn().Err(err).Str("plan_id", plan.ID).Msg("failed to claim topic from pool, falling back to auto-research")
-		} else if claimed != "" {
-			task.Prompt = claimed
-		}
-	}
 
 	if err := s.persistTasksWithFixedAdmission(ctx, []*model.Task{task}, plan.ID); err != nil {
 		if errors.Is(err, ErrBillingDebtOutstanding) || errors.Is(err, ErrBillingInsufficientForTask) {
 			s.logger.Warn().Err(err).Str("user_id", plan.UserID).Str("plan_id", plan.ID).Str("task_type", taskType).Msg("skipping plan task at fixed-SKU admission")
 			return nil, nil
-		}
-		// Release the pre-claimed topic back to the pool so it isn't orphaned
-		// (a no-op when no topic was claimed for this task).
-		if s.topicPoolSvc != nil {
-			if relErr := s.topicPoolSvc.ReleaseForTask(ctx, taskID); relErr != nil {
-				s.logger.Error().Err(relErr).Str("task_id", taskID).Msg("failed to release topic during plan task rollback")
-			}
 		}
 		return nil, fmt.Errorf("create task from plan: %w", err)
 	}

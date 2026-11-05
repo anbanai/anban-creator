@@ -4,6 +4,7 @@
 /.vscode/
 /.DS_Store
 .env
+server/config.yaml
 
 # Local runtime data and release outputs.
 /data/

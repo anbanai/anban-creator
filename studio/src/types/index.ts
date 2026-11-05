@@ -190,9 +190,9 @@ export type {
 } from './local-life'
 
 // Topic Pool
-export type { TopicPoolStatus, TopicPool } from './topic-pool'
 export type { ContentAssetStatus, ContentAssetLifecycle, ContentAsset, ContentAssetEvidence, ContentAssetLink, ContentAssetScoreSnapshot, ContentReuseRun, ContentReuseStageExecution, ContentReuseAuditEvent, ContentAssetDetail, ContentAssetLineage, ContentAssetPlatformContent, ContentAssetPlatformPerformance, ContentAssetRecommendation, ContentAutopilotPolicy } from './content-asset'
 export type { TrendItem, TrendPlatformResult, TrendQueryResult } from './trends'
+export type { TopicSubscription, TopicDigest, TopicSourceRef, TopicSuggestion, TopicScriptJob, TopicItems } from './topic-radar'
 
 // Viral Analysis
 export type {

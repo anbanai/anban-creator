@@ -58,48 +58,20 @@ func (s *ContentAssetService) DiscoverPublishedContentAssets(ctx context.Context
 			if title == "" {
 				continue
 			}
-			asset, findErr := s.repo.ContentAssets().FindByTitle(ctx, userID, title)
-			if findErr != nil {
-				asset = model.NewContentAsset(userID, title)
-				asset.CoreQuestion = title
-				if err := s.repo.ContentAssets().Create(ctx, asset); err != nil {
-					if existing, retryErr := s.repo.ContentAssets().FindByTitle(ctx, userID, title); retryErr == nil {
-						asset = existing
-					} else {
-						return created, err
-					}
-				} else {
-					created++
+			newAsset := false
+			err := s.repo.WithTx(ctx, func(repo repository.Repository) error {
+				if _, err := repo.Projects().FindByIDForUpdate(ctx, projectID); err != nil {
+					return err
 				}
-			}
-			if _, linkErr := s.repo.ContentAssets().FindLink(ctx, userID, asset.ID, kind, contentID, model.ContentAssetLinkOrigin); errors.Is(linkErr, gorm.ErrRecordNotFound) {
-				if err := s.repo.ContentAssets().CreateLink(ctx, &model.ContentAssetLink{ID: uuid.NewString(), AssetID: asset.ID, UserID: userID, ProjectID: projectID, ContentKind: kind, ContentID: contentID, Platform: project.Platform, Relation: model.ContentAssetLinkOrigin, Angle: "internal published analytics"}); err != nil {
-					return created, err
-				}
-			} else if linkErr != nil {
-				return created, linkErr
-			}
-			evidence, evidenceErr := s.repo.ContentAssets().ListEvidence(ctx, userID, asset.ID)
-			if evidenceErr != nil {
-				return created, evidenceErr
-			}
-			known := false
-			for _, item := range evidence {
-				if item != nil && item.SourceType == model.ContentAssetEvidencePublished && item.ProjectID == projectID && item.SourceID == contentID && item.DataSource == fmt.Sprintf("analytics:%d", state.Revision) {
-					known = true
-					break
-				}
-			}
-			if known {
-				continue
-			}
-			var dataAsOf *time.Time
-			if parsed, parseErr := time.Parse("2006-01-02", row.LastStatDate); parseErr == nil {
-				dataAsOf = &parsed
-			}
-			revisionRef, _ := json.Marshal(map[string]int64{"analytics_revision": state.Revision})
-			if err := s.repo.ContentAssets().CreateEvidence(ctx, &model.ContentAssetEvidence{ID: uuid.NewString(), AssetID: asset.ID, UserID: userID, SourceType: model.ContentAssetEvidencePublished, Platform: project.Platform, ProjectID: projectID, SourceKind: kind, SourceID: contentID, Title: title, Metrics: revisionRef, DataAsOf: dataAsOf, DataSource: fmt.Sprintf("analytics:%d", state.Revision), Quality: "verified"}); err != nil {
+				var err error
+				newAsset, err = importPublishedTopic(ctx, repo, userID, projectID, project.Platform, state.Revision, row, kind, contentID, title)
+				return err
+			})
+			if err != nil {
 				return created, err
+			}
+			if newAsset {
+				created++
 			}
 		}
 		if offset+len(rows) >= int(total) || len(rows) == 0 {
@@ -438,4 +410,61 @@ func (s *ContentAssetService) recoverReuseDispatch(ctx context.Context, now time
 		}
 	}
 	return errors.Join(failures...)
+}
+
+func importPublishedTopic(ctx context.Context, repo repository.Repository, userID, projectID, platform string, revision int64, row repository.AnalyticsContentRow, kind, contentID, title string) (bool, error) {
+	newAsset := false
+	asset, findErr := resolvePublishedTopic(ctx, repo, userID, projectID, row)
+	if errors.Is(findErr, gorm.ErrRecordNotFound) {
+		asset, findErr = repo.ContentAssets().FindByTitle(ctx, userID, title)
+	}
+	if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
+		return false, findErr
+	}
+	if findErr != nil {
+		asset = model.NewContentAsset(userID, title)
+		asset.CoreQuestion = title
+		if err := repo.ContentAssets().Create(ctx, asset); err != nil {
+			if existing, retryErr := repo.ContentAssets().FindByTitle(ctx, userID, title); retryErr == nil {
+				asset = existing
+			} else {
+				return false, err
+			}
+		} else {
+			newAsset = true
+		}
+	}
+	if _, linkErr := repo.ContentAssets().FindLink(ctx, userID, asset.ID, kind, contentID, model.ContentAssetLinkOrigin); errors.Is(linkErr, gorm.ErrRecordNotFound) {
+		if err := repo.ContentAssets().CreateLink(ctx, &model.ContentAssetLink{ID: uuid.NewString(), AssetID: asset.ID, UserID: userID, ProjectID: projectID, ContentKind: kind, ContentID: contentID, Platform: platform, Relation: model.ContentAssetLinkOrigin, Angle: "internal published analytics"}); err != nil {
+			return false, err
+		}
+	} else if linkErr != nil {
+		return false, linkErr
+	}
+	if err := projectTopicLink(ctx, repo, &model.ContentAssetLink{UserID: userID, ProjectID: projectID, AssetID: asset.ID, ContentKind: kind, ContentID: contentID, Relation: model.ContentAssetLinkOrigin}); err != nil {
+		return false, err
+	}
+	evidence, evidenceErr := repo.ContentAssets().ListEvidence(ctx, userID, asset.ID)
+	if evidenceErr != nil {
+		return false, evidenceErr
+	}
+	known := false
+	for _, item := range evidence {
+		if item != nil && item.SourceType == model.ContentAssetEvidencePublished && item.ProjectID == projectID && item.SourceID == contentID && item.DataSource == fmt.Sprintf("analytics:%d", revision) {
+			known = true
+			break
+		}
+	}
+	if known {
+		return newAsset, nil
+	}
+	var dataAsOf *time.Time
+	if parsed, parseErr := time.Parse("2006-01-02", row.LastStatDate); parseErr == nil {
+		dataAsOf = &parsed
+	}
+	revisionRef, _ := json.Marshal(map[string]int64{"analytics_revision": revision})
+	if err := repo.ContentAssets().CreateEvidence(ctx, &model.ContentAssetEvidence{ID: uuid.NewString(), AssetID: asset.ID, UserID: userID, SourceType: model.ContentAssetEvidencePublished, Platform: platform, ProjectID: projectID, SourceKind: kind, SourceID: contentID, Title: title, Metrics: revisionRef, DataAsOf: dataAsOf, DataSource: fmt.Sprintf("analytics:%d", revision), Quality: "verified"}); err != nil {
+		return false, err
+	}
+	return newAsset, nil
 }

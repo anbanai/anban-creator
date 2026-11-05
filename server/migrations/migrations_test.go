@@ -244,6 +244,13 @@ func TestFinalizedReferenceAssetsMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	sql := string(raw)
+	// Compare the current model with the entire migration chain, not just the
+	// original creation migration. Existing installations need the ALTER too.
+	prefixMigration, err := os.ReadFile("20261103_upload_session_media_prefix.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentSchemaSQL := sql + string(prefixMigration)
 	required := []string{
 		"CREATE TABLE `upload_sessions`",
 		"UNIQUE KEY `idx_upload_sessions_staging_key` (`staging_key`)",
@@ -295,7 +302,7 @@ func TestFinalizedReferenceAssetsMigration(t *testing.T) {
 			t.Fatalf("parse %T schema: %v", value, err)
 		}
 		for _, field := range stmt.Schema.Fields {
-			if field.DBName != "" && !strings.Contains(sql, "`"+field.DBName+"`") {
+			if field.DBName != "" && !strings.Contains(currentSchemaSQL, "`"+field.DBName+"`") {
 				t.Errorf("migration SQL missing %s.%s", stmt.Schema.Table, field.DBName)
 			}
 		}
@@ -674,5 +681,77 @@ func TestFeedbackAnalysisIdentityMigrationIsOneWay(t *testing.T) {
 	}
 	if got := strings.Count(sql, ";"); got != 4 {
 		t.Errorf("feedback analysis identity migration has %d statements, want 4 idempotent renames", got)
+	}
+}
+
+// MySQL 8 rejects the MariaDB-only `ADD COLUMN IF NOT EXISTS` form, so this
+// migration must derive the ALTER from information_schema and stay re-runnable.
+func TestUserMediaOSSSemanticMigrationUsesMySQLCompatibleGuards(t *testing.T) {
+	raw, err := os.ReadFile("20261102_user_media_oss_semantic.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Comments explain why the MariaDB-only form is avoided, so only executable
+	// statements are checked for it.
+	var executable []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "--") {
+			continue
+		}
+		executable = append(executable, line)
+	}
+	sql := strings.Join(executable, "\n")
+	for _, required := range []string{
+		"FROM information_schema.columns",
+		"FROM information_schema.statistics",
+		"COALESCE(@oss_semantic_missing_columns, '')",
+		"PREPARE oss_semantic_column_stmt FROM @oss_semantic_column_sql",
+		"EXECUTE oss_semantic_column_stmt",
+		"DEALLOCATE PREPARE oss_semantic_column_stmt",
+		"PREPARE oss_semantic_index_stmt FROM @oss_semantic_index_sql",
+		"EXECUTE oss_semantic_index_stmt",
+		"DEALLOCATE PREPARE oss_semantic_index_stmt",
+		"ADD COLUMN `summary` varchar(255) NULL",
+		"ADD COLUMN `analysis_provider` varchar(80) NULL",
+		"ADD COLUMN `indexed_at` datetime(3) NULL",
+		"ADD INDEX `idx_user_media_assets_indexed_at` (`indexed_at`)",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Errorf("OSS semantic migration missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"IF NOT EXISTS", "DROP", "DELETE", "TRUNCATE", "UPDATE `user_media_assets`"} {
+		if strings.Contains(strings.ToUpper(sql), forbidden) {
+			t.Errorf("OSS semantic migration contains unsupported or destructive fragment %q", forbidden)
+		}
+	}
+
+	// The migration must stay aligned with the model that AutoMigrate applies
+	// to fresh databases.
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open schema parser: %v", err)
+	}
+	stmt := &gorm.Statement{DB: db}
+	if err := stmt.Parse(&model.UserMediaAsset{}); err != nil {
+		t.Fatalf("parse user media asset schema: %v", err)
+	}
+	for _, name := range []string{"Summary", "AnalysisProvider", "IndexedAt"} {
+		field := stmt.Schema.LookUpField(name)
+		if field == nil || field.DBName == "" {
+			t.Fatalf("user media asset field %s is missing from the model", name)
+		}
+		if !strings.Contains(sql, "ADD COLUMN `"+field.DBName+"` ") {
+			t.Errorf("OSS semantic migration does not add user_media_assets.%s", field.DBName)
+		}
+	}
+	var indexedAtIndex string
+	for _, index := range stmt.Schema.ParseIndexes() {
+		if len(index.Fields) == 1 && index.Fields[0].DBName == "indexed_at" {
+			indexedAtIndex = index.Name
+		}
+	}
+	if indexedAtIndex != "idx_user_media_assets_indexed_at" {
+		t.Fatalf("user_media_assets.indexed_at index = %q, want idx_user_media_assets_indexed_at", indexedAtIndex)
 	}
 }

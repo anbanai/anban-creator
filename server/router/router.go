@@ -70,6 +70,7 @@ type Services struct {
 	AIEntryHandler                      *handler.AIEntryHandler
 	FeedbackHandler                     *handler.FeedbackHandler
 	ImageCapabilityHandler              *handler.ImageCapabilityHandler
+	DesignerHandler                     *handler.DesignerHandler
 	HypitCapabilityHandler              *handler.HypitCapabilityHandler
 	MontageCapabilityHandler            *handler.MontageCapabilityHandler
 	LocalLifeCapabilityHandler          *handler.LocalLifeCapabilityHandler
@@ -78,9 +79,9 @@ type Services struct {
 	ViralAnalysisHandler                *handler.ViralAnalysisHandler
 	PosterHandler                       *handler.PosterHandler
 	ResourceHandler                     *handler.ResourceHandler
-	TopicPoolHandler                    *handler.TopicPoolHandler
 	ContentAssetHandler                 *handler.ContentAssetHandler
 	TrendsHandler                       *handler.TrendsHandler
+	TopicRadarHandler                   *handler.TopicRadarHandler
 	IlinkHandler                        *handler.IlinkHandler
 	MCPHandler                          http.Handler
 	StorageProvider                     storage.Provider
@@ -278,6 +279,7 @@ func NewRouter(svc *Services) *fiber.App {
 		assistant.Post("/interactions/:id/answers", svc.AssistantHandler.InteractionAnswer)
 		assistant.Get("/interactions/:id/events", svc.AssistantHandler.InteractionEvents)
 		assistant.Post("/interactions/:id/commit", svc.AssistantHandler.InteractionCommit)
+		assistant.Post("/interactions/:id/continue", svc.AssistantHandler.InteractionContinue)
 		assistant.Delete("/interactions/:id", svc.AssistantHandler.InteractionDelete)
 		assistant.Get("/bootstrap", svc.AssistantHandler.Bootstrap)
 		assistant.Get("/projects/:projectId/works", svc.AssistantHandler.Works)
@@ -366,12 +368,6 @@ func NewRouter(svc *Services) *fiber.App {
 	// Topic pool endpoints (nested under projects)
 	// ---------------------------------------------------------------------------
 
-	if svc.TopicPoolHandler != nil {
-		apiV1.Get("/projects/:project_id/topics", svc.TopicPoolHandler.List)
-		apiV1.Post("/projects/:project_id/topics", svc.TopicPoolHandler.Create)
-		apiV1.Delete("/projects/:project_id/topics/:id", svc.TopicPoolHandler.Delete)
-		apiV1.Patch("/projects/:project_id/topics/:id/reset", svc.TopicPoolHandler.Reset)
-	}
 	if svc.ContentAssetHandler != nil {
 		apiV1.Get("/content-assets", svc.ContentAssetHandler.List)
 		apiV1.Get("/content-assets/by-content", svc.ContentAssetHandler.GetLineageByContent)
@@ -383,6 +379,7 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/content-assets/:id", svc.ContentAssetHandler.Get)
 		apiV1.Post("/content-assets/:id/score", svc.ContentAssetHandler.Score)
 		apiV1.Patch("/content-assets/:id", svc.ContentAssetHandler.Update)
+		apiV1.Post("/content-assets/:id/archive", svc.ContentAssetHandler.Archive)
 		apiV1.Post("/content-assets/:id/links", svc.ContentAssetHandler.Link)
 		apiV1.Post("/content-assets/:id/reuse-runs", svc.ContentAssetHandler.CreateReuseRun)
 		apiV1.Get("/content-reuse-runs/:id", svc.ContentAssetHandler.GetReuseRun)
@@ -396,6 +393,26 @@ func NewRouter(svc *Services) *fiber.App {
 	if svc.TrendsHandler != nil {
 		apiV1.Get("/trends", svc.TrendsHandler.List)
 		apiV1.Post("/trends/refresh", svc.TrendsHandler.Refresh)
+	}
+	if svc.TopicRadarHandler != nil {
+		apiV1.Get("/projects/:project_id/topic-radar/subscriptions", svc.TopicRadarHandler.ListSubscriptions)
+		apiV1.Post("/projects/:project_id/topic-radar/subscriptions", svc.TopicRadarHandler.CreateSubscription)
+		apiV1.Get("/projects/:project_id/topic-radar/notification-channels", svc.TopicRadarHandler.ListNotificationChannels)
+		apiV1.Post("/projects/:project_id/topic-radar/notification-channels", svc.TopicRadarHandler.CreateNotificationChannel)
+		apiV1.Post("/topic-radar/subscriptions/:subscription_id/run", svc.TopicRadarHandler.RunDigest)
+		apiV1.Get("/topic-radar/subscriptions/:subscription_id/digests", svc.TopicRadarHandler.ListDigests)
+		apiV1.Get("/topic-radar/digests/:digest_id/suggestions", svc.TopicRadarHandler.ListSuggestions)
+		apiV1.Patch("/topic-radar/subscriptions/:subscription_id", svc.TopicRadarHandler.UpdateSubscription)
+		apiV1.Delete("/topic-radar/subscriptions/:subscription_id", svc.TopicRadarHandler.DeleteSubscription)
+		apiV1.Get("/topic-radar/digests/:digest_id", svc.TopicRadarHandler.GetDigest)
+		apiV1.Post("/topic-radar/digests/:digest_id/retry", svc.TopicRadarHandler.RetryDigest)
+		apiV1.Get("/topic-radar/scripts/:script_id/artifact", svc.TopicRadarHandler.GetScriptArtifact)
+		apiV1.Post("/topic-radar/notification-channels/:channel_id/test", svc.TopicRadarHandler.TestNotificationChannel)
+		apiV1.Get("/topic-radar/scripts/:script_id", svc.TopicRadarHandler.GetScript)
+		apiV1.Post("/topic-radar/scripts/:script_id/retry", svc.TopicRadarHandler.RetryScript)
+		apiV1.Patch("/topic-radar/notification-channels/:channel_id", svc.TopicRadarHandler.UpdateNotificationChannel)
+		apiV1.Delete("/topic-radar/notification-channels/:channel_id", svc.TopicRadarHandler.DeleteNotificationChannel)
+		apiV1.Post("/content-assets/:id/scripts", svc.TopicRadarHandler.RequestScript)
 	}
 
 	// ---------------------------------------------------------------------------
@@ -586,6 +603,16 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.ImageCapabilityHandler != nil {
 		apiV1.Get("/image-capabilities", svc.ImageCapabilityHandler.List)
+	}
+	if svc.DesignerHandler != nil {
+		designer := apiV1.Group("/designer")
+		designer.Post("/quote", svc.DesignerHandler.Quote)
+		designer.Post("/generate", svc.DesignerHandler.Generate)
+		designer.Post("/register-reference", svc.DesignerHandler.RegisterReference)
+		designer.Post("/upload-reference", svc.DesignerHandler.UploadReference)
+		designer.Post("/upload-reference-from-url", svc.DesignerHandler.UploadReferenceFromURL)
+		designer.Get("/history", svc.DesignerHandler.GetHistory)
+		designer.Get("/generations/:id", svc.DesignerHandler.GetGeneration)
 	}
 	if svc.HypitCapabilityHandler != nil {
 		apiV1.Get("/hypit-capabilities", svc.HypitCapabilityHandler.List)

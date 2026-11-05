@@ -15,12 +15,12 @@ func TestTypeScriptRuntimeDockerfilesUseBundledAgentSDK(t *testing.T) {
 		name string
 		from []string
 	}{
-		{name: "Dockerfile.agent-wechat-article", from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"}},
-		{name: "Dockerfile.agent-wechat-picture", from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"}},
-		{name: "Dockerfile.agent-moments", from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"}},
-		{name: "Dockerfile.agent-ecommerce", from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"}},
-		{name: "Dockerfile.agent-seednote", from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"}},
-		{name: "Dockerfile.agent-montage", from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"}},
+		{name: "Dockerfile.agent-wechat-article", from: []string{"FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim AS builder", "FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim"}},
+		{name: "Dockerfile.agent-wechat-picture", from: []string{"FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim AS builder", "FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim"}},
+		{name: "Dockerfile.agent-moments", from: []string{"FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim AS builder", "FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim"}},
+		{name: "Dockerfile.agent-ecommerce", from: []string{"FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim AS builder", "FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim"}},
+		{name: "Dockerfile.agent-seednote", from: []string{"FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim AS builder", "FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim"}},
+		{name: "Dockerfile.agent-montage", from: []string{"FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim AS builder", "FROM " + dockerRuntimeImageMirror + "node:24.22.0-bookworm-slim"}},
 	} {
 		data := readTextFile(t, filepath.Join(root, "deploy", "docker", runtime.name))
 		if got := dockerfileFromInstructions(data); !reflect.DeepEqual(got, runtime.from) {
@@ -56,6 +56,7 @@ func TestManagedAgentImagesUsePinnedNode(t *testing.T) {
 	for _, name := range []string{
 		"Dockerfile.agent-ecommerce",
 		"Dockerfile.agent-feedback-analysis",
+		"Dockerfile.agent-topic-radar",
 		"Dockerfile.agent-hypit",
 		"Dockerfile.agent-moments",
 		"Dockerfile.agent-montage",
@@ -69,12 +70,12 @@ func TestManagedAgentImagesUsePinnedNode(t *testing.T) {
 		foundNodeImage := false
 		for _, instruction := range dockerfileFromInstructions(body) {
 			fields := strings.Fields(instruction)
-			if len(fields) < 2 || !strings.HasPrefix(fields[1], "node:") {
+			if len(fields) < 2 || !strings.HasPrefix(fields[1], dockerRuntimeImageMirror+"node:") {
 				continue
 			}
 			foundNodeImage = true
-			if !strings.HasPrefix(fields[1], "node:24.22.0-bookworm-slim") {
-				t.Errorf("%s uses Node image %q; want node:24.22.0-bookworm-slim", name, fields[1])
+			if !strings.HasPrefix(fields[1], dockerRuntimeImageMirror+"node:24.22.0-bookworm-slim") {
+				t.Errorf("%s uses Node image %q; want %snode:24.22.0-bookworm-slim", name, fields[1], dockerRuntimeImageMirror)
 			}
 		}
 		if !foundNodeImage {
@@ -157,8 +158,8 @@ func TestDshRuntimeUsesPinnedNodeLts(t *testing.T) {
 
 	dockerfile := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.runtime-dsh"))
 	for _, want := range []string{
-		"FROM node:24.22.0-alpine3.24 AS builder",
-		"FROM node:24.22.0-alpine3.24",
+		"FROM " + dockerRuntimeImageMirror + "node:24.22.0-alpine3.24 AS builder",
+		"FROM " + dockerRuntimeImageMirror + "node:24.22.0-alpine3.24",
 		"USER 1000:1000",
 	} {
 		if !strings.Contains(dockerfile, want) {

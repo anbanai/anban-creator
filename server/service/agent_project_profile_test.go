@@ -22,7 +22,8 @@ import (
 )
 
 func TestWechatDeliveryInstructionsAreSemanticAndServerResolved(t *testing.T) {
-	automatic := model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeAutomatic, AutomaticEnabled: true, AppIDConfigured: true, SecretConfigured: true}
+	automatic := model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeDraft, AutomaticEnabled: true, AppIDConfigured: true, SecretConfigured: true, CanCreateDraft: true}
+	direct := model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeDirectPublish, AutomaticEnabled: true, AppIDConfigured: true, SecretConfigured: true, CanCreateDraft: true, CanFormallyPublish: true}
 	manual := model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeUserAssisted, AutomaticEnabled: true, AppIDConfigured: false, SecretConfigured: false}
 	for _, tc := range []struct {
 		name      string
@@ -33,6 +34,7 @@ func TestWechatDeliveryInstructionsAreSemanticAndServerResolved(t *testing.T) {
 		forbidden string
 	}{
 		{name: "automatic article", taskType: model.TaskTypeWechatArticle, decision: automatic, want: "自动草稿交付", forbidden: "automatic_enabled"},
+		{name: "direct publish article", taskType: model.TaskTypeWechatArticle, decision: direct, want: "正式发布交付", forbidden: "automatic_enabled"},
 		{name: "manual article", taskType: model.TaskTypeWechatArticle, decision: manual, want: "手动复制交付", forbidden: "AppID"},
 		{name: "automatic picture", taskType: model.TaskTypeWechatPicture, decision: automatic, want: "当前任务内的相对文件路径", forbidden: "picture_publish_draft"},
 		{name: "picture draft disabled", taskType: model.TaskTypeWechatPicture, decision: automatic, input: map[string]any{"picture_publish_draft": false}, want: "手动复制交付", forbidden: "微信发布能力"},
@@ -53,6 +55,29 @@ func TestWechatDeliveryInstructionsAreSemanticAndServerResolved(t *testing.T) {
 	}
 }
 
+func TestWechatDeliveryDecisionUsesCanonicalModesAndFrozenCapabilities(t *testing.T) {
+	task := &model.Task{Type: model.TaskTypeWechatArticle}
+	for _, tc := range []struct {
+		name     string
+		decision model.WechatDeliveryDecision
+		wantErr  bool
+	}{
+		{name: "draft", decision: model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeDraft, AutomaticEnabled: true, AppIDConfigured: true, SecretConfigured: true, CanCreateDraft: true}},
+		{name: "direct publish", decision: model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeDirectPublish, AutomaticEnabled: true, AppIDConfigured: true, CanCreateDraft: true, CanFormallyPublish: true}},
+		{name: "manual", decision: model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeUserAssisted}},
+		{name: "draft capability mismatch", decision: model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeDraft, AutomaticEnabled: true, AppIDConfigured: true, SecretConfigured: true}, wantErr: true},
+		{name: "direct publish capability mismatch", decision: model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeDirectPublish, AutomaticEnabled: true, AppIDConfigured: true, CanCreateDraft: true}, wantErr: true},
+		{name: "legacy mode rejected", decision: model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeAutomatic, AutomaticEnabled: true, AppIDConfigured: true, SecretConfigured: true, CanCreateDraft: true}, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateWechatDeliveryDecision(task, tc.decision)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("validateWechatDeliveryDecision() error = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestWechatProfileScopeRejectsTaskTypeChannelMismatch(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -60,6 +85,7 @@ func TestWechatProfileScopeRejectsTaskTypeChannelMismatch(t *testing.T) {
 		scope string
 	}{
 		{name: "article type with picture channel", task: model.Task{Type: model.TaskTypeWechatArticle, Channel: model.ChannelWechatPicture}, scope: "wechat-picture"},
+		{name: "picture type with deprecated scope", task: model.Task{Type: model.TaskTypeWechatPicture, Channel: model.ChannelWechatPicture}, scope: "wechat-picture"},
 		{name: "picture type with article channel", task: model.Task{Type: model.TaskTypeWechatPicture, Channel: model.ChannelArticle}, scope: model.ScopeWechat},
 		{name: "article mismatch without scope", task: model.Task{Type: model.TaskTypeWechatArticle, Channel: model.ChannelWechatPicture}},
 		{name: "picture mismatch without scope", task: model.Task{Type: model.TaskTypeWechatPicture, Channel: model.ChannelArticle}},
@@ -125,8 +151,8 @@ func TestWechatProjectProfileRequiresTaskBoundContext(t *testing.T) {
 	article.SetProjectSnapshot(model.ProjectSnapshot{
 		Platform: model.PlatformWechat,
 		WechatDelivery: model.WechatDeliveryDecision{
-			Mode: model.WechatDeliveryModeAutomatic, AutomaticEnabled: true,
-			AppIDConfigured: true, SecretConfigured: true,
+			Mode: model.WechatDeliveryModeDraft, AutomaticEnabled: true,
+			AppIDConfigured: true, SecretConfigured: true, CanCreateDraft: true,
 		},
 	})
 	if err := repo.Tasks().Create(context.Background(), article); err != nil {
@@ -160,8 +186,8 @@ func TestWechatProjectProfileRequiresTaskBoundContext(t *testing.T) {
 	picture.SetProjectSnapshot(model.ProjectSnapshot{
 		Platform: model.PlatformWechat,
 		WechatDelivery: model.WechatDeliveryDecision{
-			Mode: model.WechatDeliveryModeAutomatic, AutomaticEnabled: true,
-			AppIDConfigured: true, SecretConfigured: true,
+			Mode: model.WechatDeliveryModeDraft, AutomaticEnabled: true,
+			AppIDConfigured: true, SecretConfigured: true, CanCreateDraft: true,
 		},
 	})
 	if err := repo.Tasks().Create(context.Background(), picture); err != nil {

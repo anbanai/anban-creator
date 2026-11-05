@@ -1,4 +1,4 @@
-import { Sparkles } from 'lucide-react'
+import { Lightbulb, ShieldUser, Sparkles } from 'lucide-react'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -14,30 +14,33 @@ describe('navigation IA', () => {
     expect(mvpNavItems.map((item) => item.label)).toEqual([
       '首页',
       '人设',
+      '选题',
       '作品',
       '排期',
       '钱包',
       '插件',
       '设置',
       '内容分析',
-      '选题资产',
       '素材库',
       '热点雷达',
     ])
     expect(mvpNavItems[0]?.icon).toBe(Sparkles)
+    expect(mvpNavItems.find((item) => item.to === '/projects')?.icon).toBe(ShieldUser)
+    expect(mvpNavItems.find((item) => item.to === '/topics')?.icon).toBe(Lightbulb)
     expect(mvpNavItems.map((item) => item.to)).not.toContain('/timeline')
     expect(mvpNavItems.map((item) => item.to)).not.toContain('/usage')
     expect(workspaceNavItems.map((item) => item.to)).toEqual([
       '/',
       '/projects',
+      '/topics',
       '/tasks',
       '/plans',
+      '/designer',
       '/timeline',
       '/billing',
       '/plugins',
       '/settings',
       '/content-analytics',
-      '/content-assets',
       '/media-assets',
       '/trends',
     ])
@@ -56,14 +59,15 @@ describe('navigation IA', () => {
     expect(allNavItems.map((item) => item.to)).toEqual([
       '/',
       '/projects',
+      '/topics',
       '/tasks',
       '/plans',
+      '/designer',
       '/timeline',
       '/billing',
       '/plugins',
       '/settings',
       '/content-analytics',
-      '/content-assets',
       '/media-assets',
       '/trends',
       '/templates',

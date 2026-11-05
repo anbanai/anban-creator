@@ -860,7 +860,7 @@ func TestClaudeCodeSkillsStayWithinOfficialSizeGuideline(t *testing.T) {
 		if d.IsDir() || filepath.Base(path) != "SKILL.md" {
 			return nil
 		}
-		if isUpstreamHumanizerSkillPath(path) {
+		if isUpstreamSkillFile(path) {
 			return nil
 		}
 		lineCount := strings.Count(readRepoFile(t, path), "\n") + 1
@@ -883,7 +883,7 @@ func TestClaudeCodeSkillsUseOfficialInvocationContract(t *testing.T) {
 		if d.IsDir() || filepath.Base(path) != "SKILL.md" {
 			return nil
 		}
-		if isUpstreamHumanizerSkillPath(path) {
+		if isUpstreamSkillFile(path) {
 			return nil
 		}
 		fm := readYAMLFrontmatter(t, path)

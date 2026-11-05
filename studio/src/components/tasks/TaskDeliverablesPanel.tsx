@@ -1,6 +1,7 @@
-import { AlertCircle, CheckCircle2, CircleDashed, FolderOpen, LoaderCircle, Send } from 'lucide-react'
+import { AlertCircle, CheckCircle2, CircleDashed, FolderOpen, LoaderCircle, ScrollText, Send } from 'lucide-react'
 import type { TaskFile, TaskLifecycle, TaskOutcome, TaskStatus, WorkflowStatus } from '@/types'
 import { Button } from '@/components/common/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { TaskFileDownloads, TaskStageFiles } from './TaskStageFiles'
 import { CompletionSummary, TaskExecutionRail } from './TaskExecutionRail'
 import { taskFailurePresentation } from '@/lib/labels'
@@ -43,6 +44,7 @@ export function TaskDeliverablesPanel({ taskId, taskStatus, files, taskType, tas
   const hasShareBody = coreFiles.some((file) => file.state === 'delivered' && (taskType === 'wechat-article' ? file.delivery_role === 'html' && file.mime_type === 'text/html' : file.delivery_role === 'final_markdown' && file.mime_type === 'text/markdown'))
   const Icon = hasFiles ? CheckCircle2 : CircleDashed
   const failure = taskFailurePresentation({ error_message: errorMessage, outcome })
+  const articleImageDeliveryBlocked = taskType === 'wechat-article' && outcome?.visual?.status === 'partial'
   const internalGroups = new Map<string, TaskFile[]>()
   for (const file of internalFiles) {
     const stageID = file.producer_stage_id || 'other'
@@ -66,6 +68,12 @@ export function TaskDeliverablesPanel({ taskId, taskStatus, files, taskType, tas
         <div className="flex items-center gap-2">
           {shareable ? <TaskSharePopover taskId={taskId} canCreate={hasShareBody && !filesLoading && !filesError} /> : null}
           {hasFiles ? <TaskFileDownloads taskId={taskId} files={coreFiles} /> : null}
+          {onOpenLogs ? <Tooltip>
+            <TooltipTrigger render={<Button type="button" size="icon-md" variant="ghost" className="hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent" onClick={onOpenLogs} aria-label="查看完整日志" />}>
+              <ScrollText className="size-4" aria-hidden="true" />
+            </TooltipTrigger>
+            <TooltipContent>查看完整日志</TooltipContent>
+          </Tooltip> : null}
         </div>
       </div>
       {taskStatus === 'failed' || taskStatus === 'cancelled' ? (
@@ -83,7 +91,7 @@ export function TaskDeliverablesPanel({ taskId, taskStatus, files, taskType, tas
       ) : null}
       {hasFiles ? (
         <div className="mt-4 border-t border-border/70 pt-4">
-          <TaskStageFiles taskId={taskId} taskType={taskType} files={coreFiles} />
+          <TaskStageFiles taskId={taskId} taskType={taskType} files={coreFiles} relatedFiles={settledFiles} articleImageDeliveryBlocked={articleImageDeliveryBlocked} />
         </div>
       ) : filesError ? (
         <div role="alert" className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-4 text-sm text-destructive">
@@ -113,7 +121,7 @@ export function TaskDeliverablesPanel({ taskId, taskStatus, files, taskType, tas
             <p className="text-xs text-muted-foreground">仅 Admin 可预览，用于检查执行产物；内部文件不提供下载。</p>
             {Array.from(internalGroups, ([stageID, groupedFiles]) => {
               const title = lifecycle?.stages.find((stage) => stage.id === stageID)?.title || (stageID === 'other' ? '其他文件' : stageID)
-              return <section key={stageID} aria-label={title} className="space-y-2"><h3 className="text-xs font-medium text-foreground">{title}</h3><TaskStageFiles taskId={taskId} taskType={taskType} files={groupedFiles} /></section>
+              return <section key={stageID} aria-label={title} className="space-y-2"><h3 className="text-xs font-medium text-foreground">{title}</h3><TaskStageFiles taskId={taskId} taskType={taskType} files={groupedFiles} relatedFiles={settledFiles} articleImageDeliveryBlocked={articleImageDeliveryBlocked} /></section>
             })}
           </div>
         </details>

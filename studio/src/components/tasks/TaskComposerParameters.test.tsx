@@ -1,7 +1,7 @@
 import { fireEvent, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { AgentExecutionProfileCapability, BillingCatalog } from '@/types'
+import type { AgentExecutionProfileCapability } from '@/types'
 import { render } from '@/test/test-utils'
 import { TaskComposerParameters } from './TaskComposerParameters'
 
@@ -26,19 +26,6 @@ const profiles: AgentExecutionProfileCapability[] = [
   },
 ]
 
-const catalog: BillingCatalog = {
-  catalog_id: 'catalog-1',
-  currency: 'credits',
-  skus: [{
-    id: 'article-effective',
-    operation: 'task.wechat_article',
-    charge_policy: 'task_admission',
-    execution_profile: 'effective',
-    price_credits: 4800,
-    delivery: 'task',
-  }],
-}
-
 describe('TaskComposerParameters', () => {
   it('combines execution, image, and finite task quantity settings in a wide compact popover', () => {
     const onExecutionProfileChange = vi.fn()
@@ -52,7 +39,6 @@ describe('TaskComposerParameters', () => {
           profiles,
           value: 'effective',
           onChange: onExecutionProfileChange,
-          catalog,
           taskType: 'wechat-article',
         }}
         image={{
@@ -90,8 +76,9 @@ describe('TaskComposerParameters', () => {
     fireEvent.click(trigger)
     const popover = screen.getByRole('dialog', { name: '创作参数' })
     expect(within(popover).getByText('执行配置')).toBeInTheDocument()
-    expect(popover).toHaveClass('w-[min(48rem,calc(100vw-1rem))]', 'gap-1.5', 'p-2')
-    expect(within(popover).getByRole('group', { name: 'Agent 执行配置' })).toHaveClass('grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]')
+    expect(popover).not.toHaveTextContent(/积分|价格|倍率/)
+    expect(popover).toHaveClass('w-[min(38rem,calc(100vw-1rem))]', 'gap-3', 'p-3')
+    expect(within(popover).getByRole('group', { name: 'Agent 执行配置' })).toHaveClass('flex-wrap')
     expect(within(popover).getByRole('group', { name: 'Agent 执行配置' })).not.toHaveClass('grid-cols-1')
     expect(within(popover).getByRole('group', { name: '图片比例' })).toBeInTheDocument()
     expect(within(popover).getByRole('group', { name: '图像能力' })).toBeInTheDocument()

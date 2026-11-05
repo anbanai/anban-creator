@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -709,4 +710,99 @@ func interactiveTestJSON(t *testing.T, value any) []byte {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func TestCreationStageMCPReturnsSafeFieldDiagnostics(t *testing.T) {
+	for _, tc := range []struct{ name, plan, field, reason string }{
+		{"string field", `{"goal":["private-token"]}`, "plan.goal", "expected string; received array"},
+		{"array field", `{"temporary_overrides":"private-token"}`, "plan.temporary_overrides", "expected array; received string"},
+		{"unknown field", `{"unexpected":"private-token"}`, "plan.unexpected", "unknown field"},
+		{"null plan", `null`, "plan", "expected object; received null"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, snapshot, _ := newCreationStageMCPTest(t)
+			old := svcs
+			svcs = &Services{InteractionSvc: svc}
+			t.Cleanup(func() { svcs = old })
+			result, err := stageAssistantDraftHandler(withMCPInteractionCapabilityMode(context.Background(), "user-1", snapshot.ID, snapshot.Generation, service.AssistantModeCreation), interactiveMCPRequest(t, map[string]any{"payload": json.RawMessage(`{"plan":` + tc.plan + `}`), "ready": true}))
+			if err != nil || result == nil || !result.IsError {
+				t.Fatalf("MCP result = %#v, %v", result, err)
+			}
+			text := toolResultText(result)
+			var diagnostic service.InteractionError
+			if err := json.Unmarshal([]byte(text), &diagnostic); err != nil {
+				t.Fatalf("MCP lost structured diagnostics: %q, %v", text, err)
+			}
+			if diagnostic.Code != service.InteractionErrorDraftInvalid || len(diagnostic.BlockingIssues) != 1 || diagnostic.BlockingIssues[0].Field != tc.field || !strings.Contains(diagnostic.BlockingIssues[0].Message, tc.reason) {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+			if strings.Contains(text, "private-token") || strings.Contains(text, `"snapshot"`) {
+				t.Fatalf("MCP diagnostic leaked content: %s", text)
+			}
+		})
+	}
+}
+
+func TestCreationStageMCPAcceptsRealisticPlanWithoutCreatingTask(t *testing.T) {
+	svc, snapshot, db := newCreationStageMCPTest(t)
+	old := svcs
+	svcs = &Services{InteractionSvc: svc}
+	t.Cleanup(func() { svcs = old })
+	payload := json.RawMessage(`{"plan":{"goal":"介绍新茶冲泡方法","content_type":"wechat-article","topic":"春茶冲泡","angle":"常见问题拆解","expression_form":"实用清单","profile_context":["面向日常饮茶读者"],"temporary_overrides":["本次采用轻松语气"],"requirements":["给出三个步骤"],"constraints":["不编造功效"]}}`)
+	ctx := withMCPInteractionCapabilityMode(context.Background(), "user-1", snapshot.ID, snapshot.Generation, service.AssistantModeCreation)
+	result, err := stageAssistantDraftHandler(ctx, interactiveMCPRequest(t, map[string]any{"payload": payload, "ready": true}))
+	if err != nil || result == nil || result.IsError {
+		t.Fatalf("valid plan = %#v, %v", result, err)
+	}
+	var stage service.InteractionStageResult
+	if err := json.Unmarshal([]byte(toolResultText(result)), &stage); err != nil {
+		t.Fatal(err)
+	}
+	if !stage.Durable || stage.Draft == nil || !stage.Draft.Ready || !stage.ConfirmationRequired {
+		t.Fatalf("valid plan stage = %#v", stage)
+	}
+	var count int64
+	if err := db.Model(&model.Task{}).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("staging created a Task: %d, %v", count, err)
+	}
+}
+
+func newCreationStageMCPTest(t *testing.T) (*service.AssistantInteractionService, service.InteractionSnapshot, *gorm.DB) {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sqlDB, _ := db.DB(); _ = sqlDB.Close() })
+	if err := db.AutoMigrate(&model.AssistantInteraction{}, &model.AssistantInteractionRuntime{}, &model.AssistantInteractionDraft{}, &model.AssistantInteractionEvent{}, &model.AssistantInteractionAttempt{}, &model.Task{}); err != nil {
+		t.Fatal(err)
+	}
+	svc := service.NewAssistantInteractionService(repository.New(db), nil, nil)
+	snapshot, err := svc.CreateOrResume(context.Background(), "user-1", service.AssistantInteractionInput{ModeID: service.AssistantModeCreation}, "create")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return svc, snapshot, db
+}
+
+func TestCreationStageMCPRedactsInternalDatabaseErrors(t *testing.T) {
+	svc, snapshot, db := newCreationStageMCPTest(t)
+	old := svcs
+	svcs = &Services{InteractionSvc: svc}
+	t.Cleanup(func() { svcs = old })
+	if err := db.Callback().Query().Before("gorm:query").Register("test:database-error", func(query *gorm.DB) { query.AddError(errors.New("database credential private-token")) }); err != nil {
+		t.Fatal(err)
+	}
+	result, err := stageAssistantDraftHandler(withMCPInteractionCapabilityMode(context.Background(), "user-1", snapshot.ID, snapshot.Generation, service.AssistantModeCreation), interactiveMCPRequest(t, map[string]any{"payload": map[string]any{"plan": map[string]any{"goal": "write"}}, "ready": true}))
+	if err != nil || result == nil || !result.IsError {
+		t.Fatalf("MCP result = %#v, %v", result, err)
+	}
+	text := toolResultText(result)
+	var diagnostic service.InteractionError
+	if err := json.Unmarshal([]byte(text), &diagnostic); err != nil {
+		t.Fatalf("safe MCP error is not structured: %q, %v", text, err)
+	}
+	if diagnostic.Code != service.InteractionErrorMessageNotAccepted || strings.Contains(text, "private-token") || strings.Contains(text, "database") {
+		t.Fatalf("unsafe MCP error: %s", text)
+	}
 }

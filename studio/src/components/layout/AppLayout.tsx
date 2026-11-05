@@ -5,7 +5,7 @@ import FeedbackFab from './FeedbackFab'
 
 export default function AppLayout() {
   const location = useLocation()
-  const isAssistantWorkspace = location.pathname === '/'
+  const isAssistantWorkspace = location.pathname === '/' || location.pathname === '/designer'
   return (
     <div className="flex h-dvh bg-background text-foreground">
       <a href="#main-content" className="sr-only z-[100] rounded-lg bg-primary px-4 py-3 text-sm text-primary-foreground focus:not-sr-only focus:fixed focus:left-4 focus:top-4">跳转到主要内容</a>

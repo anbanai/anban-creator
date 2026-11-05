@@ -1,4 +1,4 @@
-import type { Project } from '@/types'
+import type { Project, ProjectPlatform } from '@/types'
 
 export const profileLabAgents = [
   { id: 'wechat-article', label: '公众号文章', detail: '深度文章与图文内容' },
@@ -12,9 +12,33 @@ export const profileLabAgents = [
   { id: 'whiteboard-animation', label: '白板视频', detail: '讲解型动画内容' },
 ] as const
 
+export const projectCreationTypes = [
+  ...profileLabAgents,
+  { id: 'ecommerce', label: '电商设计', detail: '商品主图、详情页与营销素材' },
+] as const
+
+export function normalizeProjectTypeSelection(current: string[], next: string[]): string[] {
+  if (!current.includes('ecommerce') && next.includes('ecommerce')) return ['ecommerce']
+  if (current.includes('ecommerce')) return next.filter((id) => id !== 'ecommerce')
+  return next
+}
+
+export function primaryProjectPlatform(agentIDs: readonly string[]): ProjectPlatform | '' {
+  if (agentIDs.includes('ecommerce')) return 'ecommerce'
+  if (agentIDs.includes('talking-head-editor')) return 'talking-head-editor'
+  if (agentIDs.includes('video-edit')) return 'video-edit'
+  if (agentIDs.some((id) => id === 'wechat-article' || id === 'wechat-picture')) return 'wechat'
+  if (agentIDs.includes('seednote')) return 'seednote'
+  if (agentIDs.includes('montage')) return 'montage'
+  if (agentIDs.includes('hypit')) return 'hypit'
+  if (agentIDs.includes('whiteboard-animation')) return 'whiteboard-animation'
+  if (agentIDs.includes('local-life')) return 'local-life'
+  return ''
+}
+
 export const creationObjectLabels: Record<string, string> = {
   ...Object.fromEntries(profileLabAgents.map((agent) => [agent.id, agent.label])),
-  moments: '朋友圈', ecommerce: '电商出图',
+  moments: '朋友圈', ecommerce: '电商设计',
 }
 
 /** An explicit empty collection must never fall back to legacy capabilities. */
@@ -25,6 +49,6 @@ export function projectAgentIDs(project: Pick<Project, 'platform' | 'agent_ids'>
 }
 
 export function supportsProfileLab(project: Project): boolean {
-  if (project.agent_ids != null) return project.agent_ids.every((id) => profileLabAgents.some((agent) => agent.id === id))
+  if (project.agent_ids != null) return project.agent_ids.every((id) => id !== 'ecommerce' && profileLabAgents.some((agent) => agent.id === id))
   return ['wechat', 'seednote', 'montage', 'hypit', 'whiteboard-animation', 'video-edit', 'talking-head-editor'].includes(project.platform)
 }

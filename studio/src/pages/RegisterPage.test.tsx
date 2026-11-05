@@ -4,6 +4,12 @@ import { render } from '@/test/test-utils'
 import RegisterPage from './RegisterPage'
 
 const navigateMock = vi.hoisted(() => vi.fn())
+const setThemeMock = vi.hoisted(() => vi.fn())
+
+vi.mock('next-themes', async () => ({
+  ...(await vi.importActual<typeof import('next-themes')>('next-themes')),
+  useTheme: () => ({ theme: 'dark', setTheme: setThemeMock }),
+}))
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
@@ -17,6 +23,13 @@ vi.mock('@/contexts/AuthContext', () => ({
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 describe('RegisterPage field guidance', () => {
+  it('follows the system theme without showing a theme toggle', () => {
+    render(<RegisterPage />)
+
+    expect(setThemeMock).toHaveBeenCalledWith('system')
+    expect(screen.queryByRole('button', { name: /切换到.*色模式/ })).not.toBeInTheDocument()
+  })
+
   it('explains the fields that block registration', () => {
     render(<RegisterPage />)
 

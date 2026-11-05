@@ -11,6 +11,7 @@ func TestVideoAgentsHaveStableChannelIdentities(t *testing.T) {
 		{name: "montage", agentID: AgentIDMontage, channel: ChannelMontage},
 		{name: "hypit", agentID: AgentIDHypit, channel: ChannelHypit},
 		{name: "whiteboard", agentID: AgentIDWhiteboard, channel: ChannelWhiteboard},
+		{name: "ecommerce", agentID: AgentIDEcommerce, channel: ChannelEcommerce},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if !IsAgentID(tt.agentID) {

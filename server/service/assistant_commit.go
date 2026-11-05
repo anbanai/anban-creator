@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -268,6 +269,7 @@ func validateAssistantCommitScope(ctx context.Context, repo repository.Repositor
 }
 
 type assistantCreationPlan struct {
+	ContentAssetID       string                      `json:"asset_id,omitempty"`
 	Goal                 string                      `json:"goal"`
 	ContentType          string                      `json:"content_type"`
 	Topic                string                      `json:"topic"`
@@ -388,7 +390,7 @@ func decodeAssistantCreationPlan(payload []byte) (assistantCreationPlan, []byte,
 func decodeAssistantCreationPlanFields(payload []byte) (assistantCreationPlan, error) {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &envelope); err != nil {
-		return assistantCreationPlan{}, ErrAssistantCheckpointInvalid
+		return assistantCreationPlan{}, fmt.Errorf("%w: %w", ErrAssistantCheckpointInvalid, err)
 	}
 	raw := json.RawMessage(payload)
 	if nested, ok := envelope["plan"]; ok {
@@ -399,11 +401,17 @@ func decodeAssistantCreationPlanFields(payload []byte) (assistantCreationPlan, e
 		}
 		raw = nested
 	}
+	if strings.TrimSpace(string(raw)) == "null" {
+		return assistantCreationPlan{}, fmt.Errorf("%w: %w", ErrAssistantCheckpointInvalid, &json.UnmarshalTypeError{Value: "null", Type: reflect.TypeOf(assistantCreationPlan{})})
+	}
+	if len(raw) == 0 || len(raw) > 24<<10 {
+		return assistantCreationPlan{}, ErrAssistantCheckpointInvalid
+	}
 	var plan assistantCreationPlan
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&plan); err != nil {
-		return assistantCreationPlan{}, fmt.Errorf("%w: plan: %v", ErrAssistantCheckpointInvalid, err)
+		return assistantCreationPlan{}, fmt.Errorf("%w: plan: %w", ErrAssistantCheckpointInvalid, err)
 	}
 	return plan, nil
 }
@@ -441,7 +449,13 @@ func decodeAssistantReview(payload []byte) (assistantReviewDraft, []byte, error)
 	return review, canonical, nil
 }
 
-func commitAssistantCreation(ctx context.Context, userID string, checkpoint *model.AssistantCheckpoint, tasks *TaskService, repo repository.Repository) (AssistantCommitResult, error) {
+func commitAssistantCreation(ctx context.Context, userID string, checkpoint *model.AssistantCheckpoint, tasks *TaskService, repo repository.Repository) (resultOut AssistantCommitResult, resultErr error) {
+	creationStarted := false
+	defer func() {
+		if resultErr != nil && !creationStarted {
+			resultErr = &assistantCreationPreflightError{resultErr}
+		}
+	}()
 	if tasks == nil {
 		return AssistantCommitResult{}, ErrInteractivePersistence
 	}
@@ -478,7 +492,8 @@ func commitAssistantCreation(ctx context.Context, userID string, checkpoint *mod
 		executionProfile = "effective"
 	}
 	params := CreateManualParams{
-		UserID: userID, ProjectID: checkpoint.ProjectID, ExecutionProfile: executionProfile,
+		ContentAssetID: plan.ContentAssetID,
+		UserID:         userID, ProjectID: checkpoint.ProjectID, ExecutionProfile: executionProfile,
 		AgentID: selected.Agent.Name, Channel: selected.Channel, TaskKind: taskKind,
 		RequestedTaskType: taskType,
 		ImageRatio:        plan.ImageRatio, ImageCapabilityKey: plan.ImageCapabilityKey,
@@ -512,7 +527,8 @@ func commitAssistantCreation(ctx context.Context, userID string, checkpoint *mod
 		}
 		params.InputAttachments = inputAttachments
 	}
-	created, err := tasks.CreateManual(ctx, params)
+	creationStarted = true
+	created, err := tasks.createManual(ctx, params, true)
 	if err != nil {
 		if existing, lookupErr := repo.Tasks().FindByAssistantCheckpointID(ctx, userID, checkpoint.ID); lookupErr == nil {
 			if existing.ProjectID != checkpoint.ProjectID || existing.Prompt != prompt {

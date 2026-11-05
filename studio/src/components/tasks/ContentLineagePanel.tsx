@@ -23,11 +23,11 @@ export default function ContentLineagePanel({ assetID, runID, taskID }: { assetI
   })
   const lineage = useQuery({ queryKey: ['content-asset-lineage', assetID], queryFn: () => api.contentAssets.getLineage(assetID) })
   const run = useQuery({ queryKey: ['content-reuse-runs', runID], queryFn: () => api.contentAssets.getRun(runID!), enabled: !!runID, refetchInterval: query => ['queued', 'running'].includes(query.state.data?.status ?? '') ? 5000 : false })
-  const assetHref = `/content-assets?asset_id=${encodeURIComponent(assetID)}`
+  const assetHref = `/topics?asset_id=${encodeURIComponent(assetID)}`
   return <section className="space-y-3 rounded-lg border border-border/70 bg-card p-4" aria-label="内容链路">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h2 className="font-medium">内容链路</h2>
-      <Link className="text-sm text-primary hover:underline" to={`/content-assets?reuse_asset_id=${encodeURIComponent(assetID)}${taskID ? `&source_task_id=${encodeURIComponent(taskID)}` : ''}`}>跨平台复用</Link>
+      <Link className="text-sm text-primary hover:underline" to={`/topics?detail=reuse&asset_id=${encodeURIComponent(assetID)}${taskID ? `&source_task_id=${encodeURIComponent(taskID)}` : ''}`}>跨平台复用</Link>
     </div>
     {lineage.isError ? <p role="alert">选题链路加载失败。<button type="button" onClick={() => void lineage.refetch()}>重试</button></p> : <Link className="text-sm text-primary hover:underline" to={assetHref}>{lineage.data?.asset.title ?? '查看选题资产'}</Link>}
     {run.data && <div className="space-y-1 text-sm text-muted-foreground">

@@ -109,6 +109,38 @@ func TestAgentExecutionProfileSchemaReadiness(t *testing.T) {
 	}
 }
 
+func TestUserMediaSemanticSchemaReadiness(t *testing.T) {
+	fresh, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := requireUserMediaSemanticSchema(fresh); err != nil {
+		t.Fatalf("fresh database readiness: %v", err)
+	}
+
+	legacy, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Exec("CREATE TABLE user_media_assets (id text primary key, summary text)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := requireUserMediaSemanticSchema(legacy); err == nil || !strings.Contains(err.Error(), "20261102_user_media_oss_semantic.sql") {
+		t.Fatalf("legacy schema readiness = %v, want migration instruction", err)
+	}
+
+	ready, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.AutoMigrate(ready); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireUserMediaSemanticSchema(ready); err != nil {
+		t.Fatalf("current schema readiness: %v", err)
+	}
+}
+
 func TestWechatAccountAnalyticsSchemaReadiness(t *testing.T) {
 	openDB := func(t *testing.T) *gorm.DB {
 		t.Helper()
@@ -389,10 +421,11 @@ func TestMainFailsFastWhenModelMigrationFails(t *testing.T) {
 	publicationReadiness := strings.Index(section, "requireServerOwnedArticlePublicationSchema(mysqlDB)")
 	accountAnalyticsReadiness := strings.Index(section, "requireWechatAccountAnalyticsSchema(mysqlDB)")
 	interactionReadiness := strings.Index(section, "requireAssistantInteractionSchema(mysqlDB)")
+	mediaSemanticReadiness := strings.Index(section, "requireUserMediaSemanticSchema(mysqlDB)")
 	autoMigrate := strings.Index(section, "migrateModels(mysqlDB, model.AutoMigrate)")
-	if readiness < 0 || deliveryReadiness < 0 || publicationReadiness < 0 || accountAnalyticsReadiness < 0 || interactionReadiness < 0 || autoMigrate < 0 ||
-		readiness >= autoMigrate || deliveryReadiness >= autoMigrate || publicationReadiness >= autoMigrate || accountAnalyticsReadiness >= autoMigrate || interactionReadiness >= autoMigrate {
-		t.Fatalf("schema readiness must run before AutoMigrate: profile=%d delivery=%d publication=%d account_analytics=%d interaction=%d auto_migrate=%d", readiness, deliveryReadiness, publicationReadiness, accountAnalyticsReadiness, interactionReadiness, autoMigrate)
+	if readiness < 0 || deliveryReadiness < 0 || publicationReadiness < 0 || accountAnalyticsReadiness < 0 || interactionReadiness < 0 || mediaSemanticReadiness < 0 || autoMigrate < 0 ||
+		readiness >= autoMigrate || deliveryReadiness >= autoMigrate || publicationReadiness >= autoMigrate || accountAnalyticsReadiness >= autoMigrate || interactionReadiness >= autoMigrate || mediaSemanticReadiness >= autoMigrate {
+		t.Fatalf("schema readiness must run before AutoMigrate: profile=%d delivery=%d publication=%d account_analytics=%d interaction=%d media_semantic=%d auto_migrate=%d", readiness, deliveryReadiness, publicationReadiness, accountAnalyticsReadiness, interactionReadiness, mediaSemanticReadiness, autoMigrate)
 	}
 	if !strings.Contains(section, "migrateModels(mysqlDB, model.AutoMigrate)") {
 		t.Fatal("main.go must route model migration through the tested startup helper")
@@ -449,19 +482,6 @@ func TestMainRemovesGoalModeSchemaAfterAutoMigrate(t *testing.T) {
 	templateMigration := strings.Index(src, "service.MigrateTemplatePrompt(context.Background(), mysqlDB, log)")
 	if autoMigrate < 0 || goalRemoval <= autoMigrate || templateMigration <= goalRemoval {
 		t.Fatalf("goal removal order invalid: auto_migrate=%d goal_removal=%d template_migration=%d", autoMigrate, goalRemoval, templateMigration)
-	}
-}
-
-func TestMainRemovesDesignerSchemaAfterAutoMigrate(t *testing.T) {
-	src, err := os.ReadFile("main.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(src)
-	autoMigrate := strings.Index(text, "migrateModels(mysqlDB, model.AutoMigrate)")
-	designerRemoval := strings.Index(text, "service.MigrateDesignerRemoval(context.Background(), mysqlDB, log)")
-	if autoMigrate < 0 || designerRemoval < 0 || designerRemoval < autoMigrate {
-		t.Fatalf("Designer removal must run after AutoMigrate: auto=%d removal=%d", autoMigrate, designerRemoval)
 	}
 }
 
@@ -594,7 +614,7 @@ func TestMainWiresRequiredBillingRuntime(t *testing.T) {
 	if workerStart < 0 || workerWait <= workerStart || repoClose <= workerWait {
 		t.Fatalf("billing worker lifecycle order invalid: start=%d wait=%d repoClose=%d", workerStart, workerWait, repoClose)
 	}
-	listen := strings.Index(text, "app.Listen(addr, listenConfig)")
+	listen := strings.Index(text, "app.Listen(addr)")
 	if listen < 0 || !strings.Contains(text[listen:], "cancel()") {
 		t.Fatal("main must cancel the shared lifecycle context when Listen returns")
 	}
@@ -666,5 +686,27 @@ func TestRequireRuntimeCleanupSchema(t *testing.T) {
 		if err := requireRuntimeCleanupSchema(fresh); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestUploadSessionMediaPrefixSchemaReadiness(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := requireUploadSessionMediaPrefixSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("CREATE TABLE upload_sessions (id text primary key)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := requireUploadSessionMediaPrefixSchema(db); err == nil || !strings.Contains(err.Error(), "20261103_upload_session_media_prefix.sql") {
+		t.Fatalf("legacy schema: %v", err)
+	}
+	if err := db.Migrator().AddColumn(&model.UploadSession{}, "MediaLibraryPrefix"); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireUploadSessionMediaPrefixSchema(db); err != nil {
+		t.Fatal(err)
 	}
 }

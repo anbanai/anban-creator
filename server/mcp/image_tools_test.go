@@ -13,6 +13,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	appimage "github.com/anbanai/anban-creator/server/app/image"
 	"github.com/anbanai/anban-creator/server/service"
 )
 
@@ -270,6 +271,85 @@ func TestClassifyImageToolFailurePreservesBusinessRatioDetails(t *testing.T) {
 	}
 	if !errors.As(err, new(*service.ImageRatioNotAllowedError)) {
 		t.Fatal("test error no longer exposes the typed capability failure")
+	}
+}
+
+func TestClassifyImageToolFailureReturnsStableProviderContract(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		code      string
+		retryable bool
+	}{
+		{name: "authentication", code: "unauthorized"},
+		{name: "parameters", code: "bad_request"},
+		{name: "safety", code: "safety_blocked"},
+		{name: "endpoint protocol", code: "endpoint_protocol"},
+		{name: "rate limit", code: "rate_limit", retryable: true},
+		{name: "upstream", code: "server_error", retryable: true},
+		{name: "network", code: "network_error", retryable: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := fmt.Errorf("wrapped: %w", &appimage.GenerateError{Provider: "test", Code: tc.code, Message: "secret-bearing provider text", HintMsg: "raw hint"})
+			failure := classifyImageToolFailure(context.Background(), context.Background(), err, "generate", time.Minute, false)
+			if failure.Code != tc.code || failure.Retryable != tc.retryable || failure.Stage != "generate" || failure.CorrelationID == "" || failure.Hint == "" {
+				t.Fatalf("failure = %#v", failure)
+			}
+			payload, marshalErr := json.Marshal(failure)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			if strings.Contains(string(payload), "secret-bearing") || strings.Contains(string(payload), "raw hint") {
+				t.Fatalf("public error leaked provider diagnostics: %s", payload)
+			}
+		})
+	}
+}
+
+func TestSafeImageFailureHintEndpointsTheBaseURLFix(t *testing.T) {
+	hint := safeImageFailureHint("endpoint_protocol")
+	for _, want := range []string{"<base_url>/images/generations", "images/edits", "JSON", "api/v3"} {
+		if !strings.Contains(hint, want) {
+			t.Fatalf("endpoint_protocol hint %q missing %q", hint, want)
+		}
+	}
+	if hint == safeImageFailureHint("network_error") {
+		t.Fatalf("endpoint_protocol hint collapsed into the transient hint: %q", hint)
+	}
+}
+
+func TestClassifyImageToolFailureUsesServerCorrelationID(t *testing.T) {
+	err := &service.ImageProviderFailureError{
+		CorrelationID: "server-correlation-42",
+		Err:           &appimage.GenerateError{Code: "network_error", Message: "private provider detail"},
+	}
+	failure := classifyImageToolFailure(context.Background(), context.Background(), err, "generate", time.Minute, false)
+	if failure.CorrelationID != "server-correlation-42" || failure.Code != "network_error" || !failure.Retryable {
+		t.Fatalf("failure = %#v", failure)
+	}
+}
+
+func TestClassifyImageToolFailureIncludesSafeProviderRequestDiagnostics(t *testing.T) {
+	err := &service.ImageProviderFailureError{
+		CorrelationID: "server-correlation-request-diagnostics",
+		Err: &appimage.GenerateError{
+			Provider:            "TokenPlayer",
+			Code:                "network_error",
+			RequestMethod:       "POST",
+			RequestEndpoint:     "https://token.example.test/api/v3/images/generations",
+			ResponseContentType: "",
+			TransportPhase:      "dns",
+			ProviderRequestID:   "sdk-request-1",
+			HTTPStatusCode:      500,
+			Message:             "private provider detail",
+		},
+	}
+
+	failure := classifyImageToolFailure(context.Background(), context.Background(), err, "generate", time.Minute, false)
+	if failure.Request == nil || failure.Request.Method != "POST" || failure.Request.Endpoint != "https://token.example.test/api/v3/images/generations" || failure.Request.TransportPhase != "dns" || failure.Request.ProviderRequestID != "sdk-request-1" {
+		t.Fatalf("failure request diagnostics = %#v", failure.Request)
+	}
+	if failure.Request.HTTPStatusCode != 500 {
+		t.Fatalf("failure request status = %d, want 500", failure.Request.HTTPStatusCode)
 	}
 }
 

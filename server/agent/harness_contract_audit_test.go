@@ -56,8 +56,8 @@ func TestHarnessAutonomyAndFailureContracts(t *testing.T) {
 		"harness/packs/moments/agent.codex.toml":        {"不得询问", "结构化失败"},
 		"harness/packs/seednote/agent.claude.md":        {"viral_analysis", "quality_status=failed", "generate_image"},
 		"harness/packs/seednote/agent.codex.toml":       {"viral_analysis", "quality_status=failed", "generate_image"},
-		"harness/packs/montage/agent.codex.toml":        {"checkpoint", "decision", "output/failure-diagnosis.md", "output/failure-state.json", "recoverable_failure", "invalid_video_aspect_ratio"},
-		"harness/packs/montage/agent.claude.md":         {"checkpoint", "decision", "output/failure-diagnosis.md", "output/failure-state.json", "recoverable_failure", "invalid_video_aspect_ratio"},
+		"harness/packs/montage/agent.codex.toml":        {"checkpoint", "decision", "output/failure-diagnosis.md", "output/failure-state.json", "recoverable_failure", "invalid_montage_configuration"},
+		"harness/packs/montage/agent.claude.md":         {"checkpoint", "decision", "output/failure-diagnosis.md", "output/failure-state.json", "recoverable_failure", "invalid_montage_configuration"},
 	}
 	for rel, terms := range checks {
 		t.Run(rel, func(t *testing.T) {
@@ -115,7 +115,7 @@ func TestViralIPVideoEditorUsesAutoEditorForReviewedDeadAirCuts(t *testing.T) {
 		"source_end_frame",
 		"composition_start_frame",
 		"composition_end_frame",
-		"output/edit_decision_list.json",
+		"output/edit-decision-list.json",
 		"自然呼吸",
 		"recoverable_failure",
 	} {
@@ -174,8 +174,10 @@ func TestVisualProductionScopesMatchGetProjectProfileSchema(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if strings.Contains(string(body), `scope="article"`) {
-				t.Fatalf("%s uses unsupported get_project_profile scope=article; use scope=wechat", path)
+			for _, unsupported := range []string{`scope="article"`, `scope="short-video-cover"`} {
+				if strings.Contains(string(body), unsupported) {
+					t.Fatalf("%s uses unsupported get_project_profile %s", path, unsupported)
+				}
 			}
 			return nil
 		})
@@ -219,6 +221,27 @@ func TestWechatDeliveryInstructionsStayConsistentAcrossHostDistributions(t *test
 				t.Fatalf("%s is missing complete manual picture delivery term %q", rel, term)
 			}
 		}
+	}
+}
+
+func TestWechatArticleEvidenceQualityChecksStayConsistentAcrossHostDistributions(t *testing.T) {
+	root := articleContractRepoRoot(t)
+	paths := []string{
+		"harness/skills/content-writing/SKILL.md",
+		"harness/dsh/presets/wechat-article/skills/content-writing/SKILL.md",
+		"harness/packs/wechat-article/agent.claude.md",
+		"harness/packs/wechat-article/agent.codex.toml",
+		"harness/packs/wechat-article/agent.dsh.yml",
+	}
+	for _, rel := range paths {
+		t.Run(rel, func(t *testing.T) {
+			body := readArticleContractFile(t, filepath.Join(root, rel))
+			for _, term := range []string{"论点证据边界", "来源与案例真实性", "小标题逻辑", "体裁解释结构"} {
+				if !strings.Contains(body, term) {
+					t.Fatalf("%s is missing evidence quality contract %q", rel, term)
+				}
+			}
+		})
 	}
 }
 

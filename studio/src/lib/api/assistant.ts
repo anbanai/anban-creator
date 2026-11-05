@@ -6,9 +6,16 @@ const ASSISTANT_COMMAND_TIMEOUT_MS = 15 * 60 * 1000
 
 export type AssistantModeID = 'profile' | 'creation' | 'review'
 
-export type AssistantInteractionLifecycle = 'active' | 'reconnecting' | 'needs_confirmation' | 'completed' | 'abandoned' | string
+export type AssistantInteractionLifecycle = 'prepared' | 'active' | 'reconnecting' | 'needs_confirmation' | 'completed' | 'abandoned' | string
+
+export interface AssistantBlockingIssue {
+  code: string
+  field: string
+  message: string
+}
 
 export interface AssistantInteractionDraftReceipt {
+  state_sequence?: number
   draft_id: string
   mode_id: AssistantModeID
   revision: number
@@ -16,9 +23,11 @@ export interface AssistantInteractionDraftReceipt {
   payload_digest: string
   ready: boolean
   confirmation_state: 'pending' | 'confirmed' | 'consumed' | 'superseded' | string
+  blocking_issues?: AssistantBlockingIssue[]
 }
 
 export interface AssistantInteractionSnapshot {
+  state_sequence?: number
   interaction_id: string
   mode_id: AssistantModeID
   project_id?: string
@@ -30,7 +39,7 @@ export interface AssistantInteractionSnapshot {
   last_activity_at: string
   available_actions: string[]
   recovery_error_code?: string
-  drafts: AssistantInteractionDraftReceipt[]
+  drafts?: AssistantInteractionDraftReceipt[]
   commit_result?: AssistantInteractionCommitResult
 }
 
@@ -121,6 +130,7 @@ export interface AssistantWorkspace {
   content_id?: string
   runtime_id?: string
   runtime_status: string
+  lifecycle?: AssistantInteractionLifecycle
   expires_at: string
   generation?: number
   interaction_snapshot?: AssistantInteractionSnapshot
@@ -148,7 +158,8 @@ export type AssistantSession = InteractiveSession & {
   content_id?: string
 }
 
-const pendingMessageAttempts = new Map<string, string>()
+type InteractionMessageContext = { mode_id?: AssistantModeID; project_id?: string; content_id?: string }
+const pendingMessageAttempts = new Map<string, { id: string; context?: InteractionMessageContext }>()
 const pendingAnswerAttempts = new Map<string, string>()
 
 export const assistantApi = {
@@ -183,68 +194,93 @@ export const assistantApi = {
 
   close: (sessionId: string) => http.delete(`/assistant/sessions/${encodeURIComponent(sessionId)}`),
 
-  createWorkspace: async (request: { mode_id: AssistantModeID; project_id?: string; content_id?: string; checkpoint_id?: string }, idempotencyKey?: string) =>
-    interactionSnapshotAsWorkspace(await assistantApi.createInteraction({ mode_id: request.mode_id, project_id: request.project_id, content_id: request.content_id }, idempotencyKey)),
+  createWorkspace: async (request: { mode_id: AssistantModeID; project_id?: string; content_id?: string; checkpoint_id?: string; prepare_only?: boolean }, idempotencyKey?: string) =>
+    interactionSnapshotAsWorkspace(await assistantApi.createInteraction({ mode_id: request.mode_id, project_id: request.project_id, content_id: request.content_id, prepare_only: request.prepare_only }, idempotencyKey)),
 
   switchWorkspaceMode: (workspaceId: string, modeId: AssistantModeID, context?: { project_id?: string; content_id?: string; checkpoint_id?: string }) =>
     assistantApi.createInteraction({ mode_id: modeId, project_id: context?.project_id, content_id: context?.content_id, resume_interaction_id: workspaceId }).then(interactionSnapshotAsWorkspace),
 
-  workspaceMessage: async (workspaceId: string, _modeId: AssistantModeID, text: string, forceNewAttempt = false) => {
+  workspaceMessage: async (workspaceId: string, _modeId: AssistantModeID, text: string, forceNewAttempt = false, context?: InteractionMessageContext) => {
     const attemptKey = `${workspaceId}\u0000${text}`
     if (forceNewAttempt) pendingMessageAttempts.delete(attemptKey)
-    const clientMessageID = pendingMessageAttempts.get(attemptKey) ?? crypto.randomUUID()
-    pendingMessageAttempts.set(attemptKey, clientMessageID)
+    const previous = pendingMessageAttempts.get(attemptKey)
+    const contextChanged = context !== undefined && JSON.stringify(previous?.context) !== JSON.stringify(context)
+    const attempt = previous && !contextChanged ? previous : { id: crypto.randomUUID(), context: context && { ...context } }
+    pendingMessageAttempts.set(attemptKey, attempt)
     const snapshot = await assistantApi.getInteractionSnapshot(workspaceId)
-    const result = await assistantApi.sendInteractionMessage(workspaceId, { generation: snapshot.generation, client_message_id: clientMessageID, text })
-    if (pendingMessageAttempts.get(attemptKey) === clientMessageID) pendingMessageAttempts.delete(attemptKey)
-    return result
+    try {
+      const result = await assistantApi.sendInteractionMessage(workspaceId, { generation: snapshot.generation, client_message_id: attempt.id, text, ...attempt.context })
+      if (pendingMessageAttempts.get(attemptKey) === attempt) pendingMessageAttempts.delete(attemptKey)
+      return result
+    } catch (error) {
+      const response = (error as { response?: { status?: number; data?: { error_code?: string } } } | null)?.response
+      if (response?.status === 409 && response.data?.error_code === 'assistant_message_not_accepted' && pendingMessageAttempts.get(attemptKey) === attempt) {
+        pendingMessageAttempts.delete(attemptKey)
+      }
+      throw error
+    }
   },
 
-  workspaceAnswer: async (workspaceId: string, _modeId: AssistantModeID, callId: string, answers: Array<{ id: string; selected: string[]; custom?: string }>, forceNewAttempt = false) => {
-    const attemptKey = `${workspaceId}\u0000${callId}\u0000${JSON.stringify(answers)}`
+  workspaceAnswer: async (workspaceId: string, _modeId: AssistantModeID, callId: string, answers: Array<{ id: string; selected: string[]; custom?: string }>, generation: number | undefined, forceNewAttempt = false) => {
+    const snapshot = await assistantApi.getInteractionSnapshot(workspaceId)
+    if (generation !== snapshot.generation) {
+      throw Object.assign(new Error('问题已过期，请回答恢复后的新问题。'), {
+        response: { status: 409, data: { error_code: 'assistant_interaction_generation_changed', data: snapshot } },
+      })
+    }
+    const attemptKey = `${workspaceId}\u0000${generation}\u0000${callId}\u0000${JSON.stringify(answers)}`
     if (forceNewAttempt) pendingAnswerAttempts.delete(attemptKey)
     const attemptID = pendingAnswerAttempts.get(attemptKey) ?? crypto.randomUUID()
     pendingAnswerAttempts.set(attemptKey, attemptID)
-    const snapshot = await assistantApi.getInteractionSnapshot(workspaceId)
-    const result = await assistantApi.answerInteractionQuestion(workspaceId, callId, { generation: snapshot.generation, attempt_id: attemptID, answers })
+    const result = await assistantApi.answerInteractionQuestion(workspaceId, callId, { generation, attempt_id: attemptID, answers })
     if (pendingAnswerAttempts.get(attemptKey) === attemptID) pendingAnswerAttempts.delete(attemptKey)
     return result
   },
 
   workspaceCheckpoint: async (workspaceId: string, modeId: AssistantModeID, checkpoint: AssistantCheckpointRequest) => {
     const snapshot = await assistantApi.getInteractionSnapshot(workspaceId)
-    const draft = [...snapshot.drafts].filter((item) => item.mode_id === modeId).sort((a, b) => b.revision - a.revision)[0]
+    const draft = [...(snapshot.drafts ?? [])].filter((item) => item.mode_id === modeId).sort((a, b) => b.revision - a.revision)[0]
     if (!draft) throw new Error('当前计划尚未保存，请重试暂存')
     return { id: draft.draft_id, payload_digest: draft.payload_digest, revision: draft.revision, schema_version: checkpoint.schema_version, payload: draft.payload, summary: checkpoint.summary, status: draft.ready ? 'ready' : 'draft', user_id: '', mode_id: modeId, project_id: snapshot.project_id, content_id: snapshot.content_id, source_session_id: workspaceId, expires_at: snapshot.expires_at } satisfies AssistantCheckpoint
   },
 
-  workspaceCommit: async (workspaceId: string, _modeId: AssistantModeID, payload: AssistantCommitRequest) => {
-    const snapshot = await assistantApi.getInteractionSnapshot(workspaceId)
-    const requestedID = 'checkpoint_id' in payload ? payload.checkpoint_id : undefined
-    const draft = snapshot.drafts.find((item) => item.draft_id === requestedID) ?? snapshot.drafts.find((item) => item.ready)
-    if (!draft) throw new Error('当前计划尚未保存，请恢复计划')
-    const result = await assistantApi.commitInteraction(workspaceId, { draft_id: draft.draft_id, revision: draft.revision, idempotency_key: payload.idempotency_key, options: payload.options })
+  workspaceCommit: async (workspaceId: string, modeId: AssistantModeID, payload: AssistantCommitRequest | AssistantInteractionCommitRequest) => {
+    let request: AssistantInteractionCommitRequest
+    if ('draft_id' in payload) {
+      request = payload
+    } else {
+      if (modeId === 'creation') throw new Error('当前计划尚未保存，请恢复计划')
+      const snapshot = await assistantApi.getInteractionSnapshot(workspaceId)
+      const requestedID = 'checkpoint_id' in payload ? payload.checkpoint_id : undefined
+      const drafts = snapshot.drafts ?? []
+      const draft = drafts.find((item) => item.draft_id === requestedID) ?? drafts.find((item) => item.ready)
+      if (!draft) throw new Error('当前计划尚未保存，请恢复计划')
+      request = { draft_id: draft.draft_id, revision: draft.revision, idempotency_key: payload.idempotency_key, options: payload.options }
+    }
+    const result = await assistantApi.commitInteraction(workspaceId, request)
     if (result.result && typeof result.result === 'object') return { ...result.result as InteractiveCommitResult & Record<string, unknown>, interaction_status: result.status, task_id: result.task_id } as InteractiveCommitResult & Record<string, unknown>
     return { interaction_status: result.status, task_id: result.task_id, task: result.task_id ? { id: result.task_id } : undefined }
   },
 
   closeWorkspace: (workspaceId: string) => http.delete(`/assistant/interactions/${encodeURIComponent(workspaceId)}`),
 
-  createInteraction: (request: { mode_id: AssistantModeID; project_id?: string; content_id?: string; resume_interaction_id?: string }, idempotencyKey?: string) =>
+  createInteraction: (request: { mode_id: AssistantModeID; project_id?: string; content_id?: string; resume_interaction_id?: string; prepare_only?: boolean }, idempotencyKey?: string) =>
     unwrap<AssistantInteractionSnapshot>(http.post('/assistant/interactions', request, {
       timeout: ASSISTANT_COMMAND_TIMEOUT_MS,
       ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),
     })),
   getInteractionSnapshot: (interactionId: string) =>
-    unwrap<AssistantInteractionSnapshot>(http.get(`/assistant/interactions/${encodeURIComponent(interactionId)}`)),
-  sendInteractionMessage: (interactionId: string, payload: { generation: number; client_message_id: string; text: string }) =>
+    unwrap<AssistantInteractionSnapshot>(http.get(`/assistant/interactions/${encodeURIComponent(interactionId)}`, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
+  sendInteractionMessage: (interactionId: string, payload: { generation: number; client_message_id: string; text: string; mode_id?: AssistantModeID; project_id?: string; content_id?: string }) =>
     unwrap<{ accepted: boolean }>(http.post(`/assistant/interactions/${encodeURIComponent(interactionId)}/messages`, payload, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
   answerInteractionQuestion: (interactionId: string, callId: string, payload: { generation: number; attempt_id: string; answers: Array<{ id: string; selected: string[]; custom?: string }> }) =>
     unwrap<{ accepted: boolean }>(http.post(`/assistant/interactions/${encodeURIComponent(interactionId)}/answers`, { ...payload, call_id: callId }, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
   commitInteraction: (interactionId: string, payload: AssistantInteractionCommitRequest) =>
     unwrap<AssistantInteractionCommitResult>(http.post(`/assistant/interactions/${encodeURIComponent(interactionId)}/commit`, payload, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
+  continueInteraction: (interactionId: string, payload: { draft_id: string; revision: number }) =>
+    unwrap<AssistantInteractionSnapshot>(http.post(`/assistant/interactions/${encodeURIComponent(interactionId)}/continue`, payload, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
 }
 
 function interactionSnapshotAsWorkspace(snapshot: AssistantInteractionSnapshot): AssistantWorkspace {
-  return { id: snapshot.interaction_id, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, runtime_status: snapshot.runtime_status, expires_at: snapshot.expires_at, generation: snapshot.generation, interaction_snapshot: snapshot }
+  return { id: snapshot.interaction_id, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, runtime_status: snapshot.runtime_status, lifecycle: snapshot.lifecycle, expires_at: snapshot.expires_at, generation: snapshot.generation, interaction_snapshot: snapshot }
 }

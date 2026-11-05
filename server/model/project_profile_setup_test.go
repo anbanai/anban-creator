@@ -70,6 +70,18 @@ func TestProjectAgentSelectionRejectsDuplicatesAndUnsupportedPacks(t *testing.T)
 	}
 }
 
+func TestEcommerceIsSelectableAndDefaultForItsProjectPlatform(t *testing.T) {
+	if got := DefaultProjectAgentIDs(PlatformEcommerce); len(got) != 1 || got[0] != AgentIDEcommerce {
+		t.Fatalf("ecommerce project default Agent IDs = %v", got)
+	}
+	if err := ValidateProjectAgentIDs([]string{AgentIDEcommerce}); err != nil {
+		t.Fatalf("ecommerce project Agent ID rejected: %v", err)
+	}
+	if ProjectAllowsAgent(&Project{AgentIDs: []string{}}, AgentIDEcommerce) {
+		t.Fatal("ecommerce Agent was allowed when not selected")
+	}
+}
+
 func TestVideoEditIsSelectableAndDefaultForItsProjectPlatform(t *testing.T) {
 	if got := DefaultProjectAgentIDs(PlatformVideoEdit); len(got) != 1 || got[0] != AgentIDVideoEdit {
 		t.Fatalf("video-edit project default Agent IDs = %v", got)

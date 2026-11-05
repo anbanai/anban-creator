@@ -216,6 +216,7 @@ describe('PlansPage multi-output plans', () => {
     const remove = activeCard.getByRole('button', { name: '删除排期：活跃排期' })
     expect(edit).toHaveClass('size-11', 'hover:bg-muted')
     expect(tasks).toHaveClass('size-11')
+    expect(tasks.querySelector('svg')).toHaveClass('lucide-gallery-horizontal-end')
     expect(pause).toHaveClass('size-11')
     expect(execute).toHaveClass('size-11', 'hover:bg-muted')
     expect(execute).not.toHaveTextContent('立即执行')

@@ -193,6 +193,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		ExecutionProfile:              cloneParams.ExecutionProfile,
 		FrozenTaskType:                src.Type,
 		PreserveFrozenConfig:          true,
+		ContentAssetID:                src.ContentAssetID,
 		Prompt:                        prompt,
 		Quantity:                      1,
 		ImageRatio:                    src.ImageRatio,

@@ -12,7 +12,23 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/storage"
 )
+
+type semanticSearchFake struct {
+	results []storage.SemanticMediaResult
+	prefix  *string
+}
+
+func (f semanticSearchFake) Search(_ context.Context, _ string, prefix string, _ string, _ int) ([]storage.SemanticMediaResult, error) {
+	if f.prefix != nil {
+		*f.prefix = prefix
+	}
+	return f.results, nil
+}
+func (f semanticSearchFake) Lookup(context.Context, string, string) (*storage.SemanticMediaResult, error) {
+	return nil, nil
+}
 
 func newUserMediaLibraryTestService(t *testing.T) (repository.Repository, *UserMediaLibraryService) {
 	t.Helper()
@@ -62,6 +78,39 @@ func TestUserMediaLibrarySearchCandidatesIsolatesUsersAndReturnsReadyProjectMatc
 		if item.Status != model.UserMediaAssetStatusAvailable || item.PreviewURL == "" || item.OptionLabel != "media_asset:"+item.ID {
 			t.Fatalf("candidate view = %#v", item)
 		}
+	}
+}
+
+func TestUserMediaLibrarySemanticVideoSearchFiltersOwnershipAndRanksProject(t *testing.T) {
+	repo, svc := newUserMediaLibraryTestService(t)
+	ctx := context.Background()
+	makeVideo := func(userID, id, projectID, purpose, status string) {
+		assetID := uuid.NewString()
+		if err := repo.Assets().Create(ctx, &model.Asset{ID: assetID, UserID: userID, Purpose: purpose, StorageKey: mediaLibraryStoragePrefix + "/" + userID + "/" + id + ".mp4", FileName: id + ".mp4", ContentType: "video/mp4", Size: 12, ETag: id}); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.UserMediaAssets().Create(ctx, &model.UserMediaAsset{ID: id, UserID: userID, AssetID: assetID, ProjectID: projectID, MediaType: "video", Status: status}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	makeVideo("user-1", "other", "project-2", DirectUploadPurposeMediaLibrary, model.UserMediaAssetStatusAvailable)
+	makeVideo("user-1", "same", "project-1", DirectUploadPurposeMediaLibrary, model.UserMediaAssetStatusAvailable)
+	makeVideo("user-1", "queued", "project-1", DirectUploadPurposeMediaLibrary, model.UserMediaAssetStatusQueued)
+	makeVideo("user-2", "foreign", "project-1", DirectUploadPurposeMediaLibrary, model.UserMediaAssetStatusAvailable)
+	makeVideo("user-1", "wrong-purpose", "project-1", "article_image", model.UserMediaAssetStatusAvailable)
+	svc.SetSemanticSearch(semanticSearchFake{results: []storage.SemanticMediaResult{
+		{ObjectKey: mediaLibraryStoragePrefix + "/user-1/other.mp4", Summary: "其他", Description: "其他视频"},
+		{ObjectKey: mediaLibraryStoragePrefix + "/user-1/same.mp4", Summary: "咖啡", Description: "制作咖啡"},
+		{ObjectKey: mediaLibraryStoragePrefix + "/user-1/queued.mp4"},
+		{ObjectKey: mediaLibraryStoragePrefix + "/user-2/foreign.mp4"},
+		{ObjectKey: mediaLibraryStoragePrefix + "/user-1/wrong-purpose.mp4"},
+	}})
+	items, err := svc.SearchCandidates(ctx, "user-1", "project-1", "咖啡", "video", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].ID != "same" || items[1].ID != "other" || items[0].Summary != "咖啡" {
+		t.Fatalf("semantic items = %#v", items)
 	}
 }
 
@@ -168,3 +217,21 @@ func TestValidateUserMediaAssetForCreationRequiresReadyActiveRow(t *testing.T) {
 }
 
 func userMediaStringPtr(value string) *string { return &value }
+
+func TestUserMediaSemanticSearchUsesConfiguredUserPrefix(t *testing.T) {
+	_, svc := newUserMediaLibraryTestService(t)
+	if err := svc.SetMediaLibraryPrefix("custom/library"); err != nil {
+		t.Fatal(err)
+	}
+	var prefix string
+	svc.SetSemanticSearch(semanticSearchFake{prefix: &prefix})
+	if _, err := svc.SearchCandidates(t.Context(), "user-1", "project-1", "coffee", "video", 8); err != nil {
+		t.Fatal(err)
+	}
+	if prefix != "custom/library/users/user-1/" {
+		t.Fatalf("search prefix = %q", prefix)
+	}
+	if err := svc.SetMediaLibraryPrefix("../"); err == nil {
+		t.Fatal("unsafe prefix accepted")
+	}
+}

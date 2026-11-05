@@ -96,56 +96,18 @@ services:
         condition: service_healthy
       sidecar-ilink:
         condition: service_started
-    # Compose uses the root .env for interpolation only unless it is also an
-    # env_file. Forward it so every ${...} reference in server/config.yaml can
-    # be configured without duplicating optional integration variables here.
-    env_file:
-      - .env
+    # The Server reads /app/conf/config.yaml, mounted from the gitignored
+    # server/config.yaml. Kubernetes injects ${...} placeholders from Secrets;
+    # Compose only supplies service discovery and the local Docker executor.
+    # Do not restate server/config.yaml defaults here.
     environment:
       ANBAN_DATABASE_DSN: "root:${MYSQL_ROOT_PASSWORD:-anban_creator_dev}@tcp(mysql:3306)/anban_creator?charset=utf8mb4&parseTime=True&loc=Local"
       ANBAN_REDIS_ADDR: "redis:6379"
-      ANBAN_BILLING_ADMIN_API_KEY: "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}"
-      ANBAN_JWT_SECRET_KEY: "${ANBAN_JWT_SECRET_KEY:?ANBAN_JWT_SECRET_KEY is required}"
-      ANBAN_OSS_ENDPOINT: "${ANBAN_OSS_ENDPOINT:?ANBAN_OSS_ENDPOINT is required}"
-      ANBAN_OSS_ACCESS_KEY_ID: "${ANBAN_OSS_ACCESS_KEY_ID:?ANBAN_OSS_ACCESS_KEY_ID is required}"
-      ANBAN_OSS_ACCESS_KEY_SECRET: "${ANBAN_OSS_ACCESS_KEY_SECRET:?ANBAN_OSS_ACCESS_KEY_SECRET is required}"
-      ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-}"
-      ANBAN_DEEPSEEK_API_KEY: "${ANBAN_DEEPSEEK_API_KEY:?ANBAN_DEEPSEEK_API_KEY is required}"
       ANBAN_DSH_BRIDGE_DIR: "/app/runtime-dsh"
       ANBAN_DSH_BRIDGE_PATCH: "/app/harness/dsh/project-creator.patch.yml"
       ANBAN_DSH_BRIDGE_MCP_URL: "http://127.0.0.1:8080/mcp"
-      ANBAN_DSH_EXECUTOR: "container"
-      ANBAN_DSH_IMAGE: "creator-dsh-runtime:latest"
-      ANBAN_DSH_NETWORK: "creator-runtime-network"
-      ANBAN_DSH_PROJECT_MEMORY_VOLUME: "creator-project-memory"
-      ANBAN_DSH_SERVER_URL: "http://server:8080"
-      ANBAN_MOONSHOT_ANTHROPIC_BASE_URL: "${ANBAN_MOONSHOT_ANTHROPIC_BASE_URL:-https://api.moonshot.cn/anthropic}"
-      ANBAN_MOONSHOT_API_KEY: "${ANBAN_MOONSHOT_API_KEY:?ANBAN_MOONSHOT_API_KEY is required}"
-      ANBAN_ZHIPU_ANTHROPIC_BASE_URL: "${ANBAN_ZHIPU_ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}"
-      ANBAN_ZHIPU_API_KEY: "${ANBAN_ZHIPU_API_KEY:?ANBAN_ZHIPU_API_KEY is required}"
-      MOONSHOT_API_KEY: "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}"
-      ANBAN_AGENT_EXECUTOR: "docker"
       ANBAN_CLAUDE_AGENT_SERVER_URL: "http://server:8080"
-      ANBAN_AGENT_EXECUTION_TOKEN_SECRET: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET:?ANBAN_AGENT_EXECUTION_TOKEN_SECRET is required}"
-      ANBAN_AGENT_IMAGE_WECHAT_ARTICLE: "creator-agent-wechat-article:latest"
-      ANBAN_AGENT_IMAGE_WECHAT_PICTURE: "creator-agent-wechat-picture:latest"
-      ANBAN_AGENT_IMAGE_SEEDNOTE: "creator-agent-seednote:latest"
-      ANBAN_AGENT_IMAGE_MONTAGE: "creator-agent-montage:latest"
-      ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR: "${ANBAN_AGENT_IMAGE_VIRAL_IP_VIDEO_EDITOR:-creator-agent-viral-ip-video-editor:latest}"
-      ANBAN_AGENT_IMAGE_VIDEO_EDIT: "${ANBAN_AGENT_IMAGE_VIDEO_EDIT:-creator-agent-video-edit:latest}"
-      ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR: "${ANBAN_AGENT_IMAGE_TALKING_HEAD_EDITOR:-creator-agent-talking-head-editor:latest}"
-      ANBAN_AGENT_IMAGE_MOMENTS: "creator-agent-moments:latest"
-      ANBAN_AGENT_IMAGE_ECOMMERCE: "creator-agent-ecommerce:latest"
-      ANBAN_AGENT_IMAGE_CONTENT_PLANNING: "${ANBAN_AGENT_IMAGE_CONTENT_PLANNING:-}"
-      ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS: "${ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS:-creator-agent-profile-analysis:latest}"
-      ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS: "${ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS:-creator-agent-feedback-analysis:latest}"
-      ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION: "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}"
-      ANBAN_AGENT_IMAGE_HYPIT: "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}"
-      ANBAN_AGENT_IMAGE_LOCAL_LIFE: "${ANBAN_AGENT_IMAGE_LOCAL_LIFE:-creator-agent-local-life:latest}"
-      VIDEO_EDIT_ELEVENLABS_API_KEY: "${VIDEO_EDIT_ELEVENLABS_API_KEY:-}"
-      VIDEO_USE_API_KEY: "${VIDEO_USE_API_KEY:-}"
-      ANBAN_AGENT_DOCKER_NETWORK: "creator-runtime-network"
-      ANBAN_AGENT_PROJECT_MEMORY_VOLUME: "creator-project-memory"
+      ANBAN_AGENT_EXECUTOR: "docker"
       # ilink WeChat assistant channel. Uses the compose service name, not localhost.
       ANBAN_ILINK_ENABLED: "true"
       ANBAN_ILINK_BASE_URL: "http://sidecar-ilink:18070"

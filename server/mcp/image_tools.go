@@ -10,8 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	appimage "github.com/anbanai/anban-creator/server/app/image"
 	"github.com/anbanai/anban-creator/server/service"
 )
 
@@ -113,10 +115,7 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	})
 	if err != nil {
 		failure := classifyImageToolFailure(parentCtx, ctx, err, "generate", operationTimeout, false)
-		if isImageTimeoutFailure(failure.Code) || failure.Code == "image_ratio_not_allowed" || failure.Code == "image_ratio_mismatch" {
-			return imageFailureResult(failure), nil
-		}
-		return billingError("generate image", err), nil
+		return imageFailureResult(failure), nil
 	}
 	if timeoutResult := imageContextFailureResult(parentCtx, ctx, "generate", operationTimeout, true); timeoutResult != nil {
 		return timeoutResult, nil
@@ -125,17 +124,30 @@ func generateImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 }
 
 type imageToolFailure struct {
-	Code               string   `json:"code"`
-	Message            string   `json:"message"`
-	Stage              string   `json:"stage"`
-	TimeoutMS          int64    `json:"timeout_ms,omitempty"`
-	Durable            bool     `json:"durable_task_file"`
-	RequestedRatio     string   `json:"requested_ratio,omitempty"`
-	AllowedImageRatios []string `json:"allowed_image_ratios,omitempty"`
-	TaskImageRatio     string   `json:"task_image_ratio,omitempty"`
-	ActualWidth        int      `json:"actual_width,omitempty"`
-	ActualHeight       int      `json:"actual_height,omitempty"`
-	CapabilityKey      string   `json:"capability_key,omitempty"`
+	Code               string                       `json:"code"`
+	Message            string                       `json:"message"`
+	Hint               string                       `json:"hint"`
+	Stage              string                       `json:"stage"`
+	Retryable          bool                         `json:"retryable"`
+	CorrelationID      string                       `json:"correlation_id"`
+	TimeoutMS          int64                        `json:"timeout_ms,omitempty"`
+	Durable            bool                         `json:"durable_task_file"`
+	RequestedRatio     string                       `json:"requested_ratio,omitempty"`
+	AllowedImageRatios []string                     `json:"allowed_image_ratios,omitempty"`
+	TaskImageRatio     string                       `json:"task_image_ratio,omitempty"`
+	ActualWidth        int                          `json:"actual_width,omitempty"`
+	ActualHeight       int                          `json:"actual_height,omitempty"`
+	CapabilityKey      string                       `json:"capability_key,omitempty"`
+	Request            *imageToolRequestDiagnostics `json:"request,omitempty"`
+}
+
+type imageToolRequestDiagnostics struct {
+	Method              string `json:"method,omitempty"`
+	Endpoint            string `json:"endpoint,omitempty"`
+	HTTPStatusCode      int    `json:"http_status,omitempty"`
+	ResponseContentType string `json:"response_content_type,omitempty"`
+	TransportPhase      string `json:"transport_phase,omitempty"`
+	ProviderRequestID   string `json:"provider_request_id,omitempty"`
 }
 
 func imageFailureResult(failure imageToolFailure) *mcp.CallToolResult {
@@ -148,29 +160,57 @@ func imageFailureResult(failure imageToolFailure) *mcp.CallToolResult {
 
 func classifyImageToolFailure(parentCtx, operationCtx context.Context, err error, stage string, timeout time.Duration, durable bool) imageToolFailure {
 	code := categorizeImageGenFailure(err, "")
+	failure := imageToolFailure{Stage: stage, Durable: durable, CorrelationID: uuid.NewString()}
+	var correlatedFailure *service.ImageProviderFailureError
+	if errors.As(err, &correlatedFailure) && strings.TrimSpace(correlatedFailure.CorrelationID) != "" {
+		failure.CorrelationID = correlatedFailure.CorrelationID
+	}
+	var providerErr *appimage.GenerateError
+	if errors.As(err, &providerErr) {
+		code = providerErr.Code
+		failure.Retryable = providerErr.Retryable()
+		failure.Hint = safeImageFailureHint(providerErr.Code)
+		if providerErr.RequestMethod != "" || providerErr.RequestEndpoint != "" || providerErr.HTTPStatusCode != 0 || providerErr.ResponseContentType != "" || providerErr.TransportPhase != "" || providerErr.ProviderRequestID != "" {
+			failure.Request = &imageToolRequestDiagnostics{
+				Method:              providerErr.RequestMethod,
+				Endpoint:            providerErr.RequestEndpoint,
+				HTTPStatusCode:      providerErr.HTTPStatusCode,
+				ResponseContentType: providerErr.ResponseContentType,
+				TransportPhase:      providerErr.TransportPhase,
+				ProviderRequestID:   providerErr.ProviderRequestID,
+			}
+		}
+	}
 	var ratioErr *service.ImageRatioNotAllowedError
 	if errors.As(err, &ratioErr) {
 		return imageToolFailure{
-			Code: "image_ratio_not_allowed", Message: ratioErr.Error(), Stage: stage, Durable: durable,
+			Code: "image_ratio_not_allowed", Message: "requested image ratio is not allowed for this task", Hint: "Use the frozen image ratio returned by get_project_profile.", Stage: stage, Durable: durable, CorrelationID: failure.CorrelationID,
 			RequestedRatio: ratioErr.RequestedRatio, AllowedImageRatios: append([]string(nil), ratioErr.AllowedImageRatios...), TaskImageRatio: ratioErr.TaskImageRatio,
 		}
 	}
 	var mismatch *service.ImageRatioMismatchError
 	if errors.As(err, &mismatch) {
 		return imageToolFailure{
-			Code: "image_ratio_mismatch", Message: mismatch.Error(), Stage: stage, Durable: durable,
+			Code: "image_ratio_mismatch", Message: "generated image does not match the requested ratio", Hint: "Retry within the task's frozen image capability and ratio.", Stage: stage, Durable: durable, Retryable: true, CorrelationID: failure.CorrelationID,
 			RequestedRatio: mismatch.RequestedRatio, ActualWidth: mismatch.ActualWidth, ActualHeight: mismatch.ActualHeight, CapabilityKey: mismatch.CapabilityKey,
 		}
 	}
 	switch {
 	case errors.Is(parentCtx.Err(), context.Canceled):
 		code = "request_cancelled"
+		failure.Retryable = false
 	case errors.Is(operationCtx.Err(), context.DeadlineExceeded):
 		code = "operation_timeout"
+		failure.Retryable = true
 	case errors.Is(err, context.DeadlineExceeded):
 		code = "provider_timeout"
+		failure.Retryable = true
+	}
+	if code == "" {
+		code = "image_generation_error"
 	}
 	message := "image generation failed"
+	hint := safeImageFailureHint(code)
 	switch code {
 	case "request_cancelled":
 		message = "generate_image request was cancelled"
@@ -178,14 +218,30 @@ func classifyImageToolFailure(parentCtx, operationCtx context.Context, err error
 		message = fmt.Sprintf("generate_image exceeded the server operation timeout of %s", timeout)
 	case "provider_timeout":
 		message = "image provider attempt exceeded its server timeout"
-	case "":
-		if err != nil {
-			message = err.Error()
-		}
 	}
-	return imageToolFailure{
-		Code: code, Message: message, Stage: stage,
-		TimeoutMS: timeout.Milliseconds(), Durable: durable,
+	failure.Code, failure.Message, failure.Hint = code, message, hint
+	if isImageTimeoutFailure(code) {
+		failure.TimeoutMS = timeout.Milliseconds()
+	}
+	return failure
+}
+
+func safeImageFailureHint(code string) string {
+	switch code {
+	case "unauthorized":
+		return "Check the configured image provider credentials and account permissions. Do not retry until corrected."
+	case "bad_request", "invalid_image", "image_ratio_not_allowed", "image_ratio_mismatch":
+		return "Check the frozen task image parameters. Do not switch provider or ratio."
+	case "safety_blocked":
+		return "Revise the prompt to comply with the provider's content policy. Do not retry the unchanged prompt."
+	case "endpoint_protocol":
+		return "Check the image provider Base URL: generation POSTs to <base_url>/images/generations (or /images/edits for reference-image requests), and that path must return JSON. A web page or console URL answers HTML instead. TokenPlayer image routes carry an API prefix such as .../doubao/api/v3. Do not retry until the endpoint is corrected."
+	case "rate_limit", "server_error", "network_error", "provider_timeout", "operation_timeout":
+		return "A transient provider failure may be retried with bounded backoff."
+	case "request_cancelled":
+		return "The request was cancelled; do not retry automatically."
+	default:
+		return "Inspect the provider configuration and task parameters. Do not change the frozen route or ratio."
 	}
 }
 

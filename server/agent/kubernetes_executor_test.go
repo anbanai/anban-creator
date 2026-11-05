@@ -146,14 +146,6 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 		t.Fatalf("workspace volume = %#v, want task-scoped PVC", workspaceVolume)
 	}
 	assertMount(t, c, kubernetesTokenVolumeName, kubernetesTokenMountPath, true)
-	assertMount(t, c, kubernetesServerCAVolumeName, kubernetesServerCAMountPath, true)
-	caVolume := requireTestVolume(t, job, kubernetesServerCAVolumeName)
-	if caVolume.Secret == nil || caVolume.Secret.SecretName != "anban-server-tls" || len(caVolume.Secret.Items) != 1 || caVolume.Secret.Items[0].Key != "ca.crt" {
-		t.Fatalf("server CA volume = %#v", caVolume)
-	}
-	if caVolume.Secret.DefaultMode == nil || *caVolume.Secret.DefaultMode != corev1.SecretVolumeSourceDefaultMode {
-		t.Fatalf("server CA default mode = %#v, want %d", caVolume.Secret.DefaultMode, corev1.SecretVolumeSourceDefaultMode)
-	}
 	assertProjectedAudience(t, spec.Volumes, kubernetesTokenAudience)
 	if spec.AutomountServiceAccountToken == nil || *spec.AutomountServiceAccountToken {
 		t.Fatalf("automount token = %#v, want false", spec.AutomountServiceAccountToken)
@@ -173,20 +165,48 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	if len(c.EnvFrom) != 0 {
 		t.Fatalf("runtime env sources = %#v, want bootstrap-only credentials", c.EnvFrom)
 	}
-	if got := strings.Join(append(c.Command, c.Args...), " "); !strings.Contains(got, "anban job") || !strings.Contains(got, "--server-url https://creator-server:8443") || !strings.Contains(got, "--execution-id execution-1") || !strings.Contains(got, "--workload-token-file "+kubernetesTokenFile) {
+	if got := strings.Join(append(c.Command, c.Args...), " "); !strings.Contains(got, "anban job") || !strings.Contains(got, "--server-url http://creator-server:8080") || !strings.Contains(got, "--execution-id execution-1") || !strings.Contains(got, "--workload-token-file "+kubernetesTokenFile) {
 		t.Fatalf("command = %q, want one-shot job bootstrap args", got)
 	}
 	if got := strings.Join(append(c.Command, c.Args...), " "); strings.Contains(got, testTask().Prompt) {
 		t.Fatalf("command embeds task prompt: %q", got)
 	}
-	if len(c.Env) != 3 ||
-		c.Env[0].Name != "HOME" || c.Env[0].Value != kubernetesRuntimeHomePath ||
-		c.Env[1].Name != "SSL_CERT_FILE" || c.Env[1].Value != kubernetesServerCAFile ||
-		c.Env[2].Name != "NODE_EXTRA_CA_CERTS" || c.Env[2].Value != kubernetesServerCAFile {
-		t.Fatalf("environment = %#v, want only HOME and Go/Node server CA trust", c.Env)
+	if len(c.Env) != 1 || c.Env[0].Name != "HOME" || c.Env[0].Value != kubernetesRuntimeHomePath {
+		t.Fatalf("environment = %#v, want only HOME", c.Env)
 	}
 	if c.Resources.Requests.Cpu().String() != "500m" || c.Resources.Limits.Memory().String() != "2Gi" {
 		t.Fatalf("resources = %#v, want configured requests and limits", c.Resources)
+	}
+}
+
+func TestBuildKubernetesJobServerTransport(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		serverURL string
+		wantHTTP  bool
+	}{
+		{name: "internal HTTP", serverURL: "http://creator-server:8080", wantHTTP: true},
+		{name: "Ingress HTTPS", serverURL: "https://creator.example.com"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testJobConfig()
+			cfg.ServerURL = tc.serverURL
+			job := mustBuildKubernetesJob(cfg, testExecution(), testTask())
+			container := job.Spec.Template.Spec.Containers[0]
+			if got := slices.Contains(container.Args, "--allow-http-server"); got != tc.wantHTTP {
+				t.Fatalf("HTTP permission = %v, want %v", got, tc.wantHTTP)
+			}
+			for _, env := range container.Env {
+				if env.Name == "SSL_CERT_FILE" || env.Name == "NODE_EXTRA_CA_CERTS" {
+					t.Fatalf("runtime retains server CA environment %q", env.Name)
+				}
+			}
+			for _, volume := range job.Spec.Template.Spec.Volumes {
+				if volume.Secret != nil {
+					t.Fatalf("runtime unexpectedly requires Secret volume %q", volume.Name)
+				}
+			}
+		})
 	}
 }
 
@@ -1066,19 +1086,6 @@ func TestVerifyKubernetesJobIgnoresSafeAPIServerDefaults(t *testing.T) {
 	}
 }
 
-func TestVerifyKubernetesJobNormalizesSecretVolumeDefaultMode(t *testing.T) {
-	desired := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
-	existing := desired.DeepCopy()
-	desiredServerCA := requireTestVolume(t, desired, kubernetesServerCAVolumeName).Secret
-	existingServerCA := requireTestVolume(t, existing, kubernetesServerCAVolumeName).Secret
-	desiredServerCA.DefaultMode = nil
-	existingServerCA.DefaultMode = int32Ptr(corev1.SecretVolumeSourceDefaultMode)
-
-	if err := verifyJob(existing, desired, testExecution(), testTask()); err != nil {
-		t.Fatalf("verifyJob with secret default mode: %v", err)
-	}
-}
-
 func TestVerifyKubernetesJobReportsDifferingFields(t *testing.T) {
 	desired := mustBuildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	existing := desired.DeepCopy()
@@ -1873,7 +1880,6 @@ func testJobConfig() kubernetesJobConfig {
 			Namespace:               "anban",
 			ServiceAccount:          "creator-agent-runner",
 			ImagePullSecret:         "acr-secret",
-			ServerCASecret:          "anban-server-tls",
 			NASStorageClass:         "nas-sc-creator",
 			ProjectMemoryClaim:      "creator-project-memory",
 			TaskWorkspaceSize:       "10Gi",
@@ -1894,7 +1900,7 @@ func testJobConfig() kubernetesJobConfig {
 			"profile-analysis":                "registry.example.com/creator-agent-profile-analysis:v2",
 			"feedback-analysis":               "registry.example.com/creator-agent-feedback-analysis:v2",
 		},
-		ServerURL: "https://creator-server:8443",
+		ServerURL: "http://creator-server:8080",
 	}
 }
 

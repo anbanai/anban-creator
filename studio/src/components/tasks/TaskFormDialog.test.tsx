@@ -79,7 +79,8 @@ const fixtures = vi.hoisted(() => {
     image_ratio: '9:16',
     montage_defaults: {
       default_pipeline: 'cinematic',
-      preferences: { duration_seconds: 45, style: 'clean product film' },
+      output_profile_key: 'tiktok',
+      preferences: { duration_seconds: 45, playbook_key: 'clean-professional' },
       delivery_targets: ['final_video'],
     },
   } as Project
@@ -299,6 +300,18 @@ beforeEach(() => {
   vi.mocked(api.montageCapabilities.list).mockResolvedValue({
     enabled: true,
     default_pipeline: 'cinematic',
+    default_output_profile: 'tiktok',
+    output_profiles: [
+      { key: 'youtube_landscape', display_name: 'YouTube 横版', width: 1920, height: 1080, aspect_ratio: '16:9' },
+      { key: 'youtube_4k', display_name: 'YouTube 4K', width: 3840, height: 2160, aspect_ratio: '16:9' },
+      { key: 'youtube_shorts', display_name: 'YouTube Shorts', width: 1080, height: 1920, aspect_ratio: '9:16' },
+      { key: 'instagram_reels', display_name: 'Instagram Reels', width: 1080, height: 1920, aspect_ratio: '9:16' },
+      { key: 'instagram_feed', display_name: 'Instagram Feed', width: 1080, height: 1080, aspect_ratio: '1:1' },
+      { key: 'tiktok', display_name: 'TikTok', width: 1080, height: 1920, aspect_ratio: '9:16' },
+      { key: 'linkedin', display_name: 'LinkedIn', width: 1920, height: 1080, aspect_ratio: '16:9' },
+      { key: 'cinematic', display_name: '电影宽银幕', width: 2560, height: 1080, aspect_ratio: '21:9' },
+    ],
+    styles: [],
     max_duration_seconds: 600,
     max_assets: 20,
     items: [
@@ -1045,9 +1058,9 @@ describe('TaskFormDialog', () => {
 
     await selectProject(/剪辑人设/)
     expect(await within(dialog).findByRole('button', { name: /^创作参数：.*作品数量 1/ })).toBeInTheDocument()
+    expect(within(dialog).getByRole('group', { name: '成片画幅' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('radio', { name: /TikTok.*1080 × 1920/ })).toBeChecked()
     const montageParameters = await openTaskParameters(dialog)
-	  expect(within(montageParameters).getByRole('group', { name: '视频比例' })).toBeInTheDocument()
-	  expect(within(montageParameters).getByRole('button', { name: '9:16' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(montageParameters).getByLabelText('作品数量：1，当前能力上限')).toBeInTheDocument()
     expect(within(montageParameters).queryByRole('button', { name: '增加作品数量' })).not.toBeInTheDocument()
   })
@@ -1512,5 +1525,50 @@ describe('identity creation page and inline settings', () => {
     fireEvent.click(within(settings).getByRole('button', { name: '保存并继续创作' }))
     expect(await within(settings).findByRole('alert')).toHaveTextContent('保存失败')
     expect(within(settings).getByRole('button', { name: '公众号文章' })).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+describe('topic based creation', () => {
+  it('starts a topic draft without requiring extra prompt input and keeps optional choices hidden', async () => {
+    renderDialog({
+      initialAssetId: '22222222-2222-4222-8222-222222222222',
+      initialPrompt: '一个值得写的选题\n这个问题为何重要',
+    })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
+
+    const prompt = await within(dialog).findByRole('textbox', { name: 'Agent prompt' })
+    expect(prompt).toHaveValue('一个值得写的选题\n这个问题为何重要')
+    expect(within(dialog).getByTestId('topic-prompt-summary').textContent).toBe('一个值得写的选题\n这个问题为何重要')
+    expect(within(dialog).getByTestId('topic-prompt-summary')).toBeVisible()
+    const extraPromptDetails = within(dialog).getByText('补充创作要求（可选）').closest('details')
+    expect(extraPromptDetails).not.toHaveAttribute('open')
+    expect(prompt).not.toBeVisible()
+    const moreSettings = within(dialog).getByText('更多创作设置').closest('details')
+    expect(moreSettings).not.toHaveAttribute('open')
+    expect(within(dialog).getByRole('switch', { name: '生成封面图' })).not.toBeVisible()
+    expect(within(dialog).queryByRole('group', { name: '创作类型' })).not.toBeInTheDocument()
+    expect(within(dialog).getByText('当前选择为高峰时段 · 预计 4800 积分/次')).not.toBeVisible()
+
+    expect(within(dialog).getByText(/预计基础创作费：4,800 积分/)).toBeVisible()
+    expect(within(dialog).getByText(/图片、视频等增值操作按实际使用另行计费/)).toBeVisible()
+    const billingDetails = within(dialog).getByText('费用明细').closest('details')
+    expect(billingDetails).not.toHaveAttribute('open')
+    expect(within(billingDetails!).getByText(/云端 Agent 运行成本由平台承担/)).toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('已匹配输出方式：公众号文章')).not.toBeVisible()
+    fireEvent.click(within(dialog).getByText('更多创作设置'))
+    expect(within(dialog).getByLabelText('已匹配输出方式：公众号文章')).toBeVisible()
+    expect(within(dialog).getByText('当前选择为高峰时段 · 预计 4800 积分/次')).not.toBeVisible()
+    fireEvent.click(within(dialog).getByText('费用明细'))
+    expect(within(billingDetails!).getByText('当前选择为高峰时段 · 预计 4800 积分/次')).toBeVisible()
+
+    const createButton = within(dialog).getByRole('button', { name: '开始创作' })
+    await waitFor(() => expect(createButton).toBeEnabled())
+    fireEvent.click(createButton)
+
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'wechat-article',
+      asset_id: '22222222-2222-4222-8222-222222222222',
+      prompt: '一个值得写的选题\n这个问题为何重要',
+    })))
   })
 })

@@ -76,6 +76,9 @@ export declare class HarnessClient {
     private spawnError;
     private streamsSettled;
     private closeTask;
+    private readonly userQuestions;
+    private userQuestionHandler;
+    private requestHandler;
     /** @param options - dsh profile, patch, home, process, environment, and timeout options. */
     constructor(options?: HarnessClientOptions);
     /**
@@ -84,13 +87,17 @@ export declare class HarnessClient {
      */
     start(): void;
     /**
-     * Perform the process-wide handshake.
+     * Install the additional-request handler; native questions retain their onUserQuestion callback.
+     * @param handler - receives wire parameters and returns the JSON-RPC result; rejection sends an error.
+     * @throws when the client has not started or has already closed.
+     */
+    onRequest(handler: (method: string, params: Record<string, unknown>) => Promise<unknown>): void;
+    /**
+     * Start the runtime if needed, then perform the process-wide handshake.
      * @param params - workspace cwd plus the provider/model route.
      * @returns the runtime's wire identity.
      */
     initialize(params: InitializeParams): Promise<InitializeResult>;
-    startSession(sessionId: string, presetId: string): Promise<{ sessionId: string; presetId: string }>;
-    answerSession(sessionId: string, callId: string, answer: { answers: Array<{ id: string; selected: string[]; custom?: string }> }): Promise<{ accepted: true }>;
     /**
      * Queue one prompt and return its durable inbox identity.
      * @param sessionId - target session; an unknown id creates it.
@@ -156,6 +163,7 @@ export declare class HarnessClient {
     private recordSessionRelationship;
     private isDescendantOf;
     private failSubscriptions;
+    private abortUserQuestions;
     private appendStderr;
     private settleStreams;
     private closedError;

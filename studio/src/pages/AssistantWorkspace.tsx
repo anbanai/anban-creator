@@ -1,13 +1,13 @@
 import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Bot, Check, ChevronDown, Layers3, Library, Loader2, Plus, Upload, UserRound } from 'lucide-react'
+import { ArrowLeft, Bot, Check, ChevronDown, Layers3, Library, Loader2, Plus, Sparkles, Upload, UserRound } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 import type { AssistantInteractionDraftReceipt, AssistantInteractionSnapshot, AssistantModeID, AssistantWorkspace as AssistantWorkspaceState, AssistantProject } from '@/lib/api/assistant'
-import type { InteractiveDraft } from '@/lib/api/interactive'
+import { AssistantInteractionStreamError, type InteractiveDraft } from '@/lib/api/interactive'
 import { useAuth } from '@/contexts/AuthContext'
-import { InteractiveStreamError, streamAssistantWorkspace, type InteractiveStreamEvent } from '@/lib/interactive-events'
+import { streamAssistantWorkspace, type InteractiveStreamEvent } from '@/lib/interactive-events'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover'
@@ -45,9 +45,9 @@ import { assistantCreationTypes } from '@/lib/assistant-creation-types'
 import type { Project } from '@/types'
 import './AssistantWorkspace.css'
 
-type Message = { id: string; role: 'user' | 'assistant'; text: string; order: number }
+type Message = { id: string; role: 'user' | 'assistant'; text: string; displayText?: string; order: number }
 type HomePersona = AssistantProject & { platform: Project['platform'] }
-type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers']; order: number }
+type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers']; draftAnswers?: DshQuestionAnswer['answers']; generation?: number; closed?: 'failed' | 'expired'; order: number }
 type Draft = Record<string, unknown>
 type RouteState = AssistantRouteState
 type UncertainRetry =
@@ -64,9 +64,14 @@ type PersistedWorkspace = {
   questionsByMode?: Record<string, QuestionBatch[]>
   draftByMode?: Record<string, Draft | null>
   uncertainRetry?: UncertainRetry
+  commitIdempotencyKeys?: Record<string, string>
 }
 
 const WORKSPACE_STORAGE_KEY = 'anban:assistant-workspace'
+const RUNTIME_UNAVAILABLE_REASONS = [
+  '助手运行环境暂不可用，请稍后重试',
+  '助手运行环境尚未初始化完成，请稍后重试',
+]
 
 function isMode(value: unknown): value is AssistantModeID {
   return value === 'profile' || value === 'creation' || value === 'review'
@@ -90,13 +95,13 @@ function parsePersistedMessages(value: unknown): Record<string, Message[]> | und
       const id = stringValue(item?.id)
       const text = typeof item?.text === 'string' ? item.text : undefined
       const role = item?.role === 'user' || item?.role === 'assistant' ? item.role : undefined
-      return id && text !== undefined && role ? [{ id, role, text, order: typeof item?.order === 'number' ? item.order : index + 1 }] : []
+      return id && text !== undefined && role ? [{ id, role, text, displayText: typeof item?.displayText === 'string' ? item.displayText : undefined, order: typeof item?.order === 'number' ? item.order : index + 1 }] : []
     })
   }
   return result
 }
 
-function parsePersistedQuestions(value: unknown): Record<string, QuestionBatch[]> | undefined {
+function parsePersistedQuestions(value: unknown, generation?: number): Record<string, QuestionBatch[]> | undefined {
   const source = recordValue(value)
   if (!source) return undefined
   const result: Record<string, QuestionBatch[]> = {}
@@ -107,7 +112,8 @@ function parsePersistedQuestions(value: unknown): Record<string, QuestionBatch[]
       const callId = stringValue(item?.callId)
       const questions = parseQuestions(item?.questions)
       if (!callId || !questions.length) return []
-      return [{ callId, questions, answers: Array.isArray(item?.answers) ? item.answers as DshQuestionAnswer['answers'] : undefined, order: typeof item?.order === 'number' ? item.order : entries.length + index + 1 }]
+      const closed = item?.closed === 'failed' || item?.closed === 'expired' ? item.closed : undefined
+      return [{ callId, questions, answers: Array.isArray(item?.answers) ? item.answers as DshQuestionAnswer['answers'] : undefined, draftAnswers: Array.isArray(item?.draftAnswers) ? item.draftAnswers as DshQuestionAnswer['answers'] : undefined, generation: typeof item?.generation === 'number' ? item.generation : generation, closed, order: typeof item?.order === 'number' ? item.order : entries.length + index + 1 }]
     })
   }
   return result
@@ -161,7 +167,7 @@ function parseQuestions(value: unknown): DshQuestion[] {
   })
 }
 
-function draftReceiptToDraft(receipt: AssistantInteractionSnapshot['drafts'][number]): Draft {
+function draftReceiptToDraft(receipt: AssistantInteractionDraftReceipt): Draft {
   const payload = recordValue(receipt.payload) ?? {}
   return {
     ...payload,
@@ -171,12 +177,13 @@ function draftReceiptToDraft(receipt: AssistantInteractionSnapshot['drafts'][num
     payload_digest: receipt.payload_digest,
     ready: receipt.ready,
     confirmation_state: receipt.confirmation_state,
+    blocking_issues: receipt.blocking_issues,
   }
 }
 
 function draftsFromSnapshot(snapshot: AssistantInteractionSnapshot): Record<string, Draft | null> {
-  const latest = new Map<string, AssistantInteractionSnapshot['drafts'][number]>()
-  for (const receipt of snapshot.drafts) {
+  const latest = new Map<string, AssistantInteractionDraftReceipt>()
+  for (const receipt of snapshot.drafts ?? []) {
     const current = latest.get(receipt.mode_id)
     if (!current || receipt.revision > current.revision) latest.set(receipt.mode_id, receipt)
   }
@@ -225,11 +232,14 @@ function assistantInteractionErrorMessage(errorCode: string | undefined, fallbac
   switch (errorCode) {
     case 'assistant_interaction_generation_changed': return '对话状态已更新，正在恢复最新内容。'
     case 'assistant_interaction_reconnecting': return '正在恢复连接，请稍候。'
-    case 'assistant_interaction_restart_required': return '连接已结束，当前计划和输入已保留，请恢复后继续。'
+    case 'assistant_interaction_restart_required': return '当前对话已结束，请重新开始。'
     case 'assistant_command_outcome_unknown': return '上一条操作的结果无法确认，重新提交可能重复执行。'
     case 'assistant_message_not_accepted': return '刚才的消息未送出，内容已保留，请重试。'
     case 'assistant_draft_saved_retryable': return '计划已保留，但暂存未完成，请重试暂存。'
     case 'assistant_draft_revision_conflict': return '计划版本已更新，请恢复最新计划后再确认。'
+    case 'assistant_creation_inputs_missing': return '计划仍有必要信息待补充，请继续讨论。'
+    case 'assistant_draft_invalid': return '计划内容需要调整，请继续讨论。'
+    case 'assistant_draft_not_ready': return '计划尚未就绪，请继续讨论。'
     case 'assistant_commit_reconciliation_required': return '创建结果需要核对，请查看任务状态。'
     case 'assistant_commit_already_applied': return '任务已经创建，请查看任务。'
     default: return safeFallback
@@ -287,9 +297,10 @@ function readPersistedWorkspace(): PersistedWorkspace | null {
       contentId: typeof candidate.contentId === 'string' ? candidate.contentId : undefined,
       composer: typeof candidate.composer === 'string' ? candidate.composer : undefined,
       messagesByMode: parsePersistedMessages(candidate.messagesByMode),
-      questionsByMode: parsePersistedQuestions(candidate.questionsByMode),
+      questionsByMode: parsePersistedQuestions(candidate.questionsByMode, candidate.workspace?.generation),
       draftByMode: parsePersistedDrafts(candidate.draftByMode),
       uncertainRetry: parsePersistedUncertainRetry(candidate.uncertainRetry),
+      commitIdempotencyKeys: Object.fromEntries(Object.entries(recordValue(candidate.commitIdempotencyKeys) ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
     }
   } catch {
     return null
@@ -303,6 +314,11 @@ export default function AssistantWorkspace() {
   const routeState = (location.state ?? {}) as RouteState
   const routeHasContext = Boolean(routeState.modeId || routeState.projectId || routeState.contentId || routeState.checkpointId || routeState.initialMessage)
   const persisted = readPersistedWorkspace()
+  const startsNewWorkspace = routeHasContext && (!persisted?.workspace
+    || Boolean(routeState.initialMessage || routeState.checkpointId)
+    || Boolean(routeState.modeId && routeState.modeId !== persisted.workspace.mode_id)
+    || Boolean(routeState.projectId && routeState.projectId !== persisted.workspace.project_id)
+    || Boolean(routeState.contentId && routeState.contentId !== persisted.workspace.content_id))
   const bootstrapQuery = useQuery({ queryKey: ['assistant-bootstrap'], queryFn: api.assistant.bootstrap, staleTime: 30_000 })
   const queryClient = useQueryClient()
   const bootstrap = bootstrapQuery.data
@@ -312,7 +328,7 @@ export default function AssistantWorkspace() {
   const [composer, setComposer] = useState(routeState.initialMessage ?? persisted?.composer ?? '')
   const [attachments, setAttachments] = useState<PromptAttachment[]>([])
   const [executionProfile, setExecutionProfile] = useState<AgentExecutionProfileID | ''>('')
-  const [creationType, setCreationType] = useState(routeHasContext ? '' : persisted?.creationType ?? '')
+  const [creationType, setCreationType] = useState(startsNewWorkspace ? '' : persisted?.creationType ?? '')
   const [imageRatio, setImageRatio] = useState<ImageRatio>('auto')
   const [imageCapabilityKey, setImageCapabilityKey] = useState('')
   const [videoEditAssets, setVideoEditAssets] = useState<InputAttachment[]>([])
@@ -321,46 +337,63 @@ export default function AssistantWorkspace() {
   const [videoEditDefaults, setVideoEditDefaults] = useState<VideoEditDefaults>({})
   const [videoEditUploading, setVideoEditUploading] = useState(false)
   const [videoEditUploadFailed, setVideoEditUploadFailed] = useState(false)
-  const [workspace, setWorkspace] = useState<AssistantWorkspaceState | null>(() => routeHasContext ? null : persisted?.workspace ?? null)
+  const [workspace, setWorkspace] = useState<AssistantWorkspaceState | null>(() => startsNewWorkspace ? null : persisted?.workspace ?? null)
   const [newProfile, setNewProfile] = useState(false)
-  const [conversationPhase, setConversationPhase] = useState<'setup' | 'active'>(() => routeHasContext ? 'setup' : persisted?.workspace ? 'active' : 'setup')
+  const [conversationPhase, setConversationPhase] = useState<'setup' | 'prepared' | 'active'>(() => startsNewWorkspace ? 'setup' : persisted?.workspace?.lifecycle === 'prepared' ? 'prepared' : persisted?.workspace ? 'active' : 'setup')
   const [messagesByMode, setMessagesByMode] = useState<Record<string, Message[]>>(persisted?.messagesByMode ?? {})
   const [questionsByMode, setQuestionsByMode] = useState<Record<string, QuestionBatch[]>>(persisted?.questionsByMode ?? {})
   const [draftByMode, setDraftByMode] = useState<Record<string, Draft | null>>(persisted?.draftByMode ?? {})
   const [uncertainRetry, setUncertainRetry] = useState<UncertainRetry | undefined>(persisted?.uncertainRetry)
   const [error, setError] = useState<string | null>(null)
   const [interactionState, dispatchInteraction] = useReducer(assistantInteractionReducer, initialAssistantInteractionState)
+  const profileCompleted = workspace?.mode_id === 'profile' && interactionState.status === 'completed'
   const [, setInteractionSnapshot] = useState<AssistantInteractionSnapshot | null>(null)
   const [interactionSnapshotReady, setInteractionSnapshotReady] = useState(false)
+  const [streamRevision, setStreamRevision] = useState(0)
   const [sending, setSending] = useState(false)
   const [responding, setResponding] = useState(false)
   const [switching, setSwitching] = useState(false)
   const [pendingMode, setPendingMode] = useState<AssistantModeID | null>(null)
   const [committing, setCommitting] = useState(false)
-  const [lastEventIds, setLastEventIds] = useState<Record<string, string | undefined>>({})
+  const lastEventIds = useRef<Record<string, string | undefined>>({})
   const streamAbort = useRef<AbortController | null>(null)
   const userMessageCounter = useRef(0)
   const lastSubmittedMessage = useRef('')
   const workspaceResetVersion = useRef(0)
-  const workspaceCreateKey = useRef<string | null>(null)
+  const prepareRequestRef = useRef<{ request: Parameters<typeof api.assistant.createWorkspace>[0]; key: string } | null>(null)
+  const preparePromiseRef = useRef<Promise<AssistantWorkspaceState> | null>(null)
+  const prepareAttemptedRef = useRef(false)
+  const sseReadyRef = useRef<{ id: string; promise: Promise<void>; resolve: () => void } | null>(null)
+  const streamModeRef = useRef(mode)
+  streamModeRef.current = mode
+  const workspaceHandedOff = useRef(false)
   const sendInFlight = useRef(false)
-  const commitIdempotencyKeys = useRef<Record<string, string>>({})
+  const answerInFlight = useRef(false)
+  const [commitIdempotencyKeys, setCommitIdempotencyKeys] = useState<Record<string, string>>(persisted?.commitIdempotencyKeys ?? {})
   const modeChosenByUser = useRef(false)
   const imageRatioContextKey = useRef<string | null>(null)
   const conversationOrder = useRef<Record<string, number>>({})
   const uncertainRetryRef = useRef<(() => void) | null>(null)
-  const initialSnapshotRequired = useRef(Boolean(!routeHasContext && persisted?.workspace))
+  const initialSnapshotRequired = useRef(Boolean(!startsNewWorkspace && persisted?.workspace))
+
+  useEffect(() => {
+    const generation = workspace?.generation
+    if (generation === undefined) return
+    setQuestionsByMode((current) => Object.fromEntries(Object.entries(current).map(([questionMode, batches]) => [questionMode,
+      batches.map((batch) => !batch.answers && !batch.closed && batch.generation !== undefined && batch.generation !== generation ? { ...batch, closed: 'expired' as const } : batch),
+    ])))
+  }, [workspace?.generation])
 
   const applyInteractionSnapshot = (snapshot: AssistantInteractionSnapshot) => {
     setInteractionSnapshot(snapshot)
     setInteractionSnapshotReady(true)
-    setWorkspace((current) => current ? { ...current, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, generation: snapshot.generation, runtime_status: snapshot.runtime_status, expires_at: snapshot.expires_at } : current)
+    setWorkspace((current) => current ? { ...current, id: snapshot.interaction_id, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, generation: snapshot.generation, runtime_status: snapshot.runtime_status, lifecycle: snapshot.lifecycle, expires_at: snapshot.expires_at } : current)
     setMode(snapshot.mode_id)
     setProjectId(snapshot.project_id ?? '')
     setContentId(snapshot.content_id ?? '')
     setDraftByMode(draftsFromSnapshot(snapshot))
     dispatchInteraction({ type: 'snapshot', snapshot })
-    setConversationPhase('active')
+    setConversationPhase((current) => current === 'active' || snapshot.lifecycle !== 'prepared' ? 'active' : 'prepared')
   }
 
   useEffect(() => {
@@ -369,11 +402,22 @@ export default function AssistantWorkspace() {
     void api.assistant.getInteractionSnapshot(workspace.id).then((snapshot) => {
       if (cancelled) return
       initialSnapshotRequired.current = false
+      if (routeHasContext && (snapshot.lifecycle === 'completed' || snapshot.lifecycle === 'abandoned')) {
+        setWorkspace(null)
+        setConversationPhase('setup')
+        setMessagesByMode({})
+        setQuestionsByMode({})
+        setDraftByMode({})
+        setUncertainRetry(undefined)
+        dispatchInteraction({ type: 'restart' })
+        return
+      }
       setInteractionSnapshot(snapshot)
       setInteractionSnapshotReady(true)
-      setWorkspace((current) => current ? { ...current, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, generation: snapshot.generation, runtime_status: snapshot.runtime_status, expires_at: snapshot.expires_at } : current)
+      setWorkspace((current) => current ? { ...current, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, generation: snapshot.generation, runtime_status: snapshot.runtime_status, lifecycle: snapshot.lifecycle, expires_at: snapshot.expires_at } : current)
       setDraftByMode(draftsFromSnapshot(snapshot))
       dispatchInteraction({ type: 'snapshot', snapshot })
+      setConversationPhase(snapshot.lifecycle === 'prepared' ? 'prepared' : 'active')
     }).catch((snapshotError) => {
       if (cancelled) return
       setInteractionSnapshotReady(false)
@@ -382,10 +426,6 @@ export default function AssistantWorkspace() {
     })
     return () => { cancelled = true }
   }, [workspace?.id])
-
-  useEffect(() => {
-    if (error && interactionState.status === 'connecting') dispatchInteraction({ type: 'error', code: error.includes('计划') ? 'assistant_draft_saved_retryable' : 'assistant_message_not_accepted' })
-  }, [error, interactionState.status])
 
   const nextConversationOrder = (conversationMode: AssistantModeID) => {
     const next = (conversationOrder.current[conversationMode] ?? 0) + 1
@@ -402,6 +442,7 @@ export default function AssistantWorkspace() {
   }, [messagesByMode, questionsByMode])
 
   useEffect(() => {
+    if (workspaceHandedOff.current) return
     try {
       sessionStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify({
         workspace,
@@ -414,11 +455,12 @@ export default function AssistantWorkspace() {
         questionsByMode,
         draftByMode,
         uncertainRetry,
+        commitIdempotencyKeys,
       } satisfies PersistedWorkspace))
     } catch {
       // Conversation recovery is best effort when browser storage is unavailable or full.
     }
-  }, [workspace, creationType, mode, projectId, contentId, composer, messagesByMode, questionsByMode, draftByMode, uncertainRetry])
+  }, [workspace, creationType, mode, projectId, contentId, composer, messagesByMode, questionsByMode, draftByMode, uncertainRetry, commitIdempotencyKeys])
 
   const projects = bootstrap?.projects ?? []
   const projectsQuery = useQuery({ queryKey: ['projects', 'assistant-home'], queryFn: () => api.projects.list({ status: 'active' }), staleTime: 30_000 })
@@ -442,12 +484,13 @@ export default function AssistantWorkspace() {
   })
   const selectionMode = pendingMode ?? mode
   const selectableProjects = completeProjects
-  const lockedProjectId = workspace && !pendingMode ? workspace.project_id : undefined
+  const lockedProjectId = workspace && conversationPhase === 'active' && !pendingMode ? workspace.project_id : undefined
   const selectedProject = selectableProjects.find((project) => project.id === (lockedProjectId ?? projectId))
     ?? (lockedProjectId ? projects.find((project) => project.id === lockedProjectId) : undefined)
     ?? (!workspace && !projectId && !newProfile && selectionMode !== 'profile' ? selectableProjects[0] : undefined)
   const creationTypes = assistantCreationTypes(selectedProject)
   const selectedAgentIDs = selectedProject ? personaAgentIDs(selectedProject) : []
+  const isEcommerceCreation = mode === 'creation' && selectedAgentIDs.includes('ecommerce')
   const selectedCreationType = creationTypes.some((item) => item.value === creationType) ? creationType : creationTypes[0]?.value ?? ''
   const creationPlatform = creationTypes.find((item) => item.value === selectedCreationType)?.platform ?? selectedProject?.platform
   const isVideoEditCreation = mode === 'creation' && selectedCreationType === 'video-edit'
@@ -477,18 +520,25 @@ export default function AssistantWorkspace() {
   })
   const activeMessages = messagesByMode[mode] ?? []
   const activeQuestions = questionsByMode[mode] ?? []
-  const pendingQuestions = activeQuestions.filter((question) => !question.answers)
-  const activeDraft = draftByMode[mode]
-  const draftPending = Boolean(activeDraft)
+  const pendingQuestions = activeQuestions.filter((question) => !question.answers && !question.closed)
+  const creationReceipt = interactionState.drafts.filter((draft) => draft.mode_id === 'creation').sort((a, b) => b.revision - a.revision)[0]
+  const activeDraft = mode === 'creation' ? creationReceipt && creationReceipt.confirmation_state !== 'consumed' ? draftReceiptToDraft(creationReceipt) : null : draftByMode[mode]
+  const creationNeedsInputs = interactionState.errorCode === 'assistant_creation_inputs_missing'
+  const creationCanConfirm = Boolean(creationReceipt?.ready && creationReceipt.confirmation_state === 'pending' && interactionState.availableActions.includes('confirm_draft'))
+  const draftPending = mode === 'creation' ? interactionState.status === 'completed' || interactionState.errorCode === 'assistant_commit_reconciliation_required' || Boolean(activeDraft) && (creationCanConfirm || !interactionState.availableActions.some((action) => action === 'continue_editing' || action === 'send_message')) : Boolean(activeDraft)
+  const creationConfirmation = mode === 'creation' && Boolean(activeDraft) && draftPending && creationCanConfirm
+  const creationEditing = mode === 'creation' && creationReceipt?.confirmation_state === 'superseded'
   const bootstrapMode = bootstrap?.modes.find((candidate) => candidate.id === mode)
-  const isRuntimeUnavailable = bootstrapMode?.disabledReason === '助手运行环境暂不可用，请稍后重试'
+  const isRuntimeUnavailable = RUNTIME_UNAVAILABLE_REASONS.includes(bootstrapMode?.disabledReason ?? '')
   const activeMode = bootstrapMode && !isRuntimeUnavailable && mode === 'creation'
     ? { ...bootstrapMode, available: Boolean(selectedProject || completeProjects.length), disabledReason: bootstrapMode.disabledReason ?? '先创建一个人设，之后即可澄清创作需求' }
     : bootstrapMode && !isRuntimeUnavailable && mode === 'review' && selectedWork
       ? { ...bootstrapMode, available: true }
       : bootstrapMode
   const modePrerequisiteBlocked = Boolean(activeMode && !activeMode.available && activeMode.disabledReason && !isRuntimeUnavailable)
-  const missingContextInstruction = activeMode?.available
+  const missingContextInstruction = isEcommerceCreation
+    ? '电商设计需在创作页上传产品图并配置出图内容。'
+    : activeMode?.available
     ? mode === 'creation' && !selectedProject
       ? '先选择人设后即可输入消息'
       : mode === 'creation' && selectedProject && creationTypes.length === 0
@@ -499,8 +549,9 @@ export default function AssistantWorkspace() {
           ? '先选择作品后即可输入消息'
           : undefined
     : undefined
-  const staleProjectSelection = !workspace && Boolean(projectId) && !selectedProject
-  const composerBlocked = staleProjectSelection || modePrerequisiteBlocked || Boolean(missingContextInstruction) || Boolean(activeMode && !activeMode.available)
+  const staleProjectSelection = conversationPhase !== 'active' && Boolean(projectId) && !selectedProject
+  const conversationEnded = workspace?.lifecycle === 'abandoned' || interactionState.status === 'restart_required' && !interactionState.availableActions.includes('restore_draft') && interactionState.errorCode !== 'assistant_commit_reconciliation_required'
+  const composerBlocked = conversationEnded || staleProjectSelection || modePrerequisiteBlocked || Boolean(missingContextInstruction) || Boolean(activeMode && !activeMode.available)
   const composerPlaceholder = modePrerequisiteBlocked
     ? mode === 'creation' ? '先完成新人设创建后即可输入消息' : '先完成当前模式所需条件后即可输入消息'
     : missingContextInstruction ?? modePlaceholder(mode)
@@ -512,38 +563,100 @@ export default function AssistantWorkspace() {
     : undefined
   const profilePlatform = selectedProject?.platform ?? stringValue(draftProject?.platform)
   const isVideoEditProfile = mode === 'profile' && profilePlatform === 'video-edit'
-  const projectContextReady = Boolean(workspace) || (projectsQuery.isSuccess && !projectsQuery.isFetching)
+  const projectContextReady = conversationPhase === 'active' || (projectsQuery.isSuccess && !projectsQuery.isFetching)
   const canSend = projectContextReady && Boolean(composer.trim()) && Boolean(activeMode?.available) && (mode === 'profile' || Boolean(selectedProject)) && (mode !== 'review' || Boolean(selectedWork)) && !sending && !responding && !committing && !composerBlocked && !draftPending
+
+  const connectionReady = (id: string) => {
+    if (sseReadyRef.current?.id !== id) {
+      let resolve!: () => void
+      const promise = new Promise<void>((done) => { resolve = done })
+      sseReadyRef.current = { id, promise, resolve }
+    }
+    return sseReadyRef.current
+  }
+
+  const prepareWorkspace = () => {
+    if (preparePromiseRef.current) return preparePromiseRef.current
+    const resetVersion = workspaceResetVersion.current
+    prepareAttemptedRef.current = true
+    const request = {
+      mode_id: mode,
+      ...(selectedProject ? { project_id: selectedProject.id } : {}),
+      ...(selectedWork ? { content_id: selectedWork.id } : {}),
+      prepare_only: true,
+    }
+    if (!prepareRequestRef.current || JSON.stringify(prepareRequestRef.current.request) !== JSON.stringify(request)) {
+      prepareRequestRef.current = { request, key: crypto.randomUUID() }
+    }
+    const { key } = prepareRequestRef.current
+    const promise = api.assistant.createWorkspace(request, key).then((preparedWorkspace) => {
+      if (workspaceResetVersion.current !== resetVersion) return preparedWorkspace
+      workspaceHandedOff.current = false
+      connectionReady(preparedWorkspace.id)
+      setWorkspace(preparedWorkspace)
+      setInteractionSnapshot(preparedWorkspace.interaction_snapshot ?? null)
+      setInteractionSnapshotReady(true)
+      if (preparedWorkspace.interaction_snapshot) {
+        setDraftByMode(draftsFromSnapshot(preparedWorkspace.interaction_snapshot))
+        dispatchInteraction({ type: 'snapshot', snapshot: preparedWorkspace.interaction_snapshot })
+      }
+      setConversationPhase(preparedWorkspace.lifecycle === 'prepared' ? 'prepared' : 'active')
+      return preparedWorkspace
+    }).finally(() => {
+      if (preparePromiseRef.current === promise) preparePromiseRef.current = null
+    })
+    preparePromiseRef.current = promise
+    return promise
+  }
+
+  useEffect(() => {
+    const resolvedDefaultMode = bootstrap?.defaultModeId === 'profile' && completeProjects.length > 0 ? 'creation' : bootstrap?.defaultModeId
+    if (workspace || prepareAttemptedRef.current || !bootstrapQuery.isSuccess || !projectsQuery.isSuccess || projectsQuery.isFetching) return
+    if (!modeChosenByUser.current && !routeState.modeId && !persisted?.workspace?.mode_id && resolvedDefaultMode && mode !== resolvedDefaultMode) return
+    if (!activeMode?.available || modePrerequisiteBlocked || missingContextInstruction || staleProjectSelection) return
+    void prepareWorkspace().catch((prepareError) => {
+      setError(assistantInteractionErrorMessage(assistantWorkspaceErrorCode(prepareError), '助手连接暂时无法准备，请发送消息重试。'))
+    })
+  }, [activeMode?.available, bootstrap?.defaultModeId, bootstrapQuery.isSuccess, completeProjects.length, missingContextInstruction, mode, modePrerequisiteBlocked, persisted?.workspace?.mode_id, projectsQuery.isFetching, projectsQuery.isSuccess, routeState.modeId, selectedProject?.id, selectedWork?.id, staleProjectSelection, workspace])
 
   const resetExpiredWorkspace = (preservedComposer?: string) => {
     workspaceResetVersion.current += 1
     setResponding(false)
+    setQuestionsByMode((current) => Object.fromEntries(Object.entries(current).map(([questionMode, batches]) => [questionMode,
+      batches.map((batch) => !batch.answers && !batch.closed ? { ...batch, closed: 'expired' as const } : batch),
+    ])))
     setInteractionSnapshotReady(false)
-    setError('连接已结束，当前计划和输入已保留，请恢复后继续。')
+    streamAbort.current?.abort()
+    setError(null)
     const preserved = preservedComposer ?? lastSubmittedMessage.current
     if (preserved) setComposer((current) => current || preserved)
-    dispatchInteraction({ type: 'error', code: 'assistant_interaction_restart_required' })
+    dispatchInteraction({ type: 'error', code: 'assistant_interaction_restart_required', availableActions: ['restart'] })
   }
 
-  const refreshInteractionSnapshot = async () => {
-    if (!workspace) return
+  const refreshInteractionSnapshot = async (workspaceID = workspace?.id) => {
+    if (!workspaceID) return
+    const resetVersion = workspaceResetVersion.current
     try {
-      const snapshot = await api.assistant.getInteractionSnapshot(workspace.id)
+      const snapshot = await api.assistant.getInteractionSnapshot(workspaceID)
+      if (workspaceResetVersion.current !== resetVersion) return
       setInteractionSnapshot(snapshot)
       setInteractionSnapshotReady(true)
-      setWorkspace((current) => current ? { ...current, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, generation: snapshot.generation, runtime_status: snapshot.runtime_status, expires_at: snapshot.expires_at } : current)
+      setWorkspace((current) => current ? { ...current, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, generation: snapshot.generation, runtime_status: snapshot.runtime_status, lifecycle: snapshot.lifecycle, expires_at: snapshot.expires_at } : current)
       setDraftByMode(draftsFromSnapshot(snapshot))
       dispatchInteraction({ type: 'snapshot', snapshot })
-      setError(null)
+      setError(snapshot.lifecycle === 'prepared' && lastSubmittedMessage.current ? '消息尚未发送，输入已保留，请重试。' : null)
+      setStreamRevision((current) => current + 1)
     } catch (snapshotError) {
+      if (workspaceResetVersion.current !== resetVersion) return
       const recovered = assistantInteractionSnapshotFromError(snapshotError)
       if (recovered) {
         setInteractionSnapshotReady(true)
         setInteractionSnapshot(recovered)
-        setWorkspace((current) => current ? { ...current, mode_id: recovered.mode_id, project_id: recovered.project_id, content_id: recovered.content_id, generation: recovered.generation, runtime_status: recovered.runtime_status, expires_at: recovered.expires_at } : current)
+        setWorkspace((current) => current ? { ...current, mode_id: recovered.mode_id, project_id: recovered.project_id, content_id: recovered.content_id, generation: recovered.generation, runtime_status: recovered.runtime_status, lifecycle: recovered.lifecycle, expires_at: recovered.expires_at } : current)
         setDraftByMode(draftsFromSnapshot(recovered))
         dispatchInteraction({ type: 'snapshot', snapshot: recovered })
         setError(null)
+        setStreamRevision((current) => current + 1)
         return
       }
       setInteractionSnapshotReady(false)
@@ -551,31 +664,57 @@ export default function AssistantWorkspace() {
     }
   }
 
-  const restartInteraction = async () => {
-    const currentWorkspace = workspace
-    streamAbort.current?.abort()
-    if (currentWorkspace) {
-      try {
-        await api.assistant.closeWorkspace(currentWorkspace.id)
-      } catch {
-        // A missing or already-ended interaction is already safe to restart.
-      }
-    }
+  const resetInteraction = () => {
     workspaceResetVersion.current += 1
-    setInteractionSnapshotReady(false)
+    streamAbort.current?.abort()
+    sseReadyRef.current?.resolve()
+    sseReadyRef.current = null
+    preparePromiseRef.current = null
+    prepareAttemptedRef.current = true
+    prepareRequestRef.current = null
+    initialSnapshotRequired.current = false
+    // Clear persisted state before navigation; cleanup must not hold the user
+    // on a dead conversation when the old Server cannot answer DELETE.
+    workspaceHandedOff.current = true
+    sessionStorage.removeItem(WORKSPACE_STORAGE_KEY)
     setWorkspace(null)
     setInteractionSnapshot(null)
+    setInteractionSnapshotReady(false)
     setConversationPhase('setup')
-    setLastEventIds({})
+    lastEventIds.current = {}
+    lastSubmittedMessage.current = ''
     setMessagesByMode({})
     setQuestionsByMode({})
     setDraftByMode({})
+    setCommitIdempotencyKeys({})
+    setAttachments([])
+    setContentId('')
+    setNewProfile(false)
+    setPendingMode(null)
+    setSwitching(false)
     setComposer('')
     setError(null)
+    setResponding(false)
+    setSending(false)
     dispatchInteraction({ type: 'restart' })
     uncertainRetryRef.current = null
     setUncertainRetry(undefined)
+    navigate('/', { replace: true, state: null })
   }
+
+  const restartInteraction = () => {
+    const currentWorkspace = workspace
+    resetInteraction()
+    if (currentWorkspace) void api.assistant.closeWorkspace(currentWorkspace.id).catch(() => undefined)
+  }
+
+  useEffect(() => {
+    if (!profileCompleted) return
+    // Saving a profile already completes the Server-owned interaction.
+    resetInteraction()
+    setProjectId(workspace?.project_id ?? '')
+    setMode('creation')
+  }, [profileCompleted, workspace?.project_id, navigate])
 
   useEffect(() => {
     if (!bootstrap || routeState.modeId || persisted?.workspace?.mode_id || workspace || newProfile || projectId || completeProjects.length === 0) return
@@ -599,7 +738,7 @@ export default function AssistantWorkspace() {
   }, [mode, selectedProject?.id])
 
   useEffect(() => {
-    if (conversationPhase !== 'setup' || mode !== 'creation') return
+    if (conversationPhase === 'active' || mode !== 'creation') return
     if (creationTypes.length && !creationTypes.some((item) => item.value === creationType)) setCreationType(creationTypes[0].value)
     if (!creationTypes.length && creationType) setCreationType('')
   }, [conversationPhase, mode, creationType, creationTypes])
@@ -629,23 +768,30 @@ export default function AssistantWorkspace() {
   }, [mode, attachments.length])
 
   useEffect(() => {
-    if (conversationPhase === 'setup' && mode !== 'profile' && !projectId && selectableProjects.length === 1) setProjectId(selectableProjects[0].id)
+    if (conversationPhase !== 'active' && mode !== 'profile' && !projectId && selectableProjects.length === 1) setProjectId(selectableProjects[0].id)
   }, [conversationPhase, mode, projectId, selectableProjects])
 
   useEffect(() => {
-    if (!workspace || !token || !interactionSnapshotReady) return
+    if (!workspace || !token || !interactionSnapshotReady || profileCompleted || workspace.lifecycle === 'abandoned' || workspace.lifecycle === 'completed') return
     streamAbort.current?.abort()
     const controller = new AbortController()
     streamAbort.current = controller
+    const ready = connectionReady(workspace.id)
+    const activateConversation = () => {
+      setConversationPhase('active')
+      setWorkspace((current) => current?.lifecycle === 'prepared' ? { ...current, lifecycle: 'active' } : current)
+    }
     const stream = streamAssistantWorkspace(workspace.id, token, controller.signal, {
-      lastEventId: lastEventIds[mode],
+      lastEventId: lastEventIds.current[workspace.id],
       generation: workspace.generation,
+      onConnected: ready.resolve,
       onGenerationChanged: (generation) => {
         dispatchInteraction({ type: 'generation_changed', generation })
         void api.assistant.getInteractionSnapshot(workspace.id).then((snapshot) => {
+          if (controller.signal.aborted) return
           setInteractionSnapshot(snapshot)
           setInteractionSnapshotReady(true)
-          setWorkspace((current) => current ? { ...current, generation: snapshot.generation, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, runtime_status: snapshot.runtime_status } : current)
+          setWorkspace((current) => current ? { ...current, generation: snapshot.generation, mode_id: snapshot.mode_id, project_id: snapshot.project_id, content_id: snapshot.content_id, runtime_status: snapshot.runtime_status, lifecycle: snapshot.lifecycle } : current)
           setDraftByMode(draftsFromSnapshot(snapshot))
           dispatchInteraction({ type: 'snapshot', snapshot })
         }).catch(() => undefined)
@@ -654,7 +800,8 @@ export default function AssistantWorkspace() {
     void (async () => {
       try {
         for await (const event of stream) {
-          if (event.id) setLastEventIds((current) => ({ ...current, [mode]: event.id }))
+          if (controller.signal.aborted) return
+          if (event.id) lastEventIds.current[workspace.id] = event.id
           const data = parseEventData(event)
           if (event.event === 'session.expired' || event.event === 'expired') {
             const preservedComposer = lastSubmittedMessage.current || undefined
@@ -662,7 +809,10 @@ export default function AssistantWorkspace() {
             resetExpiredWorkspace(preservedComposer)
             continue
           }
-          if (event.event === 'turn.start') setResponding(true)
+          if (event.event === 'turn.start') {
+            activateConversation()
+            setResponding(true)
+          }
           if (event.event === 'turn.end' || event.event === 'question.opened' || event.event === 'session.error') {
             setResponding(false)
             lastSubmittedMessage.current = ''
@@ -676,10 +826,11 @@ export default function AssistantWorkspace() {
             }
           }
           if (event.event === 'session.status' && ['idle', 'waiting_answer', 'runtime_failed'].includes(String(data.status))) setResponding(false)
-          const eventMode = isMode(data.mode_id) ? data.mode_id : mode
+          const eventMode = isMode(data.mode_id) ? data.mode_id : streamModeRef.current
           if (event.event === 'assistant.message' || event.event === 'user.message') {
             const text = stringValue(data.text)
             if (!text) continue
+            activateConversation()
             const role = event.event === 'assistant.message' ? 'assistant' : 'user'
             const order = nextConversationOrder(eventMode)
             setMessagesByMode((current) => {
@@ -689,23 +840,37 @@ export default function AssistantWorkspace() {
                 const optimisticIndex = list.findIndex((item) => item.id.startsWith('optimistic-') && item.text === text)
                 if (optimisticIndex >= 0) {
                   const next = [...list]
-                  next[optimisticIndex] = { ...next[optimisticIndex], id: event.id, role, text }
+                  next[optimisticIndex] = { ...next[optimisticIndex], id: event.id, role, text, displayText: stringValue(data.display_text) ?? next[optimisticIndex].displayText }
                   return { ...current, [eventMode]: next }
                 }
               }
-              return { ...current, [eventMode]: [...list, { id: event.id ?? `${role}-${Date.now()}-${list.length}`, role, text, order }] }
+              return { ...current, [eventMode]: [...list, { id: event.id ?? `${role}-${Date.now()}-${list.length}`, role, text, displayText: role === 'user' ? stringValue(data.display_text) : undefined, order }] }
             })
           } else if (event.event === 'question.opened') {
             const callId = stringValue(data.call_id)
             const questions = parseQuestions(data.questions)
             if (callId && questions.length) {
+              activateConversation()
               const order = nextConversationOrder(eventMode)
-              setQuestionsByMode((current) => ({ ...current, [eventMode]: [...(current[eventMode] ?? []).filter((item) => item.callId !== callId), { callId, questions, order }] }))
+              setQuestionsByMode((current) => {
+                const batches = current[eventMode] ?? []
+                const existing = batches.find((item) => item.callId === callId)
+                return { ...current, [eventMode]: [...batches.filter((item) => item.callId !== callId), { ...existing, callId, questions, generation: typeof data.generation === 'number' ? data.generation : existing?.generation ?? workspace.generation, order: existing?.order ?? order }] }
+              })
             }
+          } else if (event.event === 'tool.result' && data.ok === false) {
+            const callId = stringValue(data.call_id)
+            if (callId) setQuestionsByMode((current) => ({ ...current, [eventMode]: (current[eventMode] ?? []).map((batch) => batch.callId === callId && !batch.answers ? { ...batch, closed: 'failed' } : batch) }))
+          } else if (event.event === 'question.answered') {
+            const callId = stringValue(data.call_id)
+            const answers = Array.isArray(data.answers) ? data.answers as DshQuestionAnswer['answers'] : undefined
+            if (callId && answers) setQuestionsByMode((current) => ({ ...current, [eventMode]: (current[eventMode] ?? []).map((item) => item.callId === callId ? { ...item, answers } : item) }))
           } else if (event.event === 'draft.ready') {
+            // Durable events contain metadata only; the snapshot owns their full payload.
             const stagedDraft = recordValue(data.draft) ?? recordValue(data.value)
-              ?? (data.ready === true || data.confirmation_token ? data : undefined)
+              ?? (data.durable !== true && (data.ready === true || data.confirmation_token) ? data : undefined)
             if (stagedDraft) {
+              activateConversation()
               setDraftByMode((current) => ({ ...current, [eventMode]: stagedDraft }))
               if (typeof stagedDraft.draft_id === 'string' && typeof stagedDraft.mode_id === 'string' && typeof stagedDraft.revision === 'number' && typeof stagedDraft.payload_digest === 'string' && typeof stagedDraft.ready === 'boolean' && typeof stagedDraft.confirmation_state === 'string') {
                 dispatchInteraction({ type: 'draft_ready', draft: stagedDraft as unknown as AssistantInteractionDraftReceipt })
@@ -715,17 +880,23 @@ export default function AssistantWorkspace() {
         }
       } catch (streamError) {
         if (!controller.signal.aborted) {
+          ready.resolve()
           setResponding(false)
-          if (streamError instanceof InteractiveStreamError && (streamError.status === 404 || streamError.status === 410)) {
+          if (streamError instanceof AssistantInteractionStreamError && (streamError.status === 404 || streamError.status === 410)) {
             resetExpiredWorkspace(lastSubmittedMessage.current || undefined)
           } else {
-            setError(streamError instanceof Error ? assistantInteractionErrorMessage(undefined, streamError instanceof InteractiveStreamError ? '助手连接已中断，正在恢复。' : streamError.message) : '助手连接已中断，正在恢复。')
+            dispatchInteraction({ type: 'error', code: 'assistant_interaction_reconnecting' })
+            setError('助手连接已中断，可以恢复连接继续对话。')
           }
         }
       }
     })()
-    return () => controller.abort()
-  }, [interactionSnapshotReady, mode, token, workspace])
+    return () => {
+      controller.abort()
+      ready.resolve()
+      if (sseReadyRef.current === ready) sseReadyRef.current = null
+    }
+  }, [interactionSnapshotReady, profileCompleted, streamRevision, token, workspace?.id, workspace?.generation, workspace?.lifecycle === 'abandoned' || workspace?.lifecycle === 'completed'])
 
   const sendMessage = async (override?: string, options?: { forceNewAttempt?: boolean }) => {
     const text = (override ?? composer).trim()
@@ -753,59 +924,78 @@ export default function AssistantWorkspace() {
     setError(null)
     lastSubmittedMessage.current = text
     setComposer('')
-    setMessagesByMode((current) => ({ ...current, [mode]: [...(current[mode] ?? []), { id: optimisticID, role: 'user', text: messageText, order }] }))
-    let createdWorkspace: AssistantWorkspaceState | null = null
+    setMessagesByMode((current) => ({ ...current, [mode]: [...(current[mode] ?? []), { id: optimisticID, role: 'user', text: messageText, displayText: text, order }] }))
+    let currentWorkspace = workspace
     try {
-      let currentWorkspace = workspace
-      if (!currentWorkspace) {
-        if (!workspaceCreateKey.current) workspaceCreateKey.current = crypto.randomUUID()
-        currentWorkspace = await api.assistant.createWorkspace({ mode_id: mode, ...(selectedProject ? { project_id: selectedProject.id } : {}), ...(selectedWork ? { content_id: selectedWork.id } : {}), ...(routeState.checkpointId ? { checkpoint_id: routeState.checkpointId } : {}) }, workspaceCreateKey.current)
-        workspaceCreateKey.current = null
-        createdWorkspace = currentWorkspace
+      currentWorkspace ??= await prepareWorkspace()
+      const messageContext = { mode_id: mode, ...(selectedProject ? { project_id: selectedProject.id } : { project_id: '' }), ...(selectedWork ? { content_id: selectedWork.id } : { content_id: '' }) }
+      if (currentWorkspace.lifecycle === 'prepared' && ((currentWorkspace.project_id ?? '') !== messageContext.project_id || (currentWorkspace.content_id ?? '') !== messageContext.content_id)) {
+        // Resolve the selected scope instead of moving another persona's interaction
+        // into a scope that may already have an active conversation.
+        currentWorkspace = await prepareWorkspace()
+        if (currentWorkspace.lifecycle === 'needs_confirmation') {
+          setMode(currentWorkspace.mode_id)
+          setComposer(text)
+          setMessagesByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).filter((message) => message.id !== optimisticID) }))
+          return
+        }
       }
-      if (options?.forceNewAttempt) await api.assistant.workspaceMessage(currentWorkspace.id, mode, messageText, true)
-      else await api.assistant.workspaceMessage(currentWorkspace.id, mode, messageText)
+      if (currentWorkspace.lifecycle === 'prepared' && (!workspace || interactionSnapshotReady)) {
+        // Do not let a failed network connection indefinitely block a durable message.
+        let timeout: ReturnType<typeof setTimeout> | undefined
+        try {
+          await Promise.race([
+            connectionReady(currentWorkspace.id).promise,
+            new Promise<void>((resolve) => { timeout = setTimeout(resolve, 5_000) }),
+          ])
+        } finally {
+          clearTimeout(timeout)
+        }
+      }
+      if (workspaceResetVersion.current !== resetVersion) return
+      setConversationPhase('active')
+      dispatchInteraction({ type: 'clear_error' })
+      setResponding(true)
+      if (prepareRequestRef.current && currentWorkspace.lifecycle !== 'prepared' && (currentWorkspace.mode_id !== mode || (currentWorkspace.project_id ?? '') !== messageContext.project_id || (currentWorkspace.content_id ?? '') !== messageContext.content_id)) {
+        currentWorkspace = await api.assistant.switchWorkspaceMode(currentWorkspace.id, mode, { project_id: messageContext.project_id, content_id: messageContext.content_id })
+      }
+      if (currentWorkspace.lifecycle === 'prepared') setWorkspace({ ...currentWorkspace, ...messageContext })
+      if (options?.forceNewAttempt) {
+        if (currentWorkspace.lifecycle === 'prepared') await api.assistant.workspaceMessage(currentWorkspace.id, mode, messageText, true, messageContext)
+        else await api.assistant.workspaceMessage(currentWorkspace.id, mode, messageText, true)
+      } else if (currentWorkspace.lifecycle === 'prepared') {
+        await api.assistant.workspaceMessage(currentWorkspace.id, mode, messageText, false, messageContext)
+      } else {
+        await api.assistant.workspaceMessage(currentWorkspace.id, mode, messageText)
+      }
+      prepareRequestRef.current = null
       uncertainRetryRef.current = null
       setUncertainRetry(undefined)
-      dispatchInteraction({ type: 'clear_error' })
-      if (!workspace && workspaceResetVersion.current === resetVersion) {
+      if (workspaceResetVersion.current === resetVersion) {
         const acceptedWorkspace: AssistantWorkspaceState = {
           ...currentWorkspace,
           mode_id: mode,
-          ...(selectedProject ? { project_id: selectedProject.id } : {}),
-          ...(selectedWork ? { content_id: selectedWork.id } : {}),
-        }
-        if (currentWorkspace.interaction_snapshot) {
-          setInteractionSnapshot(currentWorkspace.interaction_snapshot)
-          setDraftByMode(draftsFromSnapshot(currentWorkspace.interaction_snapshot))
-          dispatchInteraction({ type: 'snapshot', snapshot: currentWorkspace.interaction_snapshot })
+          project_id: selectedProject?.id ?? '',
+          content_id: selectedWork?.id ?? '',
+          lifecycle: 'active',
         }
         setInteractionSnapshotReady(true)
         setWorkspace(acceptedWorkspace)
         setConversationPhase('active')
       }
-      setResponding(true)
     } catch (sendError) {
+      setResponding(false)
       const recoveredSnapshot = assistantInteractionSnapshotFromError(sendError)
       if (recoveredSnapshot) applyInteractionSnapshot(recoveredSnapshot)
-      if (createdWorkspace) {
-        setInteractionSnapshotReady(true)
-        if (createdWorkspace.interaction_snapshot) {
-          setInteractionSnapshot(createdWorkspace.interaction_snapshot)
-          setDraftByMode(draftsFromSnapshot(createdWorkspace.interaction_snapshot))
-          dispatchInteraction({ type: 'snapshot', snapshot: createdWorkspace.interaction_snapshot })
-        }
-        setWorkspace(createdWorkspace)
-        setConversationPhase('active')
-      }
       setComposer(text)
       setMessagesByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).filter((message) => message.id !== optimisticID) }))
       const errorCode = assistantWorkspaceErrorCode(sendError)
+      const status = assistantWorkspaceHttpStatus(sendError)
       if (errorCode === 'assistant_command_outcome_unknown') {
         uncertainRetryRef.current = () => { void sendMessage(text, { forceNewAttempt: true }) }
         setUncertainRetry({ kind: 'message', text })
       }
-      if (errorCode?.startsWith('assistant_')) dispatchInteraction({ type: 'error', code: errorCode })
+      if (errorCode?.startsWith('assistant_')) dispatchInteraction({ type: 'error', code: errorCode, operation: 'message' })
       if (isStaleAssistantWorkspaceError(sendError)) {
         resetExpiredWorkspace()
       } else if (errorCode === 'assistant_workspace_busy') {
@@ -819,6 +1009,10 @@ export default function AssistantWorkspace() {
         setError(assistantWorkspaceConflictMessage(errorCode, 'send') ?? '对话状态已变化，输入已保留，请重新建立对话后重试。')
       } else if (assistantWorkspaceHttpStatus(sendError) === 409 && errorCode !== 'assistant_command_outcome_unknown') {
         setError('对话状态刚刚发生变化，输入已保留，请稍后重试。')
+      } else if (currentWorkspace && !errorCode && (!status || status >= 500)) {
+        dispatchInteraction({ type: 'error', code: 'assistant_interaction_reconnecting' })
+        setError('发送结果暂未确认，正在同步对话。输入已保留。')
+        void refreshInteractionSnapshot(currentWorkspace.id)
       } else {
         setError(assistantInteractionErrorMessage(errorCode, sendError instanceof Error ? sendError.message : '消息发送失败'))
       }
@@ -845,13 +1039,13 @@ export default function AssistantWorkspace() {
       setError('当前模式暂时无法加载，请稍后重试')
       return
     }
-    if (!candidate.available && candidate.disabledReason === '助手运行环境暂不可用，请稍后重试') {
-      setError(candidate.disabledReason)
+    if (!candidate.available && RUNTIME_UNAVAILABLE_REASONS.includes(candidate.disabledReason ?? '')) {
+      setError(!activeMode?.available && activeMode?.disabledReason === candidate.disabledReason ? null : candidate.disabledReason ?? null)
       return
     }
     modeChosenByUser.current = true
     setError(null)
-    if (conversationPhase === 'setup') {
+    if (conversationPhase !== 'active') {
       setMode(nextMode)
       if (context && Object.prototype.hasOwnProperty.call(context, 'projectId')) setProjectId(context.projectId ?? '')
       setContentId('')
@@ -879,7 +1073,7 @@ export default function AssistantWorkspace() {
         setQuestionsByMode((current) => ({ ...current, [nextMode]: [] }))
         setDraftByMode((current) => ({ ...current, [nextMode]: null }))
       }
-      if (generationChanged) setLastEventIds((current) => ({ ...current, [nextMode]: undefined }))
+      if (generationChanged) delete lastEventIds.current[workspace.id]
       setMode(nextMode)
       setPendingMode(null)
       setProjectId(nextWorkspace.project_id ?? projectId)
@@ -896,7 +1090,7 @@ export default function AssistantWorkspace() {
       const recoveredSnapshot = assistantInteractionSnapshotFromError(switchError)
       if (recoveredSnapshot) applyInteractionSnapshot(recoveredSnapshot)
       const errorCode = assistantWorkspaceErrorCode(switchError)
-      if (errorCode?.startsWith('assistant_')) dispatchInteraction({ type: 'error', code: errorCode })
+      if (errorCode?.startsWith('assistant_')) dispatchInteraction({ type: 'error', code: errorCode, operation: 'switch' })
       if (isStaleAssistantWorkspaceError(switchError)) {
         resetExpiredWorkspace()
       } else if (errorCode === 'assistant_workspace_busy') {
@@ -916,7 +1110,11 @@ export default function AssistantWorkspace() {
   }
 
   const submitAnswers = async (batch: QuestionBatch, answer: DshQuestionAnswer, forceNewAttempt = false) => {
-    if (!workspace) return
+    if (!workspace || conversationEnded) throw new Error('连接已结束，请重新开始。')
+    const resetVersion = workspaceResetVersion.current
+    if (answerInFlight.current) throw new Error('正在提交回答，请稍候。')
+    answerInFlight.current = true
+    setQuestionsByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).map((item) => item.callId === batch.callId ? { ...item, draftAnswers: answer.answers } : item) }))
     try {
       const mediaIDs = [...new Set(answer.answers.flatMap((item) => item.selected).flatMap((label) => {
         const match = /^media_asset:(.+)$/.exec(label.trim())
@@ -926,8 +1124,10 @@ export default function AssistantWorkspace() {
       if (selectedMedia.some((asset) => asset.status !== 'available')) {
         throw new Error('候选素材已不可用，请重新选择或上传素材。')
       }
-      if (forceNewAttempt) await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers, true)
-      else await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers)
+      if (workspaceResetVersion.current !== resetVersion) return
+      if (forceNewAttempt) await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers, batch.generation, true)
+      else await api.assistant.workspaceAnswer(workspace.id, mode, batch.callId, answer.answers, batch.generation)
+      if (workspaceResetVersion.current !== resetVersion) return
       uncertainRetryRef.current = null
       setUncertainRetry(undefined)
       dispatchInteraction({ type: 'clear_error' })
@@ -943,15 +1143,18 @@ export default function AssistantWorkspace() {
       }
       setQuestionsByMode((current) => ({ ...current, [mode]: (current[mode] ?? []).map((item) => item.callId === batch.callId ? { ...item, answers: answer.answers } : item) }))
     } catch (answerError) {
+      if (workspaceResetVersion.current !== resetVersion) return
       const recoveredSnapshot = assistantInteractionSnapshotFromError(answerError)
       if (recoveredSnapshot) applyInteractionSnapshot(recoveredSnapshot)
       const errorCode = assistantWorkspaceErrorCode(answerError)
       if (errorCode === 'assistant_command_outcome_unknown') {
-        uncertainRetryRef.current = () => { void submitAnswers(batch, answer, true) }
+        uncertainRetryRef.current = () => { void submitAnswers(batch, answer, true).catch(() => undefined) }
         setUncertainRetry({ kind: 'answer', mode, callId: batch.callId, answers: answer.answers })
       }
-      if (errorCode?.startsWith('assistant_')) dispatchInteraction({ type: 'error', code: errorCode })
-      if (isStaleAssistantWorkspaceError(answerError)) {
+      if (errorCode?.startsWith('assistant_') && !(errorCode === 'assistant_interaction_generation_changed' && recoveredSnapshot)) dispatchInteraction({ type: 'error', code: errorCode })
+      if (errorCode === 'assistant_interaction_generation_changed' && recoveredSnapshot) {
+        setError(null)
+      } else if (isStaleAssistantWorkspaceError(answerError)) {
         resetExpiredWorkspace()
       } else if (errorCode === 'assistant_workspace_busy') {
         setError('助手仍在处理上一条消息，请稍后提交回答。')
@@ -960,24 +1163,43 @@ export default function AssistantWorkspace() {
       }
       const conflictMessage = assistantWorkspaceConflictMessage(errorCode, 'answer')
       if (conflictMessage && errorCode !== 'assistant_workspace_busy') setError(conflictMessage)
+      throw new Error(conflictMessage ?? assistantInteractionErrorMessage(errorCode, answerError instanceof Error ? answerError.message : '提交回答失败'))
+    } finally {
+      answerInFlight.current = false
     }
   }
 
+  const openCreatedTask = (taskId: string) => {
+    if (mode === 'creation') {
+      // Pending renders must not restore this completed conversation after navigation.
+      workspaceHandedOff.current = true
+      try {
+        sessionStorage.removeItem(WORKSPACE_STORAGE_KEY)
+      } catch {
+        // Task navigation still works when browser storage is unavailable.
+      }
+    }
+    navigate(`/tasks/${encodeURIComponent(taskId)}`)
+  }
+
   const commitDraft = async () => {
-    if (!workspace || !activeDraft || committing) return
+    if (!workspace || !activeDraft || committing || mode === 'creation' && (!creationCanConfirm || creationNeedsInputs)) return
     setCommitting(true)
     try {
       const draftID = stringValue(activeDraft.draft_id) ?? stringValue(activeDraft.id) ?? 'draft'
       const draftRevision = typeof activeDraft.revision === 'number' ? activeDraft.revision : 0
-      const commitKeyID = `${workspace.id}:${draftID}:${draftRevision}`
-      const idempotencyKey = commitIdempotencyKeys.current[commitKeyID] ?? crypto.randomUUID()
-      commitIdempotencyKeys.current[commitKeyID] = idempotencyKey
+      const retryKey = (options?: Record<string, unknown>) => {
+        const commitKeyID = JSON.stringify([workspace.id, draftID, draftRevision, options])
+        const key = commitIdempotencyKeys[commitKeyID] ?? crypto.randomUUID()
+        setCommitIdempotencyKeys((current) => ({ ...current, [commitKeyID]: key }))
+        return key
+      }
       const tokenValue = stringValue(activeDraft.confirmation_token)
       let result: Awaited<ReturnType<typeof api.assistant.workspaceCommit>>
       if (mode === 'profile' && tokenValue) {
         result = await api.assistant.workspaceCommit(workspace.id, mode, {
           confirmation_token: tokenValue,
-          idempotency_key: idempotencyKey,
+          idempotency_key: retryKey(isVideoEditProfile ? { video_edit_defaults: videoEditDefaults } : undefined),
           ...(isVideoEditProfile ? { video_edit_defaults: videoEditDefaults } : {}),
         })
       } else {
@@ -993,6 +1215,7 @@ export default function AssistantWorkspace() {
           }
           const plan = payload.plan && typeof payload.plan === 'object' && !Array.isArray(payload.plan) ? payload.plan as Record<string, unknown> : payload
           plan.content_type = selectedCreationType
+          if (routeState.assetId) plan.asset_id = routeState.assetId
           if (executionProfile) plan.execution_profile = executionProfile
           if (usesImageSettings) {
             if (imageRatio) plan.image_ratio = imageRatio
@@ -1038,12 +1261,17 @@ export default function AssistantWorkspace() {
             plan.video_edit_preferences = Object.fromEntries(Object.entries(videoEditPreferences).filter(([, value]) => value !== undefined && value !== ''))
           }
           if (plan !== payload) payload.plan = plan
-          const optionKeys = ['content_type', 'execution_profile', 'image_ratio', 'image_capability_key', 'assets', 'video_edit_brief', 'video_edit_preferences']
+          const optionKeys = ['asset_id', 'content_type', 'execution_profile', 'image_ratio', 'image_capability_key', 'assets', 'video_edit_brief', 'video_edit_preferences']
           const planOptions = Object.fromEntries(optionKeys.filter((key) => Object.prototype.hasOwnProperty.call(plan, key)).map((key) => [key, plan[key]]))
           commitOptions = { plan: planOptions }
         }
-        const checkpoint = await api.assistant.workspaceCheckpoint(workspace.id, mode, { schema_version: '1.0', payload, summary: `${modeLabel(mode)}草稿`, status: 'ready' })
-        result = await api.assistant.workspaceCommit(workspace.id, mode, { checkpoint_id: checkpoint.id, checkpoint_digest: checkpoint.payload_digest, idempotency_key: idempotencyKey, options: commitOptions })
+        const idempotencyKey = retryKey(commitOptions)
+        if (mode === 'creation') {
+          result = await api.assistant.workspaceCommit(workspace.id, mode, { draft_id: draftID, revision: draftRevision, idempotency_key: idempotencyKey, options: commitOptions })
+        } else {
+          const checkpoint = await api.assistant.workspaceCheckpoint(workspace.id, mode, { schema_version: '1.0', payload, summary: `${modeLabel(mode)}草稿`, status: 'ready' })
+          result = await api.assistant.workspaceCommit(workspace.id, mode, { checkpoint_id: checkpoint.id, checkpoint_digest: checkpoint.payload_digest, idempotency_key: idempotencyKey, options: commitOptions })
+        }
       }
       const committedProjectID = stringValue(result.project?.id)
       if (mode === 'profile' && committedProjectID) {
@@ -1065,20 +1293,49 @@ export default function AssistantWorkspace() {
         void queryClient.invalidateQueries({ queryKey: ['projects'] })
       }
       if (mode !== 'creation') setAttachments([])
+      void queryClient.invalidateQueries({ queryKey: ['content-assets'] })
+      void queryClient.invalidateQueries({ queryKey: ['project-stats'] })
       const committedTaskID = stringValue(result.task?.id) ?? stringValue((result as { task_id?: unknown }).task_id)
       const interactionStatus = stringValue((result as { interaction_status?: unknown }).interaction_status) ?? 'created'
       dispatchInteraction({ type: 'commit_result', result: { status: interactionStatus, task_id: committedTaskID } })
-      setDraftByMode((current) => ({ ...current, [mode]: null }))
-      if (mode === 'creation' && committedTaskID) navigate(`/tasks/${encodeURIComponent(committedTaskID)}`)
+      if (interactionStatus !== 'needs_reconciliation') setDraftByMode((current) => ({ ...current, [mode]: null }))
+      if (mode === 'creation' && committedTaskID && (interactionStatus === 'created' || interactionStatus === 'already_created')) openCreatedTask(committedTaskID)
     } catch (commitError) {
       const recoveredSnapshot = assistantInteractionSnapshotFromError(commitError)
       if (recoveredSnapshot) applyInteractionSnapshot(recoveredSnapshot)
       const errorCode = assistantWorkspaceErrorCode(commitError)
-      if (errorCode?.startsWith('assistant_')) dispatchInteraction({ type: 'error', code: errorCode })
+      if (errorCode?.startsWith('assistant_')) {
+        const details = (commitError as { response?: { data?: { available_actions?: string[]; blocking_issues?: AssistantInteractionDraftReceipt['blocking_issues'] } } }).response?.data
+        dispatchInteraction({ type: 'error', code: errorCode, availableActions: details?.available_actions, blockingIssues: details?.blocking_issues })
+      }
       setError(assistantWorkspaceConflictMessage(errorCode, 'commit') ?? assistantInteractionErrorMessage(errorCode, commitError instanceof Error ? commitError.message : '确认失败'))
       if (errorCode === 'project_profile_revision_conflict') {
         void queryClient.invalidateQueries({ queryKey: ['assistant-bootstrap'] })
       }
+    } finally {
+      setCommitting(false)
+    }
+  }
+
+  const continueDraft = async () => {
+    if (!workspace || !activeDraft || committing) return
+    if (mode !== 'creation') {
+      setDraftByMode((current) => ({ ...current, [mode]: null }))
+      setError(null)
+      return
+    }
+    if (!creationReceipt || !interactionState.availableActions.includes('continue_editing')) return
+    setCommitting(true)
+    try {
+      const snapshot = await api.assistant.continueInteraction(workspace.id, { draft_id: creationReceipt.draft_id, revision: creationReceipt.revision })
+      applyInteractionSnapshot(snapshot)
+      setError(null)
+    } catch (continueError) {
+      const snapshot = assistantInteractionSnapshotFromError(continueError)
+      if (snapshot) applyInteractionSnapshot(snapshot)
+      const code = assistantWorkspaceErrorCode(continueError)
+      if (code) dispatchInteraction({ type: 'error', code })
+      setError(assistantInteractionErrorMessage(code, continueError instanceof Error ? continueError.message : '继续讨论失败，请重试。'))
     } finally {
       setCommitting(false)
     }
@@ -1183,7 +1440,7 @@ export default function AssistantWorkspace() {
     setContentId('')
     setAttachments([])
     setError(null)
-    if (!workspace) {
+    if (!workspace || conversationPhase === 'prepared') {
       setMode('profile')
       return
     }
@@ -1192,9 +1449,13 @@ export default function AssistantWorkspace() {
     try {
       await api.assistant.closeWorkspace(workspace.id)
       streamAbort.current?.abort()
+      workspaceResetVersion.current += 1
+      prepareAttemptedRef.current = false
+      prepareRequestRef.current = null
+      preparePromiseRef.current = null
       setWorkspace(null)
       setConversationPhase('setup')
-      setLastEventIds({})
+      lastEventIds.current = {}
       setMessagesByMode({})
       setQuestionsByMode({})
       setDraftByMode({})
@@ -1247,12 +1508,17 @@ export default function AssistantWorkspace() {
         loading: imageCapabilitiesQuery.isLoading,
         disabled: imageCapabilitiesQuery.isError,
       } : undefined}
-      disabled={switching || committing || sending || responding || draftPending}
+      disabled={switching || committing || sending || responding || mode !== 'creation' && draftPending}
       label="选择参数"
     />
   )
   const creationComposerParameters = mode === 'creation' ? composerParameters : null
-  const composerContextBar = (
+  const ModeIcon = mode === 'profile' ? UserRound : mode === 'creation' ? Sparkles : Check
+  const composerMode = <span role="status" aria-label="当前模式" className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
+    <ModeIcon aria-hidden="true" className="size-3.5" />{modeLabel(mode)}模式
+    {creationTypeSelector && <span aria-hidden="true" className="ml-1 h-3 border-r border-border" />}
+  </span>
+  const composerContextBar = workspace && conversationPhase === 'active' ? (
     <AssistantContextBar
       phase="locked"
       mode={mode}
@@ -1267,7 +1533,11 @@ export default function AssistantWorkspace() {
       loadingWorks={worksQuery.isLoading}
       status={missingContextInstruction ? <span role="status" className="text-xs text-muted-foreground">{missingContextInstruction}</span> : undefined}
     />
-  )
+  ) : missingContextInstruction ? <div data-testid="assistant-context-bar" className="flex flex-wrap items-center justify-between gap-2">
+    <span role="status" className="text-xs text-muted-foreground">{missingContextInstruction}</span>
+    {isEcommerceCreation && selectedProject && <Button type="button" size="sm" disabled={switching || committing || sending || responding} onClick={() => navigate(`/tasks/new?${new URLSearchParams({ project_id: selectedProject.id, type: 'ecommerce' })}`)}>开始电商设计</Button>}
+  </div> : undefined
+  const currentPersona = completeProjects.find((project) => project.id === selectedProject?.id)
   const activeReviewSelectors = workspace && pendingMode === 'review' ? <WorkspaceSelectors mode="review" projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={contentId} works={works} disabled={switching} onProject={selectPersona} onContent={selectReviewContent} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} /> : null
 
   const personaRail = bootstrap ? (
@@ -1294,7 +1564,7 @@ export default function AssistantWorkspace() {
   return (
     <AgentPromptDropProvider>
       <main data-testid="assistant-workspace" className="assistant-workspace flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
-      <AssistantRecoveryBanner
+      {!(mode === 'creation' && activeDraft && interactionState.status === 'needs_confirmation') && <AssistantRecoveryBanner
         state={interactionState}
         onRetry={() => { void refreshInteractionSnapshot() }}
         onRetryUncertain={() => {
@@ -1302,21 +1572,27 @@ export default function AssistantWorkspace() {
           if (uncertainRetry?.kind === 'message') return void sendMessage(uncertainRetry.text, { forceNewAttempt: true })
           if (uncertainRetry?.kind === 'answer') {
             const batch = (questionsByMode[uncertainRetry.mode] ?? []).find((item) => item.callId === uncertainRetry.callId)
-            if (batch) return void submitAnswers(batch, { answers: uncertainRetry.answers }, true)
+            if (batch) return void submitAnswers(batch, { answers: uncertainRetry.answers }, true).catch(() => undefined)
           }
         }}
         onRestoreDraft={() => { void refreshInteractionSnapshot() }}
         onRestart={() => { void restartInteraction() }}
-        onViewTask={() => { if (interactionState.taskId) navigate(`/tasks/${encodeURIComponent(interactionState.taskId)}`) }}
-      />
-      {!workspace ? (
+        onViewTask={() => { if (interactionState.taskId) openCreatedTask(interactionState.taskId) }}
+      />}
+      {(!workspace || conversationPhase !== 'active') && !sending ? (
         <section className="assistant-home mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col justify-center gap-3 overflow-hidden px-4 py-4 md:px-8 md:py-8">
           <div data-testid="assistant-conversation" className="assistant-home-content flex min-h-0 flex-col">
-            <HomeStage project={selectedProject} hasPersona={completeProjects.length > 0} />
+            <HomeStage project={selectedProject} mode={mode} hasPersona={completeProjects.length > 0} actions={currentPersona && <>
+              <PersonaCreationSettings project={currentPersona} disabled={switching || committing || sending || responding} />
+              <Button type="button" variant="ghost" size="sm" aria-label={`查看作品：${currentPersona.name}`} onClick={() => viewPersonaWorks(currentPersona.id)} className="h-7 px-1.5 text-[11px]">查看作品</Button>
+              {mode === 'profile'
+                ? <Button type="button" variant="ghost" size="sm" disabled={switching || committing || sending || responding} onClick={() => selectCreationPersona(currentPersona.id)} className="h-7 px-1.5 text-[11px]">开始创作</Button>
+                : <Button type="button" variant="ghost" size="sm" disabled={switching || committing || sending || responding} aria-label={`调整人设：${currentPersona.name}`} onClick={() => editPersona(currentPersona.id)} className="h-7 px-1.5 text-[11px]">调整人设</Button>}
+            </>} />
             {personaRail}
             <div className="assistant-scroll min-h-0 max-h-[45%] overflow-y-auto overscroll-contain">
             {routeHasContext && mode === 'review' && <WorkspaceSelectors mode={selectionMode} projects={selectableProjects} projectId={selectedProject?.id ?? projectId} contentId={selectedWork?.id ?? contentId} works={works} onProject={resetCreationProject} onContent={setContentId} onMore={() => void worksQuery.fetchNextPage()} hasMore={Boolean(worksQuery.hasNextPage)} />}
-            {!activeMode?.available && activeMode?.disabledReason && !isRuntimeUnavailable && <div className="mx-auto mt-4 flex w-full max-w-2xl flex-col items-center gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3 sm:flex-row sm:justify-between"><p role="status" className="text-left text-sm leading-6 text-muted-foreground">{activeMode.disabledReason}</p><Button type="button" variant="outline" size="sm" className="shrink-0" onClick={selectModePrerequisiteAction}>{modePrerequisiteAction.label}</Button></div>}
+            {!activeMode?.available && activeMode?.disabledReason && <div className="mx-auto mt-4 flex w-full max-w-2xl flex-col items-center gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3 sm:flex-row sm:justify-between"><p role="status" className="text-left text-sm leading-6 text-muted-foreground">{activeMode.disabledReason}</p>{!isRuntimeUnavailable && <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={selectModePrerequisiteAction}>{modePrerequisiteAction.label}</Button>}</div>}
             {bootstrapQuery.isError && <div className="mt-3 flex flex-wrap items-center justify-center gap-3"><p role="alert" className="text-sm text-destructive">首页暂时无法加载，请稍后重试。</p><Button type="button" variant="outline" size="sm" disabled={bootstrapQuery.isFetching} onClick={() => void bootstrapQuery.refetch()}>{bootstrapQuery.isFetching ? <Loader2 className="size-4 animate-spin" /> : '重试加载'}</Button></div>}
             {projectsQuery.isError && <div className="mt-3 flex flex-wrap items-center justify-center gap-3"><p role="alert" className="text-sm text-destructive">人设暂时无法加载，请稍后重试。</p><Button type="button" variant="outline" size="sm" disabled={projectsQuery.isFetching} onClick={() => void projectsQuery.refetch()}>重试加载人设</Button></div>}
             {bootstrapQuery.isLoading && <p role="status" className="sr-only">正在加载首页</p>}
@@ -1326,21 +1602,45 @@ export default function AssistantWorkspace() {
             {videoEditInputs}
             </div>
           </div>
-          <Composer fadeAbove={false} value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || composerBlocked} /> : undefined} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <Composer fadeAbove={false} value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={composerPlaceholder} inputDisabled={sending || switching || committing || composerBlocked} sendDisabled={!canSend} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || composerBlocked} /> : undefined} trailingTools={<>{composerMode}{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
         </section>
       ) : (
-        <section className="mx-auto flex min-h-0 w-full max-w-6xl min-w-0 flex-1 flex-col px-4 pb-3 md:px-8">
-          <div data-testid="assistant-conversation" className="assistant-scroll min-h-0 flex-1 overflow-y-auto py-4" aria-live="polite">
+        <div className="assistant-dialogue-layout mx-auto min-h-0 w-full max-w-5xl min-w-0 flex-1">
+        <section aria-label="对话" className="assistant-chat-panel flex min-w-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+          <header role="region" aria-label="人设信息" className="shrink-0 border-b border-border/70 px-5 py-3 sm:px-7 sm:py-4">
+            <h1 className="sr-only">{modeLabel(mode)}对话</h1>
+            <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+              <div className="min-w-0 flex-1">{composerContextBar}</div>
+              <div className="flex shrink-0 items-center gap-3">
+                {selectedProject && <AgentIconStack agentIds={personaAgentIDs(selectedProject)} maxVisible={3} compact emptyLabel="还未选择创作类型" />}
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2.5 py-1 text-xs text-muted-foreground"><ModeIcon className="size-3.5" />{modeLabel(mode)}模式</span>
+              </div>
+            </div>
+            <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{selectedProject?.description || (selectedProject ? platformIntroduction(selectedProject.platform) : '通过对话，一起明确你的定位、表达风格和目标读者。')}</p>
+            {activeReviewSelectors}
+          </header>
+          <div data-testid="assistant-conversation" className="assistant-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-7 sm:py-7" aria-live="polite">
             {mode === 'review' && selectedProject?.platform === 'video-edit' && selectedWork && (
               <VideoEditReviewResults query={reviewVideoQuery} />
             )}
-            <Conversation messages={activeMessages} questions={activeQuestions} responding={responding} disabled={draftPending} userAvatarURL={personaImageURL(selectedProject)} onAnswer={submitAnswers} />
-            {activeReviewSelectors}
-            {activeDraft && confirmationDraft && <DraftConfirmationCard mode={mode} draft={confirmationDraft} committing={committing} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => { setDraftByMode((current) => ({ ...current, [mode]: null })); setError(null) }} />}
+            <Conversation autoScroll={!draftPending} messages={activeMessages} questions={activeQuestions} responding={responding} disabled={conversationEnded || draftPending || interactionState.status === 'command_uncertain'} userAvatarURL={personaImageURL(selectedProject)} onAnswer={submitAnswers} />
+            {!conversationEnded && creationEditing && confirmationDraft ? <details className="mt-4 rounded-xl border border-border/70 px-4 py-3"><summary className="cursor-pointer text-sm text-muted-foreground">查看上一版计划</summary><div className="pt-3"><AssistantDraftSummary draft={activeDraft as unknown as InteractiveDraft} mode="creation" compact /></div></details> : !conversationEnded && activeDraft && confirmationDraft && <DraftConfirmationCard attemptIssues={mode === 'creation' ? interactionState.blockingIssues : undefined} mode={mode} draft={confirmationDraft} committing={committing} confirmable={mode !== 'creation' || creationCanConfirm && !creationNeedsInputs} disabled={mode === 'creation' && selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onCommit={() => void commitDraft()} onContinue={() => void continueDraft()} />}
             {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
           </div>
-          <Composer value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} contextBar={composerContextBar} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={sending || switching || committing || draftPending || pendingQuestions.length > 0} /> : undefined} trailingTools={<>{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />
+          <div data-awaiting-confirmation={draftPending} className="assistant-chat-composer shrink-0 border-t border-border px-3 pb-3">
+          {creationConfirmation ? <section aria-label="创作确认操作" className="mx-auto flex w-full max-w-[960px] flex-wrap items-center justify-between gap-2 px-1 py-3 sm:px-4">
+            <div className="min-w-0"><p className="text-sm font-medium">{creationNeedsInputs ? '计划仍有必要信息待补充' : '确认这份计划后开始创作'}</p><p className="text-xs leading-5 text-muted-foreground">{creationNeedsInputs ? '请先修改需求，补充必要信息后再确认。' : '也可以修改需求，生成新的计划后再确认。'}</p></div>
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+              <div className="min-w-0 max-sm:w-full">{creationComposerParameters}</div>
+              <div className="ml-auto flex shrink-0 items-center gap-2">
+                <Button variant="outline" size="sm" disabled={committing || switching} onClick={() => void continueDraft()}>修改需求</Button>
+                <Button size="sm" disabled={committing || switching || creationNeedsInputs || selectedCreationType === 'video-edit' && (videoEditUploading || videoEditUploadFailed || videoEditAssets.length === 0)} onClick={() => void commitDraft()}>{committing && <Loader2 className="size-4 animate-spin" />}开始创作</Button>
+              </div>
+            </div>
+          </section> : <Composer fadeAbove={false} value={composer} attachments={attachments} attachmentController={attachmentController} attachmentsEnabled={mode === 'creation'} placeholder={draftPending ? '请先选择确认卡片中的下一步' : pendingQuestions.length ? '请先完成上方问题' : '输入消息…'} inputDisabled={conversationEnded || sending || switching || committing || draftPending || pendingQuestions.length > 0} sendDisabled={!canSend || pendingQuestions.length > 0} leadingTools={mode === 'creation' ? <MediaLibraryPicker projectId={selectedProject?.id} attachments={attachments} onChange={setAttachments} attachmentController={attachmentController} disabled={conversationEnded || sending || switching || committing || draftPending || pendingQuestions.length > 0} /> : undefined} trailingTools={<>{composerMode}{creationTypeSelector}{creationComposerParameters}</>} onChange={setComposer} onAttachmentsChange={setAttachments} onSend={() => void sendMessage()} />}
+          </div>
         </section>
+        </div>
       )}
       </main>
     </AgentPromptDropProvider>
@@ -1373,7 +1673,7 @@ function platformIntroduction(platform: string) {
   return profileLabAgents.find((agent) => agent.id === agentID)?.detail ?? `${platformDisplayName(platform, '创作')}内容创作`
 }
 
-function HomeStage({ project, hasPersona }: { project?: AssistantProject; hasPersona: boolean }) {
+function HomeStage({ project, hasPersona, mode, actions }: { project?: AssistantProject; hasPersona: boolean; mode: AssistantModeID; actions?: ReactNode }) {
   const imageURL = personaImageURL(project)
   const agents = project ? personaAgentIDs(project) : []
   return <section aria-label="当前人设" className="assistant-home-stage mx-auto flex w-full max-w-xl shrink-0 flex-col px-2 text-left">
@@ -1384,8 +1684,8 @@ function HomeStage({ project, hasPersona }: { project?: AssistantProject; hasPer
     <div className="min-w-0">
       <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{project ? '当前人设' : '准备开始'}</p>
       <h1 className="mt-2 truncate text-xl font-semibold tracking-tight sm:text-3xl" title={project?.name}>{project?.name ?? '神秘人'}</h1>
-      <p className="assistant-home-description mt-2 line-clamp-2 max-w-xl text-sm leading-6 text-muted-foreground">{project?.description || (hasPersona ? '选择一个人设，开始你的下一次创作。' : '为了创建更好的作品，需要先创建您的人设')}</p>
-      {project && <span className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><AgentIconStack agentIds={agents} maxVisible={3} compact emptyLabel="还未选择创作类型" /></span>}
+      <p className="assistant-home-description mt-2 line-clamp-2 max-w-xl text-sm leading-6 text-muted-foreground">{project && mode === 'profile' ? '调整这个人设的定位、风格与创作方向。' : project?.description || (project ? '使用当前人设，开始你的下一次创作。' : hasPersona ? '选择一个人设，开始你的下一次创作。' : '为了创建更好的作品，需要先创建您的人设')}</p>
+      {project && <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground"><AgentIconStack agentIds={agents} maxVisible={3} compact emptyLabel="还未选择创作类型" /><div className="persona-current-actions flex flex-wrap items-center">{actions}</div></div>}
     </div>
     </div>
   </section>
@@ -1403,6 +1703,7 @@ function PersonaRail({ projects, selectedProjectId, disabled, onSelect, onCreate
   const scrollRef = useRef<HTMLDivElement>(null)
   const [hasContentAbove, setHasContentAbove] = useState(false)
   const [hasContentBelow, setHasContentBelow] = useState(false)
+  const hasSelectedProject = projects.some((project) => project.id === selectedProjectId)
 
   useEffect(() => {
     const element = scrollRef.current
@@ -1426,8 +1727,8 @@ function PersonaRail({ projects, selectedProjectId, disabled, onSelect, onCreate
 
   return <section aria-label="首页人设选择" className="mx-auto flex min-h-32 w-full max-w-5xl flex-col pb-1">
     <div data-testid="persona-rail-header" className="mb-3 flex shrink-0 items-center gap-2 px-1">
-      <p className="text-sm font-medium">选择人设</p>
-      <span className="text-xs text-muted-foreground">{projects.length ? `${projects.length} 个可用人设` : '还没有可用人设'}</span>
+      <p className="text-sm font-medium">{hasSelectedProject ? '切换人设' : '选择人设'}</p>
+      <span className="text-xs text-muted-foreground">{projects.length ? `${projects.length} 个人设` : '还没有可用人设'}</span>
     </div>
     <div className="relative h-[14.125rem] min-h-0">
       <div ref={scrollRef} className="assistant-scroll persona-card-scroll grid h-full min-h-0 grid-cols-2 min-[700px]:grid-cols-3 min-[1600px]:grid-cols-4 min-[1900px]:grid-cols-5 min-[2200px]:grid-cols-6 auto-rows-max content-start gap-2 overflow-y-auto overscroll-contain p-1" data-testid="persona-card-scroll" tabIndex={0}>
@@ -1436,15 +1737,16 @@ function PersonaRail({ projects, selectedProjectId, disabled, onSelect, onCreate
           <span className="min-w-0"><span className="block truncate text-sm font-semibold">创建新人设</span><span className="mt-0.5 block truncate text-xs leading-4 text-muted-foreground">聊一聊你的定位与风格</span></span>
         </button>
         {projects.map((project) => {
+          const selected = project.id === selectedProjectId
           const agents = personaAgentIDs(project)
           const imageURL = personaImageURL(project)
-          const selected = selectedProjectId === project.id
-          return <article key={project.id} className={`group relative flex min-h-[5.25rem] min-w-0 flex-col rounded-xl border bg-card p-2 transition-shadow ${selected ? 'border-primary shadow-sm ring-1 ring-primary/25' : 'border-border hover:shadow-sm'}`}>
+          return <article key={project.id} className={`group relative flex min-h-[5.25rem] min-w-0 flex-col rounded-xl border p-2 transition-colors hover:shadow-sm ${selected ? 'border-primary/50 bg-primary/[0.05]' : 'border-border bg-card'}`}>
             <button type="button" aria-label={`选择人设：${project.name}`} aria-pressed={selected} disabled={disabled} onClick={() => onSelect(project.id)} className="flex min-h-10 w-full min-w-0 grow shrink-0 items-start gap-2 text-left">
               <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
                 {imageURL ? <SignedImage src={imageURL} alt="" className="size-full object-cover" showLoading={false} fallbackIcon={<UserRound className="size-5 text-muted-foreground" />} /> : <UserRound aria-hidden="true" className="size-5 text-muted-foreground" />}
               </div>
               <span className="min-w-0 flex-1"><span className="flex items-center gap-1 text-sm font-semibold"><span className="truncate">{project.name}</span><AgentIconStack agentIds={agents} maxVisible={1} compact emptyLabel="还未选择创作类型" /></span><span className="block truncate text-xs leading-4 text-muted-foreground">{project.description || (agents.length ? platformIntroduction(project.platform) : '选择创作类型后即可开始')}</span></span>
+              {selected && <Check aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-primary" />}
             </button>
             <div className="persona-card-actions mt-auto flex shrink-0 flex-wrap items-center justify-end gap-1 transition-opacity">
               <PersonaCreationSettings project={project} disabled={disabled} />
@@ -1460,20 +1762,37 @@ function PersonaRail({ projects, selectedProjectId, disabled, onSelect, onCreate
   </section>
 }
 
-function DraftConfirmationCard({ mode, draft, committing, disabled, onCommit, onContinue }: { mode: AssistantModeID; draft: Draft; committing: boolean; disabled: boolean; onCommit: () => void; onContinue: () => void }) {
+function DraftConfirmationCard({ mode, draft, attemptIssues, committing, confirmable, disabled, onCommit, onContinue }: { mode: AssistantModeID; draft: Draft; attemptIssues?: AssistantInteractionDraftReceipt['blocking_issues']; committing: boolean; confirmable: boolean; disabled: boolean; onCommit: () => void; onContinue: () => void }) {
+  const cardRef = useRef<HTMLElement>(null)
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    if (mode === 'creation') headingRef.current?.focus({ preventScroll: true })
+  }, [mode, draft.draft_id, draft.revision])
   const isCreation = mode === 'creation'
+  const issues = attemptIssues ?? draft.blocking_issues
   const isProfile = mode === 'profile'
-  const title = isCreation ? '确认创作' : isProfile ? '保存人设' : '确认复盘结论'
-  const buttonLabel = isCreation ? '创作作品' : isProfile ? '保存人设' : '保存复盘结论'
-  const continueLabel = isCreation ? '继续讨论' : '继续深入访谈'
-  return <section role="region" aria-label={title} className="mt-6 rounded-xl border border-primary/30 bg-primary/[0.04] p-4">
-    <div className="flex items-center gap-2 text-sm font-medium"><Check className="size-4 text-emerald-600" />{title}</div>
-    <p className="mt-2 text-xs leading-5 text-muted-foreground">{isCreation ? '确认后会按这份计划创建作品，也可以继续讨论细节。' : isProfile ? '确认后保存当前人设，也可以继续补充访谈内容。' : '确认后保存当前结构化结果。'}</p>
-    {isCreation || mode === 'review' ? <div className="mt-4 rounded-lg border border-border/70 bg-background/70 p-3"><AssistantDraftSummary draft={draft as unknown as InteractiveDraft} mode={mode} compact /></div> : <ProfileDraftSummary draft={draft} />}
-    <div className="mt-4 flex flex-wrap items-center gap-2">
-      <Button size="sm" disabled={committing || disabled} onClick={onCommit}>{committing ? <Loader2 className="size-4 animate-spin" /> : buttonLabel}</Button>
-      {isCreation || isProfile ? <Button type="button" variant="outline" size="sm" disabled={committing} onClick={onContinue}>{continueLabel}</Button> : null}
+  const title = isCreation ? confirmable ? '确认创作' : '创作草稿' : isProfile ? '保存人设' : '确认复盘结论'
+  const buttonLabel = isProfile ? '保存人设' : '保存复盘结论'
+  return <section ref={cardRef} role="region" aria-label={title} className={`assistant-confirmation-card mx-auto w-full scroll-mt-4 overflow-hidden rounded-2xl border border-border/80 bg-card shadow-sm ${isCreation ? 'mt-4' : 'mt-7'}`}>
+    <header className={`flex items-center justify-between gap-3 border-b border-border/60 ${isCreation ? 'px-4 py-3 sm:px-5' : 'px-5 py-4 sm:px-6'}`}>
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Check className="size-4" /></span>
+        <h2 ref={headingRef} tabIndex={-1} className="rounded text-sm font-semibold tracking-tight outline-none focus-visible:ring-2 focus-visible:ring-ring">{isCreation ? '创作计划总结' : isProfile ? '人设总结' : '复盘总结'}</h2>
+      </div>
+      <span className="shrink-0 rounded-full bg-primary/5 px-2.5 py-1 text-[11px] font-medium text-primary">{confirmable ? '待确认' : '待完善'}</span>
+    </header>
+    <div className={isCreation ? 'p-4 sm:px-5' : 'p-5 sm:p-6'}>
+      <AssistantDraftSummary draft={draft as unknown as InteractiveDraft} mode={mode} compact />
+      {isCreation && Array.isArray(issues) && <ul className="mt-3 space-y-1 text-sm text-amber-700">{(issues as NonNullable<AssistantInteractionDraftReceipt['blocking_issues']>).map((issue) => <li key={`${issue.code}:${issue.field}`}>{issue.message}</li>)}</ul>}
     </div>
+    {!isCreation && <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 bg-muted/20 px-5 py-4 sm:px-6">
+      <p className="text-xs leading-5 text-muted-foreground">{isProfile ? '确认后将保存为当前人设。' : '确认后将保存本次复盘结论。'}</p>
+      <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+        {isProfile ? <Button type="button" variant="ghost" size="sm" disabled={committing} onClick={onContinue}>继续深入访谈</Button> : null}
+        {confirmable && <Button size="sm" className="min-w-24" disabled={committing || disabled} onClick={onCommit}>{committing ? <Loader2 className="size-4 animate-spin" /> : buttonLabel}</Button>}
+      </div>
+    </footer>}
   </section>
 }
 
@@ -1492,13 +1811,6 @@ function withCreationConfirmationSettings(draft: Draft, settings: Record<string,
     ...draft,
     payload: { ...sourcePayload, plan: nextPlan },
   }
-}
-
-function ProfileDraftSummary({ draft }: { draft: Draft }) {
-  const project = draft.project && typeof draft.project === 'object' && !Array.isArray(draft.project) ? draft.project as Record<string, unknown> : undefined
-  const profile = draft.profile && typeof draft.profile === 'object' && !Array.isArray(draft.profile) ? draft.profile as Record<string, unknown> : undefined
-  const values = [stringValue(project?.name), stringValue(project?.platform), stringValue(profile?.identity), stringValue(profile?.positioning)].filter(Boolean)
-  return values.length ? <p className="mt-4 text-sm leading-6 text-muted-foreground">{values.join(' · ')}</p> : null
 }
 
 function WorkspaceSelectors({ mode, projects, projectId, contentId, works, disabled = false, onProject, onContent, onMore, hasMore }: { mode: AssistantModeID; projects: AssistantProject[]; projectId: string; contentId: string; works: AssistantProject['works']; disabled?: boolean; onProject: (value: string) => void; onContent: (value: string) => void; onMore: () => void; hasMore: boolean }) {
@@ -1599,19 +1911,38 @@ function Composer({ value, attachments, attachmentController, attachmentsEnabled
   </div>
 }
 
-function Conversation({ messages, questions, responding, disabled, userAvatarURL, onAnswer }: { messages: Message[]; questions: QuestionBatch[]; responding: boolean; disabled: boolean; userAvatarURL?: string; onAnswer: (batch: QuestionBatch, answer: DshQuestionAnswer) => Promise<void> }) {
+function Conversation({ messages, questions, responding, disabled, autoScroll, userAvatarURL, onAnswer }: { autoScroll: boolean; messages: Message[]; questions: QuestionBatch[]; responding: boolean; disabled: boolean; userAvatarURL?: string; onAnswer: (batch: QuestionBatch, answer: DshQuestionAnswer) => Promise<void> }) {
   const endRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [messages.length, questions.length, responding])
+    if (autoScroll) endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [autoScroll, messages.length, questions.length, responding])
 
   if (messages.length === 0 && questions.length === 0) return <div className="flex min-h-[18rem] items-center justify-center text-sm text-muted-foreground">输入你的需求后开始</div>
   const entries = [
     ...messages.map((message) => ({ kind: 'message' as const, order: message.order, message })),
-    ...questions.filter((batch) => !batch.answers).map((batch) => ({ kind: 'question' as const, order: batch.order, batch })),
+    ...questions.map((batch) => ({ kind: 'question' as const, order: batch.order, batch })),
   ].sort((left, right) => left.order - right.order)
   return <div className="min-w-0 space-y-5">{entries.map((entry) => entry.kind === 'message'
-    ? <div key={entry.message.id} className={`flex min-w-0 gap-3 ${entry.message.role === 'user' ? 'justify-end' : ''}`}><div className={`flex min-w-0 max-w-[min(900px,100%)] gap-3 ${entry.message.role === 'user' ? 'flex-row-reverse' : ''}`}><div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{entry.message.role === 'user' ? userAvatarURL ? <SignedImage src={userAvatarURL} alt="当前人设头像" className="size-7 rounded-full object-cover" fallbackIcon={<UserRound className="size-3.5" />} fallbackClassName="bg-primary text-primary-foreground" /> : <UserRound className="size-3.5" /> : <Bot className="size-3.5" />}</div><div className={`min-w-0 max-w-full rounded-2xl px-4 py-3 text-sm leading-6 ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'} [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto`}><Streamdown>{entry.message.text}</Streamdown></div></div></div>
-    : <DshQuestionComposer key={entry.batch.callId} questions={entry.batch.questions} submitted={Boolean(entry.batch.answers)} answers={entry.batch.answers} disabled={disabled} onSubmit={(answer) => onAnswer(entry.batch, answer)} />)}{responding && <div role="status" className="flex items-center gap-2 px-10 text-sm text-muted-foreground"><Bot className="size-4" /><Loader2 className="size-4 animate-spin" />AI 正在处理…</div>}<div ref={endRef} aria-hidden="true" className="h-px" /></div>
+    ? <div key={entry.message.id} className={`flex min-w-0 gap-3 ${entry.message.role === 'user' ? 'justify-end' : ''}`}><div className={`flex min-w-0 max-w-[min(900px,100%)] gap-3 ${entry.message.role === 'user' ? 'flex-row-reverse' : ''}`}><div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{entry.message.role === 'user' ? userAvatarURL ? <SignedImage src={userAvatarURL} alt="当前人设头像" className="size-7 rounded-full object-cover" fallbackIcon={<UserRound className="size-3.5" />} fallbackClassName="bg-primary text-primary-foreground" /> : <UserRound className="size-3.5" /> : <Bot className="size-3.5" />}</div><div className={`min-w-0 max-w-full rounded-2xl px-4 py-3 text-sm leading-6 ${entry.message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'} [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto`}><Streamdown>{entry.message.displayText ?? entry.message.text}</Streamdown></div></div></div>
+    : entry.batch.answers
+      ? <section key={entry.batch.callId} aria-label="历史问答" className="mx-auto w-full max-w-[760px] rounded-lg border border-border/70 px-4 py-3 text-sm">
+        <p className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground"><Check className="size-3.5" />已回答</p>
+        <dl className="space-y-1.5">{entry.batch.questions.map((question, index) => {
+          const answer = entry.batch.answers?.find((item) => item.id === question.id)
+          const text = [...(answer?.selected ?? []), ...(answer?.custom ? [answer.custom] : [])].join('、')
+          return <div key={question.id} className="grid gap-x-3 gap-y-0.5 sm:grid-cols-[6rem_minmax(0,1fr)]"><dt className="text-xs leading-6 text-muted-foreground">{question.header || `决定 ${index + 1}`}</dt><dd className="min-w-0 whitespace-pre-wrap break-words leading-6">{text || '已跳过'}</dd></div>
+        })}</dl>
+        <details className="mt-2 border-t border-border/60 pt-2"><summary className="cursor-pointer text-xs text-muted-foreground">查看完整问答</summary>
+          <div className="mt-2 space-y-3">{entry.batch.questions.map((question) => {
+            const answer = entry.batch.answers?.find((item) => item.id === question.id)
+            return <div key={question.id} className="text-sm leading-6"><h2 className="font-medium">{question.question}</h2>
+              {question.detail && <p className="whitespace-pre-wrap text-muted-foreground">{question.detail}</p>}
+              {question.options?.length ? <ul className="list-disc pl-4 text-muted-foreground">{question.options.map((option, index) => <li key={index}>{option.label}{option.description ? `：${option.description}` : ''}</li>)}</ul> : null}
+              <p className="mt-1 whitespace-pre-wrap break-words">{[...(answer?.selected ?? []), ...(answer?.custom ? [answer.custom] : [])].join('、') || '已跳过'}</p>
+            </div>
+          })}</div>
+        </details>
+      </section>
+      : <DshQuestionComposer key={entry.batch.callId} questions={entry.batch.questions} answers={entry.batch.draftAnswers} closed={entry.batch.closed} disabled={disabled} onSubmit={(answer) => onAnswer(entry.batch, answer)} />)}{responding && <div role="status" className="flex items-center gap-2 px-10 text-sm text-muted-foreground"><Bot className="size-4" /><Loader2 className="size-4 animate-spin" />AI 正在处理…</div>}<div ref={endRef} aria-hidden="true" className="h-px" /></div>
 }

@@ -234,12 +234,19 @@ The runtime bootstrap still compares the Server's embedded Catalog digest with
 the Catalog shipped in each Agent image; no Docker build argument or image label
 is required.
 
+Runtime contract versions are strict: the Server and every Agent image must ship
+the same contract version. A mismatched image fails bootstrap with HTTP 426
+`agent_runtime_upgrade_required` and the expected version in
+`X-Anban-Agent-Contract-Version-Expected`. Publish the Agent images and roll the
+Server in the same release so the mismatch window covers only in-flight
+dispatches.
+
 ## Quick Start
 
 ```bash
-# Create the local Server environment file.
-cp .env.example .env
-# Fill every required value in .env before starting Compose.
+# Create the local Server config (gitignored) and fill every required value.
+cp server/config.example.yaml server/config.yaml
+chmod 600 server/config.yaml
 
 # Start infra and services with Docker Compose
 # (builds the Server and managed runtime images before startup)
@@ -269,14 +276,27 @@ production defaults to `https://api-creator.anbanai.com/api/v1`. Studio Nginx
 has no upstreams or `BACKEND_*` variables. The API ingress owns uploads, SSE
 streaming (no buffering, suitable read timeouts), MCP and any WebSocket routes.
 Keep the Studio origin in the Server's `cors.allowed_origins`.
-`server.public_base_url` / `ANBAN_PUBLIC_BASE_URL` is the API origin;
-`server.studio_base_url` / `ANBAN_STUDIO_BASE_URL` is the frontend origin for
+`server.public_base_url` is the API origin;
+`server.studio_base_url` is the frontend origin for
 authorization return redirects. Archestra must never route through Studio.
 
 For an existing deployment, update the API ingress and Server configuration,
 WeChat callback domains, and installed plugins' MCP endpoint before rolling out
 the static-only Studio image. Previously persisted URLs under the old Studio
 API origin require a separate data migration; changing defaults does not rewrite them.
+
+The Server links libvips through govips for the image-understanding downscale
+path, so every Go build and test needs the library installed:
+
+```bash
+# macOS
+brew install vips pkg-config
+# Debian/Ubuntu
+sudo apt-get install -y libvips-dev
+```
+
+The Server container installs `vips` at runtime and builds with
+`CGO_ENABLED=1`; there is no static-binary build anymore.
 
 Frontend build:
 
@@ -351,30 +371,45 @@ Important sections:
 - WeChat auth and publishing settings
 - credits and invitation rules
 
-Docker Compose loads the root `.env` into the Server container and rejects a
-startup with any required value missing. Populate all required entries from
-`.env.example`: `ANBAN_BILLING_ADMIN_API_KEY`, a 32-byte or longer
-`ANBAN_AGENT_EXECUTION_TOKEN_SECRET`, `ANBAN_JWT_SECRET_KEY`, `ANBAN_OSS_ENDPOINT`,
-`ANBAN_OSS_ACCESS_KEY_ID`, and `ANBAN_OSS_ACCESS_KEY_SECRET`, plus
-`MOONSHOT_API_KEY` for the configured writing
-and understanding routes. The checked-in image routes also require
-`VOLCENGINE_ARK_API_KEY` and `WANGCAI_OPENAI_API_KEY`. Add any other provider and
-integration variables referenced by `server/config.yaml` directly to `.env`;
-the relevant optional feature remains unavailable until its credentials are
-configured.
+Compose mounts the gitignored `server/config.yaml` into the Server container;
+the Server has no `.env` file. Put credentials directly in `server/config.yaml`
+(mode `600`) and replace the `${VAR}` placeholders you rely on. The Server still
+expands `${VAR}` references from the process environment, so Kubernetes can
+inject Secrets and a shell can export an override without editing the file.
+Compose injects the database DSN, Redis address, DSH bridge paths, and
+`ANBAN_AGENT_EXECUTOR=docker`; when running `make server-dev` without Compose,
+fill `database.dsn`, `redis.addr`, and `claude.executor: docker` in
+`server/config.yaml` (or export the matching variables).
+
+Replace, at minimum, `ANBAN_BILLING_ADMIN_API_KEY`,
+`ANBAN_AGENT_EXECUTION_TOKEN_SECRET` (32 bytes or longer),
+`ANBAN_JWT_SECRET_KEY`, `ANBAN_OSS_ACCESS_KEY_ID`, and
+`ANBAN_OSS_ACCESS_KEY_SECRET`. The configured writing and understanding routes
+require `MOONSHOT_API_KEY`; the checked-in image routes require
+`VOLCENGINE_ARK_API_KEY` and `WANGCAI_OPENAI_API_KEY`. Optional integrations stay
+unavailable until their credentials are filled in.
 
 The application recognizes exactly three Agent product IDs: `effective`,
 `balanced`, and `quality`. Their provider, model, and Claude Code settings live
-only under each `claude.profiles.<id>.envs` map. The checked-in
-configuration uses DeepSeek, Zhipu, and Moonshot, so set
-`ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL` plus `ANBAN_DEEPSEEK_API_KEY`,
-`ANBAN_ZHIPU_ANTHROPIC_BASE_URL` plus `ANBAN_ZHIPU_API_KEY`, and
-`ANBAN_MOONSHOT_ANTHROPIC_BASE_URL` plus `ANBAN_MOONSHOT_API_KEY` before the
-Server starts. A configured profile must include its Base URL, Token, default
-model, and the Opus/Fable/Sonnet/Haiku model variables. The remaining Claude
-control variables are optional and may be removed to use provider defaults.
-Invalid or incomplete configured profiles fail closed; execution never falls
-back to another profile or model.
+only under each `claude.profiles.<id>.envs` map. The checked-in configuration
+uses DeepSeek, Zhipu, and Moonshot, so fill their provider tokens in
+`server/config.yaml` (or export `ANBAN_DEEPSEEK_API_KEY`,
+`ANBAN_ZHIPU_API_KEY`, and `ANBAN_MOONSHOT_API_KEY`). Their provider Base URLs
+keep the YAML defaults and can be overridden in `server/config.yaml` or through
+`ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL`, `ANBAN_MOONSHOT_ANTHROPIC_BASE_URL`, and
+`ANBAN_ZHIPU_ANTHROPIC_BASE_URL`. A configured profile must include its Base
+URL, Token, default model, and the Opus/Fable/Sonnet/Haiku model variables. The
+remaining Claude control variables are optional and may be removed to use
+provider defaults. Invalid or incomplete configured profiles fail closed;
+execution never falls back to another profile or model.
+
+### Migrating from `.env`
+
+`make docker-up`, `make server-dev`, and the Server no longer read a root
+`.env`. Move every value you still need into `server/config.yaml`, delete the
+root `.env`, and restrict the file with `chmod 600 server/config.yaml`. If you
+customized `MYSQL_ROOT_PASSWORD`, export it in the shell; Compose still uses it
+for MySQL and the container DSN.
 
 Server-owned research is configured independently under capability-level
 `search.web`, `search.fetch`, and `search.images` routes. Enable web search with
@@ -441,8 +476,9 @@ using keys `deepseek-anthropic-base-url`, `deepseek-api-key`, `moonshot-api-key`
 and `zhipu-api-key`. The Deployment pins the official Moonshot and Zhipu
 Anthropic-compatible Base URLs as non-secret values. Configure the
 remaining `server/config.yaml` environment references through the deployment's
-Secret/config injection. Do not put credentials directly in manifests or
-config files.
+Secret/config injection. In Kubernetes, keep credentials in Secrets rather than
+manifests or the ConfigMap-backed config.yaml; the gitignored local
+`server/config.yaml` is the only file where a developer writes them directly.
 
 For DSH, reuse the existing `ANBAN_*` environment references used by Claude in
 the route's `api_key` value. No additional DSH credential variable or Secret

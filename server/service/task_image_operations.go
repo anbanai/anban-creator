@@ -97,7 +97,14 @@ type AnalyzeTaskImageResult struct {
 type TaskImageOperationsConfig struct {
 	UnderstandingProvider string
 	UnderstandingModel    string
+	UnderstandingTimeout  time.Duration
 	PublicBaseURL         string
+	// MaxImageEdge caps the long edge of an image before it is base64 encoded
+	// for the image-understanding route. Zero disables downscaling.
+	MaxImageEdge int
+	// ImageQuality is the JPEG quality used when the source has to be
+	// re-encoded. Zero selects the package default.
+	ImageQuality int
 }
 
 type taskImageOperationsImage interface {
@@ -606,12 +613,18 @@ func (s *TaskImageOperationsService) Analyze(ctx context.Context, req AnalyzeTas
 		if s.logger != nil {
 			event := s.logger.Error().Str("task_id", req.TaskID).Str("execution_id", req.ExecutionID).
 				Str("provider", s.config.UnderstandingProvider).Str("model", s.config.UnderstandingModel).
+				Str("operation_id", providerRequestID).
+				Int("image_data_url_bytes", len(imageSource)).
+				Int64("timeout_ms", s.config.UnderstandingTimeout.Milliseconds()).
 				Int64("duration_ms", time.Since(started).Milliseconds())
 			var providerErr *imageUnderstandingProviderError
 			if errors.As(err, &providerErr) {
 				event.Str("error_code", providerErr.Code).Int("http_status", providerErr.StatusCode).
 					Str("content_type", providerErr.ContentType).Str("endpoint", providerErr.Endpoint).
-					Str("provider_request_id", providerErr.RequestID)
+					Str("provider_request_id", providerErr.RequestID).
+					Str("timeout_source", providerErr.TimeoutSource).
+					Bool("request_written", providerErr.RequestWritten).
+					Int64("request_write_ms", providerErr.RequestWriteMS)
 			}
 			event.Msg("image understanding provider call failed")
 		}
@@ -688,7 +701,7 @@ func (s *TaskImageOperationsService) loadAnalysisSource(ctx context.Context, ima
 		if err != nil {
 			return "", fmt.Errorf("validate image file: %w", err)
 		}
-		return imageDataURL(mimeType, data), nil
+		return s.encodeAnalysisImage(data, mimeType), nil
 	}
 	if !strings.HasPrefix(imageURL, "https://") {
 		return "", errors.New("image_url must be an HTTPS URL")
@@ -705,7 +718,35 @@ func (s *TaskImageOperationsService) loadAnalysisSource(ctx context.Context, ima
 	if err != nil {
 		return "", fmt.Errorf("validate downloaded image: %w", err)
 	}
-	return imageDataURL(mimeType, data), nil
+	return s.encodeAnalysisImage(data, mimeType), nil
+}
+
+// encodeAnalysisImage downscales the validated source before base64 encoding.
+// The provider request is dominated by the encoded image, so an image that
+// already fits the edge budget is sent untouched and a failed downscale falls
+// back to the original bytes instead of failing the analysis.
+func (s *TaskImageOperationsService) encodeAnalysisImage(data []byte, mimeType string) string {
+	prepared, err := appimage.DownscaleForVision(data, mimeType, appimage.VisionDownscaleOptions{
+		MaxEdge: s.config.MaxImageEdge,
+		Quality: s.config.ImageQuality,
+	})
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn().Err(err).Int("image_bytes", len(data)).Str("image_type", mimeType).
+				Msg("image understanding downscale failed; sending the original image")
+		}
+		return imageDataURL(mimeType, data)
+	}
+	if prepared.Changed && s.logger != nil {
+		s.logger.Debug().
+			Int("image_bytes_before", len(data)).
+			Int("image_bytes_after", len(prepared.Data)).
+			Int("image_width", prepared.Width).
+			Int("image_height", prepared.Height).
+			Str("image_type_after", prepared.MIMEType).
+			Msg("image understanding source downscaled")
+	}
+	return imageDataURL(prepared.MIMEType, prepared.Data)
 }
 
 func imageDataURL(mimeType string, data []byte) string {

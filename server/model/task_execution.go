@@ -105,6 +105,7 @@ const (
 const (
 	TaskExecutionFinalizationTerminal      = "terminal"
 	TaskExecutionFinalizationArtifacts     = "artifacts"
+	TaskExecutionFinalizationDomain        = "domain"
 	TaskExecutionFinalizationResult        = "result"
 	TaskExecutionFinalizationWorkflow      = "workflow"
 	TaskExecutionFinalizationDraftDelivery = "draft_delivery"
@@ -114,6 +115,11 @@ const (
 	TaskExecutionFinalizationDispatch      = "dispatch"
 	TaskExecutionFinalizationNotification  = "notification"
 	TaskExecutionFinalizationDone          = "done"
+	// TaskExecutionFinalizationSuperseded marks a terminal attempt whose
+	// durable finalization was abandoned because another attempt became the
+	// task's current execution. The attempt keeps its recorded outcome; only
+	// task-level finalization is retired.
+	TaskExecutionFinalizationSuperseded = "superseded"
 )
 
 const (

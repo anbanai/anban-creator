@@ -1,13 +1,11 @@
 # Message-free start backport
 
-Baseline: the published `@deepseek-ai/dsh-agent-loop@0.2.1-rc.2` package.
+Baseline: the published `@deepseek-ai/dsh-agent-loop@0.2.2-alpha.2` package.
 `package.json`, `lib/index.js`, and all `lib/types/**/*.d.ts` were copied from
 that release. This is not a build of the newer upstream package.
 
-Source: DeepSeek Harness commit
-`8c2ae0d1ebf0e43cbe6fdebaa41495ac8676efba`, the same upstream revision recorded
-in `runtime-dsh/vendor/README.md`, specifically
-`packages/core/agent-loop/src/agent.ts`.
+Source: the message-free startup behavior retained from the previous Anban
+backport, applied to `packages/core/agent-loop/src/agent.ts`.
 
 Only these upstream changes are applied:
 
@@ -21,21 +19,14 @@ Only these upstream changes are applied:
   `turn/end` diagnostic message, while preserving structured provider fields.
 
 All other release JavaScript and declarations remain unchanged. Package version
-and dependency metadata remain unchanged to preserve the published graph.
+and dependency metadata match the published `0.2.2-alpha.2` graph.
 
-The rc.2 package also includes its published locale files; those and every
-other rc.2 runtime/declaration change remain intact.
-
-Published rc.2 baseline SHA-256 values (before the backport):
-
-```text
-cf57e3ecd487ac5c2553455aaa5cef2c6fb41e6bd61be5aa455675d1d7193033  lib/index.js
-66131a86c5f024fabb77e99103f3f07cdca5818cbce7d6aaecb058197c66589e  lib/types/agent.d.ts
-```
+The alpha.2 package includes its published runtime and declaration files; those
+and every other alpha.2 release change remain intact.
 
 The runtime file contains the minimal Anban startup and transport-diagnostic
-extensions; the surrounding implementation is from the published rc.2
-package. The rc.2 package metadata and locale files remain from rc.2.
+extensions; the surrounding implementation is from the published alpha.2
+package. The alpha.2 package metadata remains from alpha.2.
 
 ## Verification
 
@@ -53,9 +44,8 @@ after cancellation, and preservation of a transport cause chain with provider
 status. `start()` remains one-shot after cancellation, matching the upstream
 implementation. Repeated calls do not retry the cancelled startup.
 
-Before installing this local override, `DSH_BACKPORT_BASELINE=1` selects the
-installed registry package and demonstrates failure because `agent.start` is
-undefined. After installation that mode selects the installed override instead.
+The test fixture selects the installed override by default and verifies the
+backported startup contract against the published alpha.2 implementation.
 
 The bridge calls `start()` for a newly created idle Agent. Starting during
 maintenance or using start as a general resume operation is outside this

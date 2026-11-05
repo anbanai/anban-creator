@@ -24,6 +24,7 @@ type UploadSession struct {
 	ID                    string     `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID                string     `gorm:"type:char(36);index;not null" json:"user_id"`
 	Purpose               string     `gorm:"type:varchar(50);index;not null" json:"purpose"`
+	MediaLibraryPrefix    string     `gorm:"type:varchar(120);not null;default:''" json:"-"`
 	StagingKey            string     `gorm:"type:varchar(500);uniqueIndex;not null" json:"staging_key"`
 	FileName              string     `gorm:"type:varchar(255);not null" json:"file_name"`
 	ContentType           string     `gorm:"type:varchar(120);not null" json:"content_type"`

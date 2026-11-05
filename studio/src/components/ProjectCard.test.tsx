@@ -191,7 +191,7 @@ describe('ProjectCard', () => {
     expect(actions).not.toHaveClass('border-t')
   })
 
-  it('shows common actions directly and opens the topic pool', async () => {
+  it('shows common actions and links to scoped topics', async () => {
     const onEdit = vi.fn()
     const onArchive = vi.fn()
     render(<ProjectCard project={project()} stats={stats} onEdit={onEdit} onArchive={onArchive} />)
@@ -204,8 +204,7 @@ describe('ProjectCard', () => {
     fireEvent.click(screen.getByRole('button', { name: '归档人设：公众号人设' }))
     expect(onArchive).toHaveBeenCalledWith('project-1')
 
-    fireEvent.click(screen.getByRole('button', { name: '选题资产：公众号人设，待研究 6 个' }))
-    expect(await screen.findByRole('dialog', { name: /选题资产 - 公众号人设/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '选题：公众号人设，未使用 6 个' })).toHaveAttribute('href', '/topics?project_id=project-1')
   })
 
   it('keeps project actions as accessible icon targets', async () => {
@@ -231,7 +230,7 @@ describe('ProjectCard', () => {
   it('does not report zero remaining topics before stats are available', () => {
     render(<ProjectCard project={project()} />)
 
-    const topicPoolButton = screen.getByRole('button', { name: '选题资产：公众号人设' })
+    const topicPoolButton = screen.getByRole('link', { name: '选题：公众号人设' })
     expect(topicPoolButton.querySelector('svg')).toBeInTheDocument()
     expect(topicPoolButton).not.toHaveTextContent('0')
   })
@@ -262,11 +261,21 @@ describe('ProjectCard', () => {
   })
 
   it('places the work list entry in the icon action row', () => {
-    render(<ProjectCard project={project()} />)
+    render(<ProjectCard project={project()} onEdit={vi.fn()} onChannelConfig={vi.fn()} onArchive={vi.fn()} />)
 
     const workList = screen.getByRole('link', { name: '查看作品：公众号人设' })
+    const actions = screen.getByLabelText('人设操作：公众号人设')
     expect(workList).toBeInTheDocument()
-    expect(workList.closest('[aria-label="人设操作：公众号人设"]')).toContainElement(workList)
+    expect(workList.querySelector('svg')).toHaveClass('lucide-gallery-horizontal-end')
+    expect(actions).toContainElement(workList)
+    expect(actions).toHaveClass('flex-nowrap', 'gap-0')
+    expect(actions).not.toHaveClass('flex-wrap')
+    const actionTargets = actions.querySelectorAll('a, button')
+    expect(actionTargets).toHaveLength(7)
+    for (const action of actionTargets) {
+      expect(action).toHaveClass('size-11', 'shrink-0')
+      expect(action).not.toHaveClass('shrink')
+    }
     expect(screen.queryByRole('button', { name: '查看反馈闭环' })).not.toBeInTheDocument()
   })
 })

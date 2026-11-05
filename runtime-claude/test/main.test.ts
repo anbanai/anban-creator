@@ -1337,6 +1337,7 @@ test("Hypit trusted provider credentials are applied after host sanitization wit
     {
       ...bootstrapData,
       task_type: "hypit",
+      runtime_profile: "hypit",
       env: { MODEL_API_KEY: "trusted-key" },
     },
     "https://server",
@@ -1489,7 +1490,7 @@ test("Hypit inherits only OS essentials and accepts arbitrary credentials only f
   };
   const baseline = buildExecutionEnvironment(
     host,
-    { ...bootstrapData, task_type: "hypit" },
+    { ...bootstrapData, task_type: "hypit", runtime_profile: "hypit" },
     "https://server",
     "token",
   );
@@ -1508,6 +1509,7 @@ test("Hypit inherits only OS essentials and accepts arbitrary credentials only f
     {
       ...bootstrapData,
       task_type: "hypit",
+      runtime_profile: "hypit",
       env: { HYPIT_AUTH: "server-auth" },
     },
     "https://server",

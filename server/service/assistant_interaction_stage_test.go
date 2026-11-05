@@ -144,3 +144,42 @@ func TestDraftPersistenceFailureUsesRetryableRecoveryContract(t *testing.T) {
 		t.Fatalf("draft persistence error leaked cause: %s", err)
 	}
 }
+
+func TestCreationStagePreservesSafeFieldDiagnostics(t *testing.T) {
+	for _, tc := range []struct{ name, payload, field, reason string }{
+		{"string field", `{"plan":{"goal":["private-token"]}}`, "plan.goal", "expected string; received array"},
+		{"array field", `{"plan":{"profile_context":"private-token"}}`, "plan.profile_context", "expected array; received string"},
+		{"array element", `{"plan":{"requirements":[123456789]}}`, "plan.requirements.0", "expected string; received number"},
+		{"unknown field", `{"plan":{"unexpected":"private-token"}}`, "plan.unexpected", "unknown field"},
+		{"unsafe field name", `{"plan":{"private-token:secret":"value"}}`, "plan", "unknown field"},
+		{"malformed", `{"plan":{"goal":"private-token"`, "plan", "invalid JSON"},
+		{"null plan", `{"plan":null}`, "plan", "expected object; received null"},
+		{"array plan", `{"plan":[]}`, "plan", "expected object; received array"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := newAssistantInteractionServiceTest(t)
+			snapshot, err := svc.CreateOrResume(context.Background(), "user-1", AssistantInteractionInput{ModeID: AssistantModeCreation}, "create")
+			if err != nil {
+				t.Fatal(err)
+			}
+			digest := sha256.Sum256([]byte(tc.payload))
+			_, err = svc.StageDraftForInteraction(context.Background(), "user-1", InteractionStageInput{InteractionID: snapshot.ID, Generation: snapshot.Generation, AttemptID: "stage", ModeID: AssistantModeCreation, Payload: json.RawMessage(tc.payload), PayloadDigest: hex.EncodeToString(digest[:]), Ready: true})
+			var structured *InteractionError
+			if !errors.As(err, &structured) || structured.Code != InteractionErrorDraftInvalid || len(structured.BlockingIssues) != 1 {
+				t.Fatalf("stage error = %#v, %v", structured, err)
+			}
+			issue := structured.BlockingIssues[0]
+			if issue.Field != tc.field || !strings.Contains(issue.Message, tc.reason) {
+				t.Fatalf("issue = %#v, want %s: %s", issue, tc.field, tc.reason)
+			}
+			raw, _ := json.Marshal(structured.BlockingIssues)
+			if strings.Contains(string(raw), "private-token") || strings.Contains(string(raw), "123456789") {
+				t.Fatalf("diagnostic leaked input: %s", raw)
+			}
+			drafts, err := svc.repo.AssistantInteractions().ListDrafts(context.Background(), "user-1", snapshot.ID)
+			if err != nil || len(drafts) != 0 {
+				t.Fatalf("invalid plan persisted drafts: %#v, %v", drafts, err)
+			}
+		})
+	}
+}

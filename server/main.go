@@ -14,7 +14,6 @@ import (
 	"time"
 
 	dockerclient "github.com/docker/docker/client"
-	"github.com/gofiber/fiber/v3"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"gorm.io/driver/mysql"
@@ -23,6 +22,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	serverimage "github.com/anbanai/anban-creator/server/app/image"
 	appwechat "github.com/anbanai/anban-creator/server/app/wechat"
 	"github.com/anbanai/anban-creator/server/auth"
 	serverbilling "github.com/anbanai/anban-creator/server/billing"
@@ -79,6 +79,16 @@ func main() {
 	logger := zerolog.New(os.Stderr).With().Timestamp().Logger().Level(logLevel)
 	log := &logger
 
+	// libvips backs the image-understanding downscale path. Deployments without
+	// an understanding route never touch it, so only start (and fail fast) when
+	// that route is configured.
+	if cfg.ImageUnderstanding.BaseURL != "" && cfg.ImageUnderstanding.Key != "" && cfg.ImageUnderstanding.Model != "" {
+		if err := serverimage.StartVisionRuntime(); err != nil {
+			log.Fatal().Err(err).Msg("start image processing runtime")
+		}
+		defer serverimage.StopVisionRuntime()
+	}
+
 	log.Info().
 		Int("port", cfg.Server.Port).
 		Str("host", cfg.Server.Host).
@@ -126,6 +136,12 @@ func main() {
 		if err := requireAssistantInteractionSchema(mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database schema is not ready for homepage assistant interactions")
 		}
+		if err := requireUploadSessionMediaPrefixSchema(mysqlDB); err != nil {
+			log.Fatal().Err(err).Msg("database schema is not ready for configurable media-library paths")
+		}
+		if err := requireUserMediaSemanticSchema(mysqlDB); err != nil {
+			log.Fatal().Err(err).Msg("database schema is not ready for OSS media semantic search")
+		}
 		if err := service.AssertExecutableIdentityReadiness(context.Background(), mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database executable identity is not ready")
 		}
@@ -165,9 +181,6 @@ func main() {
 		}
 		if err := service.MigrateTaskLifecycle(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate task lifecycle schema")
-		}
-		if err := service.MigrateDesignerRemoval(context.Background(), mysqlDB, log); err != nil {
-			log.Fatal().Err(err).Msg("failed to remove Designer schema")
 		}
 		if err := service.MigrateTemplatePrompt(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate canonical template prompts")
@@ -370,9 +383,9 @@ func main() {
 		ImageAPIConfig:          defaultImageAPI,
 		MontageToolPolicy:       cfg.Montage.ToolPolicy,
 		MontagePipelineDefaults: cfg.Montage.PipelineDefaults,
-		MontageEnv:              cfg.Montage.Env,
 		VideoEdit:               cfg.VideoEdit,
 		TalkingHeadEditor:       cfg.TalkingHeadEditor,
+		AgentEnvs:               cfg.AgentRuntimeEnvs(),
 		Hypit:                   cfg.Hypit,
 		Registry:                agentProfiles,
 		ProjectMemory:           projectMemoryStore,
@@ -395,6 +408,7 @@ func main() {
 	var posterSvc *service.PosterService
 	var referenceAssetSvc *service.ReferenceAssetService
 	var imageAnalysisSvc *service.ImageAnalysisService
+	var mediaSemanticSearch storage.MediaSemanticSearch
 	var userMediaLibrarySvc *service.UserMediaLibraryService
 	var asynqClient *scheduler.AsynqClient
 	var analyticsRebuildManager *service.AnalyticsRebuildManager
@@ -541,6 +555,15 @@ func main() {
 			Provider:      cfg.ImageUnderstanding.ProviderKey,
 			Model:         cfg.ImageUnderstanding.Model,
 		}, log)
+		if cfg.Storage.AIContentAwareness.Enabled && cfg.Storage.Provider == "oss" {
+			semantic, semanticErr := storage.NewOSSMetaQueryProvider(cfg.Storage, log)
+			if semanticErr != nil {
+				log.Fatal().Err(semanticErr).Msg("initialize OSS AI content awareness")
+			}
+			mediaSemanticSearch = semantic
+			imageAnalysisSvc.SetMediaSemanticSearch(semantic)
+			log.Info().Str("bucket", cfg.Storage.BucketName).Str("region", cfg.Storage.Region).Bool("video_enabled", cfg.Storage.AIContentAwareness.VideoEnabled).Msg("OSS AI content awareness initialized")
+		}
 		projectSvc.SetImageAnalysisService(imageAnalysisSvc)
 		templateSvc.SetImageAnalysisService(imageAnalysisSvc)
 	}
@@ -553,6 +576,12 @@ func main() {
 	}
 	if repo != nil && store != nil && imageAnalysisSvc != nil {
 		userMediaLibrarySvc = service.NewUserMediaLibraryService(repo, store, imageAnalysisSvc)
+		if err := userMediaLibrarySvc.SetMediaLibraryPrefix(cfg.Storage.MediaLibraryPrefix); err != nil {
+			log.Fatal().Err(err).Msg("configure media-library prefix")
+		}
+		log.Info().Str("bucket", cfg.Storage.BucketName).Str("media_library_prefix", cfg.Storage.MediaLibraryPrefix).Bool("query_enabled", cfg.Storage.AIContentAwareness.Enabled).Bool("video_enabled", cfg.Storage.AIContentAwareness.VideoEnabled).Msg("media-library configuration; verify the same prefix and video content awareness in OSS")
+		userMediaLibrarySvc.SetSemanticSearch(mediaSemanticSearch)
+		userMediaLibrarySvc.SetLogger(log)
 	}
 	var aiEntrySvc *service.AIEntryService
 	if repo != nil && taskSvc != nil {
@@ -644,6 +673,8 @@ func main() {
 	var aiEntryHandler *handler.AIEntryHandler
 	var feedbackHandler *handler.FeedbackHandler
 	var imageCapabilityHandler *handler.ImageCapabilityHandler
+	var designerHandler *handler.DesignerHandler
+	var designerSvc *service.DesignerService
 	var montageCapabilityHandler *handler.MontageCapabilityHandler
 	var localLifeCapabilityHandler *handler.LocalLifeCapabilityHandler
 	var templateHandler *handler.TemplateHandler
@@ -651,10 +682,11 @@ func main() {
 	var viralAnalysisHandler *handler.ViralAnalysisHandler
 	var posterHandler *handler.PosterHandler
 	var resourceHandler *handler.ResourceHandler
-	var topicPoolHandler *handler.TopicPoolHandler
 	var contentAssetHandler *handler.ContentAssetHandler
 	var trendsHandler *handler.TrendsHandler
+	var topicRadarHandler *handler.TopicRadarHandler
 	var trendSvc *service.TrendService
+	var topicRadarSvc *service.TopicRadarService
 	var topicPoolSvc *service.TopicPoolService
 	var contentAssetSvc *service.ContentAssetService
 	var agentFeedbackSvc *service.AgentFeedbackService
@@ -745,7 +777,6 @@ func main() {
 		}
 		posterHandler = handler.NewPosterHandler(posterSvc, log)
 		topicPoolSvc = service.NewTopicPoolService(repo, log)
-		topicPoolHandler = handler.NewTopicPoolHandler(topicPoolSvc, log)
 		contentAssetSvc = service.NewContentAssetService(repo)
 		if asynqClient != nil {
 			contentAssetSvc.SetEnqueuer(asynqClient)
@@ -760,6 +791,11 @@ func main() {
 		contentAssetHandler = handler.NewContentAssetHandler(contentAssetSvc, log)
 		trendSvc = service.NewTrendService(repo, rdb, cfg.Trends, log)
 		trendsHandler = handler.NewTrendsHandler(trendSvc, log)
+		topicRadarSvc = service.NewTopicRadarService(repo, asynqClient, nil)
+		topicRadarSvc.SetTaskService(taskSvc)
+		topicRadarSvc.SetPublicBaseURL(cfg.Server.StudioBaseURL)
+		taskSvc.SetTopicRadarFinalizer(topicRadarSvc.FinalizeTopicRadarExecution)
+		topicRadarHandler = handler.NewTopicRadarHandler(topicRadarSvc, repo, log)
 		if taskSvc != nil {
 			taskSvc.SetTopicPoolService(topicPoolSvc)
 		}
@@ -772,6 +808,17 @@ func main() {
 		imageCatalog = fixedBilling.Catalog
 	}
 	imageCapabilityHandler = handler.NewImageCapabilityHandler(cfg.ModelRoutes.ImageGeneration, repo, imageCatalog, log)
+	if repo != nil && store != nil && fixedBilling != nil {
+		designerSvc = service.NewDesignerService(mysqlDB, cfg, store, log)
+		designerSvc.SetBillingCatalogService(fixedBilling.Catalog)
+		designerSvc.SetBillingWalletService(fixedBilling.Wallet)
+		designerSvc.SetProviderCostService(fixedBilling.Cost)
+		designerHandler = handler.NewDesignerHandler(designerSvc, log)
+		if fileHandler != nil {
+			fileHandler.SetDesignerService(designerSvc)
+		}
+		designerHandler.SetDirectUploadDependencies(repo, store)
+	}
 	hypitCapabilityHandler := handler.NewHypitCapabilityHandler(hypitCapabilitySvc)
 	hypitCapabilityHandler.SetTaskService(taskSvc)
 	montageCapabilityHandler = handler.NewMontageCapabilityHandler(montageCapabilitySvc)
@@ -789,11 +836,18 @@ func main() {
 			planHandler.SetRepository(repo)
 		}
 	}
-	var assistantInteractionFactory service.RuntimeFactory
-	interactiveSvc := service.NewInteractiveService(repo)
-	if projectSvc != nil {
-		interactiveSvc.SetProjectService(projectSvc)
+	// Use one signal-derived lifecycle for runtime reconciliation and server shutdown.
+	signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithCancel(signalCtx)
+	defer cancel()
+	if designerSvc != nil {
+		go startDesignerRecovery(ctx, designerSvc, log)
 	}
+
+	var assistantInteractionFactory service.RuntimeFactory
+	var cleanupInteractiveOrphans func(context.Context) error
+	interactiveSvc := service.NewInteractiveService(repo)
 	if cfg.Dsh.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Dsh.Executor), "container") {
 		route := cfg.Dsh.Routes[cfg.Dsh.Route]
 		dshFactory := service.ContainerRuntimeFactory{
@@ -802,23 +856,7 @@ func main() {
 			BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL,
 		}
 		assistantInteractionFactory = dshFactory
-		runtimeReady := true
-		if err := dshFactory.CleanupOrphans(context.Background()); err != nil {
-			log.Warn().Err(err).Msg("failed to clean orphaned interactive DSH containers")
-			runtimeReady = false
-		}
-		if repo == nil || repo.AssistantSessions() == nil {
-			log.Error().Msg("cannot recover Assistant sessions without durable session storage")
-			runtimeReady = false
-		} else if err := repo.AssistantSessions().InterruptActive(context.Background(), time.Now().UTC()); err != nil {
-			log.Error().Err(err).Msg("failed to recover interrupted Assistant sessions")
-			runtimeReady = false
-		}
-		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, dshFactory)
-		if projectSvc != nil {
-			interactiveSvc.SetProjectService(projectSvc)
-		}
-		interactiveSvc.SetEnabled(runtimeReady)
+		cleanupInteractiveOrphans = dshFactory.CleanupOrphans
 	} else if cfg.Dsh.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Dsh.Executor), "kubernetes") {
 		restConfig, err := rest.InClusterConfig()
 		if err != nil {
@@ -835,23 +873,7 @@ func main() {
 			BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL, Logger: log,
 		}
 		assistantInteractionFactory = dshFactory
-		runtimeReady := true
-		if err := dshFactory.CleanupOrphans(context.Background()); err != nil {
-			log.Warn().Err(err).Msg("failed to clean orphaned interactive DSH jobs")
-			runtimeReady = false
-		}
-		if repo == nil || repo.AssistantSessions() == nil {
-			log.Error().Msg("cannot recover Assistant sessions without durable session storage")
-			runtimeReady = false
-		} else if err := repo.AssistantSessions().InterruptActive(context.Background(), time.Now().UTC()); err != nil {
-			log.Error().Err(err).Msg("failed to recover interrupted Assistant sessions")
-			runtimeReady = false
-		}
-		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, dshFactory)
-		if projectSvc != nil {
-			interactiveSvc.SetProjectService(projectSvc)
-		}
-		interactiveSvc.SetEnabled(runtimeReady)
+		cleanupInteractiveOrphans = dshFactory.CleanupOrphans
 	} else if cfg.Dsh.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Dsh.Executor), "process") && strings.TrimSpace(cfg.Dsh.BridgeCommand) != "" {
 		route := cfg.Dsh.Routes[cfg.Dsh.Route]
 		execFactory := service.ExecRuntimeFactory{
@@ -867,27 +889,33 @@ func main() {
 			MCPURL:   cfg.Dsh.MCPURL,
 		}
 		assistantInteractionFactory = execFactory
-		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, execFactory)
-		if projectSvc != nil {
-			interactiveSvc.SetProjectService(projectSvc)
-		}
-		runtimeReady := repo != nil && repo.AssistantSessions() != nil
-		if runtimeReady {
-			if err := repo.AssistantSessions().InterruptActive(context.Background(), time.Now().UTC()); err != nil {
-				log.Error().Err(err).Msg("failed to recover interrupted Assistant sessions")
-				runtimeReady = false
+	}
+	if assistantInteractionFactory != nil {
+		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, assistantInteractionFactory)
+		var recoverSessions func(context.Context) error
+		if repo != nil && repo.AssistantSessions() != nil {
+			recoverSessions = func(ctx context.Context) error {
+				return repo.AssistantSessions().InterruptActive(ctx, time.Now().UTC())
 			}
-		} else {
-			log.Error().Msg("cannot recover Assistant sessions without durable session storage")
 		}
-		interactiveSvc.SetEnabled(runtimeReady)
+		readyFactory, startupErr := initializeInteractiveRuntime(ctx, interactiveSvc, assistantInteractionFactory, cleanupInteractiveOrphans, recoverSessions, nil)
+		assistantInteractionFactory = readyFactory
+		if startupErr != nil {
+			log.Error().Err(startupErr).Msg("interactive startup initialization incomplete")
+		}
 	} else if repo != nil && repo.AssistantSessions() != nil {
 		// No runtime branch owns startup recovery in this configuration. Release
 		// durable Assistant leases so a disabled or unsupported executor cannot
 		// strand sessions across a restart.
-		if err := repo.AssistantSessions().InterruptActive(context.Background(), time.Now().UTC()); err != nil {
+		if err := repo.AssistantSessions().InterruptActive(ctx, time.Now().UTC()); err != nil {
 			log.Error().Err(err).Msg("failed to recover interrupted Assistant sessions")
 		}
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	if projectSvc != nil {
+		interactiveSvc.SetProjectService(projectSvc)
 	}
 	interactiveSvc.SetTaskService(taskSvc)
 	// Apply authorization policy after selecting the runtime-backed service so
@@ -976,7 +1004,10 @@ func main() {
 			TaskImageOperationsSvc: service.NewTaskImageOperationsService(taskSvc, imageSvc, imageUnderstandingClient, fixedBilling.Cost, service.TaskImageOperationsConfig{
 				UnderstandingProvider: cfg.ImageUnderstanding.ProviderKey,
 				UnderstandingModel:    cfg.ImageUnderstanding.Model,
+				UnderstandingTimeout:  cfg.ImageUnderstanding.Timeout,
 				PublicBaseURL:         cfg.Server.PublicBaseURL,
+				MaxImageEdge:          cfg.ImageUnderstanding.MaxImageEdge,
+				ImageQuality:          cfg.ImageUnderstanding.ImageQuality,
 			}, log),
 			TaskVideoOperationsSvc: service.NewTaskVideoOperationsService(repo, store, videoUnderstandingClient, fixedBilling.Cost, service.TaskVideoOperationsConfig{
 				UnderstandingProvider: cfg.VideoUnderstanding.ProviderKey,
@@ -1006,17 +1037,15 @@ func main() {
 		log.Info().Msg("MCP handler initialized (no tools, services unavailable)")
 	}
 
-	// Use one signal-derived lifecycle for runtime reconciliation and server shutdown.
-	signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-	ctx, cancel := context.WithCancel(signalCtx)
-	defer cancel()
-
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
-		asynqServer = startAsynqServer(repo, taskSvc, contentAssetSvc, imageAnalysisSvc, wechatPublicationSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, analyticsRebuildManager, feedbackScheduler, feedbackAttributionSvc, cfg, log, rdb)
+		asynqServer = startAsynqServer(repo, taskSvc, contentAssetSvc, imageAnalysisSvc, wechatPublicationSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, analyticsRebuildManager, feedbackScheduler, feedbackAttributionSvc, topicRadarSvc, cfg, log, rdb)
 		startAnalyticsRebuildRecovery(ctx, repo, asynqClient, log)
+	}
+
+	if topicRadarSvc != nil {
+		startTopicRadarLoops(ctx, topicRadarSvc, log)
 	}
 
 	// 15.1 Start plan checker if repository and task service are available.
@@ -1130,6 +1159,7 @@ func main() {
 		AIEntryHandler:                      aiEntryHandler,
 		FeedbackHandler:                     feedbackHandler,
 		ImageCapabilityHandler:              imageCapabilityHandler,
+		DesignerHandler:                     designerHandler,
 		MontageCapabilityHandler:            montageCapabilityHandler,
 		LocalLifeCapabilityHandler:          localLifeCapabilityHandler,
 		HypitCapabilityHandler:              hypitCapabilityHandler,
@@ -1138,9 +1168,9 @@ func main() {
 		ViralAnalysisHandler:                viralAnalysisHandler,
 		PosterHandler:                       posterHandler,
 		ResourceHandler:                     resourceHandler,
-		TopicPoolHandler:                    topicPoolHandler,
 		ContentAssetHandler:                 contentAssetHandler,
 		TrendsHandler:                       trendsHandler,
+		TopicRadarHandler:                   topicRadarHandler,
 		IlinkHandler:                        ilinkHandler,
 		MCPHandler:                          mcpHandler,
 		StorageProvider:                     store,
@@ -1254,16 +1284,8 @@ func main() {
 		close(shutdownDone)
 	}()
 
-	listenConfig := fiber.ListenConfig{}
-	if cfg.Server.TLSCertFile != "" || cfg.Server.TLSKeyFile != "" {
-		if cfg.Server.TLSCertFile == "" || cfg.Server.TLSKeyFile == "" {
-			log.Fatal().Msg("server TLS requires both certificate and key files")
-		}
-		listenConfig.CertFile = cfg.Server.TLSCertFile
-		listenConfig.CertKeyFile = cfg.Server.TLSKeyFile
-	}
-	log.Info().Str("addr", addr).Bool("tls", listenConfig.CertFile != "").Msg("server starting")
-	if err := app.Listen(addr, listenConfig); err != nil {
+	log.Info().Str("addr", addr).Str("scheme", "http").Msg("server starting")
+	if err := app.Listen(addr); err != nil {
 		log.Error().Err(err).Msg("server listen error")
 	}
 	cancel()
@@ -1512,6 +1534,32 @@ func requireAssistantInteractionSchema(db *gorm.DB) error {
 	return nil
 }
 
+// requireUserMediaSemanticSchema prevents an existing media-library database
+// from serving rows that cannot persist the OSS content-awareness result.
+// Fresh databases still receive these columns through model.AutoMigrate.
+func requireUserMediaSemanticSchema(db *gorm.DB) error {
+	if db == nil || !db.Migrator().HasTable(&model.UserMediaAsset{}) {
+		return nil
+	}
+	for _, column := range []string{"Summary", "AnalysisProvider", "IndexedAt"} {
+		if !db.Migrator().HasColumn(&model.UserMediaAsset{}, column) {
+			return fmt.Errorf("existing database requires server/migrations/20261102_user_media_oss_semantic.sql before startup (missing user_media_assets.%s)", column)
+		}
+	}
+	return nil
+}
+
+// Existing databases apply the explicit migration before serving new uploads.
+func requireUploadSessionMediaPrefixSchema(db *gorm.DB) error {
+	if db == nil || !db.Migrator().HasTable(&model.UploadSession{}) {
+		return nil
+	}
+	if !db.Migrator().HasColumn(&model.UploadSession{}, "MediaLibraryPrefix") {
+		return fmt.Errorf("existing database requires server/migrations/20261103_upload_session_media_prefix.sql before startup (missing upload_sessions.media_library_prefix)")
+	}
+	return nil
+}
+
 func requireMySQLTaskDeliveryConstraints(db *gorm.DB) error {
 	checks := []struct {
 		name     string
@@ -1682,7 +1730,7 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
-func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, contentAssetSvc *service.ContentAssetService, imageAnalysisSvc *service.ImageAnalysisService, wechatPublicationSvc *service.WechatPublicationService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, analyticsRebuildManager *service.AnalyticsRebuildManager, feedbackScheduler *service.FeedbackScheduler, feedbackAttributionSvc *service.FeedbackAttributionService, cfg *config.Config, log *zerolog.Logger, rdb *redis.Client) *scheduler.TaskProcessor {
+func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, contentAssetSvc *service.ContentAssetService, imageAnalysisSvc *service.ImageAnalysisService, wechatPublicationSvc *service.WechatPublicationService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, analyticsRebuildManager *service.AnalyticsRebuildManager, feedbackScheduler *service.FeedbackScheduler, feedbackAttributionSvc *service.FeedbackAttributionService, topicRadarSvc *service.TopicRadarService, cfg *config.Config, log *zerolog.Logger, rdb *redis.Client) *scheduler.TaskProcessor {
 	var seednoteCaptureHandler scheduler.SeednoteTrackingHandler
 	if seednoteTrackingSvc != nil {
 		seednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
@@ -1729,6 +1777,9 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 		log,
 		publicationHandlers,
 	)
+	if topicRadarSvc != nil {
+		srv.RegisterTopicRadarHandlers(topicRadarSvc.ProcessTopicDigest, topicRadarSvc.ProcessTopicScript)
+	}
 	if imageAnalysisSvc != nil {
 		srv.RegisterImageAnalysisHandler(imageAnalysisSvc.Process, log)
 	}
@@ -1876,6 +1927,25 @@ func startImageAnalysisRecovery(ctx context.Context, analyses *service.ImageAnal
 	run := func() {
 		if err := analyses.Recover(ctx, 100); err != nil && ctx.Err() == nil {
 			log.Error().Err(err).Msg("image analysis recovery failed")
+		}
+	}
+	run()
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
+	}
+}
+
+func startDesignerRecovery(ctx context.Context, designer *service.DesignerService, log *zerolog.Logger) {
+	run := func() {
+		if err := designer.RecoverGenerations(ctx); err != nil && ctx.Err() == nil {
+			log.Error().Err(err).Msg("designer generation recovery failed")
 		}
 	}
 	run()

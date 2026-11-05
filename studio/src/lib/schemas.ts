@@ -88,6 +88,7 @@ const montageAssetSchema = z.object({
 const montagePreferencesSchema = z.object({
   duration_seconds: z.number().int().min(1).optional(),
   style: z.string().max(1000).optional(),
+  playbook_key: z.string().max(100).optional(),
   music_prompt: z.string().max(1000).optional(),
   subtitle_mode: z.string().optional(),
   voiceover_mode: z.string().optional(),
@@ -96,6 +97,8 @@ const montagePreferencesSchema = z.object({
 const montageInputSchema = z.object({
   brief: promptSchema.optional(),
   pipeline_key: z.string().max(100).optional(),
+  output_profile_key: z.string().max(100).optional(),
+  output_profile: z.object({ key: z.string(), display_name: z.string(), width: z.number(), height: z.number(), aspect_ratio: z.string() }).optional(),
   source_assets: z.array(montageAssetSchema).default([]),
   preferences: montagePreferencesSchema,
   delivery_targets: z.array(z.string()).default([]),
@@ -192,6 +195,7 @@ export const registerSchema = z.object({
 export type RegisterFormValues = z.infer<typeof registerSchema>
 
 export const createTaskSchema = z.object({
+  asset_id: z.string().uuid().optional(),
   project_id: z.string().optional().default(""),
   execution_profile: executionProfileSchema,
   type: z.enum(["seednote", "wechat-article", "wechat-picture", "moments", "viral-analysis", "profile-analysis", "content-research", "content-validation", "content-script", "feedback-analysis", "ecommerce", "montage", "whiteboard-animation", "hypit", "local-life", "video-edit", "talking-head-editor"]),
@@ -357,6 +361,7 @@ export const projectSchema = z.object({
   hypit_defaults: z.object({ preferences: hypitPreferencesSchema, asset_guidance: z.string().optional() }).optional(),
   montage_defaults: z.object({
     default_pipeline: z.string().max(100).optional(),
+    output_profile_key: z.string().max(100).optional(),
     preferences: montagePreferencesSchema,
     asset_guidance: z.string().max(2000).optional(),
     delivery_targets: z.array(z.string()).default([]),

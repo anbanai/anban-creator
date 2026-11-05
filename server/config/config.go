@@ -37,6 +37,10 @@ type Config struct {
 	Storage            StorageConfig                   `yaml:"storage"`
 	MCP                MCPConfig                       `yaml:"mcp"`
 	Hypit              HypitConfig                     `yaml:"hypit"`
+	WechatArticle      AgentRuntimeEnvConfig           `yaml:"wechat-article"`
+	WechatPicture      AgentRuntimeEnvConfig           `yaml:"wechat-picture"`
+	Seednote           AgentRuntimeEnvConfig           `yaml:"seednote"`
+	ContentPlanning    AgentRuntimeEnvConfig           `yaml:"content-planning"`
 	Montage            MontageConfig                   `yaml:"montage"`
 	VideoEdit          VideoEditConfig                 `yaml:"video_edit"`
 	TalkingHeadEditor  TalkingHeadEditorConfig         `yaml:"talking_head_editor"`
@@ -400,8 +404,16 @@ func joinConfigErrors(errs []string) error {
 }
 
 type TrendsConfig struct {
-	TTL     time.Duration `yaml:"ttl"`
-	Timeout time.Duration `yaml:"timeout"`
+	Provider string             `yaml:"provider"`
+	TTL      time.Duration      `yaml:"ttl"`
+	Timeout  time.Duration      `yaml:"timeout"`
+	RedFox   TrendsRedFoxConfig `yaml:"redfox"`
+}
+
+type TrendsRedFoxConfig struct {
+	Endpoint string        `yaml:"endpoint"`
+	APIKey   string        `yaml:"api_key" json:"-"`
+	Timeout  time.Duration `yaml:"timeout"`
 }
 
 // SearchConfig controls Server-owned search capabilities. Credentials are
@@ -504,8 +516,6 @@ type EmailConfig struct {
 type ServerConfig struct {
 	Port          int    `yaml:"port"` // default 8080
 	Host          string `yaml:"host"` // default "0.0.0.0"
-	TLSCertFile   string `yaml:"tls_cert_file"`
-	TLSKeyFile    string `yaml:"tls_key_file"`
 	PublicBaseURL string `yaml:"public_base_url"`
 	StudioBaseURL string `yaml:"studio_base_url"`
 }
@@ -548,6 +558,64 @@ type MCPConfig struct {
 
 type MCPToolTimeoutsConfig struct {
 	GenerateImage time.Duration `yaml:"generate_image"`
+}
+
+// AgentRuntimeEnvConfig contains environment variables for one business Agent.
+// Values are injected only into that Agent's runtime process and are never
+// exposed through MCP responses, task snapshots, logs, prompts, or artifacts.
+type AgentRuntimeEnvConfig struct {
+	Env map[string]string `yaml:"env" json:"-"`
+}
+
+func (c *AgentRuntimeEnvConfig) UnmarshalYAML(value *yaml.Node) error {
+	if err := validateYAMLMappingFields(value, "Agent runtime", map[string]bool{"env": true}); err != nil {
+		return err
+	}
+	type plain AgentRuntimeEnvConfig
+	return value.Decode((*plain)(c))
+}
+
+func (c AgentRuntimeEnvConfig) Validate(name string) error {
+	return model.ValidateRuntimeEnvironment(name+".env", model.NormalizeRuntimeEnvironment(c.Env))
+}
+
+// AgentRuntimeEnvs returns the configured environment for every managed Agent
+// Pack, keyed by Agent ID. The returned map is the single input of the runtime
+// bootstrap: the Server is the only authority on which credentials an Agent
+// receives, and the runtime only enforces transport invariants.
+//
+// A Pack without configuration is absent from the map. Unset operator values
+// are normalized away so an empty string never reaches the runtime.
+func (c Config) AgentRuntimeEnvs() map[string]map[string]string {
+	envs := map[string]map[string]string{
+		model.AgentIDArticle:         model.NormalizeRuntimeEnvironment(c.WechatArticle.Env),
+		model.AgentIDWechatPicture:   model.NormalizeRuntimeEnvironment(c.WechatPicture.Env),
+		model.AgentIDSeednote:        model.NormalizeRuntimeEnvironment(c.Seednote.Env),
+		model.AgentIDContentPlanning: model.NormalizeRuntimeEnvironment(c.ContentPlanning.Env),
+		model.AgentIDMontage:         model.NormalizeRuntimeEnvironment(c.Montage.Env),
+		model.AgentIDHypit:           model.NormalizeRuntimeEnvironment(c.Hypit.Env),
+		model.AgentIDVideoEdit:       withRuntimeCredential(c.VideoEdit.Env, "ELEVENLABS_API_KEY", c.VideoEdit.ElevenLabsAPIKey),
+		model.AgentIDTalkingHeadEditor: withRuntimeCredential(
+			c.TalkingHeadEditor.Env, "ELEVENLABS_API_KEY", c.TalkingHeadEditor.VideoUseAPIKey,
+		),
+	}
+	for id, env := range envs {
+		if len(env) == 0 {
+			delete(envs, id)
+		}
+	}
+	return envs
+}
+
+// withRuntimeCredential composes a Pack environment from its section map plus a
+// dedicated credential field. The dedicated field wins because it is the
+// documented operator setting; both are normalized so unset values stay absent.
+func withRuntimeCredential(env map[string]string, key, value string) map[string]string {
+	composed := model.NormalizeRuntimeEnvironment(env)
+	if credential := strings.TrimSpace(value); credential != "" {
+		composed[key] = credential
+	}
+	return composed
 }
 
 type MontageConfig struct {
@@ -631,12 +699,7 @@ func (c TalkingHeadEditorConfig) Validate() error {
 	if err := input.Validate(c.MaxAssets, c.MaxDurationSeconds); err != nil {
 		return fmt.Errorf("talking_head_editor.default_policy: %w", err)
 	}
-	for key, value := range c.Env {
-		if key == "" || strings.ContainsAny(key, "=\x00") || strings.ContainsAny(value, "\x00\r\n") {
-			return fmt.Errorf("talking_head_editor.env contains invalid entry %q", key)
-		}
-	}
-	return nil
+	return model.ValidateRuntimeEnvironment("talking_head_editor.env", model.NormalizeRuntimeEnvironment(c.Env))
 }
 
 func (c TalkingHeadEditorConfig) DispatchReady() bool {
@@ -737,12 +800,7 @@ func (c VideoEditConfig) Validate() error {
 	if err := policyInput.Validate(0, c.MaxDurationSeconds); err != nil {
 		return fmt.Errorf("video_edit.default_policy: %w", err)
 	}
-	for key, value := range c.Env {
-		if key == "" || strings.ContainsAny(key, "=\x00") || strings.ContainsAny(value, "\x00\r\n") {
-			return fmt.Errorf("video_edit.env contains invalid entry %q", key)
-		}
-	}
-	return nil
+	return model.ValidateRuntimeEnvironment("video_edit.env", model.NormalizeRuntimeEnvironment(c.Env))
 }
 
 func (c VideoEditConfig) DispatchReady() bool {
@@ -796,7 +854,7 @@ func (c *MontageConfig) ApplyDefaults() {
 		c.DefaultPipeline = "cinematic"
 	}
 	if len(c.AllowedPipelines) == 0 {
-		c.AllowedPipelines = []string{"cinematic", "talking-head", "screen-demo", "clip-factory"}
+		c.AllowedPipelines = []string{"animated-explainer", "animation", "avatar-spokesperson", "character-animation", "cinematic", "clip-factory", "documentary-montage", "framework-smoke", "hybrid", "localization-dub", "podcast-repurpose", "screen-demo", "talking-head"}
 	}
 	if c.MaxDurationSeconds <= 0 {
 		c.MaxDurationSeconds = 600
@@ -837,15 +895,7 @@ func (c MontageConfig) Validate() error {
 	if !montageStringSliceContains(c.AllowedPipelines, c.DefaultPipeline) {
 		return fmt.Errorf("montage.default_pipeline must be in montage.allowed_pipelines")
 	}
-	for key, value := range c.Env {
-		if key == "" || strings.ContainsAny(key, "=\x00") {
-			return fmt.Errorf("montage.env contains invalid key %q", key)
-		}
-		if strings.ContainsRune(value, '\x00') {
-			return fmt.Errorf("montage.env value for %q contains a NUL byte", key)
-		}
-	}
-	return nil
+	return model.ValidateRuntimeEnvironment("montage.env", model.NormalizeRuntimeEnvironment(c.Env))
 }
 
 func (c MontageConfig) RedactedEnv() map[string]bool {
@@ -879,9 +929,26 @@ type RouteConfig struct {
 	Timeout  time.Duration `yaml:"timeout"`
 }
 
+// DefaultMaxImageEdge is the long-edge cap applied to images sent to a vision
+// model when a route does not configure model_routes.*.max_image_edge.
+const DefaultMaxImageEdge = 1600
+
+// DefaultImageQuality is the JPEG quality used when a route does not configure
+// model_routes.*.image_quality.
+const DefaultImageQuality = 85
+
 type UnderstandingRouteConfig struct {
 	RouteConfig  `yaml:",inline"`
 	RequireUsage bool `yaml:"require_usage"`
+	// MaxImageEdge caps the long edge of an image before it is base64 encoded
+	// for the vision model. A nil value selects DefaultMaxImageEdge; an explicit
+	// zero disables downscaling.
+	MaxImageEdge *int `yaml:"max_image_edge"`
+	// ImageQuality is the JPEG quality used when the image has to be re-encoded.
+	// A nil value selects DefaultImageQuality. Resolution and quality trade
+	// different costs: the edge drives image tokens and prefill time, quality
+	// drives encoded bytes and small-text legibility.
+	ImageQuality *int `yaml:"image_quality"`
 }
 
 type VideoUnderstandingRouteConfig struct {
@@ -966,6 +1033,8 @@ type UnderstandingRuntimeConfig struct {
 	ProviderKey  string
 	Timeout      time.Duration
 	RequireUsage bool
+	MaxImageEdge int
+	ImageQuality int
 }
 
 type VideoUnderstandingRuntimeConfig struct {
@@ -1019,18 +1088,36 @@ type TokenUsage struct {
 // StorageConfig holds file storage configuration.
 // Supports "oss" (Alibaba Cloud OSS) or "local" (filesystem).
 type StorageConfig struct {
-	Provider                   string `yaml:"provider"` // "oss" or "local", default "local"
-	Endpoint                   string `yaml:"endpoint"` // OSS endpoint, e.g. "oss-cn-hangzhou.aliyuncs.com"
-	AccessKeyID                string `yaml:"access_key_id"`
-	AccessKeySecret            string `yaml:"access_key_secret"`
-	BucketName                 string `yaml:"bucket_name"`
-	Region                     string `yaml:"region"`
-	CustomDomain               string `yaml:"custom_domain"`                 // Optional CDN domain for public file URLs
-	STSRoleArn                 string `yaml:"sts_role_arn"`                  // Optional RAM role used for browser direct uploads
-	STSSessionName             string `yaml:"sts_session_name"`              // Optional direct upload STS session name
-	STSEndpoint                string `yaml:"sts_endpoint"`                  // Optional STS endpoint override
-	DirectUploadExpiresSeconds int    `yaml:"direct_upload_expires_seconds"` // Default 900
-	LocalDataDir               string `yaml:"local_data_dir"`                // Default "./data/files"
+	Provider                   string                   `yaml:"provider"` // "oss" or "local", default "local"
+	Endpoint                   string                   `yaml:"endpoint"` // OSS endpoint, e.g. "oss-cn-hangzhou.aliyuncs.com"
+	AccessKeyID                string                   `yaml:"access_key_id"`
+	AccessKeySecret            string                   `yaml:"access_key_secret"`
+	BucketName                 string                   `yaml:"bucket_name"`
+	Region                     string                   `yaml:"region"`
+	CustomDomain               string                   `yaml:"custom_domain"`                 // Optional CDN domain for public file URLs
+	STSRoleArn                 string                   `yaml:"sts_role_arn"`                  // Optional RAM role used for browser direct uploads
+	STSSessionName             string                   `yaml:"sts_session_name"`              // Optional direct upload STS session name
+	STSEndpoint                string                   `yaml:"sts_endpoint"`                  // Optional STS endpoint override
+	DirectUploadExpiresSeconds int                      `yaml:"direct_upload_expires_seconds"` // Default 900
+	LocalDataDir               string                   `yaml:"local_data_dir"`                // Default "./data/files"
+	MediaLibraryPrefix         string                   `yaml:"media_library_prefix"`
+	AIContentAwareness         AIContentAwarenessConfig `yaml:"ai_content_awareness"`
+}
+
+type AIContentAwarenessConfig struct {
+	Enabled      bool          `yaml:"enabled"`
+	VideoEnabled bool          `yaml:"video_enabled"`
+	QueryTimeout time.Duration `yaml:"query_timeout"`
+	MaxResults   int           `yaml:"max_results"`
+}
+
+func (c *AIContentAwarenessConfig) ApplyDefaults() {
+	if c.QueryTimeout <= 0 {
+		c.QueryTimeout = 10 * time.Second
+	}
+	if c.MaxResults <= 0 || c.MaxResults > 100 {
+		c.MaxResults = 20
+	}
 }
 
 // ImageAPIConfig is an internal runtime adapter for server/app/image. It is built from
@@ -1202,7 +1289,7 @@ func (c ClaudeConfig) Validate() error {
 			errs = append(errs, path+".envs: "+err.Error())
 		}
 	}
-	requiredRuntimeProfiles := []string{"wechat-article", "wechat-picture", model.PlatformSeednote, model.PlatformMontage, model.PlatformVideoEdit, "viral-ip-video-editor", "moments", "ecommerce", model.PlatformWhiteboardAnimation, "profile-analysis", "feedback-analysis"}
+	requiredRuntimeProfiles := []string{"wechat-article", "wechat-picture", model.PlatformSeednote, model.PlatformMontage, model.PlatformVideoEdit, "viral-ip-video-editor", "moments", "ecommerce", model.PlatformWhiteboardAnimation, "profile-analysis", "feedback-analysis", model.AgentIDTopicRadar}
 	for _, profile := range requiredRuntimeProfiles {
 		image, ok := c.RuntimeImages[profile]
 		if !ok {
@@ -1214,7 +1301,7 @@ func (c ClaudeConfig) Validate() error {
 		}
 	}
 	for profile := range c.RuntimeImages {
-		if profile != "wechat-article" && profile != "wechat-picture" && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != model.PlatformVideoEdit && profile != model.PlatformTalkingHeadEditor && profile != "viral-ip-video-editor" && profile != "moments" && profile != "ecommerce" && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != model.PlatformLocalLife && profile != "profile-analysis" && profile != "feedback-analysis" && profile != "content-planning" {
+		if profile != "wechat-article" && profile != "wechat-picture" && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != model.PlatformVideoEdit && profile != model.PlatformTalkingHeadEditor && profile != "viral-ip-video-editor" && profile != "moments" && profile != "ecommerce" && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != model.PlatformLocalLife && profile != "profile-analysis" && profile != "feedback-analysis" && profile != "content-planning" && profile != model.AgentIDTopicRadar {
 			errs = append(errs, fmt.Sprintf("claude.runtime_images contains unsupported profile %q", profile))
 		}
 	}
@@ -1243,7 +1330,6 @@ type KubernetesConfig struct {
 	Namespace       string `yaml:"namespace"`
 	ServiceAccount  string `yaml:"service_account"`
 	ImagePullSecret string `yaml:"image_pull_secret"`
-	ServerCASecret  string `yaml:"server_ca_secret"`
 
 	NASStorageClass         string                              `yaml:"nas_storage_class"`
 	ProjectMemoryClaim      string                              `yaml:"project_memory_claim"`
@@ -1313,7 +1399,7 @@ func (c *DockerConfig) UnmarshalYAML(value *yaml.Node) error {
 func (c *KubernetesConfig) UnmarshalYAML(value *yaml.Node) error {
 	known := map[string]bool{
 		"namespace": true, "service_account": true, "image_pull_secret": true,
-		"server_ca_secret": true, "nas_storage_class": true,
+		"nas_storage_class":    true,
 		"project_memory_claim": true, "task_workspace_size": true,
 		"active_deadline_seconds": true, "heartbeat_timeout_seconds": true,
 		"completion_grace_seconds": true, "ttl_seconds_after_finished": true,
@@ -1526,11 +1612,14 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"model_routes":         true,
 		"billing_runtime":      true,
 		"claude":               true,
+		"wechat-article":       true,
+		"wechat-picture":       true,
+		"seednote":             true,
+		"content-planning":     true,
 		"cors":                 true,
 		"asynq":                true,
 		"email":                true,
 		"invitation":           true,
-		"seednote":             true,
 		"worldtree":            true,
 		"ilink":                true,
 		"trends":               true,
@@ -1568,6 +1657,13 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 						return fmt.Errorf("deprecated config key model_routes.image_generation.%s.size; image size is a business workflow rule, not a model route setting", routeName)
 					}
 				}
+			}
+		}
+	}
+	if trends, ok := top["trends"].(map[string]any); ok {
+		if redfox, ok := trends["redfox"].(map[string]any); ok {
+			if _, ok := redfox["agent_api_key"]; ok {
+				return fmt.Errorf("deprecated config key trends.redfox.agent_api_key; configure the relevant Agent env block")
 			}
 		}
 	}
@@ -1615,6 +1711,12 @@ func (c *Config) applyDefaults() {
 	applyRateLimitTierDefaults(&c.RateLimit.SendCode, 5, 10*time.Minute)
 	applyRateLimitTierDefaults(&c.RateLimit.Agent, 300, time.Minute)
 	applyRateLimitTierDefaults(&c.RateLimit.Admin, 10, time.Minute)
+	if strings.TrimSpace(c.Trends.Provider) == "" {
+		c.Trends.Provider = "default"
+	}
+	if c.Trends.RedFox.Endpoint == "" {
+		c.Trends.RedFox.Endpoint = "https://redfox.hk/story/api/hotKeyword/list"
+	}
 	if strings.TrimSpace(c.ArticleResources.LifecycleMode) == "" {
 		c.ArticleResources.LifecycleMode = "legacy"
 	}
@@ -1715,9 +1817,6 @@ func (c *Config) applyDefaults() {
 	if c.Dsh.IdleTimeoutSec == 0 {
 		c.Dsh.IdleTimeoutSec = 30 * 60
 	}
-	if c.Dsh.ServerURL == "" {
-		c.Dsh.ServerURL = c.AgentServerURL()
-	}
 	if c.Dsh.ServerInstanceID == "" {
 		c.Dsh.ServerInstanceID = strings.TrimSpace(os.Getenv("HOSTNAME"))
 		if c.Dsh.ServerInstanceID == "" {
@@ -1751,6 +1850,9 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.Claude.RuntimeImages["feedback-analysis"]) == "" {
 		c.Claude.RuntimeImages["feedback-analysis"] = "creator-agent-feedback-analysis:latest"
 	}
+	if strings.TrimSpace(c.Claude.RuntimeImages[model.AgentIDTopicRadar]) == "" {
+		c.Claude.RuntimeImages[model.AgentIDTopicRadar] = "creator-agent-topic-radar:latest"
+	}
 	if strings.TrimSpace(c.Claude.RuntimeImages[model.PlatformWhiteboardAnimation]) == "" {
 		c.Claude.RuntimeImages[model.PlatformWhiteboardAnimation] = "creator-agent-whiteboard-animation:latest"
 	}
@@ -1768,6 +1870,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Server.Host == "" {
 		c.Server.Host = "0.0.0.0"
+	}
+	if c.Dsh.ServerURL == "" {
+		c.Dsh.ServerURL = c.AgentServerURL()
+	}
+	if c.Dsh.MCPURL == "" {
+		c.Dsh.MCPURL = strings.TrimRight(c.Dsh.ServerURL, "/") + "/mcp"
 	}
 	if c.Database.MaxOpenConns == 0 {
 		c.Database.MaxOpenConns = 10
@@ -1787,6 +1895,9 @@ func (c *Config) applyDefaults() {
 	if c.Trends.Timeout == 0 {
 		c.Trends.Timeout = 8 * time.Second
 	}
+	if c.Trends.RedFox.Timeout == 0 {
+		c.Trends.RedFox.Timeout = c.Trends.Timeout
+	}
 	if c.JWT.AccessExpiry == "" {
 		c.JWT.AccessExpiry = "24h"
 	}
@@ -1799,6 +1910,10 @@ func (c *Config) applyDefaults() {
 	if c.Storage.LocalDataDir == "" {
 		c.Storage.LocalDataDir = "./data/files"
 	}
+	if prefix, err := NormalizeMediaLibraryPrefix(c.Storage.MediaLibraryPrefix); err == nil {
+		c.Storage.MediaLibraryPrefix = prefix
+	}
+	c.Storage.AIContentAwareness.ApplyDefaults()
 	if c.Claude.ProjectMemory.RootDir == "" {
 		c.Claude.ProjectMemory.RootDir = "/app/data/project-memory"
 	}
@@ -1915,9 +2030,6 @@ func (c *Config) applyDefaults() {
 	if c.Claude.Kubernetes.Namespace == "" {
 		c.Claude.Kubernetes.Namespace = "default"
 	}
-	if c.Claude.Kubernetes.ServerCASecret == "" {
-		c.Claude.Kubernetes.ServerCASecret = "anban-internal-ca"
-	}
 	if c.Claude.Kubernetes.ProjectMemoryClaim == "" {
 		c.Claude.Kubernetes.ProjectMemoryClaim = "creator-project-memory"
 	}
@@ -1997,10 +2109,19 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 		if err != nil {
 			return err
 		}
+		maxImageEdge := DefaultMaxImageEdge
+		if c.ModelRoutes.ImageUnderstanding.MaxImageEdge != nil {
+			maxImageEdge = *c.ModelRoutes.ImageUnderstanding.MaxImageEdge
+		}
+		imageQuality := DefaultImageQuality
+		if c.ModelRoutes.ImageUnderstanding.ImageQuality != nil {
+			imageQuality = *c.ModelRoutes.ImageUnderstanding.ImageQuality
+		}
 		c.ImageUnderstanding = UnderstandingRuntimeConfig{
 			BaseURL: p.BaseURL, Key: p.APIKey, Model: c.ModelRoutes.ImageUnderstanding.Model,
 			Provider: providerKind(c.ModelRoutes.ImageUnderstanding.Provider), ProviderKey: c.ModelRoutes.ImageUnderstanding.Provider,
 			Timeout: c.ModelRoutes.ImageUnderstanding.Timeout, RequireUsage: c.ModelRoutes.ImageUnderstanding.RequireUsage,
+			MaxImageEdge: maxImageEdge, ImageQuality: imageQuality,
 		}
 	}
 	if c.ModelRoutes.VideoUnderstanding.Model != "" || c.ModelRoutes.VideoUnderstanding.Provider != "" {
@@ -2091,7 +2212,7 @@ func validateImageCapabilityBaseURL(raw string) error {
 
 func supportsSemanticTaskAspectRatioProvider(provider string) bool {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "openai", "wangcai_openai", "volcengine", "volcengine_ark", "volc", "seedream":
+	case "openai", "wangcai_openai", "volcengine", "volcengine_ark", "volc", "seedream", "tokenplayer":
 		return true
 	default:
 		return false
@@ -2355,6 +2476,39 @@ func (c *Config) Validate() error {
 	if c.Trends.Timeout <= 0 {
 		errs = append(errs, "trends.timeout must be positive")
 	}
+	trendsProvider := strings.ToLower(strings.TrimSpace(c.Trends.Provider))
+	if trendsProvider == "" {
+		trendsProvider = "default"
+	}
+	if trendsProvider != "default" && trendsProvider != "redfox" {
+		errs = append(errs, fmt.Sprintf("trends.provider %q is unsupported", c.Trends.Provider))
+	}
+	if trendsProvider == "redfox" {
+		endpoint := strings.TrimSpace(c.Trends.RedFox.Endpoint)
+		parsed, err := url.Parse(endpoint)
+		if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			errs = append(errs, "trends.redfox.endpoint must be an absolute HTTPS URL without credentials, query, or fragment")
+		}
+		apiKey := strings.TrimSpace(c.Trends.RedFox.APIKey)
+		if apiKey == "" {
+			errs = append(errs, "trends.redfox.api_key is required when trends.provider is redfox")
+		} else if strings.ContainsAny(apiKey, "\r\n") || len(apiKey) > 4096 {
+			errs = append(errs, "trends.redfox.api_key contains invalid characters or is too long")
+		}
+		if c.Trends.RedFox.Timeout <= 0 {
+			errs = append(errs, "trends.redfox.timeout must be positive when trends.provider is redfox")
+		}
+	}
+	for name, env := range map[string]AgentRuntimeEnvConfig{
+		"wechat-article":   c.WechatArticle,
+		"wechat-picture":   c.WechatPicture,
+		"seednote":         c.Seednote,
+		"content-planning": c.ContentPlanning,
+	} {
+		if err := env.Validate(name); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
 	// Capability-level configuration is the current contract. Keep validation
 	// independent per capability so a disabled Fetch or Images route never
 	// requires credentials for another route.
@@ -2474,6 +2628,15 @@ func (c *Config) Validate() error {
 			errs = append(errs, err.Error())
 		}
 	}
+	if _, err := NormalizeMediaLibraryPrefix(c.Storage.MediaLibraryPrefix); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if c.Storage.AIContentAwareness.Enabled && c.Storage.Provider != "oss" {
+		errs = append(errs, "storage.ai_content_awareness requires storage.provider to be \"oss\"")
+	}
+	if c.Storage.AIContentAwareness.VideoEnabled && !c.Storage.AIContentAwareness.Enabled {
+		errs = append(errs, "storage.ai_content_awareness.video_enabled requires storage.ai_content_awareness.enabled")
+	}
 
 	pm := c.Claude.ProjectMemory
 	if !filepath.IsAbs(pm.RootDir) {
@@ -2519,9 +2682,27 @@ func (c *Config) Validate() error {
 		errs = append(errs, err.Error())
 	}
 
+	if c.ModelRoutes.ImageUnderstanding.Model != "" || c.ModelRoutes.ImageUnderstanding.Provider != "" {
+		if c.ModelRoutes.ImageUnderstanding.Timeout <= 0 {
+			errs = append(errs, "model_routes.image_understanding.timeout must be positive")
+		}
+		if edge := c.ModelRoutes.ImageUnderstanding.MaxImageEdge; edge != nil {
+			if *edge < 0 || *edge > 8192 || (*edge > 0 && *edge < 256) {
+				errs = append(errs, "model_routes.image_understanding.max_image_edge must be 0 or between 256 and 8192")
+			}
+		}
+		if quality := c.ModelRoutes.ImageUnderstanding.ImageQuality; quality != nil {
+			if *quality < 1 || *quality > 100 {
+				errs = append(errs, "model_routes.image_understanding.image_quality must be between 1 and 100")
+			}
+		}
+	}
 	if c.ModelRoutes.VideoUnderstanding.Model != "" || c.ModelRoutes.VideoUnderstanding.Provider != "" {
 		if !c.ModelRoutes.VideoUnderstanding.RequireNativeVideo {
 			errs = append(errs, "model_routes.video_understanding.require_native_video must be true")
+		}
+		if c.ModelRoutes.VideoUnderstanding.Timeout <= 0 {
+			errs = append(errs, "model_routes.video_understanding.timeout must be positive")
 		}
 	}
 
@@ -2566,11 +2747,12 @@ func (c *Config) Validate() error {
 			errs = append(errs, name+".timeout must be positive")
 			continue
 		}
-		minimumOperationTimeout := route.Timeout + c.ModelRoutes.ImageUnderstanding.Timeout
-		if c.MCP.ToolTimeouts.GenerateImage <= minimumOperationTimeout {
+		// generate_image owns only the provider generation attempt; analyze_image
+		// is a separate MCP tool with its own image-understanding route budget.
+		if c.MCP.ToolTimeouts.GenerateImage <= route.Timeout {
 			errs = append(errs, fmt.Sprintf(
-				"mcp.tool_timeouts.generate_image (%s) must be greater than %s.timeout (%s) plus model_routes.image_understanding.timeout (%s)",
-				c.MCP.ToolTimeouts.GenerateImage, name, route.Timeout, c.ModelRoutes.ImageUnderstanding.Timeout))
+				"mcp.tool_timeouts.generate_image (%s) must be greater than %s.timeout (%s); raise mcp.tool_timeouts.generate_image or lower the generation route timeout",
+				c.MCP.ToolTimeouts.GenerateImage, name, route.Timeout))
 		}
 	}
 
@@ -2626,9 +2808,6 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Claude.Executor == "kubernetes" {
-		if strings.TrimSpace(c.Server.TLSCertFile) == "" || strings.TrimSpace(c.Server.TLSKeyFile) == "" {
-			errs = append(errs, "server.tls_cert_file and server.tls_key_file are required when claude.executor is \"kubernetes\"")
-		}
 		if c.Storage.Provider != "oss" {
 			errs = append(errs, "claude.kubernetes requires storage.provider to be \"oss\"")
 		}
@@ -2637,17 +2816,12 @@ func (c *Config) Validate() error {
 		}
 		if strings.TrimSpace(c.Claude.AgentServerURL) == "" {
 			errs = append(errs, "claude.agent_server_url is required when claude.executor is \"kubernetes\"")
-		} else if !strings.HasPrefix(strings.TrimSpace(c.Claude.AgentServerURL), "https://") {
-			errs = append(errs, "claude.agent_server_url must use https:// when claude.executor is \"kubernetes\"")
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.Namespace) == "" {
 			errs = append(errs, "claude.kubernetes.namespace is required")
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.ServiceAccount) == "" {
 			errs = append(errs, "claude.kubernetes.service_account is required")
-		}
-		if strings.TrimSpace(c.Claude.Kubernetes.ServerCASecret) == "" {
-			errs = append(errs, "claude.kubernetes.server_ca_secret is required")
 		}
 		if strings.TrimSpace(c.Claude.Kubernetes.NASStorageClass) == "" {
 			errs = append(errs, "claude.kubernetes.nas_storage_class is required")
@@ -2681,10 +2855,6 @@ func (c *Config) Validate() error {
 			errs = append(errs, err.Error())
 		}
 	}
-	if (strings.TrimSpace(c.Server.TLSCertFile) == "") != (strings.TrimSpace(c.Server.TLSKeyFile) == "") {
-		errs = append(errs, "server.tls_cert_file and server.tls_key_file must be configured together")
-	}
-
 	if c.Claude.AgentServerURL != "" {
 		u := strings.TrimSpace(c.Claude.AgentServerURL)
 		if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {

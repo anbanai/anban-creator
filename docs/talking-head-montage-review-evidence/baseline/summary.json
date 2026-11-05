@@ -1,0 +1,10 @@
+{
+  "id": "baseline",
+  "source_path": "/Users/medivh/Movies/final_副本.mp4",
+  "sha256": "92cad91253fb28cd3416fb4d15b803e722ccc159793d63e755ec2d4420117355",
+  "duration_seconds": 142.4,
+  "frame_sampling_interval_seconds": 2,
+  "sampled_frame_count": 71,
+  "loudness_summary": "Summary:\n\n  Integrated loudness:\n    I:         -14.4 LUFS\n    Threshold: -24.8 LUFS\n\n  Loudness range:\n    LRA:         4.5 LU\n    Threshold: -34.9 LUFS\n    LRA low:   -17.0 LUFS\n    LRA high:  -12.6 LUFS\n\n  True peak:\n    Peak:       -1.5 dBFS\n[out#0/null @ 0x762502c300] video:0KiB audio:26700KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown\nsize=N/A time=00:02:22.40 bitrate=N/A speed= 193x elapsed=0:00:00.73    \n",
+  "review_limit": "contact sheets and ASR; not real-time listening or continuous-frame review"
+}

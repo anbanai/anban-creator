@@ -44,7 +44,8 @@ func TestArticleAssetRoutesAllowSeparateStudioOrigin(t *testing.T) {
 	for _, tc := range []struct {
 		method string
 		status int
-	}{{"GET", 200}, {"DELETE", 401}, {"OPTIONS", 204}} {
+		origin string
+	}{{"GET", 200, "*"}, {"DELETE", 401, studioOrigin}, {"OPTIONS", 204, studioOrigin}} {
 		t.Run(tc.method, func(t *testing.T) {
 			request := httptest.NewRequest(tc.method, "/api/v1/article-assets/"+asset.ID, nil)
 			request.Header.Set("Origin", studioOrigin)
@@ -57,7 +58,7 @@ func TestArticleAssetRoutesAllowSeparateStudioOrigin(t *testing.T) {
 				t.Fatal(err)
 			}
 			response.Body.Close()
-			if response.StatusCode != tc.status || response.Header.Get("Access-Control-Allow-Origin") != studioOrigin {
+			if response.StatusCode != tc.status || response.Header.Get("Access-Control-Allow-Origin") != tc.origin {
 				t.Fatalf("%s: status %d, headers %v", tc.method, response.StatusCode, response.Header)
 			}
 			if tc.method == "GET" && response.Header.Get("Cross-Origin-Resource-Policy") == "same-origin" {

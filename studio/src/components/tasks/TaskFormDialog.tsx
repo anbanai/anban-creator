@@ -110,6 +110,8 @@ export interface TaskFormDialogProps {
   sourceTask?: Task
   initialProjectId?: string
   initialType?: TaskType
+  initialAssetId?: string
+  initialPrompt?: string
   onOpenChange: (open: boolean) => void
   onCreated: (task: Task, quantity: number) => void
   shouldHandleResult?: () => boolean
@@ -149,6 +151,8 @@ export function TaskFormDialog({
   sourceTask,
   initialProjectId,
   initialType,
+  initialAssetId,
+  initialPrompt,
   onOpenChange,
   onCreated,
   shouldHandleResult,
@@ -220,6 +224,8 @@ export function TaskFormDialog({
   const watchedImageRatio = useWatch({ control: form.control, name: 'image_ratio' }) ?? ''
   const quantity = useWatch({ control: form.control, name: 'quantity' }) ?? 1
   const taskQuantityMax = maxTaskQuantity(watchedType)
+  const isTopicCreation = mode === 'create' && Boolean(initialAssetId) && BATCH_TASK_TYPES.has(watchedType)
+  const SettingsContainer = isTopicCreation ? 'details' : 'div'
 
   useEffect(() => {
     const transition = billingCatalog?.task_time_pricing?.next_transition_at
@@ -249,7 +255,7 @@ export function TaskFormDialog({
   const isTalkingHeadEditorTask = watchedType === 'talking-head-editor'
   const isLocalLifeTask = watchedType === 'local-life'
   const isViralAnalysisTask = watchedType === 'viral-analysis'
-  const usesImageSettings = !isViralAnalysisTask && watchedType !== 'hypit' && !isLocalLifeTask && !isVideoEditTask && !isTalkingHeadEditorTask
+  const usesImageSettings = !isViralAnalysisTask && watchedType !== 'montage' && watchedType !== 'hypit' && !isLocalLifeTask && !isVideoEditTask && !isTalkingHeadEditorTask
   const { items: imageCapabilityOptions, defaultCapability, isLoading: imageCapabilitiesLoading, isError: imageCapabilitiesError } = useImageCapabilities(usesImageSettings)
   const hasIncompatibleSeednoteAttachments = watchedType === 'seednote'
     && attachmentController.attachments.some((attachment) => attachment.type !== 'image')
@@ -312,7 +318,7 @@ export function TaskFormDialog({
 
     const initializationKey = mode === 'clone'
       ? `clone:${sourceTask?.id ?? ''}:${sourceTask?.project_id ?? ''}:${sourceTask?.type ?? ''}:${sourceTask?.execution_profile ?? ''}`
-      : `create:${initialProjectId ?? ''}:${initialType ?? ''}`
+      : `create:${initialProjectId ?? ''}:${initialType ?? ''}:${initialAssetId ?? ''}`
     if (initializedKeyRef.current === initializationKey) return
 
     const project = initialProjectId ? projectMap.get(initialProjectId) : undefined
@@ -339,7 +345,7 @@ export function TaskFormDialog({
         })()
       : createInitialDefaults(project ?? (initialType === 'viral-analysis' ? firstProject : undefined), initialType)
     initializedKeyRef.current = initializationKey
-    form.reset(defaults)
+    form.reset({ ...defaults, ...(mode === 'create' ? { asset_id: initialAssetId, prompt: initialPrompt ?? defaults.prompt } : {}) })
     resetAttachments(defaults.input_attachments)
     setMontageUploading(false)
     setMontageReady(false)
@@ -347,7 +353,7 @@ export function TaskFormDialog({
     explicitTaskTypeRef.current = false
     const focusTimeout = setTimeout(() => form.setFocus('prompt'), 100)
     return () => clearTimeout(focusTimeout)
-  }, [form, initialProjectId, initialType, mode, open, projectMap, projectsLoading, resetAttachments, sourceTask])
+  }, [form, initialProjectId, initialType, initialAssetId, initialPrompt, mode, open, projectMap, projectsLoading, resetAttachments, sourceTask])
 
   const defaultExecutionProfile = cheapestAvailableExecutionProfile(
     executionProfilesQuery.data,
@@ -370,6 +376,9 @@ export function TaskFormDialog({
     },
     onSuccess: (task, variables) => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['content-assets'] })
+      queryClient.invalidateQueries({ queryKey: ['project-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
       if (shouldHandleResult && !shouldHandleResult()) return
       toast.success(mode === 'clone'
         ? variables.quantity > 1 ? `已克隆 ${variables.quantity} 个作品` : '作品克隆成功'
@@ -517,7 +526,7 @@ export function TaskFormDialog({
                         : imageCapabilityUnavailable
                           ? { message: '当前图像能力不可用，请重新选择。', href: '' }
                           : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
-                            ? { message: '电商出图需要先上传产品图。', href: '' }
+                            ? { message: '电商设计需要先上传产品图。', href: '' }
                             : null
 
   const projectControl = (
@@ -548,9 +557,7 @@ export function TaskFormDialog({
         onChange: (value) => setFormValue('execution_profile', value),
         loading: executionProfilesQuery.isLoading,
         disabled: executionProfilesQuery.isError,
-        catalog: billingCatalog,
         taskType: watchedType,
-        priceUnit: 'task',
       }}
       image={usesImageSettings ? {
         ratios: businessImageRatios,
@@ -681,7 +688,9 @@ export function TaskFormDialog({
     />
   )
 
-  const submitLabel = mode === 'clone' ? (watchedType === 'hypit' ? '再次改编' : '克隆') : quantity > 1 ? `创建 ${quantity} 个作品` : '创建'
+  const submitLabel = mode === 'clone'
+    ? (watchedType === 'hypit' ? '再次改编' : '克隆')
+    : quantity > 1 ? `创建 ${quantity} 个作品` : isTopicCreation ? '开始创作' : '创建'
 
   const Title = presentation === 'page' ? 'h1' : DialogTitle
   const Description = presentation === 'page' ? 'p' : DialogDescription
@@ -697,15 +706,15 @@ export function TaskFormDialog({
                   ? '上传 SRT 字幕，Agent 将按字幕生成白板动画。'
                 : isMontageTask || isVideoEditTask || isTalkingHeadEditorTask
                   ? '配置视频目标、来源素材和成片方式。'
-                  : '配置内容目标、图片选项和执行方式。'}
+                  : isTopicCreation ? '选题和人设已带入，确认后即可开始创作。' : '配置内容目标、图片选项和执行方式。'}
             </Description>
           </DialogHeader>
           <Form {...form}>
             <form id="task-create-form" onSubmit={handleSubmit} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
               {projectContext}
-              {agentControl}
-              {canConfigureTask ? <div className="flex justify-end">{taskParametersControl}</div> : null}
-              {selectedProject && canConfigureTask ? (
+              {!isTopicCreation ? agentControl : null}
+              {canConfigureTask && !isTopicCreation ? <div className="flex justify-end">{taskParametersControl}</div> : null}
+              {selectedProject && canConfigureTask && !isTopicCreation ? (
                 <details className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs">
                   <summary className="cursor-pointer text-muted-foreground">
                     <span className="ml-1 inline-flex flex-wrap gap-x-3 gap-y-1" aria-label="本次运行">
@@ -735,30 +744,42 @@ export function TaskFormDialog({
                   </p>
                 </div>
               ) : <>
-              <TaskTimePricingNotice
+              {!isTopicCreation ? <TaskTimePricingNotice
                 catalog={billingCatalog}
                 taskType={watchedType}
                 executionProfile={watchedExecutionProfile || undefined}
-              />
+              /> : null}
 
               {watchedType !== 'hypit' && <div className="pt-1">
-                <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">目标/提示词</p>
-                <p className="mb-2 text-xs text-muted-foreground">写清目标、素材用法和不能出现的表达；未填写的部分按人设默认值执行。</p>
-                {!isViralAnalysisTask ? (
+                <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">{isTopicCreation ? '本次选题' : '目标/提示词'}</p>
+                <p className="mb-2 text-xs text-muted-foreground">{isTopicCreation ? '选题内容已带入，确认后即可开始。' : '写清目标、素材用法和不能出现的表达；未填写的部分按人设默认值执行。'}</p>
+                {isTopicCreation ? <p data-testid="topic-prompt-summary" className="mb-3 whitespace-pre-wrap rounded-md bg-muted/40 px-3 py-2 text-sm">{watchedPrompt}</p> : null}
+                {!isViralAnalysisTask && !isTopicCreation ? (
                   <SeednoteTemplateGallery
                     platform={selectedProject?.platform || undefined}
                     onApply={(prompt) => setFormValue('prompt', prompt)}
                     className="mb-4"
                   />
                 ) : null}
-                {!isMontageTask && !isLocalLifeTask && !isVideoEditTask && !isTalkingHeadEditorTask ? promptComposer : null}
+                {!isMontageTask && !isLocalLifeTask && !isVideoEditTask && !isTalkingHeadEditorTask
+                  ? isTopicCreation
+                    ? <details className="rounded-md border border-border px-3 py-2">
+                        <summary className="cursor-pointer text-sm font-medium">补充创作要求（可选）</summary>
+                        <div className="mt-3">{promptComposer}</div>
+                      </details>
+                    : promptComposer
+                  : null}
                 {hasIncompatibleSeednoteAttachments ? (
                   <p role="alert" className="mt-2 text-sm font-medium text-red-500">{SEEDNOTE_ATTACHMENT_BLOCKER}</p>
                 ) : null}
               </div>}
 
-              <div className="space-y-4 pt-1">
-                {!isViralAnalysisTask ? <p className="text-xs font-medium uppercase text-muted-foreground">{isMontageTask || isVideoEditTask ? '视频设置' : '图片/高级'}</p> : null}
+              <SettingsContainer key={`${initialAssetId ?? ''}:${watchedType}`} className={isTopicCreation ? 'rounded-lg border border-border px-3 py-2' : ''}>
+                {isTopicCreation ? <summary className="cursor-pointer text-sm font-medium">更多创作设置</summary> : null}
+              <div className={isTopicCreation ? 'space-y-4 border-t border-border pt-3 mt-3' : 'space-y-4 pt-1'}>
+                {isTopicCreation ? <div className="flex justify-end">{taskParametersControl}</div> : null}
+                {isTopicCreation ? agentControl : null}
+                {!isViralAnalysisTask && !isTopicCreation ? <p className="text-xs font-medium uppercase text-muted-foreground">{isMontageTask || isVideoEditTask ? '视频设置' : '图片/高级'}</p> : null}
 
                 {watchedType === 'hypit' ? <HypitCreationPanel form={form} onReadyChange={setMontageReady} onUploadingChange={setMontageUploading} briefField={promptComposer} remix={mode === 'clone' && sourceTask?.status === 'completed'} sourceTaskId={mode === 'clone' ? sourceTask?.id : undefined} /> : isMontageTask ? (
                   <MontageCreationPanel
@@ -1025,9 +1046,45 @@ export function TaskFormDialog({
                 />
 
               </div>
+              </SettingsContainer>
               </>}
 
-              {canConfigureTask ? <div className="pt-1">
+              {canConfigureTask && isTopicCreation ? <div className="space-y-2 pt-1">
+                <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+                  {costPreview.priceAvailable ? (
+                    <p className="font-medium">预计基础创作费：{costPreview.totalCost.toLocaleString()} 积分</p>
+                  ) : <p className="font-medium text-red-500">固定创作价暂不可用</p>}
+                  {costPreview.priceAvailable ? (
+                    <p className={`mt-1 text-xs ${costPreview.remaining < 0 ? 'font-medium text-red-500' : 'text-muted-foreground'}`}>
+                      创作后余额：{costPreview.remaining.toLocaleString()} 积分
+                    </p>
+                  ) : null}
+                  <p className="mt-1 text-xs text-muted-foreground">图片、视频等增值操作按实际使用另行计费。</p>
+                  <details className="mt-2 border-t border-border pt-2 text-xs text-muted-foreground">
+                    <summary className="cursor-pointer">费用明细</summary>
+                    <div className="mt-2 space-y-1">
+                      {costPreview.priceAvailable ? (
+                        <p>{billingCatalog?.pricing_tier ? `${billingCatalog.pricing_tier === 'enterprise' ? '企业版' : billingCatalog.pricing_tier === 'pro' ? '专业版' : '免费版'}创作价` : '固定创作价'}：{costPreview.baseCost.toLocaleString()} × {costPreview.billableQuantity} = {costPreview.totalCost.toLocaleString()} 积分</p>
+                      ) : null}
+                      {costPreview.discountPerTask > 0 ? (
+                        <p>标准价 <span className="line-through">{costPreview.listBaseCost.toLocaleString()}</span> · 每个作品优惠 {costPreview.discountPerTask.toLocaleString()} 积分</p>
+                      ) : null}
+                      <TaskTimePricingNotice
+                        catalog={billingCatalog}
+                        taskType={watchedType}
+                        executionProfile={watchedExecutionProfile || undefined}
+                      />
+                      <p>云端 Agent 运行成本由平台承担，不额外预留或补扣。</p>
+                    </div>
+                  </details>
+                </div>
+                {creationBlocker && !hasIncompatibleSeednoteAttachments ? (
+                  <p className="text-sm font-medium text-red-500">{creationBlocker.href ? <Link to={creationBlocker.href}>{creationBlocker.message}</Link> : creationBlocker.message}</p>
+                ) : null}
+                {validationMessage ? <p role="alert" className="text-sm font-medium text-red-500">{validationMessage}</p> : null}
+              </div> : null}
+
+              {canConfigureTask && !isTopicCreation ? <div className="pt-1">
                 <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">固定价格</p>
                 <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
                   {costPreview.priceAvailable ? (

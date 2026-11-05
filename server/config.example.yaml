@@ -1,9 +1,11 @@
+# Copy this file to server/config.yaml (gitignored) for local and Compose runs,
+# then replace the ${VAR} placeholders you need with literal values. Kubernetes
+# keeps the placeholders: server/Deployment.yaml injects them from Secrets.
 server:
+  # Server 仅监听 HTTP；公网域名的 TLS 证书由 Ingress 管理。
   port: 8080
   public_base_url: "${ANBAN_PUBLIC_BASE_URL:-https://api-creator.anbanai.com}"
   studio_base_url: "${ANBAN_STUDIO_BASE_URL:-https://creator.anbanai.com}"
-  tls_cert_file: "${ANBAN_SERVER_TLS_CERT_FILE}"
-  tls_key_file: "${ANBAN_SERVER_TLS_KEY_FILE}"
   host: "0.0.0.0"
 
 # Per-bucket, per-IP, per-request-path limits. Windows use Go duration syntax.
@@ -63,8 +65,38 @@ redis:
   db: ${ANBAN_REDIS_DB:-0}
 
 trends:
+  # Which provider backs the existing list_trends MCP tool.
+  # default keeps the current public trend sources; redfox uses the Server
+  # RedFox credential below and requires api_key to be set.
+  provider: "${ANBAN_TRENDS_PROVIDER:-default}"
   ttl: 10m
   timeout: 8s
+  redfox:
+    # RedFox API endpoint used by the Server-side trend provider. This is
+    # used only for list_trends when trends.provider=redfox.
+    endpoint: "${ANBAN_REDFOX_ENDPOINT:-https://redfox.hk/story/api/hotKeyword/list}"
+    # Server credential for list_trends. Required only when provider=redfox.
+    # Keep it separate from agent_api_key; it is never injected into Agents.
+    api_key: "${ANBAN_REDFOX_API_KEY:-}"
+    timeout: 15s
+
+# Agent 运行时环境。每个业务 Agent 单独配置 env；只有对应 Agent 执行时才会注入。
+# 公众号文章、公众号图文、Seednote 和内容研究可按需填写 RedFox key。
+# Server 是唯一的下发方：键名必须匹配 [A-Z][A-Z0-9_]*，且不得使用运行时保留名
+# （ANBAN_/ANTHROPIC_/CLAUDE_/NODE_/LD_/PYTHON/GIT_/SSH_ 前缀，以及 PATH/HOME/TMPDIR 等
+# 进程级变量）。运行时不按任务类型或 Agent Pack 过滤这些值，只校验上述传输不变量。
+wechat-article:
+  env:
+    REDFOX_API_KEY: "${ANBAN_REDFOX_AGENT_WECHAT_ARTICLE_API_KEY:-}"
+wechat-picture:
+  env:
+    REDFOX_API_KEY: "${ANBAN_REDFOX_AGENT_WECHAT_PICTURE_API_KEY:-}"
+seednote:
+  env:
+    REDFOX_API_KEY: "${ANBAN_REDFOX_AGENT_SEEDNOTE_API_KEY:-}"
+content-planning:
+  env:
+    REDFOX_API_KEY: "${ANBAN_REDFOX_AGENT_CONTENT_PLANNING_API_KEY:-}"
 
 jwt:
   secret_key: "${ANBAN_JWT_SECRET_KEY}"
@@ -75,10 +107,12 @@ wechat:
   app_id: "${ANBAN_WECHAT_APP_ID}"
   app_secret: "${ANBAN_WECHAT_APP_SECRET}"
 
-# Optional third-party platform configuration for project-scoped QR authorization.
-# Refresh-token encryption key accepts 32 bytes or base64-encoded 32 bytes.
-# Set these values through the optional anban-wechat-open-platform Kubernetes
-# Secret only when project-scoped WeChat QR authorization is configured.
+# Optional WeChat Open Platform third-party app configuration. All five values
+# are required together; without them the project settings page hides QR binding.
+# In Kubernetes, populate the anban-wechat-open-platform Secret described in
+# docs/wechat-open-platform-setup.md. For local/Compose, fill these values in
+# server/config.yaml. Generate the encryption key with
+# `openssl rand -base64 32`; it accepts 32 raw bytes or base64-encoded 32 bytes.
 wechat_open_platform:
   component_app_id: "${ANBAN_WECHAT_COMPONENT_APP_ID}"
   component_app_secret: "${ANBAN_WECHAT_COMPONENT_APP_SECRET}"
@@ -87,21 +121,49 @@ wechat_open_platform:
   token_encryption_key: "${ANBAN_WECHAT_TOKEN_ENCRYPTION_KEY}"
 
 storage:
+  # Original media objects and OSS AI content-awareness indexes use this same
+  # Bucket. A separate Bucket is optional and requires separate Server code.
+  # AI content awareness only works with OSS; local storage cannot be used for
+  # semantic video search.
   provider: "oss"
-  endpoint: "${ANBAN_OSS_ENDPOINT}"
+  # Use the endpoint of the same region as the Bucket, for example:
+  # https://oss-cn-hangzhou.aliyuncs.com
+  endpoint: "${ANBAN_OSS_ENDPOINT:-https://oss-cn-hangzhou.aliyuncs.com}"
+  # Use a dedicated RAM user/role for the Server. Never commit real secrets.
   access_key_id: "${ANBAN_OSS_ACCESS_KEY_ID}"
   access_key_secret: "${ANBAN_OSS_ACCESS_KEY_SECRET}"
-  bucket_name: "anbancreator"
-  region: "cn-chengdu"
+  bucket_name: "${ANBAN_OSS_BUCKET_NAME:-anbancreator-prod}"
+  region: "${ANBAN_OSS_REGION:-cn-hangzhou}"
   # Optional public CDN/OSS custom domain only, e.g. "cdn.example.com".
   # Leave empty to return default https://{bucket}.{endpoint}/... OSS URLs.
   # Do not point this at the Studio/API domain or the /api/v1/files proxy.
-  custom_domain: "${ANBAN_OSS_CDN_DOMAIN}"
-  sts_role_arn: "${ANBAN_OSS_STS_ROLE_ARN}"
+  custom_domain: "${ANBAN_OSS_CDN_DOMAIN:-}"
+  # Required only when browsers upload directly with short-lived STS tokens.
+  sts_role_arn: "${ANBAN_OSS_STS_ROLE_ARN:-}"
   sts_session_name: "anban-direct-upload"
-  sts_endpoint: "${ANBAN_OSS_STS_ENDPOINT}"
+  sts_endpoint: "${ANBAN_OSS_STS_ENDPOINT:-}"
   direct_upload_expires_seconds: 900
+  # Ignored while provider=oss; retained for local development fallback.
   local_data_dir: "./data/files"
+  # Copy this exact value into the OSS content-awareness file-prefix filter.
+  # New objects: <media_library_prefix>users/<user_id>/<upload_id>/<filename>.
+  # Changing it does not move existing objects or configure OSS automatically.
+  media_library_prefix: "assets/media-library/"
+
+  # Before enabling this block, configure the same OSS Bucket:
+  # 1. Data Index -> Vector Search
+  # 2. Video content awareness
+  # 3. RAM authorization including AliyunMetaQueryDefaultRole
+  # Set the OSS file-prefix filter to storage.media_library_prefix above.
+  # YAML configures Server paths/queries only, not OSS scanning or billing.
+  # The Server's OSS identity also needs access to the Bucket and MetaQuery.
+  ai_content_awareness:
+    # Keep disabled until the OSS filter rule is restricted to media-library
+    # videos; enabling this scans matching existing and newly uploaded videos.
+    enabled: ${ANBAN_OSS_AI_CONTENT_AWARENESS_ENABLED:-false}
+    video_enabled: ${ANBAN_OSS_VIDEO_CONTENT_AWARENESS_ENABLED:-false}
+    query_timeout: ${ANBAN_OSS_META_QUERY_TIMEOUT:-10s}
+    max_results: ${ANBAN_OSS_META_QUERY_MAX_RESULTS:-20}
 
 mcp:
   api_key: "${ANBAN_MCP_API_KEY}"
@@ -160,7 +222,8 @@ dsh:
   kubernetes_image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET:-acr-secret}"
   kubernetes_project_memory_claim: "${ANBAN_AGENT_PROJECT_MEMORY_CLAIM:-creator-project-memory}"
   kubernetes_project_memory_mount: "/workspace/project"
-  server_url: "${ANBAN_DSH_SERVER_URL:-http://server:8080}"
+  # 留空时继承 claude.agent_server_url，集群内部使用 HTTP 8080。
+  server_url: "${ANBAN_DSH_SERVER_URL}"
   server_instance_id: "${HOSTNAME:-local}"
   # Kubernetes-native quantities. These are applied directly to each DSH Pod.
   resources:
@@ -186,7 +249,8 @@ dsh:
   bridge_args: ["dist/dsh-bridge.js"]
   bridge_dir: "${ANBAN_DSH_BRIDGE_DIR:-./runtime-dsh}"
   dsh_patch: "${ANBAN_DSH_BRIDGE_PATCH:-./harness/dsh/project-creator.patch.yml}"
-  mcp_url: "${ANBAN_DSH_BRIDGE_MCP_URL:-https://api-creator.anbanai.com/mcp}"
+  # 留空时使用 server_url + /mcp，无需绕行公网 Ingress。
+  mcp_url: "${ANBAN_DSH_BRIDGE_MCP_URL}"
   route: "effective"
   routes:
     # DeepSeek's official adapter. This route uses the DSH-native
@@ -208,10 +272,22 @@ dsh:
       model: "deepseek-flash"
 
 model_providers:
+  # These providers are used by model_routes.server_internal and the
+  # understanding routes. They do not configure image generation.
   moonshot:
     protocol: "openai_compatible"
     base_url: "https://api.moonshot.cn/v1"
     api_key: "${MOONSHOT_API_KEY}"
+
+  # Optional TokenPlayer chat/LLM route. This block is not required when
+  # TokenPlayer is used only for image generation; configure the image route
+  # under model_routes.image_generation below instead. Chat is served from the
+  # /v1 prefix, while the Ark-compatible Seedream image route sits under
+  # /doubao/api/v3 (see the image capability below for the exact base URL).
+  # tokenplayer:
+  #   protocol: "openai_compatible"
+  #   base_url: "https://tokenplayer.cn/v1"
+  #   api_key: "${TOKENPLAYER_API_KEY}"
 
   volcengine_ark:
     protocol: "openai_compatible"
@@ -236,6 +312,17 @@ model_routes:
     model: "kimi-k2.7-code-highspeed"
     timeout: 90s
     require_usage: true
+    # Cap on the long edge of an image before the Server base64-encodes it for
+    # the vision model. The encoded payload and the image token cost both scale
+    # with resolution, so this is the main lever on analyze_image latency and
+    # traffic. Omit to use the 1600 default; set 0 to disable downscaling
+    # entirely; raise to 2048 when verbatim text review needs more detail.
+    max_image_edge: 1600
+    # JPEG quality used when the image has to be re-encoded (1-100). Resolution
+    # and quality trade different costs: max_image_edge drives image tokens and
+    # prefill time, this drives encoded bytes and small-text legibility. Raise it
+    # when verbatim text review regresses; omit to use the 85 default.
+    image_quality: 85
 
   video_understanding:
     provider: "moonshot"
@@ -258,25 +345,28 @@ model_routes:
         description: "适合日常内容配图和常规视觉创作"
         billing_sku: "image.standard"
         sort_order: 10
-        provider: "volcengine_ark"
-        model: "${ANBAN_IMAGE_MODEL_STANDARD:-doubao-seedream-5-0-pro-260628}"
-        base_url: "https://ark.cn-beijing.volces.com/api/v3"
-        api_key: "${VOLCENGINE_ARK_API_KEY}"
+        # Standard now uses the quality/alpha-capable gateway too. Existing
+        # deployments must update their mounted config, not only this example.
+        provider: "wangcai_openai"
+        model: "${ANBAN_IMAGE_MODEL_STANDARD:-gpt-image-2-t}"
+        base_url: "${WANGCAI_OPENAI_BASE_URL}"
+        api_key: "${WANGCAI_OPENAI_API_KEY}"
+        response_format: "${ANBAN_IMAGE_RESPONSE_FORMAT:-b64_json}"
         timeout: 5m
         enabled: true
         quality_rank: 100
         generation_features:
-          quality_levels: ["auto"]
-          size_presets: ["1:1:2K", "3:4:2K", "4:3:2K", "16:9:2K"]
+          quality_levels: ["auto", "high", "medium", "low"]
+          size_presets: ["1:1:2K", "3:4:2K", "4:3:2K", "16:9:2K", "9:16:2K"]
           default_size: "1:1:2K"
           max_batch: 1
           max_reference_images: 10
           supports_reference: true
           supports_mask: false
-          output_formats: ["png", "jpeg"]
-          has_background: false
+          output_formats: ["png", "jpeg", "webp"]
+          has_background: true
           has_compression: false
-          watermark: true
+          watermark: false
       professional:
         min_tier: "enterprise"
         alias: "专业增强"
@@ -307,8 +397,8 @@ model_routes:
         # actually returns URL images and the adapter has been verified.
         response_format: "${ANBAN_IMAGE_RESPONSE_FORMAT:-b64_json}"
         generation_features:
-          quality_levels: ["auto", "low", "medium", "high"]
-          size_presets: ["1:1:2K", "3:2:2K", "2:3:2K"]
+          quality_levels: ["auto", "high", "medium", "low"]
+          size_presets: ["1:1:2K", "3:4:2K", "4:3:2K", "16:9:2K", "9:16:2K"]
           default_size: "1:1:2K"
           max_batch: 1
           max_reference_images: 16
@@ -355,7 +445,7 @@ hypit:
 # Montage 视频工作流配置。
 # 生产建议：
 # - 保持 enabled=true。
-# - claude.executor 使用 kubernetes 或 docker，并确保 Montage Agent 镜像继承已发布的 OpenMontage runtime 镜像。
+# - claude.executor 使用 kubernetes 或 docker，并确保已发布内含固定 OpenMontage 源码与依赖的 Montage Agent 镜像。
 montage:
   # 是否启用 Montage 平台。显式 false 会关闭任务/计划创建入口。
   enabled: true
@@ -363,8 +453,8 @@ montage:
   # 生产建议选择已验证的上游 pipeline，例如 cinematic、talking-head、screen-demo、clip-factory。
   default_pipeline: "cinematic"
   # 允许 Studio/API 选择的 pipeline 白名单。新增上游 pipeline 后先做 adapter contract test，
-  # 并确认所选 OpenMontage runtime 镜像内的 pipeline_defs/<name>.yaml 存在。
-  allowed_pipelines: ["cinematic", "talking-head", "screen-demo", "clip-factory"]
+  # 并确认所选 Montage Agent 镜像内的 pipeline_defs/<name>.yaml 存在。
+  allowed_pipelines: ["animated-explainer", "animation", "avatar-spokesperson", "character-animation", "cinematic", "clip-factory", "documentary-montage", "framework-smoke", "hybrid", "localization-dub", "podcast-repurpose", "screen-demo", "talking-head"]
   # 单个 Montage 任务允许的最长成片时长，单位秒。
   max_duration_seconds: 600
   # 单个 Montage 任务允许引用/上传的最大素材数量。
@@ -556,7 +646,7 @@ claude:
       model_usage_aliases:
         "kimi-k3[1m]": "kimi-k3"
   # Agent Job/容器访问 server MCP/API 的地址。Kubernetes 生产环境通常使用集群内 Service URL。
-  agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-https://creator-api-svc:8443}"
+  agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-http://creator-api-svc:8080}"
   # 托管 Agent 执行器类型：docker 用于单机容器；kubernetes 用于生产队列。
   executor: "${ANBAN_AGENT_EXECUTOR}"
   # 失败运行时保留多久供排查（秒），之后由 reconciler 清理。
@@ -577,6 +667,7 @@ claude:
     content-planning: "${ANBAN_AGENT_IMAGE_CONTENT_PLANNING:-}"
     profile-analysis: "${ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS:-creator-agent-profile-analysis:latest}"
     feedback-analysis: "${ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS:-creator-agent-feedback-analysis:latest}"
+    topic-radar: "${ANBAN_AGENT_IMAGE_TOPIC_RADAR:-creator-agent-topic-radar:latest}"
     whiteboard-animation: "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}"
     hypit: "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}"
     local-life: "${ANBAN_AGENT_IMAGE_LOCAL_LIFE:-creator-agent-local-life:latest}"
@@ -608,9 +699,6 @@ claude:
     service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"
     # 私有镜像仓库拉取 secret；公开镜像可留空。
     image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET:-acr-secret}"
-    # Agent Job 中的 Go 与 Node/Claude Code TLS 客户端校验 Server 使用的签发 CA Secret，仅挂载 ca.crt。
-    # 不要指向保存叶子证书 tls.crt/tls.key 的 anban-server-tls。
-    server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET:-anban-internal-ca}"
     # 任务工作区 PVC 使用的 RWX NAS 存储类；项目记忆使用预创建的共享 PVC。
     nas_storage_class: "${ANBAN_AGENT_NAS_STORAGE_CLASS:-nas-sc-creator}"
     project_memory_claim: "${ANBAN_AGENT_PROJECT_MEMORY_CLAIM:-creator-project-memory}"
@@ -652,10 +740,28 @@ claude:
       whiteboard-animation:
         requests: { cpu: "1", memory: "2Gi" }
         limits: { cpu: "2", memory: "4Gi" }
+      # 视频类 Agent 需要更高的 CPU / 内存。
+      talking-head-editor:
+        requests: { cpu: "2", memory: "4Gi" }
+        limits: { cpu: "4", memory: "7Gi" }
+      # plugin Pack 只要声明 task surface，就必须在这里配置同名资源档位。
+      moments:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
+      ecommerce:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
       profile-analysis:
         requests: { cpu: "1", memory: "2Gi" }
         limits: { cpu: "2", memory: "4Gi" }
       feedback-analysis:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
+      # 选题雷达的持久化 Task.Type 是 topic-digest / topic-script；topic-radar 只是 Agent Pack 与 runtime profile 身份。
+      topic-digest:
+        requests: { cpu: "1", memory: "2Gi" }
+        limits: { cpu: "2", memory: "4Gi" }
+      topic-script:
         requests: { cpu: "1", memory: "2Gi" }
         limits: { cpu: "2", memory: "4Gi" }
       content-research:

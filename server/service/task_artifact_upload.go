@@ -246,9 +246,16 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 	if err != nil {
 		return err
 	}
+	var totalBytes int64
 	for _, file := range req.Files {
 		if file.Size > taskArtifactByteLimit(task, strings.TrimSpace(file.RelativePath)) {
 			return taskArtifactInvalidf("task artifact %s exceeds the %d MB limit", strings.TrimSpace(file.RelativePath), taskArtifactByteLimit(task, strings.TrimSpace(file.RelativePath))/(1024*1024))
+		}
+		if model.IsTalkingHeadEditorPlatform(task.Type) {
+			if file.Size > 0 && totalBytes > talkingHeadTotalArtifactBytes-file.Size {
+				return taskArtifactInvalidf("talking-head artifact manifest exceeds the %d MB total limit", talkingHeadTotalArtifactBytes/(1024*1024))
+			}
+			totalBytes += file.Size
 		}
 	}
 	artifactStore, ok := s.store.(taskArtifactPromotionStorage)

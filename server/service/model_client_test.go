@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"net/url"
 	"strings"
 	"testing"
@@ -173,5 +175,185 @@ func TestImageUnderstandingUsesEarlierParentOrRouteDeadline(t *testing.T) {
 				t.Errorf("completion took %s; earlier deadline should terminate before 1s", elapsed)
 			}
 		})
+	}
+}
+
+func TestVisionRequestDisablesKimiThinking(t *testing.T) {
+	const successJSON = `{"id":"completion-1","model":"vision-response","choices":[{"index":0,"message":{"role":"assistant","content":"a blue cup"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`
+	for _, tt := range []struct {
+		name         string
+		model        string
+		wantThinking bool
+	}{
+		{name: "kimi k3 disables thinking", model: "kimi-k3", wantThinking: true},
+		{name: "kimi k2.6 disables thinking", model: "kimi-k2.6", wantThinking: true},
+		{name: "non-kimi model keeps provider defaults", model: "vision-route"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var request map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Errorf("decode vision request: %v", err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(successJSON))
+			}))
+			defer server.Close()
+
+			client := NewOpenAILLMClient(server.URL+"/v1", "fixture-api-key", tt.model, time.Second).(*openaiLLMClient)
+			if _, err := client.CompleteWithImageResult(context.Background(), "", "describe", "data:image/png;base64,eA=="); err != nil {
+				t.Fatal(err)
+			}
+			thinking, ok := request["thinking"].(map[string]any)
+			if tt.wantThinking {
+				if !ok || thinking["type"] != "disabled" {
+					t.Fatalf("vision thinking policy = %#v, want disabled", request["thinking"])
+				}
+				return
+			}
+			if ok {
+				t.Fatalf("non-Kimi model received thinking policy: %#v", request["thinking"])
+			}
+		})
+	}
+}
+
+func TestVideoRequestDisablesKimiThinking(t *testing.T) {
+	const successJSON = `{"id":"completion-1","model":"video-response","choices":[{"index":0,"message":{"role":"assistant","content":"a blue cup"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`
+	var request map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode video request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(successJSON))
+	}))
+	defer server.Close()
+
+	client := NewOpenAILLMClient(server.URL+"/v1", "fixture-api-key", "kimi-k3", time.Second).(*openaiLLMClient)
+	if _, err := client.CompleteWithVideoURLResult(context.Background(), "", "describe", "https://example.com/video.mp4"); err != nil {
+		t.Fatal(err)
+	}
+	thinking, ok := request["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "disabled" {
+		t.Fatalf("video thinking policy = %#v, want disabled", request["thinking"])
+	}
+}
+
+func TestKimiThinkingModelCoverage(t *testing.T) {
+	for _, tt := range []struct {
+		model string
+		want  bool
+	}{
+		{model: "kimi-k3", want: true},
+		{model: " kimi-k3[1m] ", want: true},
+		{model: "kimi-k2.5", want: true},
+		{model: "kimi-k2.6", want: true},
+		{model: "kimi-k2-thinking", want: true},
+		{model: "kimi-k3-code", want: false},
+		{model: "gpt-5", want: false},
+		{model: "", want: false},
+	} {
+		if got := isKimiThinkingModel(tt.model); got != tt.want {
+			t.Errorf("isKimiThinkingModel(%q) = %v, want %v", tt.model, got, tt.want)
+		}
+	}
+}
+
+func TestVisionTimeoutDiagnostics(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+	}))
+	defer server.Close()
+	defer close(release)
+
+	run := func(t *testing.T, ctx context.Context, timeout time.Duration) *imageUnderstandingProviderError {
+		t.Helper()
+		client := NewOpenAILLMClient(server.URL+"/v1", "fixture-api-key", "vision-route", timeout).(*openaiLLMClient)
+		client.client.Chat.Completions.Options = append(client.client.Chat.Completions.Options, option.WithMaxRetries(0))
+		_, err := client.CompleteWithImageResult(ctx, "", "describe", "data:image/png;base64,eA==")
+		var providerErr *imageUnderstandingProviderError
+		if !errors.As(err, &providerErr) {
+			t.Fatalf("error = %v, want image understanding provider error", err)
+		}
+		return providerErr
+	}
+
+	t.Run("route timeout", func(t *testing.T) {
+		providerErr := run(t, context.Background(), 500*time.Millisecond)
+		if providerErr.Code != "provider_timeout" || providerErr.TimeoutSource != "route_timeout" || !providerErr.RequestWritten {
+			t.Fatalf("timeout diagnostics = %#v", providerErr)
+		}
+	})
+
+	t.Run("caller deadline", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		providerErr := run(t, ctx, 5*time.Second)
+		if providerErr.Code != "provider_timeout" || providerErr.TimeoutSource != "caller_deadline" || !providerErr.RequestWritten {
+			t.Fatalf("timeout diagnostics = %#v", providerErr)
+		}
+	})
+}
+
+func TestImageUnderstandingTraceIgnoresFailedRequestWrite(t *testing.T) {
+	trace := &imageUnderstandingRequestTrace{}
+	trace.clientTrace().WroteRequest(httptrace.WroteRequestInfo{Err: errors.New("connection reset during upload")})
+	if diagnostics := trace.diagnostics(time.Now(), "route_timeout"); diagnostics.RequestWritten {
+		t.Fatalf("failed request write was recorded as written: %#v", diagnostics)
+	}
+	trace.clientTrace().WroteRequest(httptrace.WroteRequestInfo{})
+	if diagnostics := trace.diagnostics(time.Now(), "route_timeout"); !diagnostics.RequestWritten {
+		t.Fatalf("successful request write was not recorded: %#v", diagnostics)
+	}
+}
+
+func TestImageUnderstandingCompletionRecordsToolUsage(t *testing.T) {
+	const successJSON = `{"id":"completion-1","model":"vision-response","choices":[{"index":0,"message":{"role":"assistant","content":"a blue cup"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(successJSON))
+	}))
+	defer server.Close()
+
+	tracker := NewToolUsage()
+	ctx := WithToolUsage(context.Background(), tracker)
+	client := NewOpenAILLMClient(server.URL, "fixture-api-key", "vision-route", time.Second).(*openaiLLMClient)
+	client.client.Chat.Completions.Options = append(client.client.Chat.Completions.Options, option.WithMaxRetries(0))
+	result, err := client.CompleteWithImageResult(ctx, "", "describe", "data:image/png;base64,eA==")
+	if err != nil {
+		t.Fatalf("completion: %v", err)
+	}
+	if result == nil || result.Model != "vision-response" {
+		t.Fatalf("completion = %#v, want provider model", result)
+	}
+	snapshot := tracker.Snapshot()
+	if snapshot.ProviderCalls != 1 || !snapshot.UsageReported || len(snapshot.Models) != 1 || snapshot.Models[0] != "vision-response" {
+		t.Fatalf("tool usage = %#v, want one vision-route call", snapshot)
+	}
+	if snapshot.InputTokens != 3 || snapshot.OutputTokens != 2 || snapshot.TotalTokens != 5 {
+		t.Fatalf("tool usage tokens = %#v, want input 3, output 2, total 5", snapshot)
+	}
+}
+
+func TestTextCompletionRecordsToolUsage(t *testing.T) {
+	const successJSON = `{"id":"completion-2","model":"text-response","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":4,"total_tokens":13}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(successJSON))
+	}))
+	defer server.Close()
+
+	tracker := NewToolUsage()
+	ctx := WithToolUsage(context.Background(), tracker)
+	client := NewOpenAILLMClient(server.URL, "fixture-api-key", "text-route", time.Second).(*openaiLLMClient)
+	client.client.Chat.Completions.Options = append(client.client.Chat.Completions.Options, option.WithMaxRetries(0))
+	if _, err := client.CompleteResult(ctx, "", "write"); err != nil {
+		t.Fatalf("completion: %v", err)
+	}
+	snapshot := tracker.Snapshot()
+	if snapshot.ProviderCalls != 1 || !snapshot.UsageReported || snapshot.InputTokens != 9 || snapshot.OutputTokens != 4 || snapshot.TotalTokens != 13 {
+		t.Fatalf("tool usage = %#v, want input 9, output 4, total 13", snapshot)
 	}
 }

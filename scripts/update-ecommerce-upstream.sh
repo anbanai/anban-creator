@@ -1,0 +1,16 @@
+#!/bin/sh
+
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(git -C "$script_dir/.." rev-parse --show-toplevel 2>/dev/null) || {
+  echo "error: update-ecommerce-upstream.sh must be run inside a Git working tree" >&2
+  exit 1
+}
+
+plugin_script=$repo_root/harness/scripts/update-ecommerce-upstream.sh
+if [ ! -x "$plugin_script" ]; then
+  git -C "$repo_root" submodule update --init --recursive -- harness
+fi
+
+exec "$plugin_script"
