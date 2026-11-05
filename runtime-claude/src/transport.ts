@@ -1,4 +1,4 @@
-export type TransferOperation = "bootstrap" | "prepare" | "put" | "stream" | "manifest" | "complete" | "progress";
+export type TransferOperation = "bootstrap" | "prepare" | "put" | "stream" | "manifest" | "complete" | "progress" | "job";
 export type TransferErrorCode = "connection_reset" | "network_timeout" | "network_unavailable"
   | "rate_limited" | "service_unavailable" | "invalid_request" | "unauthorized"
   | "execution_conflict" | "signature_expired" | "integrity_mismatch"

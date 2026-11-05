@@ -527,12 +527,14 @@ export async function runJob(
 /**
  * A failure reported to the Server has to carry the same flattened diagnostic
  * as the container's stderr. A bare "fetch failed" would otherwise be the only
- * surviving description of a pre-Agent transport failure.
+ * surviving description of a transport failure. The label stays generic: the
+ * caller covers bootstrap materialization and Agent execution alike, and a
+ * typed transport error reports its own operation anyway.
  */
 function failure(workspace: string, error: unknown): ExecutionResult {
   return {
     success: false,
-    error: describeErrorForLog("complete", error),
+    error: describeErrorForLog("job", error),
     work_dir: workspace,
     terminal_reason: "platform_error",
   };
