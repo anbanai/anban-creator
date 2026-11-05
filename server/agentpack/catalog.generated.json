@@ -2499,7 +2499,7 @@
       "ui": {
         "renderer": "custom:ip-explainer"
       },
-      "digest": "c789eecf9075ee74baf2d906eb74dedd0c644928a5eed55496789eea513eb06f"
+      "digest": "e73769cce4fa26003d11dd85f41a0efe1597ce8a251eabb70537ba57be809acf"
     },
     {
       "id": "local-life",
@@ -6261,7 +6261,7 @@
         }
       ],
       "ui": {},
-      "digest": "af34edb9404c6bd4751ae34b5d61f185abd5980b6a260e6d98a073c09985afb7"
+      "digest": "9967e46ab84745b159c315eb21239f72e85ece006a5e01bb14938593ddc2c1fd"
     },
     {
       "id": "wechat-article",
