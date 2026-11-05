@@ -1,4 +1,4 @@
-export type TransferOperation = "prepare" | "put" | "stream" | "manifest" | "complete" | "progress";
+export type TransferOperation = "bootstrap" | "prepare" | "put" | "stream" | "manifest" | "complete" | "progress" | "job";
 export type TransferErrorCode = "connection_reset" | "network_timeout" | "network_unavailable"
   | "rate_limited" | "service_unavailable" | "invalid_request" | "unauthorized"
   | "execution_conflict" | "signature_expired" | "integrity_mismatch"
@@ -20,12 +20,14 @@ export class TypedTransportError extends Error {
     readonly retryAfterMs?: number,
     public readonly serverCode?: string,
     public readonly networkCode?: string,
+    /** The original failure, kept so a non-transport cause is not lost. */
+    readonly cause?: unknown,
   ) {
     super(`${failure.operation} failed: ${serverCode ?? failure.code}`);
   }
 
   withAttempts(attempts: number): TypedTransportError {
-    return new TypedTransportError({ ...this.failure, attempts }, this.retryAfterMs, this.serverCode, this.networkCode);
+    return new TypedTransportError({ ...this.failure, attempts }, this.retryAfterMs, this.serverCode, this.networkCode, this.cause);
   }
 }
 
@@ -105,6 +107,79 @@ export function asTransferFailure(operation: TransferOperation, error: unknown):
   return normalizeError(operation, error, false, false).failure;
 }
 
+/**
+ * Renders a failure as a single log line for the container's stderr.
+ *
+ * undici reports every transport failure as the same "fetch failed" TypeError
+ * and keeps the discriminating code (ENOTFOUND, ECONNREFUSED, ...) in the
+ * cause chain. Kubernetes stores only the stderr tail as the termination
+ * message, so the code has to be flattened into the text we print.
+ *
+ * Only allowlisted values are rendered: the mapped failure category, the
+ * network code, an HTTP status, the operation, and the target host and port.
+ * A free-form message is included only when no network code exists, so a
+ * transient network failure never leaks request details.
+ */
+export function describeTransportError(operation: TransferOperation, error: unknown, endpoint?: string): string {
+  const normalized = normalizeError(operation, error, false, false);
+  // A typed error already knows which phase it belongs to; the caller's label
+  // is only a fallback for errors that never entered a retried request.
+  const label = error instanceof TypedTransportError ? error.failure.operation : operation;
+  const fields = [`failure=${normalized.failure.code}`];
+  if (normalized.networkCode) fields.push(`network_code=${normalized.networkCode}`);
+  if (normalized.failure.http_status) fields.push(`http_status=${normalized.failure.http_status}`);
+  if (normalized.serverCode) fields.push(`server_code=${normalized.serverCode}`);
+  const target = describeEndpoint(endpoint);
+  if (target) fields.push(target);
+  if (!normalized.networkCode) {
+    // A retried request rewraps its cause as protocol_error; the readable text
+    // is the one the attempt actually failed with.
+    const source = error instanceof TypedTransportError && error.cause !== undefined ? error.cause : error;
+    const message = source instanceof Error ? source.message : "";
+    if (message) fields.push(`message=${redactLogText(message)}`);
+  }
+  return `${label} failed: ${fields.join(" ")}`;
+}
+
+const MAX_LOG_MESSAGE = 300;
+
+/**
+ * True when an error carries a discriminating transport cause, i.e. flattening
+ * it adds information. Domain errors keep their own descriptive message.
+ */
+export function isTransportFailure(error: unknown): boolean {
+  if (error instanceof TypedTransportError) return true;
+  return error instanceof TypeError && networkCode(error) !== undefined;
+}
+
+/** Renders an error for the log, flattening only transport failures. */
+export function describeErrorForLog(operation: TransferOperation, error: unknown, endpoint?: string): string {
+  if (!isTransportFailure(error)) {
+    return error instanceof Error ? error.message : "agent job failed";
+  }
+  return describeTransportError(operation, error, endpoint);
+}
+
+/** Strips credentials and URL query strings before text enters the log. */
+function redactLogText(value: string): string {
+  return value
+    .replace(/\bBearer\s+[^\s"']+/gi, "Bearer [redacted]")
+    .replace(/\b(?:token|access_token|api_key|apikey|secret|signature|password)=[^\s&"']*/gi, "[redacted]")
+    .replace(/(https?:\/\/[^\s?#"']+)\?[^\s"']*/gi, "$1?[redacted]")
+    .slice(0, MAX_LOG_MESSAGE);
+}
+
+/** The runtime command line already carries the endpoint, so it is not a secret. */
+function describeEndpoint(endpoint?: string): string | undefined {
+  if (!endpoint) return undefined;
+  try {
+    const url = new URL(endpoint);
+    return `host=${url.hostname} port=${url.port || (url.protocol === "https:" ? "443" : "80")}`;
+  } catch {
+    return undefined;
+  }
+}
+
 function normalizeError(operation: TransferOperation, error: unknown, timedOut: boolean, cancelled: boolean): TypedTransportError {
   if (error instanceof TypedTransportError) return error;
   if (cancelled) return failure(operation, "cancelled", 1, false);
@@ -113,7 +188,9 @@ function normalizeError(operation: TransferOperation, error: unknown, timedOut: 
   if (code === "ECONNRESET" || code === "EPIPE") return failure(operation, "connection_reset", 1, true, undefined, undefined, code);
   if (["ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT"].includes(code ?? "")) return failure(operation, "network_timeout", 1, true, undefined, undefined, code);
   if (["EAI_AGAIN", "ENOTFOUND", "ENETUNREACH", "EHOSTUNREACH", "ECONNREFUSED"].includes(code ?? "") || error instanceof TypeError) return failure(operation, "network_unavailable", 1, true, undefined, undefined, code);
-  return failure(operation, "protocol_error", 1, false);
+  // Preserve the original error so a domain failure such as a rejected
+  // bootstrap response is not replaced by a bare protocol_error.
+  return failure(operation, "protocol_error", 1, false, undefined, undefined, undefined, error);
 }
 
 function networkCode(error: unknown): string | undefined {
@@ -121,15 +198,23 @@ function networkCode(error: unknown): string | undefined {
   const seen = new Set<object>();
   for (let depth = 0; depth < 8 && current && typeof current === "object" && !seen.has(current); depth += 1) {
     seen.add(current);
-    const value = current as { code?: unknown; cause?: unknown };
+    const value = current as { code?: unknown; cause?: unknown; errors?: unknown };
     if (typeof value.code === "string" && ALLOWED_NETWORK_CODES.has(value.code)) return value.code;
+    // undici aggregates one failure per resolved address, so a refused
+    // connection on a multi-homed host arrives as AggregateError.errors.
+    if (Array.isArray(value.errors)) {
+      for (const nested of value.errors) {
+        const code = networkCode(nested);
+        if (code) return code;
+      }
+    }
     current = value.cause;
   }
   return undefined;
 }
 
-function failure(operation: TransferOperation, code: TransferErrorCode, attempts: number, retryable: boolean, httpStatus?: number, requestID?: string, networkCode?: string): TypedTransportError {
-  return new TypedTransportError({ operation, code, attempts, retryable, ...(httpStatus ? { http_status: httpStatus } : {}), ...(requestID ? { request_id: requestID } : {}) }, undefined, undefined, networkCode);
+function failure(operation: TransferOperation, code: TransferErrorCode, attempts: number, retryable: boolean, httpStatus?: number, requestID?: string, networkCode?: string, cause?: unknown): TypedTransportError {
+  return new TypedTransportError({ operation, code, attempts, retryable, ...(httpStatus ? { http_status: httpStatus } : {}), ...(requestID ? { request_id: requestID } : {}) }, undefined, undefined, networkCode, cause);
 }
 
 const ALLOWED_NETWORK_CODES = new Set([

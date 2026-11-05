@@ -1,9 +1,83 @@
 import { describe, expect, test } from "bun:test";
 
-import { TypedTransportError, retryRequest, transportErrorFromResponse } from "../src/transport.js";
+import { TypedTransportError, describeTransportError, retryRequest, transportErrorFromResponse } from "../src/transport.js";
 
 const immediate = async () => {};
 const dependencies = { now: () => 1_000, random: () => 0, sleep: immediate };
+
+describe("describeTransportError", () => {
+  test("flattens a nested fetch cause into a single log line", async () => {
+    const error = await retryRequest("bootstrap", async () => {
+      throw Object.assign(new TypeError("fetch failed"), {
+        cause: { cause: { code: "ENOTFOUND" }, message: "getaddrinfo ENOTFOUND" },
+      });
+    }, { signal: new AbortController().signal, maxAttempts: 1 }, dependencies).catch((caught) => caught);
+
+    const line = describeTransportError("bootstrap", error, "http://creator-server-svc.anbanai-prod.svc.cluster.local:8080");
+    expect(line).toContain("bootstrap failed:");
+    expect(line).toContain("failure=network_unavailable");
+    expect(line).toContain("network_code=ENOTFOUND");
+    expect(line).toContain("host=creator-server-svc.anbanai-prod.svc.cluster.local");
+    expect(line).toContain("port=8080");
+    expect(line).not.toContain("getaddrinfo");
+  });
+
+  test("distinguishes a refused connection from a DNS failure", async () => {
+    for (const code of ["ECONNREFUSED", "EAI_AGAIN", "ENETUNREACH"]) {
+      const error = Object.assign(new TypeError("fetch failed"), { cause: { code } });
+      expect(describeTransportError("bootstrap", error, "https://creator.example")).toContain(`network_code=${code}`);
+    }
+  });
+
+  test("defaults the port from the endpoint scheme", () => {
+    const error = Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
+    expect(describeTransportError("bootstrap", error, "https://creator.example")).toContain("port=443");
+    expect(describeTransportError("bootstrap", error, "http://creator.example")).toContain("port=80");
+  });
+
+  test("resolves a code from an AggregateError over several addresses", () => {
+    const error = Object.assign(new TypeError("fetch failed"), {
+      cause: new AggregateError([
+        Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+        Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+      ]),
+    });
+    const line = describeTransportError("bootstrap", error, "http://creator.example:8080");
+    expect(line).toContain("failure=network_unavailable");
+    expect(line).toContain("network_code=ECONNREFUSED");
+  });
+
+  test("keeps the original message when a retried attempt failed for a domain reason", () => {
+    const error = new TypedTransportError(
+      { operation: "bootstrap", code: "protocol_error", attempts: 1, retryable: false },
+      undefined,
+      undefined,
+      undefined,
+      new Error("bootstrap response exceeds size limit"),
+    );
+    const line = describeTransportError("bootstrap", error, "http://creator.example:8080");
+    expect(line).toContain("failure=protocol_error");
+    expect(line).toContain("message=bootstrap response exceeds size limit");
+  });
+
+  test("reports an HTTP rejection without a network cause", () => {
+    const error = new Error("bootstrap returned HTTP 426");
+    const line = describeTransportError("bootstrap", error, "http://creator.example:8080");
+    expect(line).toContain("failure=protocol_error");
+    expect(line).toContain("message=bootstrap returned HTTP 426");
+  });
+
+  test("does not leak credentials, tokens, or URL query strings", () => {
+    const error = new Error(
+      "request to https://oss.example/bucket/photo.png?Signature=SECRETSIG&token=abc failed with Authorization: Bearer TOKENVALUE api_key=LEAKED",
+    );
+    const line = describeTransportError("bootstrap", error, "http://creator.example:8080");
+    expect(line).not.toContain("SECRETSIG");
+    expect(line).not.toContain("TOKENVALUE");
+    expect(line).not.toContain("LEAKED");
+    expect(line).toContain("port=8080");
+  });
+});
 
 describe("retryRequest", () => {
   test("retries transient HTTP and network failures up to four attempts", async () => {

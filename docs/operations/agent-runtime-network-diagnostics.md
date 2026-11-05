@@ -5,6 +5,33 @@ bootstrap, progress, artifact, MCP, or completion requests. Run checks from the
 Agent container or Pod network; a successful request from the Server host or a
 developer machine does not establish runtime reachability.
 
+## Recognising a bootstrap failure
+
+The managed runtime reports a single stderr line, which Kubernetes stores as
+the container's termination message. Read it before anything else:
+
+```
+bootstrap failed: failure=network_unavailable network_code=ENOTFOUND host=creator-svc.anbanai-prod.svc.cluster.local port=8080
+```
+
+A reconciler log line with `started=false` means the Agent never completed
+`POST /api/v1/agent/bootstrap`. Nothing downstream of bootstrap can be the
+cause, so the failure is always a transport, DNS, routing, egress, or Server
+availability problem — never an Agent, Skill, Agent Pack, or model provider
+problem. Confirm this signature before investigating anything else:
+
+- `started=false` — bootstrap never succeeded.
+- `runtime_reason=Error` — Kubernetes set the generic reason for a non-zero exit.
+- `exit_code=1` — anything other than a completion-report failure.
+
+The `network_code` field is the discriminating value. A runtime image built
+before this field existed prints a bare `fetch failed`, which cannot be
+resolved retroactively: the cause was never written.
+
+Bootstrap is retried four times with a 10 s per-attempt timeout, so a reported
+failure means the endpoint was unreachable for the whole window rather than a
+single blip. A transient interruption now recovers without operator action.
+
 ## Docker executor
 
 Find the retained Agent container and inspect its configured server URL and
