@@ -50,7 +50,7 @@ export default function UserMediaLibraryPage() {
   }
 
   return <div className="mx-auto w-full max-w-6xl space-y-6 pb-10">
-    <PageHeader title="素材库" description="上传图片或视频，AI 会独立解析内容并为创作提供可复用候选。">
+    <PageHeader title="素材" description="上传图片或视频，AI 会独立解析内容并为创作提供可复用候选。">
       <input ref={fileRef} type="file" accept="image/*,video/*" className="sr-only" aria-label="上传素材" onChange={(event) => { const file = event.target.files?.[0]; if (file) void onFile(file) }} />
       <Button disabled={uploading} onClick={() => fileRef.current?.click()}>{uploading ? <Loader2 className="animate-spin" /> : <Upload />}上传素材</Button>
     </PageHeader>
@@ -64,8 +64,8 @@ export default function UserMediaLibraryPage() {
       <select aria-label="素材解析状态" className="h-9 rounded-md border border-input bg-background px-3 text-sm" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部状态</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
     </div>
 
-    {assets.isPending && <p role="status" className="py-12 text-center text-sm text-muted-foreground">正在加载素材库…</p>}
-    {assets.isError && <div role="alert" className="py-12 text-center text-sm text-destructive">素材库加载失败，请稍后重试。</div>}
+    {assets.isPending && <p role="status" className="py-12 text-center text-sm text-muted-foreground">正在加载素材…</p>}
+    {assets.isError && <div role="alert" className="py-12 text-center text-sm text-destructive">素材加载失败，请稍后重试。</div>}
     {!assets.isPending && !assets.isError && (assets.data?.items.length ?? 0) === 0 && <div className="border border-dashed border-border py-16 text-center text-sm text-muted-foreground">还没有符合条件的素材，先上传一张图片或一段视频。</div>}
     <section aria-label="素材列表" className="grid gap-3 md:grid-cols-2">
       {(assets.data?.items ?? []).map((asset) => <article key={asset.id} className="overflow-hidden rounded-lg border border-border bg-card">

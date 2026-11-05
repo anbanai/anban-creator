@@ -41,6 +41,7 @@ describe('UserMediaLibraryPage', () => {
     mocks.reanalyze.mockResolvedValue({ id: 'media-2', status: 'queued' })
     renderPage()
 
+    expect(screen.getByRole('heading', { name: '素材' })).toBeInTheDocument()
     expect(await screen.findByText('白色包装正面')).toBeInTheDocument()
     expect(screen.getByText('模型不支持该视频')).toBeInTheDocument()
     const notes = screen.getByRole('textbox', { name: 'product.png 使用说明' })

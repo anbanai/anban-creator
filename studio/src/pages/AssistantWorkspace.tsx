@@ -1848,18 +1848,18 @@ function MediaLibraryPicker({ projectId, attachments, onChange, attachmentContro
     onChange([...attachments, { id: `media-${asset.id}`, type: asset.media_type, fileName: asset.file_name, contentType: asset.content_type, size: asset.size, status: 'uploaded', progress: 100, assetId: asset.id }])
   }
   return <Popover open={open} onOpenChange={handleOpenChange}>
-    <PopoverTrigger render={<Button type="button" variant="ghost" size="icon-xs" aria-label="从素材库选择" disabled={disabled} />}><Plus /></PopoverTrigger>
+    <PopoverTrigger render={<Button type="button" variant="ghost" size="icon-xs" aria-label="从素材选择" disabled={disabled} />}><Plus /></PopoverTrigger>
     <PopoverContent align="start" className="w-[min(24rem,calc(100vw-2rem))]">
       {view === 'menu' ? <>
         <PopoverTitle>添加创作素材</PopoverTitle>
         <input ref={fileRef} type="file" accept="image/*,video/*" className="sr-only" aria-label="上传创作素材" onChange={(event) => { const file = event.target.files?.[0]; if (file) handleUpload(file); event.target.value = '' }} />
         <div className="mt-2 grid gap-1">
           <button type="button" aria-label="上传素材" className="flex items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-muted" onClick={() => fileRef.current?.click()}><Upload className="size-4" /><span><span className="block text-sm font-medium">上传素材</span><span className="block text-xs text-muted-foreground">上传图片或视频到本次创作</span></span></button>
-          <button type="button" aria-label="从素材库选择" className="flex items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-muted" onClick={() => setView('library')}><Library className="size-4" /><span><span className="block text-sm font-medium">从素材库选择</span><span className="block text-xs text-muted-foreground">选择已解析、可复用的素材</span></span></button>
+          <button type="button" aria-label="从素材选择" className="flex items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-muted" onClick={() => setView('library')}><Library className="size-4" /><span><span className="block text-sm font-medium">从素材选择</span><span className="block text-xs text-muted-foreground">选择已解析、可复用的素材</span></span></button>
         </div>
       </> : <>
-        <div className="flex items-center gap-2"><Button type="button" variant="ghost" size="icon-xs" aria-label="返回添加创作素材" onClick={() => setView('menu')}><ArrowLeft /></Button><PopoverTitle>从素材库选择</PopoverTitle></div>
-        <Input className="mt-3" aria-label="搜索素材库" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索已解析素材" />
+        <div className="flex items-center gap-2"><Button type="button" variant="ghost" size="icon-xs" aria-label="返回添加创作素材" onClick={() => setView('menu')}><ArrowLeft /></Button><PopoverTitle>从素材选择</PopoverTitle></div>
+        <Input className="mt-3" aria-label="搜索素材" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索已解析素材" />
         <div className="mt-3 max-h-64 space-y-1 overflow-y-auto">
           {media.isPending && <p className="py-4 text-center text-xs text-muted-foreground">正在加载…</p>}
           {!media.isPending && (media.data?.items ?? []).length === 0 && <p className="py-4 text-center text-xs text-muted-foreground">没有可用素材，请先上传或重新解析。</p>}
