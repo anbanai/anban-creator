@@ -2499,7 +2499,7 @@
       "ui": {
         "renderer": "custom:ip-explainer"
       },
-      "digest": "e73769cce4fa26003d11dd85f41a0efe1597ce8a251eabb70537ba57be809acf"
+      "digest": "55481db96f7611ccd4f91bf02d66e2f4da15c370118dfeb972f7fb0b6c4621b6"
     },
     {
       "id": "local-life",
@@ -4187,7 +4187,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "961cdaba6ed42023d520255eb2c2cafb55078c6760bed2e6c48632f8d8927a5b"
+      "digest": "e02dd14d7bab701e4a22ef772353a759c285506c98d7d82267e7bad30b36e6bc"
     },
     {
       "id": "topic-radar",
