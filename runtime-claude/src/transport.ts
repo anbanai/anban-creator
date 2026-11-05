@@ -198,8 +198,16 @@ function networkCode(error: unknown): string | undefined {
   const seen = new Set<object>();
   for (let depth = 0; depth < 8 && current && typeof current === "object" && !seen.has(current); depth += 1) {
     seen.add(current);
-    const value = current as { code?: unknown; cause?: unknown };
+    const value = current as { code?: unknown; cause?: unknown; errors?: unknown };
     if (typeof value.code === "string" && ALLOWED_NETWORK_CODES.has(value.code)) return value.code;
+    // undici aggregates one failure per resolved address, so a refused
+    // connection on a multi-homed host arrives as AggregateError.errors.
+    if (Array.isArray(value.errors)) {
+      for (const nested of value.errors) {
+        const code = networkCode(nested);
+        if (code) return code;
+      }
+    }
     current = value.cause;
   }
   return undefined;

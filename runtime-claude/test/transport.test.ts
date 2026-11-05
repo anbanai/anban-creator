@@ -35,6 +35,18 @@ describe("describeTransportError", () => {
     expect(describeTransportError("bootstrap", error, "http://creator.example")).toContain("port=80");
   });
 
+  test("resolves a code from an AggregateError over several addresses", () => {
+    const error = Object.assign(new TypeError("fetch failed"), {
+      cause: new AggregateError([
+        Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+        Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+      ]),
+    });
+    const line = describeTransportError("bootstrap", error, "http://creator.example:8080");
+    expect(line).toContain("failure=network_unavailable");
+    expect(line).toContain("network_code=ECONNREFUSED");
+  });
+
   test("keeps the original message when a retried attempt failed for a domain reason", () => {
     const error = new TypedTransportError(
       { operation: "bootstrap", code: "protocol_error", attempts: 1, retryable: false },
