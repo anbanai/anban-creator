@@ -224,10 +224,10 @@ func TestProjectRequestMapsMontageDefaults(t *testing.T) {
 		Platform: model.PlatformMontage,
 		Name:     "Montage",
 		MontageDefaults: &model.MontageDefaults{
-			DefaultPipeline: "social-short",
+			DefaultPipeline: "hybrid",
 			Preferences: model.MontagePreferences{
 				DurationSeconds: 45,
-				Style:           "documentary",
+				PlaybookKey:     "clean-professional",
 				MusicPrompt:     "minimal electronic",
 				SubtitleMode:    "burned-in",
 				VoiceoverMode:   "narrated",
@@ -242,7 +242,7 @@ func TestProjectRequestMapsMontageDefaults(t *testing.T) {
 		t.Fatal("MontageDefaultsSet = false")
 	}
 	got := project.MontageDefaults.Data()
-	if got.DefaultPipeline != "social-short" || got.Preferences.MusicPrompt != "minimal electronic" || got.AssetGuidance != "prefer source footage" {
+	if got.DefaultPipeline != "hybrid" || got.Preferences.PlaybookKey != "clean-professional" || got.Preferences.MusicPrompt != "minimal electronic" || got.AssetGuidance != "prefer source footage" {
 		t.Fatalf("MontageDefaults = %#v", got)
 	}
 	if len(got.DeliveryTargets) != 2 || got.DeliveryTargets[1] != "subtitles" {

@@ -56,8 +56,8 @@ func TestHarnessAutonomyAndFailureContracts(t *testing.T) {
 		"harness/packs/moments/agent.codex.toml":        {"不得询问", "结构化失败"},
 		"harness/packs/seednote/agent.claude.md":        {"viral_analysis", "quality_status=failed", "generate_image"},
 		"harness/packs/seednote/agent.codex.toml":       {"viral_analysis", "quality_status=failed", "generate_image"},
-		"harness/packs/montage/agent.codex.toml":        {"checkpoint", "decision", "output/failure-diagnosis.md", "output/failure-state.json", "recoverable_failure", "invalid_video_aspect_ratio"},
-		"harness/packs/montage/agent.claude.md":         {"checkpoint", "decision", "output/failure-diagnosis.md", "output/failure-state.json", "recoverable_failure", "invalid_video_aspect_ratio"},
+		"harness/packs/montage/agent.codex.toml":        {"checkpoint", "decision", "output/failure-diagnosis.md", "output/failure-state.json", "recoverable_failure", "invalid_montage_configuration"},
+		"harness/packs/montage/agent.claude.md":         {"checkpoint", "decision", "output/failure-diagnosis.md", "output/failure-state.json", "recoverable_failure", "invalid_montage_configuration"},
 	}
 	for rel, terms := range checks {
 		t.Run(rel, func(t *testing.T) {

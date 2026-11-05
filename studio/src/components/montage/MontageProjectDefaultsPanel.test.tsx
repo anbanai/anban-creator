@@ -18,7 +18,6 @@ function PanelHarness() {
         default_pipeline: '',
         preferences: {
           duration_seconds: 30,
-          style: '',
           music_prompt: '',
           subtitle_mode: '',
           voiceover_mode: '',
@@ -56,6 +55,10 @@ describe('MontageProjectDefaultsPanel', () => {
     ]
     vi.mocked(useMontageCapabilities).mockReturnValue({
       items, enabled: true, defaultPipeline: 'cinematic', maxDurationSeconds: 600, maxAssets: 20,
+      availableItems: items, styles: [], outputProfiles: [
+        { key: 'tiktok', display_name: 'TikTok', width: 1080, height: 1920, aspect_ratio: '9:16' },
+        { key: 'instagram_feed', display_name: 'Instagram Feed', width: 1080, height: 1080, aspect_ratio: '1:1' },
+      ], defaultOutputProfile: 'tiktok',
       isLoading: false, isError: false,
       capabilityByKey: (key: string) => items.find((item) => item.key === key),
     })
@@ -67,7 +70,6 @@ describe('MontageProjectDefaultsPanel', () => {
     await waitFor(() => expect(screen.getByRole('radio', { name: /电影感制作/ })).toBeChecked())
     fireEvent.click(screen.getByRole('radio', { name: /口播精剪/ }))
     fireEvent.change(screen.getByLabelText('默认时长（秒）'), { target: { value: '45' } })
-    fireEvent.change(screen.getByLabelText('风格偏好'), { target: { value: 'clean documentary' } })
     fireEvent.change(screen.getByLabelText('音乐提示'), { target: { value: 'minimal electronic' } })
     fireEvent.change(screen.getByLabelText('默认字幕'), { target: { value: 'burned_in' } })
     fireEvent.change(screen.getByLabelText('默认配音'), { target: { value: 'narrated' } })
@@ -84,7 +86,7 @@ describe('MontageProjectDefaultsPanel', () => {
     expect(screen.queryByLabelText('默认画幅')).not.toBeInTheDocument()
     expect(output).not.toHaveTextContent('aspect_ratio')
     expect(output).toHaveTextContent('"duration_seconds":45')
-    expect(output).toHaveTextContent('"style":"clean documentary"')
+    expect(screen.queryByLabelText('风格偏好')).not.toBeInTheDocument()
     expect(output).toHaveTextContent('"music_prompt":"minimal electronic"')
     expect(output).toHaveTextContent('"subtitle_mode":"burned_in"')
     expect(output).toHaveTextContent('"voiceover_mode":"narrated"')
@@ -98,7 +100,7 @@ describe('MontageProjectDefaultsPanel', () => {
     await waitFor(() => expect(screen.getByRole('radio', { name: /电影感制作/ })).toBeChecked())
 
     expect(screen.getAllByText('留空表示由每次创作自行决定。').length).toBeGreaterThan(0)
-    expect(screen.getByText('作为该人设每次视频创作的默认风格约束。')).toBeInTheDocument()
+    expect(screen.queryByLabelText('风格偏好')).not.toBeInTheDocument()
     expect(screen.getByText('默认配乐方向；单次创作可临时改写。')).toBeInTheDocument()
     expect(screen.getByText('长期素材规则，例如品牌必须露出、禁用第三方素材。')).toBeInTheDocument()
     expect(screen.getByText('该人设视频作品的默认交付要求；单次创作可追加。')).toBeInTheDocument()
@@ -117,5 +119,14 @@ describe('MontageProjectDefaultsPanel', () => {
     fireEvent.change(screen.getByLabelText('默认时长（秒）'), { target: { value: '42' } })
     fireEvent.click(screen.getByRole('radio', { name: /口播精剪/ }))
     expect(screen.getByLabelText('默认时长（秒）')).toHaveValue(42)
+  })
+
+  it('shows the square output profile with a square ratio preview', async () => {
+    render(<PanelHarness />)
+
+    const squareProfile = screen.getByRole('radio', { name: /Instagram Feed/ })
+    const preview = squareProfile.closest('label')?.querySelector('span[aria-hidden="true"] > span')
+
+    expect(preview).toHaveStyle({ width: '24px', height: '24px' })
   })
 })

@@ -461,7 +461,7 @@ describe('task form mapping', () => {
         brief: 'Keep montage brief',
         pipeline_key: 'custom-pipeline',
         source_assets: [{ type: 'video_url' as const, url: 'oss://source.mp4' }],
-        preferences: { duration_seconds: 37, style: 'kinetic' },
+        preferences: { duration_seconds: 37, playbook_key: 'flat-motion-graphics' },
         delivery_targets: ['douyin'],
         advanced: { render: { fps: 60 } },
       },
@@ -473,7 +473,7 @@ describe('task form mapping', () => {
       ecommerce_defaults: { image_capability_key: 'destination-capability' },
       montage_defaults: {
         default_pipeline: 'destination-default',
-        preferences: { duration_seconds: 15, style: 'documentary' },
+        preferences: { duration_seconds: 15, playbook_key: 'clean-professional' },
         delivery_targets: ['wechat'],
       },
     })
@@ -490,7 +490,7 @@ describe('task form mapping', () => {
         brief: 'Keep montage brief',
         pipeline_key: 'destination-default',
         source_assets: [{ type: 'video_url', url: 'oss://source.mp4' }],
-        preferences: { duration_seconds: 15, style: 'documentary' },
+        preferences: { duration_seconds: 15, playbook_key: 'clean-professional' },
         delivery_targets: ['wechat'],
         advanced: { render: { fps: 60 } },
       },
@@ -549,7 +549,7 @@ describe('task form mapping', () => {
       platform: 'montage',
       montage_defaults: {
         default_pipeline: 'social-short',
-        preferences: { duration_seconds: 45, style: 'clean' },
+        preferences: { duration_seconds: 45, playbook_key: 'clean-professional' },
         delivery_targets: ['douyin'],
       },
     })
@@ -563,7 +563,7 @@ describe('task form mapping', () => {
       montage_input: {
         brief: '',
         pipeline_key: 'social-short',
-        preferences: { duration_seconds: 45, style: 'clean' },
+        preferences: { duration_seconds: 45, playbook_key: 'clean-professional' },
         delivery_targets: ['douyin'],
       },
     })
@@ -656,7 +656,7 @@ describe('task form mapping', () => {
       ecommerce: { selected_modules: { hero: 1 }, product_photos: ['oss://product.png'] },
       montage_input: {
         source_assets: [{ type: 'image_url', url: 'oss://source.png' }],
-        preferences: { style: 'original' },
+        preferences: { playbook_key: 'minimalist-diagram' },
         delivery_targets: ['douyin'],
         advanced: { render: { fps: 30 } },
       },
@@ -812,7 +812,7 @@ describe('task form mapping', () => {
           brief: '  Launch video  ',
           pipeline_key: ' social-short ',
           source_assets: [{ type: 'image_url' as const, url: 'oss://source.png' }],
-          preferences: { duration_seconds: 30, style: '  clean  ', music_prompt: '  upbeat  ' },
+          preferences: { duration_seconds: 30, playbook_key: '  clean-professional  ', music_prompt: '  upbeat  ' },
           delivery_targets: ['douyin'],
         },
       },
@@ -822,7 +822,7 @@ describe('task form mapping', () => {
           brief: 'Launch video',
           pipeline_key: 'social-short',
           source_assets: [{ type: 'image_url', url: 'oss://source.png' }],
-          preferences: { duration_seconds: 30, style: 'clean', music_prompt: 'upbeat' },
+          preferences: { duration_seconds: 30, playbook_key: 'clean-professional', music_prompt: 'upbeat' },
           delivery_targets: ['douyin'],
         },
       },

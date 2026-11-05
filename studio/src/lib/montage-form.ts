@@ -14,10 +14,11 @@ export function initialMontageInput(
   return {
     brief: input?.brief ?? brief,
     pipeline_key: input?.pipeline_key ?? defaults?.default_pipeline ?? '',
+    output_profile_key: input?.output_profile_key ?? defaults?.output_profile_key ?? '',
     source_assets: input?.source_assets ?? [],
     preferences: {
       duration_seconds: input?.preferences?.duration_seconds ?? defaults?.preferences?.duration_seconds,
-      style: input?.preferences?.style ?? defaults?.preferences?.style ?? '',
+      playbook_key: input?.preferences?.playbook_key ?? defaults?.preferences?.playbook_key ?? '',
       music_prompt: input?.preferences?.music_prompt ?? defaults?.preferences?.music_prompt ?? '',
       subtitle_mode: input?.preferences?.subtitle_mode ?? defaults?.preferences?.subtitle_mode ?? '',
       voiceover_mode: input?.preferences?.voiceover_mode ?? defaults?.preferences?.voiceover_mode ?? '',
@@ -33,10 +34,11 @@ export function buildMontageInputForSubmit(brief: string | undefined, input?: Pa
     ...next,
     brief: (next.brief ?? '').trim(),
     pipeline_key: next.pipeline_key?.trim() || undefined,
+    output_profile_key: next.output_profile_key?.trim() || undefined,
     source_assets: next.source_assets ?? [],
     preferences: {
       duration_seconds: next.preferences?.duration_seconds,
-      style: next.preferences?.style?.trim() || undefined,
+      playbook_key: next.preferences?.playbook_key?.trim() || undefined,
       music_prompt: next.preferences?.music_prompt?.trim() || undefined,
       subtitle_mode: next.preferences?.subtitle_mode || undefined,
       voiceover_mode: next.preferences?.voiceover_mode || undefined,

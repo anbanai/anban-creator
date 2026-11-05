@@ -32,6 +32,10 @@ const capabilities: MontagePipelineCapability[] = [
     recommended_duration_seconds: 45,
   },
 ]
+const outputProfiles = [
+  { key: 'tiktok', display_name: 'TikTok', width: 1080, height: 1920, aspect_ratio: '9:16' },
+  { key: 'instagram_feed', display_name: 'Instagram Feed', width: 1080, height: 1080, aspect_ratio: '1:1' },
+]
 
 vi.mock('@/hooks/useMontageCapabilities', () => ({
   useMontageCapabilities: vi.fn(),
@@ -83,7 +87,7 @@ function PanelHarness({
     defaultValues: {
       montage_input: input ?? {
         brief: '', pipeline_key: '', source_assets: [],
-        preferences: { style: '', music_prompt: '', subtitle_mode: '', voiceover_mode: '' },
+        preferences: { music_prompt: '', subtitle_mode: '', voiceover_mode: '' },
         delivery_targets: [],
       },
     },
@@ -107,6 +111,7 @@ describe('MontageCreationPanel', () => {
   beforeEach(() => {
     vi.mocked(useMontageCapabilities).mockReturnValue({
       items: capabilities, enabled: true, defaultPipeline: 'cinematic',
+      availableItems: capabilities, styles: [], outputProfiles, defaultOutputProfile: 'tiktok',
       maxDurationSeconds: 600, maxAssets: 20, isLoading: false, isError: false,
       capabilityByKey: (key: string) => capabilities.find((item) => item.key === key),
     })
@@ -193,7 +198,6 @@ describe('MontageCreationPanel', () => {
     expect(screen.getByText(/保留原声适合素材本身有解说的情况/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /更多创作要求/ }))
-    expect(screen.getByText('影响镜头语言、色彩和剪辑节奏；留空则由 Agent 按参考素材判断。')).toBeInTheDocument()
     expect(screen.getByText('描述配乐风格、情绪和卡点；留空则按视频类型默认处理。')).toBeInTheDocument()
     expect(screen.getByText(/补充的交付要求会写进 Agent 的交付清单/)).toBeInTheDocument()
   })
@@ -202,18 +206,25 @@ describe('MontageCreationPanel', () => {
     render(<PanelHarness />)
     await waitFor(() => expect(screen.getByRole('radio', { name: /电影感制作/ })).toBeChecked())
 
-    expect(screen.queryByLabelText('风格偏好')).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('字幕'), { target: { value: 'burned_in' } })
     fireEvent.change(screen.getByLabelText('配音'), { target: { value: 'narrated' } })
     fireEvent.click(screen.getByRole('button', { name: /更多创作要求/ }))
-    fireEvent.change(screen.getByLabelText('风格偏好'), { target: { value: '干净克制' } })
 
     const output = screen.getByTestId('montage-input')
     expect(output).toHaveTextContent('"subtitle_mode":"burned_in"')
     expect(output).toHaveTextContent('"voiceover_mode":"narrated"')
-    expect(output).toHaveTextContent('"style":"干净克制"')
+    expect(output).toHaveTextContent('"output_profile_key":"tiktok"')
     expect(screen.queryByText('执行位置')).not.toBeInTheDocument()
     expect(output).not.toHaveTextContent('execution_target')
+  })
+
+  it('shows the square output profile with a square ratio preview', async () => {
+    render(<PanelHarness />)
+
+    const squareProfile = screen.getByRole('radio', { name: /Instagram Feed/ })
+    const preview = squareProfile.closest('label')?.querySelector('span[aria-hidden="true"] > span')
+
+    expect(preview).toHaveStyle({ width: '24px', height: '24px' })
   })
 
   it('preserves historical custom subtitle and voice values while editing', () => {
@@ -260,6 +271,7 @@ describe('MontageCreationPanel', () => {
   it('does not overwrite an existing pipeline or duration when the catalog loads later', async () => {
     vi.mocked(useMontageCapabilities).mockReturnValue({
       items: [], enabled: false, defaultPipeline: '',
+      availableItems: [], styles: [], outputProfiles, defaultOutputProfile: 'tiktok',
       maxDurationSeconds: 0, maxAssets: 0, isLoading: true, isError: false,
       capabilityByKey: () => undefined,
     })
@@ -271,6 +283,7 @@ describe('MontageCreationPanel', () => {
 
     vi.mocked(useMontageCapabilities).mockReturnValue({
       items: capabilities, enabled: true, defaultPipeline: 'cinematic',
+      availableItems: capabilities, styles: [], outputProfiles, defaultOutputProfile: 'tiktok',
       maxDurationSeconds: 600, maxAssets: 20, isLoading: false, isError: false,
       capabilityByKey: (key: string) => capabilities.find((item) => item.key === key),
     })
@@ -279,5 +292,17 @@ describe('MontageCreationPanel', () => {
     expect(screen.getByRole('radio', { name: /屏幕演示/ })).toBeChecked()
     expect(screen.getByLabelText('目标时长（秒）')).toHaveValue(75)
     expect(screen.getByTestId('montage-input')).toHaveTextContent('"pipeline_key":"screen-demo"')
+  })
+
+  it('blocks readiness and shows a clear error when no output profile is available', async () => {
+    const onReadyChange = vi.fn()
+    vi.mocked(useMontageCapabilities).mockReturnValue({
+      items: capabilities, availableItems: capabilities, styles: [], outputProfiles: [], defaultOutputProfile: '',
+      enabled: true, defaultPipeline: 'cinematic', maxDurationSeconds: 600, maxAssets: 20,
+      isLoading: false, isError: false, capabilityByKey: (key: string) => capabilities.find((item) => item.key === key),
+    })
+    render(<PanelHarness onReadyChange={onReadyChange} />)
+    expect(screen.getByRole('alert')).toHaveTextContent('成片规格缺失或无效，暂时无法创建视频')
+    await waitFor(() => expect(onReadyChange).toHaveBeenLastCalledWith(false))
   })
 })

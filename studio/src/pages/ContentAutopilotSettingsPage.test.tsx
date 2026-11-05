@@ -115,6 +115,23 @@ describe('ContentAutopilotSettingsPage', () => {
     })))
   })
 
+  it('keeps automatic publishing dependent on draft creation', async () => {
+    api.getPolicy.mockResolvedValue({ user_id: 'u1', enabled: false, project_ids: ['p1'], platforms: ['wechat'], daily_budget_credits: 1000, max_run_cost_credits: 500, min_recommendation_score: 60, min_video_confidence: 70, draft_enabled: true, publish_enabled: true, failure_mode: 'pause', revision: 1 })
+    api.projectsList.mockResolvedValue([{ id: 'p1', name: '公众号人设', platform: 'wechat', status: 'active' }])
+    api.updatePolicy.mockResolvedValue({ revision: 2 })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><MemoryRouter><ContentAutopilotSettingsPage /></MemoryRouter></QueryClientProvider>)
+
+    fireEvent.click(await screen.findByText('高级设置'))
+    const drafts = screen.getByLabelText('允许自动创建草稿')
+    const publishing = screen.getByLabelText('自动发布')
+    expect(publishing).toBeEnabled()
+    fireEvent.click(drafts)
+    expect(publishing).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(api.updatePolicy).toHaveBeenCalledWith(expect.objectContaining({ draft_enabled: false, publish_enabled: false })))
+  })
+
   it('rejects fractional daily budgets even when autopilot is disabled', async () => {
     api.getPolicy.mockResolvedValue({ user_id: 'u1', enabled: false, project_ids: [], platforms: [], daily_budget_credits: 0, max_run_cost_credits: 0, min_recommendation_score: 0, min_video_confidence: 0, draft_enabled: false, publish_enabled: false, failure_mode: 'pause', revision: 1 })
     api.projectsList.mockResolvedValue([])

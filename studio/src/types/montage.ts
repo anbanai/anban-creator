@@ -12,7 +12,7 @@ export interface MontageAsset {
 
 export interface MontagePreferences {
   duration_seconds?: number
-  style?: string
+  playbook_key?: string
   music_prompt?: string
   subtitle_mode?: string
   voiceover_mode?: string
@@ -21,6 +21,8 @@ export interface MontagePreferences {
 export interface MontageInput {
   brief?: string
   pipeline_key?: string
+  output_profile_key?: string
+  output_profile?: MontageOutputProfile
   source_assets?: MontageAsset[]
   preferences?: MontagePreferences
   delivery_targets?: string[]
@@ -40,6 +42,23 @@ export interface MontagePipelineCapability {
   source_requirement: MontageSourceRequirement
   output_mode: MontageOutputMode
   recommended_duration_seconds: number
+  available?: boolean
+  availability_reason?: string
+  stability?: string
+}
+
+export interface MontageStyleCapability {
+  key: string
+  display_name: string
+  description: string
+}
+
+export interface MontageOutputProfile {
+  key: string
+  display_name: string
+  width: number
+  height: number
+  aspect_ratio: string
 }
 
 export interface MontageCapabilityListResponse {
@@ -48,4 +67,7 @@ export interface MontageCapabilityListResponse {
   max_duration_seconds: number
   max_assets: number
   items: MontagePipelineCapability[]
+  styles?: MontageStyleCapability[]
+  output_profiles?: MontageOutputProfile[]
+  default_output_profile?: string
 }

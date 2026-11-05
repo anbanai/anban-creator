@@ -2912,7 +2912,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "800d343fb9744396f630e2b0be9568b42ed874a4e0e5fdafd482f1e89c0a7411"
+      "digest": "22c752a783129942dca4c0f5daae574b91950a022fc8583960874578d7b694f6"
     },
     {
       "id": "postmortem-review",
@@ -6261,7 +6261,7 @@
         }
       ],
       "ui": {},
-      "digest": "599733bddeb9a5504c530e6ad91d5e43cd96e55420172bdf102aed8c53eb1556"
+      "digest": "af34edb9404c6bd4751ae34b5d61f185abd5980b6a260e6d98a073c09985afb7"
     },
     {
       "id": "wechat-article",
