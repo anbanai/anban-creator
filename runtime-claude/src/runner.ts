@@ -204,6 +204,9 @@ const MANAGED_ALLOWED_MCP_TOOLS: Record<string, ReadonlySet<string>> = {
     "get_project_profile", "get_content_reuse_context", "set_task_progress_plan", "update_task_progress", "submit_completion_metadata",
   ]),
 };
+const MANAGED_ALLOWED_SFXMINT_TOOLS: Record<string, ReadonlySet<string>> = {
+  talking_head_editor: new Set(["generate_sound", "get_generation", "change_sound"]),
+};
 const MANAGED_PARALLEL_TASK_TYPES = new Set(["wechat-article", "wechat-picture", "seednote", "viral_analysis"]);
 const MANAGED_READONLY_WORKER = "managed-readonly-worker";
 const MANAGED_READONLY_WORKER_TOOLS = ["Read", "Glob", "Grep"];
@@ -422,7 +425,7 @@ export function buildQueryOptions(
         message: `tool ${JSON.stringify(toolName)} is outside the managed Agent SDK allowlist for task type ${JSON.stringify(data.task_type)}`,
       };
     },
-    plugins: [{ type: "local", path: pluginRoot, skipMcpDiscovery: true }],
+    plugins: [{ type: "local", path: pluginRoot }],
     mcpServers: {
       anban: { type: "http", url: `${serverURL}/mcp`, headers: { Authorization: `Bearer ${token}` }, timeout: 900000 },
       ...(hasRedFoxCredentials(data.env) ? {
@@ -744,6 +747,12 @@ export function validateManagedInit(message: Pick<SDKSystemMessage, "type" | "su
   for (const required of requiredMCPTools(taskType)) if (!tools.has(required)) throw new Error(`managed MCP readiness failed: server "anban" is missing required tool for ${taskType}: ${required}`);
   const skills = new Set(message.skills);
   for (const required of requiredSkills(taskType)) if (!skills.has(required)) throw new Error(`managed plugin readiness failed: skill ${required} is not loaded`);
+  if (taskType === "talking_head_editor") {
+    const server = message.mcp_servers.find((candidate) => candidate.name === "sfxmint");
+    if (!server || server.status !== "connected") throw new Error(`managed MCP readiness failed: server "sfxmint" is not connected`);
+    const sfxmintTools = new Set(message.tools.filter((tool) => tool.startsWith("mcp__sfxmint__")).map((tool) => tool.slice("mcp__sfxmint__".length)));
+    for (const required of requiredSFXMintTools(taskType)) if (!sfxmintTools.has(required)) throw new Error(`managed MCP readiness failed: server "sfxmint" is missing required tool: ${required}`);
+  }
   if (redfox) {
     const server = message.mcp_servers.find((candidate) => candidate.name === "redfox");
     if (!server || server.status !== "connected") throw new Error(`managed MCP readiness failed: server "redfox" is not connected`);
@@ -779,6 +788,10 @@ function isManagedToolAllowed(taskType: string, toolName: string, input: unknown
     return allowedMCPTools?.has(toolName.slice("mcp__anban__".length)) ?? false;
   }
   if (toolName === "mcp__redfox__redfox_research") return redfox;
+  if (toolName.startsWith("mcp__sfxmint__")) {
+    const allowedSFXMintTools = MANAGED_ALLOWED_SFXMINT_TOOLS[taskType];
+    return allowedSFXMintTools?.has(toolName.slice("mcp__sfxmint__".length)) ?? false;
+  }
   if (toolName !== "Agent" || !managedParallelWorkersEnabled(taskType) || !isRecord(input)) return false;
   return input.subagent_type === MANAGED_READONLY_WORKER;
 }
@@ -1100,6 +1113,10 @@ function requiredMCPTools(taskType: string): string[] {
   if (taskType === "montage") return ["analyze_image", "analyze_video", "generate_image", "get_project_profile", "submit_agent_feedback"];
   if (taskType === "video-edit") return ["get_project_profile"];
   return [];
+}
+
+function requiredSFXMintTools(taskType: string): string[] {
+  return [...(MANAGED_ALLOWED_SFXMINT_TOOLS[taskType] ?? [])];
 }
 
 function toolBaseName(name: string): string { return name.startsWith("mcp__") ? name.split("__", 3)[2] ?? name : name; }

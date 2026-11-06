@@ -305,6 +305,41 @@ describe("validateManagedInit", () => {
     }
   });
 
+  test("requires the bundled SFXMint MCP surface for talking-head editing", () => {
+    const message = {
+      type: "system" as const,
+      subtype: "init" as const,
+      mcp_servers: [
+        { name: "anban", status: "connected" as const },
+        { name: "sfxmint", status: "connected" as const },
+      ],
+      plugins: [{ name: "anban", path: "/anbanai" }],
+      tools: [
+        "mcp__anban__get_project_profile",
+        "mcp__sfxmint__generate_sound",
+        "mcp__sfxmint__get_generation",
+        "mcp__sfxmint__change_sound",
+      ],
+      skills: [],
+    };
+
+    expect(() => validateManagedInit(message, "talking_head_editor", false)).not.toThrow();
+    expect(() => validateManagedInit({ ...message, mcp_servers: [message.mcp_servers[0]] }, "talking_head_editor", false)).toThrow("sfxmint");
+    expect(() => validateManagedInit({ ...message, tools: message.tools.filter((tool) => tool !== "mcp__sfxmint__get_generation") }, "talking_head_editor", false)).toThrow("get_generation");
+  });
+
+  test("does not require SFXMint for other managed task types", () => {
+    const message = {
+      type: "system" as const,
+      subtype: "init" as const,
+      mcp_servers: [{ name: "anban", status: "connected" as const }],
+      plugins: [{ name: "anban", path: "/anbanai" }],
+      tools: ["mcp__anban__get_project_profile"],
+      skills: ["anban:video-edit", "anban:content-tagging"],
+    };
+    expect(() => validateManagedInit(message, "video-edit", false)).not.toThrow();
+  });
+
   test.each(["wechat-article", "seednote", "hypit"])("requires the shared portrait cover skill for %s", (taskType) => {
     const message = {
       type: "system" as const,
@@ -362,6 +397,10 @@ describe("validateManagedInit", () => {
 });
 
 describe("buildQueryOptions", () => {
+  test("loads plugin MCP discovery for the bundled SFXMint server", () => {
+    const options = runner.buildQueryOptions(validBootstrap(), "/workspace");
+    expect(options.plugins).toEqual([{ type: "local", path: "/anbanai" }]);
+  });
   test("takes the execution turn limit from the selected Agent Pack Agent", () => {
     const options = runner.buildQueryOptions({
       ...validBootstrap(),
@@ -557,6 +596,12 @@ describe("buildQueryOptions", () => {
     expect(await options.canUseTool?.("mcp__anban__submit_profile_result", {}, permissionOptions)).toMatchObject({ behavior: "deny" });
     const articleOptions = runner.buildQueryOptions({ ...validBootstrap(), task_type: "wechat-article" }, "/workspace");
     expect(await articleOptions.canUseTool?.("mcp__anban__submit_profile_result", {}, permissionOptions)).toMatchObject({ behavior: "deny" });
+    const talkingHeadOptions = runner.buildQueryOptions({ ...validBootstrap(), task_type: "talking_head_editor" }, "/workspace");
+    expect(await talkingHeadOptions.canUseTool?.("mcp__sfxmint__generate_sound", {}, permissionOptions)).toEqual({ behavior: "allow" });
+    expect(await talkingHeadOptions.canUseTool?.("mcp__sfxmint__get_generation", {}, permissionOptions)).toEqual({ behavior: "allow" });
+    expect(await talkingHeadOptions.canUseTool?.("mcp__sfxmint__change_sound", {}, permissionOptions)).toEqual({ behavior: "allow" });
+    expect(await talkingHeadOptions.canUseTool?.("mcp__sfxmint__search", {}, permissionOptions)).toMatchObject({ behavior: "deny" });
+    expect(await options.canUseTool?.("mcp__sfxmint__generate_sound", {}, permissionOptions)).toMatchObject({ behavior: "deny" });
     expect(await articleOptions.canUseTool?.("mcp__anban__render_template", {}, permissionOptions)).toEqual({ behavior: "allow" });
     expect(await options.canUseTool?.("mcp__anban__future_tool", {}, permissionOptions)).toMatchObject({ behavior: "deny" });
     expect(await options.canUseTool?.("Agent", { subagent_type: "managed-readonly-worker" }, permissionOptions)).toEqual({ behavior: "allow" });
