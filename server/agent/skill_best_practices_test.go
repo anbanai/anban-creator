@@ -209,6 +209,8 @@ func TestClaudeCodeSkillsHaveRuntimeOwner(t *testing.T) {
 	userEntrypoints := map[string]bool{
 		"humanizer":              true, // Deferred bundled capability, read at the rewrite stage.
 		"anban-setup":            true,
+		"gpt-image":              true, // Explicit user-invocable image generation and prompt-planning skill.
+		"get-prompt-from-image":  true, // Explicit user-invocable image-reference analysis skill.
 		"article":                true,
 		"article-publishing":     true,
 		"ecommerce":              true,

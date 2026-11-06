@@ -14,7 +14,6 @@ import (
 var upstreamSkillRepos = []string{
 	"humanizer",
 	"seedance2-skill",
-	"GPT-Image2-Skill",
 	"motion-graphics",
 	"ecommerce-visual-copywriting-skill",
 }

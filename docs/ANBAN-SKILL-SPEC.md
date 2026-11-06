@@ -58,7 +58,7 @@ harness/
 - Pack YAML 是产物路径和交付角色的权威来源；Skill 不得声明与 Pack 冲突的必需产物。
 - `harness/` 变更必须同步更新 Claude 和 Codex 两份插件清单，并按仓库规则递增版本号。
 - 上游第三方 Skill 可保留其许可证和必要文件，但新增 Anban Skill 遵循本规范。
-- `skills/humanizer`、`skills/seedance2-skill`、`skills/GPT-Image2-Skill`、`skills/motion-graphics` 和 `skills/ecommerce-visual-copywriting-skill` 是固定 Git revision 的只读上游 submodule，与自建 Skill 同级分发。不得修改其 `SKILL.md`、README、许可证、目录名或上游目录结构，因此它们的目录命名、内部 `skills/` 层级和文件内容不受本节的 kebab-case、单层引用和体量约束；只校验入口、许可证、上游版本、revision 和调用边界。仓库 lint 与契约测试必须按上游目录清单跳过它们，业务约束放在拥有它们的 Agent/Skill 中。
+- `skills/humanizer`、`skills/seedance2-skill`、`skills/motion-graphics` 和 `skills/ecommerce-visual-copywriting-skill` 是固定 Git revision 的只读上游 submodule，与自建 Skill 同级分发。不得修改其 `SKILL.md`、README、许可证、目录名或上游目录结构，因此它们的目录命名、内部 `skills/` 层级和文件内容不受本节的 kebab-case、单层引用和体量约束；只校验入口、许可证、上游版本、revision 和调用边界。仓库 lint 与契约测试必须按上游目录清单跳过它们，业务约束放在拥有它们的 Agent/Skill 中。GPT Image 提示词方法已维护为本地 `skills/gpt-image` 和 `skills/get-prompt-from-image` Skill，并遵循自建 Skill 契约。
 
 ### 工作流分层
 
