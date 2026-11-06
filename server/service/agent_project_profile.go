@@ -461,7 +461,7 @@ func (s *AgentProjectProfileService) talkingHeadEditorProfile(project *model.Pro
 			"output/content-tags.json",
 		},
 		"optional_artifacts": []string{"output/final-picture.mp4", "output/rough-cut.mp4", "output/semantic-cut.mp4", "output/motion-sample.mp4", "output/subtitles.srt", "output/failure-state.json", "output/failure-diagnosis.md", "output/progress-state.json"},
-		"runtime_contract":   "Use the available talking-head-editor Skills; content-tagging is read-only metadata support. Check required runtime capabilities and record observed versions without requiring exact version matches. Execute rough cut and semantic cut continuously, stop at the motion-sample review gate, then after approval use the local CC0 sound-design Skill to render event-synced SFX. Never load video-edit or silently downgrade to it.",
+		"runtime_contract":   "Use the available talking-head-editor Skills; content-tagging is read-only metadata support. Check required runtime capabilities and record observed versions without requiring exact version matches. Execute rough cut and semantic cut continuously, stop at the motion-sample review gate, then after approval use the bundled sfxmint Skill and MCP for event-synced SFX. Never install a separate sfxmint-mcp plugin, load video-edit, or silently downgrade to it.",
 	}
 }
 

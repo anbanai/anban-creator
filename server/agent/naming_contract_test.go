@@ -18,7 +18,7 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	assertJSONField(t, filepath.Join(root, "harness", ".codex-plugin", "plugin.json"), "name", "anban")
 	assertClaudeMarketplacePlugin(t, filepath.Join(root, "harness", ".claude-plugin", "marketplace.json"))
 
-	assertOnlyMCPServerKey(t, filepath.Join(root, "harness", ".mcp.json"), "creator")
+	assertMCPServerKeys(t, filepath.Join(root, "harness", ".mcp.json"), "creator", "sfxmint")
 
 	for _, path := range []string{
 		filepath.Join(root, "AGENTS.md"),
@@ -40,7 +40,7 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	}
 	assertFileContains(t, filepath.Join(root, "AGENTS.md"), "plugin@marketplace")
 	assertFileContains(t, filepath.Join(root, "AGENTS.md"), "anban@anbanai")
-	assertFileContains(t, filepath.Join(root, "AGENTS.md"), "The MCP server key is `creator`")
+	assertFileContains(t, filepath.Join(root, "AGENTS.md"), "The MCP server keys are `creator` and `sfxmint`")
 	assertFileContains(t, filepath.Join(root, "AGENTS.md"), "anban:<agent>")
 	assertFileNotExists(t, filepath.Join(root, "CLAUDE.md"))
 	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "claude plugin install --scope user anban@anbanai")
@@ -50,7 +50,7 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	assertFileNotExists(t, filepath.Join(root, "harness", "agents", "article.md"))
 	assertFileNotExists(t, filepath.Join(root, "harness", "agents", "article.toml"))
 	assertFileNotContains(t, filepath.Join(root, "harness", "README.md"), "--dangerously-skip-permissions")
-	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "插件内的 MCP server key 固定为 `creator`")
+	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "插件内的 MCP server key 固定为 `creator` 和 `sfxmint`")
 	assertFileNotExists(t, filepath.Join(root, "harness", "CLAUDE.md"))
 	assertFileContains(t, filepath.Join(root, "harness", "docs", "plugin-development.md"), "Plugin developer notes")
 	assertJSONMCPServerURL(t, filepath.Join(root, "harness", ".mcp.json"), "creator", "https://creator.anbanai.com/mcp")
@@ -475,17 +475,19 @@ func assertClaudePluginUserConfig(t *testing.T, path string) {
 	}
 }
 
-func assertOnlyMCPServerKey(t *testing.T, path, want string) {
+func assertMCPServerKeys(t *testing.T, path string, want ...string) {
 	t.Helper()
 	var object struct {
 		MCPServers map[string]any `json:"mcpServers"`
 	}
 	readJSONFile(t, path, &object)
-	if len(object.MCPServers) != 1 {
-		t.Fatalf("%s has %d MCP server keys, want exactly one %q", path, len(object.MCPServers), want)
+	if len(object.MCPServers) != len(want) {
+		t.Fatalf("%s has %d MCP server keys, want exactly %d %v", path, len(object.MCPServers), len(want), want)
 	}
-	if _, ok := object.MCPServers[want]; !ok {
-		t.Fatalf("%s MCP server keys = %v, want only %q", path, keys(object.MCPServers), want)
+	for _, key := range want {
+		if _, ok := object.MCPServers[key]; !ok {
+			t.Fatalf("%s MCP server keys = %v, missing %q", path, keys(object.MCPServers), key)
+		}
 	}
 }
 

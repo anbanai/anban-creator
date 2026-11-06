@@ -121,8 +121,8 @@ url = "https://other.example/mcp"
 			if _, err := toml.Decode(string(first), &parsed); err != nil {
 				t.Fatalf("parse installed Codex config as TOML: %v\n%s", err, first)
 			}
-			if len(parsed.MCPServers) != 2 {
-				t.Fatalf("parsed MCP server count = %d, want exactly creator and unrelated server", len(parsed.MCPServers))
+			if len(parsed.MCPServers) != 3 {
+				t.Fatalf("parsed MCP server count = %d, want exactly creator, sfxmint, and unrelated server", len(parsed.MCPServers))
 			}
 			creator, ok := parsed.MCPServers["creator"]
 			if !ok {
@@ -136,6 +136,9 @@ url = "https://other.example/mcp"
 			}
 			if parsed.MCPServers["other"].URL != "https://other.example/mcp" {
 				t.Fatalf("unrelated MCP server changed: %+v", parsed.MCPServers["other"])
+			}
+			if parsed.MCPServers["sfxmint"].URL != "https://sfxmint.com/mcp" {
+				t.Fatalf("embedded SFXMint MCP server missing or changed: %+v", parsed.MCPServers["sfxmint"])
 			}
 			if parsed.Model != "gpt-test" || !parsed.Features.CustomFeature || parsed.Custom.Value != "preserve-me" {
 				t.Fatalf("unrelated config changed: model=%q features=%+v custom=%+v", parsed.Model, parsed.Features, parsed.Custom)

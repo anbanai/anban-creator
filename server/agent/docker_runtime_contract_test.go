@@ -1114,6 +1114,52 @@ func TestTalkingHeadEditorDockerfileValidatesErduoMotionContract(t *testing.T) {
 	}
 }
 
+func TestVideoRuntimeDockerfilesUseEmbeddedSFXMintMCP(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, name := range []string{
+		"deploy/docker/Dockerfile.agent-talking-head-editor",
+		"deploy/docker/Dockerfile.agent-viral-ip-video-editor",
+	} {
+		dockerfile := readTextFile(t, filepath.Join(root, name))
+		for _, forbidden := range []string{"sfxmint-mcp", "SFXMINT_PLUGIN", "/opt/sfxmint-mcp"} {
+			if strings.Contains(dockerfile, forbidden) {
+				t.Fatalf("%s must not install an independent SFXMint plugin (%q)", name, forbidden)
+			}
+		}
+	}
+	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
+	for _, forbidden := range []string{"SFXMINT_PLUGIN_REPO", "SFXMINT_PLUGIN_REF", "--build-arg SFXMINT_PLUGIN"} {
+		if strings.Contains(makefile, forbidden) {
+			t.Fatalf("Makefile must not build an independent SFXMint plugin (%q)", forbidden)
+		}
+	}
+}
+
+func TestPluginEmbedsSFXMintMCPConfiguration(t *testing.T) {
+	root := repositoryRoot(t)
+	mcpConfig := readTextFile(t, filepath.Join(root, "harness", ".mcp.json"))
+	for _, want := range []string{"\"creator\"", "\"sfxmint\"", "https://sfxmint.com/mcp"} {
+		if !strings.Contains(mcpConfig, want) {
+			t.Fatalf("harness/.mcp.json missing embedded SFXMint MCP contract %q", want)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(root, "harness", "skills", "sfxmint", "SKILL.md"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("required bundled SFXMint Skill missing: %s: %v", path, err)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(root, "harness", "skills", "sfxmint-mcp"),
+		filepath.Join(root, "harness", "skills", "pixabay-search-skill"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("obsolete bundled directory still exists: %s", path)
+		}
+	}
+}
+
 func TestViralIPVideoEditorRuntimeProfileIsPackagedAndRegistered(t *testing.T) {
 	root := repositoryRoot(t)
 	for path, expected := range map[string][]string{
